@@ -10,12 +10,12 @@
 #include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
-
-#ifdef USE_PYTORCH_METAL
 
 namespace {
 
@@ -160,22 +160,30 @@ void metalFusePrePackedConvWithClamp(script::Module& module) {
 void metalInsertCopyOps(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   auto&& outputs = graph->outputs();
-  for (int i = 0; i < outputs.size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     Value* output = outputs[i];
-    std::cout << "find output: " << *output->node() << std::endl;
     auto namedValue = NamedValue("", output);
     if (namedValue.type()->kind() == TypeKind::TensorType) {
       // find the insertion point
       WithInsertPoint ip(output->node()->next());
       Value* replaced_output = graph->insert(
           Symbol::fromQualString("metal::copy_to_host"), {namedValue});
-      std::cout << "insert: " << *replaced_output->node() << std::endl;
       // replaced the output
       graph->block()->replaceOutput(i, replaced_output);
     }
   }
   SubgraphRewriter rewriter;
   rewriter.runOnGraph(graph);
+}
+
+void metalRemoveMutation(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  RemoveTensorMutation(graph);
+}
+
+void metalRunCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  runOptimization(graph, false /* no loop unrolling */);
 }
 
 script::Module metalOptimizeForMobile(
@@ -188,42 +196,14 @@ script::Module metalOptimizeForMobile(
   cloned_module = freeze_module(cloned_module, preserved_methods);
   metalFusePrePackedConvWithClamp(cloned_module);
   metalFoldPrePackingOps(cloned_module);
-  metalInsertCopyOps(cloned_module);
   removeDropout(cloned_module);
+  metalRemoveMutation(cloned_module);
+  // remove duplicated constants
+  metalRunCanonicalOptimizations(cloned_module);
+  cloned_module.register_attribute(
+      "optimized_for_metal", BoolType::get(), true);
   return cloned_module;
 }
 
-#else
-
-void metalInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-void metalInsertPrePackedOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFusePrePackedConvWithClamp(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFoldPrePackingOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-script::Module metalOptimizeForMobile(
-    const script::Module& m,
-    const std::vector<std::string>& preserved_methods) {
-  TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with metal at the moment. "
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-  return m;
-}
-
-#endif
 } // namespace jit
 } // namespace torch

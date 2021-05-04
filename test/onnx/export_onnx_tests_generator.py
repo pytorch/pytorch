@@ -124,7 +124,7 @@ def convert_tests(testcases, sets=1):
                 input = gen_input(t)
                 if (module_name != "FunctionalModule"):
                     nn_module[module_name] |= 1
-        except:  # noqa: E722
+        except:  # noqa: E722,B001
             traceback.print_exc()
             if (module_name != "FunctionalModule"):
                 nn_module[module_name] |= 2

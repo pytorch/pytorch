@@ -38,6 +38,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   int64_t cuFFTGetPlanCacheSize(int64_t device_index) const override;
   void cuFFTClearPlanCache(int64_t device_index) const override;
   int getNumGPUs() const override;
+  void deviceSynchronize(int64_t device_index) const override;
 };
 
 }}} // at::cuda::detail

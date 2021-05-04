@@ -19,9 +19,9 @@ namespace caffe2 {
 using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
 namespace internal {
-CAFFE2_API at::Tensor index_with_uint8_handling(
+TORCH_API at::Tensor index_with_uint8_handling(
     const at::Tensor& self,
-    at::TensorList indices);
+    const torch::List<c10::optional<at::Tensor>>& indices);
 }
 
 template <class Context>
@@ -86,6 +86,16 @@ private:
 
   std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
+    results.reserve(len);
+    for (size_t ii = i; ii < i + len; ++ii) {
+      results.push_back(peek(ii, N));
+    }
+    return results;
+  }
+
+  torch::List<c10::optional<at::Tensor>> peekSliceOptionals(size_t i, size_t len, size_t N) {
+    torch::List<c10::optional<at::Tensor>> results;
+    results.reserve(len);
     for (size_t ii = i; ii < i + len; ++ii) {
       results.push_back(peek(ii, N));
     }
@@ -98,7 +108,7 @@ private:
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
 #ifdef __HIP_PLATFORM_HCC__
-    if (device.type() == at::DeviceType::CUDA) {
+    if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
 #endif
@@ -139,7 +149,7 @@ private:
     return s.toDouble();
   }
 
-  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, const at::Scalar& scalar) {
     switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \

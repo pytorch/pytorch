@@ -60,6 +60,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward(edge_list&& next_edges)
     : Node(std::move(next_edges)) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   UndefinedGradBackward() {}
 
   variable_list apply(variable_list&& inputs) override;
@@ -68,7 +69,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
 struct TORCH_API GraphRoot : public Node {
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)),
-        outputs(std::move(inputs)) {
+      outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
     // on devices of root grad tensors at the time the instance is constructed.
     for (const auto& t : outputs) {
@@ -81,6 +82,10 @@ struct TORCH_API GraphRoot : public Node {
   }
 
   variable_list outputs;
+};
+
+struct TORCH_API Identity : public Node {
+  variable_list apply(variable_list&& inputs) override;
 };
 
 }}

@@ -16,7 +16,7 @@ else()
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_ROOT_DIR}/include)
+  include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
 if(USE_GLOO)
@@ -45,14 +45,17 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
-  ProcessGroup.cpp
-  Store.cpp
+  ParamCommsUtils.cpp
   PrefixStore.cpp
+  ProcessGroup.cpp
+  sequence_num.cpp
+  Store.cpp
+  TCPStore.cpp
   Utils.cpp
   )
 
 if(NOT WIN32)
-  list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp TCPStore.cpp)
+  list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp)
 endif()
 
 set(C10D_LIBS torch)
@@ -64,6 +67,9 @@ endif()
 
 if(USE_C10D_MPI)
   list(APPEND C10D_SRCS ProcessGroupMPI.cpp)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(ProcessGroupMPI.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
@@ -106,8 +112,6 @@ target_include_directories(c10d PUBLIC
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# For torch/csrc/utils/hash.h
-target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
 if(USE_C10D_NCCL)
   target_compile_definitions(c10d INTERFACE USE_C10D_NCCL)
@@ -122,18 +126,23 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(ParamCommsUtils.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
+copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
+copy_header(sequence_num.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
 endif()
 if(NOT WIN32)
   copy_header(HashStore.hpp)
-  copy_header(TCPStore.hpp)
+  copy_header(UnixSockUtils.hpp)
+else()
+  copy_header(WinSockUtils.hpp)
 endif()
 
 if(USE_C10D_NCCL)

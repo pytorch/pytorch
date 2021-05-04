@@ -71,6 +71,7 @@ int main(int argc, char* argv[]) {
     // also be a 'Mul' or some other expression.
     //
     // Let's construct a simple TE:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Expr* lhs = new IntImm(5);
     Expr* rhs = new Var("x", kInt);
     Expr* mul = new Mul(lhs, rhs);
@@ -97,6 +98,7 @@ int main(int argc, char* argv[]) {
     ExprHandle a = Var::make("a", kInt);
     ExprHandle b = Var::make("b", kFloat);
     ExprHandle c = Var::make("c", kFloat);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle x = ExprHandle(5) * a + b / (sigmoid(c) - 3.0f);
     std::cout << "Tensor expression: " << *x.node() << std::endl;
     // Prints: Tensor expression: float(5 * a) + b / ((sigmoid(c)) - 3.f)
@@ -109,42 +111,65 @@ int main(int argc, char* argv[]) {
     // placeholder similar to Var, but with dimensions info.
     //
     // Let's construct a simple load:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BufHandle A("A", {ExprHandle(64), ExprHandle(32)}, kInt);
     ExprHandle i = Var::make("i", kInt), j = Var::make("j", kInt);
-    ExprHandle load = Load::make(A.dtype(), A, {i, j}, /* mask= */ 1);
+    ExprHandle load = Load::make(A.dtype(), A, {i, j});
     std::cout << "Tensor expression: " << *load.node() << std::endl;
     // Prints: Tensor expression: A[i, j]
   }
 
   std::cout << "*** Tensors, Functions, and Placeholders ***" << std::endl;
   {
-    // A tensor computation is represented by objects of Tensor class and
+    // A tensor computation is represented by Tensor class objects and
     // consists of the following pieces:
     //   - domain, which is specified by a Buf expression
-    //   - an expression (or several expressions if we want to perform several
-    //   independent computations over the same domain) for its elements, as a
-    //   function of indices
-    //
-    // TODO: Update this section once Tensor/Function cleanup is done
-    std::vector<const Expr*> dims = {
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+    //   - a tensor statement, specified by a Stmt object, that computation to
+    //   be performed in this domain
 
-    // Next we need to create arguments. The arguments are Vars, and they play
-    // role of placeholders. The computation that the tensor would describe
-    // would use these arguments.
+    // Let's start with defining a domain. We do this by creating a Buf object.
+
+    // First, let's specify the sizes:
+    std::vector<const Expr*> dims = {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        new IntImm(64),
+        new IntImm(32)}; // IntImm stands for Integer Immediate
+    // and represents an integer constant
+
+    // Now we can create a Buf object by providing a name, dimensions, and a
+    // data type of the elements:
+    const Buf* buf = new Buf("X", dims, kInt);
+
+    // Next we need to spefify the computation. We can do that by either
+    // constructing a complete tensor statement for it (statements are
+    // examined in details in subsequent section), or by using a convenience
+    // method where we could specify axis and an element expression for the
+    // computation. In the latter case a corresponding statement would be
+    // constructed automatically.
+
+    // Let's define two variables, i and j - they will be axis in our
+    // computation.
     const Var* i = new Var("i", kInt);
     const Var* j = new Var("j", kInt);
     std::vector<const Var*> args = {i, j};
 
     // Now we can define the body of the tensor computation using these
-    // arguments.
+    // variables. What this means is that values in our tensor are:
+    //   X[i, j] = i * j
     Expr* body = new Mul(i, j);
 
     // Finally, we pass all these pieces together to Tensor constructor:
-    Tensor* X = new Tensor("X", dims, args, body);
+    Tensor* X = new Tensor(buf, args, body);
     std::cout << "Tensor computation: " << *X << std::endl;
-    // Prints: Tensor computation: Tensor X(i[64], j[32]) = i * j
+    // Prints:
+    // Tensor computation: Tensor X[64, 32]:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     X[i, j] = i * j;
+    //   }
+    // }
+
+    // TODO: Add an example of constructing a Tensor with a complete Stmt.
 
     // Similarly to how we provide a more convenient way of using handles for
     // constructing Exprs, Tensors also have a more convenient API for
@@ -152,22 +177,37 @@ int main(int argc, char* argv[]) {
     // dimensions, and a lambda specifying the computation body:
     Tensor* Z = Compute(
         "Z",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [](const VarHandle& i, const VarHandle& j) { return i / j; });
     std::cout << "Tensor computation: " << *Z << std::endl;
-    // Prints: Tensor computation: Tensor Z(i[64], j[32]) = i / j
+    // Prints:
+    // Tensor computation: Tensor Z[64, 32]:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     Z[i, j] = i / j;
+    //   }
+    // }
 
     // Tensors might access other tensors and external placeholders in their
     // expressions. It can be done like so:
-    Placeholder P("P", kFloat, {64, 32});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    Placeholder P("P", kInt, {64, 32});
     Tensor* R = Compute(
         "R",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z->call(i, j) * P.load(i, j);
+          return Z->load(i, j) * P.load(i, j);
         });
     std::cout << "Tensor computation: " << *R << std::endl;
-    // Prints: Tensor computation: Tensor R(i[64], j[32]) = Z(i, j) * P[i, j]
+    // Prints:
+    // Tensor computation: Tensor R[64, 32]:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     R[i, j] = (Z(i, j)) * (P[i, j]);
+    //   }
+    // }
 
     // Placeholders could be thought of as external tensors, i.e. tensors for
     // which we don't have the element expression. In other words, for `Tensor`
@@ -176,11 +216,6 @@ int main(int argc, char* argv[]) {
     // have such an expression. They need to be considered as coming to us as
     // inputs from outside - we can only load data from them.
     //
-    // Also note that we use 'call' to construct an access to an element of a
-    // Tensor and we use 'load' for accessing elements of an external tensor
-    // through its Placeholder. This is an implementation detail and could be
-    // changed in future.
-
     // TODO: Show how reductions are represented and constructed
   }
 
@@ -194,30 +229,45 @@ int main(int argc, char* argv[]) {
     // the computation (how to compute?).
     //
     // Let's create a simple tensor expression and construct a loop nest for it.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder A("A", kFloat, {64, 32});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder B("B", kFloat, {64, 32});
     Tensor* X = Compute(
         "X",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
     Tensor* Y = Compute(
         "Y",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->call(i, j));
+          return sigmoid(X->load(i, j));
         });
     std::cout << "Tensor computation X: " << *X
               << "Tensor computation Y: " << *Y << std::endl;
     // Prints:
-    // Tensor computation X: Tensor X(i[64], j[32]) = (A[i, j]) + (B[i, j])
-    // Tensor computation Y: Tensor Y(i[64], j[32]) = sigmoid(X(i, j))
+    // Tensor computation X: Tensor X[64, 32]:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     X[i, j] = (A[i, j]) + (B[i, j]);
+    //   }
+    // }
 
-    // Creating a loop nest is as quite simple, we just need to specify what are
-    // the output tensors in our computation and LoopNest object will
-    // automatically pull all tensor dependencies:
-    LoopNest loopnest({Y});
+    // Tensor computation Y: Tensor Y[64, 32]:
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
+    //     Y[i, j] = sigmoid(X(i, j));
+    //   }
+    // }
+
+    // Creating a loop nest is as quite simple, we just need to specify a list
+    // of all and a list of output tensors:
+    // NOLINTNEXTLINE(bugprone-argument-comment)
+    LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
     // `Stmt` class. Statements are used to specify the loop nest structure, and
@@ -274,9 +324,13 @@ int main(int argc, char* argv[]) {
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_outer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
@@ -313,10 +367,13 @@ int main(int argc, char* argv[]) {
     // section we would look at how we can bridge that gap.
 
     // Let's start by constructing a simple computation for us to work with:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder A("A", kInt, {64, 32});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder B("B", kInt, {64, 32});
     Tensor* X = Compute(
         "X",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
@@ -362,8 +419,11 @@ int main(int argc, char* argv[]) {
     // computation everything is ready.
 
     // Let's now create some inputs and run our computation with them:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_A(64 * 32, 3); // This will be the input A
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_B(64 * 32, 5); // This will be the input B
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_X(64 * 32, 0); // This will be used for the result
 
     // Now let's invoke our codegen to perform the computation on our data. We
@@ -380,8 +440,13 @@ int main(int argc, char* argv[]) {
 
     // Let's print one of the elements from each array to verify that the
     // computation did happen:
-    std::cout << "A[10] = " << data_A[10] << std::endl
-              << "B[10] = " << data_B[10] << std::endl
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    std::cout << "A[10] = " << data_A[10]
+              << std::endl
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              << "B[10] = " << data_B[10]
+              << std::endl
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
     // Prints:
     // A[10] = 3

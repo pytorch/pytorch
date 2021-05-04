@@ -1,17 +1,10 @@
 #pragma once
 
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/core/Array.h>
 #include <ATen/core/TransformationHelper.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/Optional.h>
 #include <c10/macros/Macros.h>
 
@@ -220,7 +213,7 @@ struct normal_distribution {
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
     const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+    const dist_acctype<T> theta = static_cast<T>(2.0) * c10::pi<T> * u1;
     if (std::is_same<T, double>::value) {
       maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
     } else {

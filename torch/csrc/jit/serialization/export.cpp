@@ -1,24 +1,25 @@
 #include <torch/csrc/jit/serialization/export.h>
+
+#include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
 
-#include <ATen/core/functional.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/instruction.h>
-
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-
-#include <ATen/ATen.h>
-#include <c10/util/Optional.h>
 
 #include <fstream>
 #include <memory>
@@ -137,12 +138,13 @@ std::string GetFileRootPath(const std::string& rootPath) {
   return folder;
 }
 
-std::string GetExternalFileName(const c10::optional<std::string> external_ref) {
+std::string GetExternalFileName(
+    const c10::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
-  for (int i = 0; i < tensorName.size(); i++) {
-    if (illegalChars.find(tensorName[i]) != std::string::npos) {
-      tensorName[i] = '_';
+  for (char& i : tensorName) {
+    if (illegalChars.find(i) != std::string::npos) {
+      i = '_';
     }
   }
   return tensorName;
@@ -160,7 +162,7 @@ void CreateExternalFile(
   std::string fullFilePath = folder + "/" + tensorName;
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(
       fopen(fullFilePath.c_str(), "wb"), &CloseFile);
-  if (fp == NULL) {
+  if (fp == nullptr) {
     throw std::runtime_error(
         std::string("ONNX export failed. Could not open file or directory: ") +
         fullFilePath);
@@ -219,6 +221,14 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void AddInitializersIntoGraphProto(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>(),
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -247,13 +257,21 @@ class EncoderBase {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   SymbolDimMap symbol_dim_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   onnx::ModelProto model_proto_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_blocks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_op_nodes_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_external_data_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   onnx_torch::OperatorExportTypes operator_export_type_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strip_doc_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::set<std::string> domains_;
 
   // For large models, the parameters can be stored in separate binary files.
@@ -261,6 +279,7 @@ class EncoderBase {
   // tensor, beyond which the parameter is stored in a separate file (if API
   // argument use_external_data_format is set to True). This threshold is in
   // place so as not to create too many external files.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
@@ -321,8 +340,9 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
-                                  TensorTypePtr t,
+
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
+                                  const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
@@ -339,7 +359,13 @@ void EncoderBase::EncodeValueInfo(
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+            if (n->node()->kind() == prim::Param) {
+              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
+            } else {
+              std::string op_type = n->node()->kind().toUnqualString();
+              symbol_dim_map_[sizes[i]] =
+                  op_type + name + "_dim_" + std::to_string(i);
+            }
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }
@@ -551,14 +577,33 @@ void EncoderBase::EncodeBlock(
           onnx_file_path);
     }
   }
+  AddInitializersIntoGraphProto(
+      graph_proto,
+      block,
+      initializers,
+      use_external_data_format,
+      onnx_file_path);
+}
+
+void EncoderBase::AddInitializersIntoGraphProto(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
     auto p = graph_proto->add_initializer();
-    p->set_name(name_tensor_pair.first);
+    p->set_name(name_tensor_pair->first);
     EncodeTensor(
         p,
-        name_tensor_pair.second,
-        name_tensor_pair.first,
+        name_tensor_pair->second,
+        name_tensor_pair->first,
         use_external_data_format,
         onnx_file_path);
   }
@@ -599,6 +644,7 @@ void EncoderBase::AddAttribute(
     case AttributeKind::fs:
       attr->set_type(onnx::AttributeProto_AttributeType_FLOATS);
       for (auto& v : node->fs(name))
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         attr->add_floats(v);
       break;
     case AttributeKind::i:
@@ -803,11 +849,8 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
     AT_ASSERT(t.is_contiguous());
-    size_t tensorSize = static_cast<size_t>(std::accumulate(
-        std::begin(tensor.sizes()),
-        std::end(tensor.sizes()),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>()));
+    size_t tensorSize = static_cast<size_t>(c10::multiply_integers(
+        std::begin(tensor.sizes()), std::end(tensor.sizes())));
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());

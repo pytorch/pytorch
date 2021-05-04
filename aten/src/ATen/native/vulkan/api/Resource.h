@@ -21,6 +21,16 @@ struct Resource final {
 
   struct Memory final {
     /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      VmaMemoryUsage usage;
+      VkMemoryPropertyFlags /* optional */ required;
+      VkMemoryPropertyFlags /* optional */ preferred;
+    };
+
+    /*
       Barrier
     */
 
@@ -29,22 +39,44 @@ struct Resource final {
       VkAccessFlags dst;
     };
 
-    VmaAllocator allocator;
-    VmaAllocation allocation;
+    /*
+      Access
+    */
+
+    struct Access final {
+      typedef uint8_t Flags;
+
+      enum Type : Flags {
+        None = 0u << 0u,
+        Read = 1u << 0u,
+        Write = 1u << 1u,
+      };
+
+      template<typename Type, Flags access>
+      using Pointer = std::add_pointer_t<
+          std::conditional_t<
+              0u != (access & Write),
+              Type,
+              std::add_const_t<Type>>>;
+    };
 
     class Scope;
     template<typename Type>
-    using Data = Handle<Type, Scope>;
+    using Handle = Handle<Type, Scope>;
 
     template<
         typename Type,
-        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
-    Data<Pointer> map() const &;
+        typename Pointer = Access::Pointer<Type, Access::Read>>
+    Handle<Pointer> map() const &;
 
     template<
         typename Type,
-        typename Pointer = std::add_pointer_t<Type>>
-    Data<Pointer> map() &;
+        Access::Flags kAccess,
+        typename Pointer = Access::Pointer<Type, kAccess>>
+    Handle<Pointer> map() &;
+
+    VmaAllocator allocator;
+    VmaAllocation allocation;
 
    private:
     // Intentionally disabed to ensure memory access is always properly
@@ -54,10 +86,10 @@ struct Resource final {
     // for seemingly ineffective memory writes and hard to hunt down bugs.
 
     template<typename Type, typename Pointer>
-    Data<Pointer> map() const && = delete;
+    Handle<Pointer> map() const && = delete;
 
-    template<typename Type, typename Pointer>
-    Data<Pointer> map() && = delete;
+    template<typename Type, Access::Flags kAccess, typename Pointer>
+    Handle<Pointer> map() && = delete;
   };
 
   //
@@ -74,7 +106,7 @@ struct Resource final {
 
       struct {
         VkBufferUsageFlags buffer;
-        VmaMemoryUsage memory;
+        Memory::Descriptor memory;
       } usage;
     };
 
@@ -136,7 +168,7 @@ struct Resource final {
 
         typedef Sampler::Descriptor Descriptor;
         typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
+        typedef api::Handle<VkSampler, Deleter> Handle;
 
         struct Hasher {
           size_t operator()(const Descriptor& descriptor) const;
@@ -171,7 +203,7 @@ struct Resource final {
 
       struct {
         VkImageUsageFlags image;
-        VmaMemoryUsage memory;
+        Memory::Descriptor memory;
       } usage;
 
       struct {
@@ -234,20 +266,44 @@ struct Resource final {
 
   class Pool final {
    public:
-    explicit Pool(const GPU& gpu);
+    class Policy {
+     public:
+      virtual ~Policy() = default;
+
+      static std::unique_ptr<Policy> linear(
+          VkDeviceSize block_size = VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE,
+          uint32_t min_block_count = 1u,
+          uint32_t max_block_count = UINT32_MAX);
+
+      virtual void enact(
+          VmaAllocator allocator,
+          const VkMemoryRequirements& memory_requirements,
+          VmaAllocationCreateInfo& allocation_create_info) = 0;
+    };
+
+    explicit Pool(const GPU& gpu, std::unique_ptr<Policy> = {});
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
     Pool& operator=(Pool&&);
     ~Pool();
 
+    // Primary
+
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
     Fence fence();
     void purge();
 
+    // Helper
+
+    template <typename Block>
+    Buffer uniform(const Block& block);
+
    private:
     friend struct Fence;
+
+    void invalidate();
 
    private:
     struct Configuration final {
@@ -256,6 +312,10 @@ struct Resource final {
 
     VkDevice device_;
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+
+    struct {
+      std::unique_ptr<Policy> policy;
+    } memory_;
 
     struct {
       std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
@@ -274,7 +334,7 @@ struct Resource final {
   } pool;
 
   explicit Resource(const GPU& gpu)
-    : pool(gpu) {
+    : pool(gpu, Pool::Policy::linear()) {
   }
 };
 
@@ -284,37 +344,44 @@ struct Resource final {
 
 class Resource::Memory::Scope final {
  public:
-  enum class Access {
-    Read,
-    Write,
-  };
+  Scope(
+      VmaAllocator allocator,
+      VmaAllocation allocation,
+      Access::Flags access);
 
-  Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
   void operator()(const void* data) const;
 
  private:
   VmaAllocator allocator_;
   VmaAllocation allocation_;
-  Access access_;
+  Access::Flags access_;
 };
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
+inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
-  return Data<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Read),
+  return Handle<Pointer>{
+    reinterpret_cast<Pointer>(map(*this, Access::Read)),
+    Scope(allocator, allocation, Access::Read),
   };
 }
 
-template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
+template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
+inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
-  return Data<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Write),
+  static_assert(
+      (kAccess == Access::Read) ||
+      (kAccess == Access::Write) ||
+      (kAccess == (Access::Read | Access::Write)),
+      "Invalid memory access!");
+
+  return Handle<Pointer>{
+    reinterpret_cast<Pointer>(map(*this, kAccess)),
+    Scope(allocator, allocation, kAccess),
   };
 }
 
@@ -329,10 +396,11 @@ inline Resource::Buffer::operator bool() const {
 inline bool operator==(
     const Resource::Image::Sampler::Descriptor& _1,
     const Resource::Image::Sampler::Descriptor& _2) {
-    return (_1.filter == _2.filter) &&
-           (_1.mipmap_mode == _2.mipmap_mode) &&
-           (_1.address_mode == _2.address_mode) &&
-           (_1.border == _2.border);
+    static_assert(
+      std::is_trivially_copyable<Resource::Image::Sampler::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Resource::Image::Sampler::Descriptor)));
 }
 
 inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
@@ -356,21 +424,29 @@ inline Resource::Fence::operator bool() const {
   return pool;
 }
 
-inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
-  if (!pool) {
-    return VK_NULL_HANDLE;
+template<typename Block>
+inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
+  Buffer uniform = this->buffer({
+      sizeof(Block),
+      {
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        {
+          VMA_MEMORY_USAGE_CPU_TO_GPU,
+          0u,
+          0u,
+        },
+      },
+    });
+
+  {
+    Memory::Handle<Block*> memory = uniform.memory.template map<
+        Block,
+        Memory::Access::Write>();
+
+    *memory.get() = block;
   }
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      id < pool->fence_.pool.size(),
-      "Invalid Vulkan fence!");
-
-  const VkFence fence = pool->fence_.pool[id].get();
-  if (add_to_waitlist) {
-    pool->fence_.waitlist.push_back(fence);
-  }
-
-  return fence;
+  return uniform;
 }
 
 } // namespace api

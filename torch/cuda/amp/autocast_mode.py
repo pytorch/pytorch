@@ -1,8 +1,14 @@
 import torch
 import functools
 import warnings
-import numpy as np
-from torch._six import container_abcs, string_classes
+import collections
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    HAS_NUMPY = False
+from torch._six import string_classes
+from .common import amp_definitely_not_available
 
 
 class autocast(object):
@@ -106,11 +112,11 @@ class autocast(object):
     :class:`torch.nn.parallel.DistributedDataParallel` when used with more than one GPU per process
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
-    Arguments:
+    Args:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -144,11 +150,11 @@ def _cast(value, dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
-    elif isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value
-    elif isinstance(value, container_abcs.Mapping):
+    elif isinstance(value, collections.abc.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
-    elif isinstance(value, container_abcs.Iterable):
+    elif isinstance(value, collections.abc.Iterable):
         iterable = map(lambda v: _cast(v, dtype), value)
         if isinstance(value, list) or isinstance(value, tuple):
             return type(value)(iterable)
@@ -173,7 +179,7 @@ def custom_fwd(fwd=None, **kwargs):
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
-    Arguments:
+    Args:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
             when ``forward`` runs in an autocast-enabled region, casts incoming
             floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),

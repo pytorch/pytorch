@@ -25,14 +25,16 @@ void quantize_tensor_per_tensor_affine_cuda(
           .add_input(qtensor)
           .build();
 
-        gpu_kernel(iter,
-          [=] GPU_LAMBDA (float raw_val, scalar_t quantized_val) -> scalar_t {
-            int64_t qvalue = static_cast<int64_t>(nearbyint(raw_val / scale + zero_point));
-            qvalue = std::max<int64_t>(qvalue, qmin);
-            qvalue = std::min<int64_t>(qvalue, qmax);
-            quantized_val.val_ = qvalue;
-            return quantized_val;
-        });
+        gpu_kernel(
+            iter,
+            [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
+              int64_t qvalue =
+                  static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
+              qvalue = std::max<int64_t>(qvalue, qmin);
+              qvalue = std::min<int64_t>(qvalue, qmax);
+              quantized_val.val_ = qvalue;
+              return quantized_val;
+            });
       });
 }
 

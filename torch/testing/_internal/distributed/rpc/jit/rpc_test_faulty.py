@@ -3,6 +3,7 @@ from typing import Dict, Tuple
 import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor
+from torch.distributed.rpc import RRef
 from torch.testing._internal.dist_utils import (
     dist_init,
     worker_name,
@@ -63,18 +64,15 @@ def rpc_async_call_future_ret(
     return fut
 
 @torch.jit.script
-def rref_to_here(rref_var):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_to_here(rref_var: RRef[Tensor]) -> Tensor:
     return rref_var.to_here()
 
 @torch.jit.script
-def rref_to_here_with_timeout(rref_var, timeout):
-    # type: (RRef[Tensor], float) -> Tensor
+def rref_to_here_with_timeout(rref_var: RRef[Tensor], timeout: float) -> Tensor:
     return rref_var.to_here(timeout)
 
 @torch.jit.script
-def rpc_async_with_rref_arg(dst_worker_name, args):
-    # type: (str, Tuple[RRef[Tensor]]) -> Tensor
+def rpc_async_with_rref_arg(dst_worker_name: str, args: Tuple[RRef[Tensor]]) -> Tensor:
     fut = rpc.rpc_async(dst_worker_name, rref_to_here, args)
     ret = fut.wait()
     return ret

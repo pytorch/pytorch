@@ -11,7 +11,7 @@ namespace impl {
 //
 // NOTE: this is NOT the c++ api for torch.vmap. That doesn't exist yet.
 
-struct CAFFE2_API VmapMode {
+struct TORCH_API VmapMode {
   // Returns the vmap level, aka the count of how many nested vmaps we're in.
   static int64_t current_vmap_level();
 

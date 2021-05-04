@@ -30,8 +30,9 @@ void max_pool1d_impl(
     const Tensor& input,
     const PoolingParams1D& p) {
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
+    const Tensor in = input.contiguous();
     scalar_t* const OP = output.data_ptr<scalar_t>();
-    const scalar_t* const IP = input.contiguous().data_ptr<scalar_t>();
+    const scalar_t* const IP = in.data_ptr<scalar_t>();
 
     // Value used for padding
     constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
@@ -51,6 +52,7 @@ void max_pool1d_impl(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_pool1d_stub, &max_pool1d_impl);
 
 } // namespace native

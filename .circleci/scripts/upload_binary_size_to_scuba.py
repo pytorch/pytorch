@@ -17,7 +17,7 @@ def get_size(file_dir):
         # we should only expect one file, if no, something is wrong
         file_name = glob.glob(os.path.join(file_dir, "*"))[0]
         return os.stat(file_name).st_size
-    except:
+    except Exception:
         logging.exception(f"error getting file from: {file_dir}")
         return 0
 
@@ -41,6 +41,7 @@ def build_message(size):
             "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
             "sha1": os.environ.get("CIRCLE_SHA1"),
             "branch": os.environ.get("CIRCLE_BRANCH"),
+            "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
         },
         "int": {
             "time": int(time.time()),
@@ -115,6 +116,7 @@ def report_android_sizes(file_dir):
                     "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
                     "sha1": os.environ.get("CIRCLE_SHA1"),
                     "branch": os.environ.get("CIRCLE_BRANCH"),
+                    "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
                 },
                 "int": {
                     "time": int(time.time()),
@@ -143,5 +145,5 @@ if __name__ == "__main__":
         if size != 0:
             try:
                 send_message([build_message(size)])
-            except:
+            except Exception:
                 logging.exception("can't send message")

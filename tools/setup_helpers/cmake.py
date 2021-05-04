@@ -5,11 +5,10 @@
 import multiprocessing
 import os
 import re
-from subprocess import check_call, check_output
+from subprocess import check_call, check_output, CalledProcessError
 import sys
-import distutils
-import distutils.sysconfig
-from distutils.version import LooseVersion
+import sysconfig
+from setuptools import distutils
 
 from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
@@ -32,7 +31,7 @@ USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
 def convert_cmake_value_to_python_value(cmake_value, cmake_type):
     r"""Convert a CMake value in a string form to a Python value.
 
-    Arguments:
+    Args:
       cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
       cmake_type (string): The CMake type of :attr:`cmake_value`.
 
@@ -56,7 +55,7 @@ def convert_cmake_value_to_python_value(cmake_value, cmake_type):
 def get_cmake_cache_variables_from_file(cmake_cache_file):
     r"""Gets values in CMakeCache.txt into a dictionary.
 
-    Arguments:
+    Args:
       cmake_cache_file: A CMakeCache.txt file object.
     Returns:
       dict: A ``dict`` containing the value of cached CMake variables.
@@ -116,10 +115,10 @@ class CMake:
             return cmake_command
         cmake3 = which('cmake3')
         cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= LooseVersion("3.5.0"):
+        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.5.0"):
             cmake_command = 'cmake3'
             return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.5.0"):
+        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.5.0"):
             return cmake_command
         else:
             raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
@@ -130,7 +129,7 @@ class CMake:
 
         for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
             if 'version' in line:
-                return LooseVersion(line.strip().split(' ')[2])
+                return distutils.version.LooseVersion(line.strip().split(' ')[2])
         raise RuntimeError('no version found')
 
     def run(self, args, env):
@@ -138,7 +137,13 @@ class CMake:
 
         command = [self._cmake_command] + args
         print(' '.join(command))
-        check_call(command, cwd=self.build_dir, env=env)
+        try:
+            check_call(command, cwd=self.build_dir, env=env)
+        except (CalledProcessError, KeyboardInterrupt) as e:
+            # This error indicates that there was a problem with cmake, the
+            # Python backtrace adds no signal here so skip over it by catching
+            # the error and exiting manually
+            sys.exit(1)
 
     @staticmethod
     def defines(args, **kwargs):
@@ -168,7 +173,7 @@ class CMake:
         ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
         if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
             # Cannot rerun ninja on Windows due to a ninja bug.
-            # The workground is to remove `.ninja_deps`.
+            # The workaround is to remove `.ninja_deps`.
             os.remove(ninja_deps_file)
 
         args = []
@@ -212,7 +217,7 @@ class CMake:
         # Store build options that are directly stored in environment variables
         build_options = {
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
-            'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
+            'CMAKE_PREFIX_PATH': sysconfig.get_path('purelib')
         }
         # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
         # This is a dict that maps environment variables to the corresponding variable name in CMake.
@@ -251,7 +256,8 @@ class CMake:
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
-             'WERROR')
+             'WERROR',
+             'OPENSSL_ROOT_DIR')
         })
 
         for var, val in my_env.items():
@@ -298,7 +304,7 @@ class CMake:
         CMake.defines(args,
                       PYTHON_EXECUTABLE=sys.executable,
                       PYTHON_LIBRARY=cmake_python_library,
-                      PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
+                      PYTHON_INCLUDE_DIR=sysconfig.get_path('include'),
                       TORCH_BUILD_VERSION=version,
                       NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)

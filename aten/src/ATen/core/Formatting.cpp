@@ -60,7 +60,9 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       break;
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMin;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMax;
   if(offset == size) {
     expMin = 1;
@@ -91,9 +93,12 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   if(intMode) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if(expMax > 9) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sz = 11;
       stream << std::scientific << std::setprecision(4);
     } else {
@@ -102,20 +107,27 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   } else {
     if(expMax-expMin > 4) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sz = 11;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
       stream << std::scientific << std::setprecision(4);
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if(expMax > 5 || expMax < 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         sz = 7;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         scale = std::pow(10, expMax-1);
         stream << std::fixed << std::setprecision(4);
       } else {
         if(expMax == 0) {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sz = 7;
         } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sz = expMax+6;
         }
         stream << std::fixed << std::setprecision(4);
@@ -138,7 +150,9 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double scale;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   std::tie(scale, sz) = __printFormat(stream, self);
 
@@ -241,6 +255,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mkldnn()) {
+      stream << "MKLDNN Tensor: ";
+      tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
@@ -249,14 +266,16 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double scale;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t sz;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
         if(scale != 1) {
           printScale(stream, scale);
         }
         double* tensor_p = tensor.data_ptr<double>();
-        for(int64_t i = 0; i < tensor.size(0); i++) {
+        for (int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
@@ -290,6 +309,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         Tensor zero_points = tensor_.q_per_channel_zero_points();
         print(stream, zero_points, linesize);
         stream << ", axis: " << tensor_.q_per_channel_axis();
+      }
+    }
+
+    // Proxy check for if autograd was built
+    if (tensor.getIntrusivePtr()->autograd_meta()) {
+      auto& fw_grad = tensor._fw_grad(/* level */ 0);
+      if (fw_grad.defined()) {
+        stream << ", tangent:" << std::endl << fw_grad;
       }
     }
     stream << " ]";

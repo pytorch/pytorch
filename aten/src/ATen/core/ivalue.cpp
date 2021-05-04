@@ -4,7 +4,9 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/hash.h>
 #include <cmath>
 
 namespace c10 {
@@ -21,7 +23,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
@@ -32,7 +34,7 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
               expected_type->repr_str());
 }
 
-CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
@@ -75,8 +77,12 @@ TypePtr IValue::type() const {
       return NoneType::get();
     case Tag::Tensor:
       return TensorType::create(toTensor());
+    case Tag::Storage:
+      return StorageType::get();
     case Tag::Double:
       return FloatType::get();
+    case Tag::ComplexDouble:
+      return ComplexType::get();
     case Tag::Int:
       return IntType::get();
     case Tag::Bool:
@@ -122,7 +128,7 @@ TypePtr IValue::type() const {
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
   if (visitor(*this)) {
-    // Short cut.
+    // Shortcut
     return;
   }
   switch (this->tag) {
@@ -152,6 +158,15 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       for (const auto& attr: attributes) {
         auto attribute = obj_value->getAttr(attr.getName());
         attribute.visit(visitor);
+      }
+      break;
+    }
+    case Tag::PyObject: {
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      if (match.success()) {
+        auto contained_value = py_obj->toIValue(match.type());
+        contained_value.visit(visitor);
       }
       break;
     }
@@ -198,13 +213,22 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      subValues.insert(*this);
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      TORCH_CHECK_TYPE(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), ": ", match.reason());
+      auto contained_value = py_obj->toIValue(match.type());
+      contained_value.getSubValues(subValues);
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
-      TORCH_INTERNAL_ASSERT(
-          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      TORCH_CHECK_TYPE(
+          false, "Cannot inspect value of type ", this->tagKind());
       // Fall through
     default:
       // don't record scalars.
@@ -244,7 +268,7 @@ bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
   TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
   TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
   return lhs.tag == rhs.tag &&
-      lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+      lhs.payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
 }
 
 IValue IValue::equals(const IValue& rhs) const {
@@ -259,8 +283,12 @@ IValue IValue::equals(const IValue& rhs) const {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Storage:
+      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::ComplexDouble:
+      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::Bool:
@@ -272,7 +300,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
     case Tag::Stream:
-      return rhs.isStream() && lhs.toStream() == lhs.toStream();
+      return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -292,6 +320,50 @@ IValue IValue::equals(const IValue& rhs) const {
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+size_t IValue::hash(const IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return 0;
+    case Tag::Bool:
+      return c10::get_hash(v.payload.u.as_bool);
+    case Tag::Double:
+      return c10::get_hash(v.payload.u.as_double);
+    case Tag::Tensor:
+      // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
+      // the tensor to emulate it
+      return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    case Tag::Storage:
+      return c10::get_hash(v.payload.u.as_int);
+    case Tag::Int:
+      return c10::get_hash(v.payload.u.as_int);
+    case Tag::String:
+      return c10::get_hash(v.toStringRef());
+    case Tag::Tuple:
+      return c10::get_hash(*v.toTuple());
+    case Tag::Device:
+      return c10::get_hash(v.toDevice());
+    case Tag::GenericDict:
+    case Tag::GenericList:
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+    case Tag::Quantizer:
+    case Tag::ComplexDouble:
+    case Tag::Enum:
+    case Tag::Stream:
+    case Tag::Uninitialized:
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
@@ -337,7 +409,7 @@ std::ostream& printList(
     const std::string finish,
     IValueFormatter formatter) {
   out << start;
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       out << ", ";
     }
@@ -352,7 +424,7 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
+  auto list_elem_type = the_list.type()->expectRef<ListType>().getElementType();
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type()->annotation_str() << ", ";
@@ -393,7 +465,7 @@ std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
-  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type()->annotation_str() << ",";
@@ -402,6 +474,18 @@ std::ostream& printMaybeAnnotatedDict(
     return printDict(out, the_dict.toGenericDict(), formatter);
   }
   return out;
+}
+
+std::ostream& printComplex(std::ostream & out, const IValue & v) {
+  c10::complex<double> d = v.toComplexDouble();
+  IValue real(d.real()), imag(std::abs(d.imag()));
+  auto sign = "";
+  if (d.imag() >= 0) {
+    sign = "+";
+  } else {
+    sign = "-";
+  }
+  return out << real << sign << imag << "j";
 }
 
 std::ostream& IValue::repr(
@@ -424,15 +508,23 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
+          // -0.0 (signed zero) needs to be parsed as -0.
+          if (i == 0 && std::signbit(d)) {
+            return out << "-" << i << ".";
+          }
           return out << i << ".";
         }
       }
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
-                 << v.toDouble() << std::setprecision(orig_prec);
+                 << d << std::setprecision(orig_prec);
+    }
+    case IValue::Tag::ComplexDouble: {
+      return printComplex(out, v);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -462,6 +554,9 @@ std::ostream& IValue::repr(
       auto enum_holder = v.toEnumHolder();
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
+    }
+    case IValue::Tag::Object: {
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
@@ -532,7 +627,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 
       std::vector<IValueComparator> elements_lts;
       elements_lts.reserve(n);
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         elements_lts.push_back(getLessThanComparator(elements[i]));
       }
 
@@ -540,7 +635,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
         const auto& a_elements = a.toTuple()->elements();
         const auto& b_elements = b.toTuple()->elements();
 
-        for (size_t i = 0; i < n; ++i) {
+        for (const auto i : c10::irange(n)) {
           if (elements_lts[i](a_elements[i], b_elements[i])) {
             return true;
           }
@@ -599,6 +694,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
+    case IValue::Tag::Storage:
+      return out << v.toStorage().unsafeGetStorageImpl();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -613,6 +710,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << std::setprecision(std::numeric_limits<double>::max_digits10)
         << v.toDouble()
         << std::setprecision(orig_prec);
+    } case IValue::Tag::ComplexDouble: {
+      return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
@@ -752,6 +851,10 @@ IValue IValue::deepcopy(
   return copy;
 }
 
+void IValue::reportToTensorTypeError() const {
+  TORCH_CHECK(false, "Expected Tensor but got ", tagKind());
+}
+
 std::string ivalue::Object::name() const {
   return type()->name()->qualifiedName();
 }
@@ -778,7 +881,7 @@ void ivalue::Object::resizeObject(size_t slot) {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
   return object;
@@ -791,7 +894,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (size_t i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     if (slots_[i].type() == c10::CapsuleType::get()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
@@ -831,7 +934,35 @@ getClassConverter() {
   return classConverter;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+// Needs to be in this .cpp file to access the full definition of PyObjectHolder
+std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+    const at::IValue& value) {
+  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+  }
+  return data_ptrs;
+}
+
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
     explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
@@ -846,24 +977,31 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  std::function<void()> func = [ctx]() {
-    if (--ctx->remaining == 0) {
-      ctx->dstFuture->markCompleted(ctx->asIvalue);
-    }
-  };
   if (ctx->srcFutures.size() == 0) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
-    for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
-      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
+    for (const auto i : c10::irange(ctx->srcFutures.size())) {
+
+      auto fut = ctx->srcFutures.get(i);
+      std::function<void()> func = [ctx, fut]() {
+        // Set error and exit early if encountered.
+        if (fut->hasError()) {
+          ctx->dstFuture->setErrorIfNeeded(fut->exception_ptr());
+          return;
+        }
+
+        if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          ctx->dstFuture->markCompleted(ctx->asIvalue);
+        }
+      };
       ctx->srcFutures.get(i)->addCallback(func);
     }
   }
   return ctx->dstFuture;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   if (srcs.empty()) {
     auto res = make_intrusive<ivalue::Future>(NoneType::get());
@@ -871,7 +1009,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
-  for (size_t i = 0, tot = srcs.size(); i < tot; ++i) {
+  for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
@@ -900,7 +1038,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
       }
     }
   };
-  for (size_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+  for (const auto i : c10::irange(ctx->srcFutures.size())) {
     ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
   }
   return ctx->dstFuture;

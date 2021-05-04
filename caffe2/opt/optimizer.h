@@ -8,8 +8,8 @@
 namespace caffe2 {
 namespace opt {
 
-CAFFE2_API NetDef optimize(NetDef net, Workspace* ws, int level = 1);
-CAFFE2_API NetDef optimize(NetDef net, int level = 1);
+TORCH_API NetDef optimize(NetDef net, Workspace* ws, int level = 1);
+TORCH_API NetDef optimize(NetDef net, int level = 1);
 
 } // namespace opt
 } // namespace caffe2

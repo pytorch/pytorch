@@ -100,14 +100,23 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("ceil_", CppFunction::makeFallthrough());
   m.impl("chunk", CppFunction::makeFallthrough());
   m.impl("clamp", CppFunction::makeFallthrough());
+  m.impl("clamp.Tensor", CppFunction::makeFallthrough());
   m.impl("clamp.out", CppFunction::makeFallthrough());
+  m.impl("clamp.Tensor_out", CppFunction::makeFallthrough());
   m.impl("clamp_", CppFunction::makeFallthrough());
+  m.impl("clamp_.Tensor", CppFunction::makeFallthrough());
   m.impl("clamp_max", CppFunction::makeFallthrough());
+  m.impl("clamp_max.Tensor", CppFunction::makeFallthrough());
   m.impl("clamp_max.out", CppFunction::makeFallthrough());
+  m.impl("clamp_max.Tensor_out", CppFunction::makeFallthrough());
   m.impl("clamp_max_", CppFunction::makeFallthrough());
+  m.impl("clamp_max_.Tensor", CppFunction::makeFallthrough());
   m.impl("clamp_min", CppFunction::makeFallthrough());
+  m.impl("clamp_min.Tensor", CppFunction::makeFallthrough());
   m.impl("clamp_min.out", CppFunction::makeFallthrough());
+  m.impl("clamp_min.Tensor_out", CppFunction::makeFallthrough());
   m.impl("clamp_min_", CppFunction::makeFallthrough());
+  m.impl("clamp_min_.Tensor", CppFunction::makeFallthrough());
   m.impl("clone", CppFunction::makeFallthrough());
   m.impl("conj", CppFunction::makeFallthrough());
   m.impl("conj.out", CppFunction::makeFallthrough());
@@ -210,6 +219,12 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("i0", CppFunction::makeFallthrough());
   m.impl("i0.out", CppFunction::makeFallthrough());
   m.impl("i0_", CppFunction::makeFallthrough());
+  m.impl("igamma", CppFunction::makeFallthrough());
+  m.impl("igamma.out", CppFunction::makeFallthrough());
+  m.impl("igamma_", CppFunction::makeFallthrough());
+  m.impl("igammac", CppFunction::makeFallthrough());
+  m.impl("igammac.out", CppFunction::makeFallthrough());
+  m.impl("igammac_", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());
@@ -456,6 +471,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("tanh_", CppFunction::makeFallthrough());
   m.impl("tensor_split.indices", CppFunction::makeFallthrough());
   m.impl("tensor_split.sections", CppFunction::makeFallthrough());
+  m.impl("tensor_split.tensor_indices_or_sections", CppFunction::makeFallthrough());
   m.impl("threshold", CppFunction::makeFallthrough());
   m.impl("threshold.out", CppFunction::makeFallthrough());
   m.impl("threshold_", CppFunction::makeFallthrough());
@@ -496,11 +512,12 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   // supported because they were manually registered.  I'm not sure
   // if these registrations are right or not, but they preserve old behavior
   // (and some of them are exercised by the test suite).
-  m.impl("backward", CppFunction::makeFallthrough());
+  m.impl("_backward", CppFunction::makeFallthrough());
   m.impl("set_data", CppFunction::makeFallthrough());
   m.impl("data", CppFunction::makeFallthrough());
   m.impl("is_leaf", CppFunction::makeFallthrough());
   m.impl("_version", CppFunction::makeFallthrough());
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
+  m.impl("_fw_primal", CppFunction::makeFallthrough());
 }

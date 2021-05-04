@@ -1,6 +1,7 @@
 #include <torch/cuda.h>
 
 #include <ATen/Context.h>
+#include <c10/core/DeviceGuard.h>
 
 #include <cstddef>
 
@@ -47,6 +48,14 @@ void manual_seed_all(uint64_t seed) {
       gen.set_current_seed(seed);
     }
   }
+}
+
+void synchronize(int64_t device_index) {
+  TORCH_CHECK(is_available(), "No CUDA GPUs are available");
+  int64_t num_gpus = cuda::device_count();
+  TORCH_CHECK(device_index == -1 || device_index < num_gpus,
+    "Device index out of range: ", device_index);
+  at::detail::getCUDAHooks().deviceSynchronize(device_index);
 }
 
 } // namespace cuda

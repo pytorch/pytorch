@@ -3,7 +3,6 @@
 
 
 
-from future.utils import bytes_to_native_str
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest

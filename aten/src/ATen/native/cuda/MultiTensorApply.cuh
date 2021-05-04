@@ -31,7 +31,7 @@ static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
 template<int n> struct TensorListMetadata
 {
   void* addresses[n][depth_to_max_tensors[n-1]];
-  int sizes[depth_to_max_tensors[n-1]];
+  int numel_for_tensor[depth_to_max_tensors[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
@@ -39,7 +39,7 @@ template<int n> struct TensorListMetadata
 template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
 {
   void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
-  int sizes[depth_to_max_tensors_scalarlist[n-1]];
+  int numel_for_tensor[depth_to_max_tensors_scalarlist[n-1]];
   scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
@@ -56,14 +56,13 @@ multi_tensor_apply_kernel(
   callable(kChunkSize, tensorListMeta, args...);
 }
 
-template<int depth, typename T, typename... ArgTypes>
+template<int depth, typename scalar_T, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
-    at::ArrayRef<double> scalars,
+    at::ArrayRef<Scalar> scalars,
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         using scalar_vals_t = typename T::opmath_t;
         TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
@@ -72,9 +71,9 @@ void multi_tensor_apply(
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
 
-            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t];
+            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
 
-            tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
+            tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
             }
@@ -96,8 +95,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-
-                    AT_CUDA_CHECK(cudaGetLastError());
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;
@@ -105,7 +103,7 @@ void multi_tensor_apply(
                         loc_tensor_info = 0;
                     }
                     else {
-                        tensorListMeta.sizes[0] = tensorListMeta.sizes[loc_tensor_info-1];
+                        tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info-1];
                         tensorListMeta.scalar_vals[0] = tensorListMeta.scalar_vals[loc_tensor_info-1];
                         for(int d = 0; d < depth; d++) {
                             tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info-1];
@@ -124,14 +122,13 @@ void multi_tensor_apply(
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;
 
         int loc_block_info = 0;
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
-            tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
+            tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
             }
@@ -153,8 +150,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-
-                    AT_CUDA_CHECK(cudaGetLastError());
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;
@@ -162,7 +158,7 @@ void multi_tensor_apply(
                         loc_tensor_info = 0;
                     }
                     else {
-                        tensorListMeta.sizes[0] = tensorListMeta.sizes[loc_tensor_info-1];
+                        tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info-1];
                         for(int d = 0; d < depth; d++) {
                             tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info-1];
                         }

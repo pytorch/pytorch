@@ -15,122 +15,50 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
     // Return something so we can handle scalar buffers.
     return kInt;
   }
-  Dtype dt = indices.at(0)->dtype();
-  for (size_t i = 1; i < indices.size(); ++i) {
-    if (indices.at(i)->dtype() != dt) {
-      throw malformed_input("dtype mismatch in dtypeOfIndices");
+  return indices.at(0)->dtype();
+}
+
+void castIndicesToInts(std::vector<const Expr*>& indices) {
+  // Cast all indices to Int
+  // TODO: Should we use int64 here?
+  auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    const Dtype& dt = index->dtype();
+    if (c10::isIntegralType(dt.scalar_type(), true) &&
+        dt.scalar_type() != index_dtype) {
+      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
     }
   }
-  return dt;
 }
 
-static bool indicesValid(const std::vector<const Expr*>& indices) {
-  if (indices.size() == 0) {
-    return true;
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (indices.size() > 1 && index_dtype.lanes() > 1) {
-    // Multilane is only allowed in a flattened (i.e. 1D) index
-    return false;
-  }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    return false;
-  }
-  return true;
+Load::Load(Dtype dtype, const Buf* buf, std::vector<const Expr*> indices)
+    : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
+  castIndicesToInts(indices_);
 }
 
-void Load::verify_dtypes() const {
-  if (indices_.size() > 0 && buf_->base_handle()->dtype() != kHandle) {
-    throw malformed_input(
-        "Load base handle dtype must be Handle", buf_->base_handle());
-  }
-
-  if (!indicesValid(indices_)) {
-    throw malformed_input("invalid indices in Load");
-  }
-  Dtype index_dtype = dtypeOfIndices(indices_);
-  if (index_dtype.lanes() != mask_->dtype().lanes()) {
-    throw malformed_input("lane mismatch in Load mask");
-  }
-}
-
-Load::Load(
-    Dtype dtype,
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  verify_dtypes();
-}
-
-Load::Load(
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
-          buf,
-          indices,
-          mask) {}
+Load::Load(const Buf* buf, const std::vector<const Expr*>& indices)
+    : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(new Load(
-      dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
+    const std::vector<ExprHandle>& indices) {
+  return ExprHandle(
+      new Load(dtype, buf.node(), ExprHandleVectorToExprVector(indices)));
 }
 
 ExprHandle Load::make(
     const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return Load::make(buf.dtype(), buf, indices, mask);
+    const std::vector<ExprHandle>& indices) {
+  return Load::make(buf.dtype(), buf, indices);
 }
 
 Store::Store(
     const Buf* buf,
     std::vector<const Expr*> indices,
-    const Expr* value,
-    const Expr* mask)
-    : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input("Store base handle must be Handle");
-  }
-  /*
-  TODO: Reenable the checks.
-  The reason they are disabled is that kernel.cpp is using Buffers somewhat
-  loosely: we don't set dimensions properly and just construct index expressions
-  directly. We should harden that part and then we'd be able to turn on these
-  checks.
-
-  if (!indicesValid(indices)) {
-    throw malformed_input();
-  }
-  if (!mask || !value) {
-    throw malformed_input();
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input();
-  }
-  if (index_dtype.lanes() != value->dtype().lanes()) {
-    throw malformed_input();
-  }
-  */
-}
-
-Store* Store::make(
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      mask.node());
+    const Expr* value)
+    : buf_(buf), indices_(std::move(indices)), value_(value) {
+  castIndicesToInts(indices_);
 }
 
 Store* Store::make(
@@ -138,10 +66,7 @@ Store* Store::make(
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value) {
   return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      ExprHandle(1).node());
+      buf.node(), ExprHandleVectorToExprVector(indices), value.node());
 }
 
 const Expr* flatten_index(
@@ -175,6 +100,9 @@ const Expr* flatten_index(
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
+  if (op_type == kIsNan) {
+    return dt1.cloneWithScalarType(ScalarType::Int);
+  }
   // TODO: check the op_type and make a real decision
   return dt1;
 }
@@ -187,11 +115,15 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
     const std::vector<const Expr*>& params) {
-  // TODO: check the op_type an dmake a real decision
+  // TODO: check the op_type and make a real decision
+  // Doesnt this fail with kRand?
   if (params.size() == 0) {
     throw malformed_input("invalid params in Intrinsics");
+  } else if (params.size() == 1) {
+    return IntrinsicsDtype(op_type, params[0]->dtype());
+  } else if (params.size() == 2) {
+    return IntrinsicsDtype(op_type, params[0]->dtype(), params[1]->dtype());
   }
-
   return params[0]->dtype();
 }
 
@@ -209,7 +141,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kSigmoid:
     case kExp:
     case kExpm1:
-    case kFabs:
+    case kAbs:
     case kLog:
     case kLog2:
     case kLog10:
@@ -224,6 +156,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kTrunc:
     case kFrac:
     case kLgamma:
+    case kIsNan:
       return 1;
     case kRand:
       return 0;
@@ -235,6 +168,20 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     default:
       throw std::runtime_error("invalid op_type: " + c10::to_string(op_type));
   }
+}
+
+ExternalCall* ExternalCall::make(
+    BufHandle buf,
+    const std::string& func_name,
+    const std::vector<BufHandle>& buf_args,
+    const std::vector<ExprHandle>& args) {
+  std::vector<const Buf*> buf_arg_nodes;
+  buf_arg_nodes.reserve(buf_args.size());
+  for (const BufHandle& buf_arg : buf_args) {
+    buf_arg_nodes.push_back(buf_arg.node());
+  }
+  return new ExternalCall(
+      buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
 std::vector<const Expr*> ExprHandleVectorToExprVector(

@@ -1,14 +1,16 @@
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/TensorFactories.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/accumulate.h>
+
 #include <cmath>
 #include <typeinfo>
 
@@ -29,7 +31,7 @@ namespace {
 // Note: this is not a native function as Quantizer is not exposed to python yet
 QuantizerPtr Tensor::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
   return get_qtensorimpl(*this)->quantizer();
 }
 
@@ -78,9 +80,11 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 }
 
 int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t new_size_bytes;
   switch(t) {
     case at::ScalarType::QUInt4x2:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       new_size_bytes = std::ceil(size_bytes * 0.5);
       break;
     default:
@@ -94,7 +98,7 @@ inline Tensor new_qtensor(
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  at::Allocator* allocator = options.device().type() == DeviceType::CUDA
+  at::Allocator* allocator = options.device().is_cuda()
     ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
     : at::getCPUAllocator();
 
@@ -106,7 +110,7 @@ inline Tensor new_qtensor(
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
-  int64_t nelements = at::prod_intlist(sizes);
+  int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
@@ -205,6 +209,11 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
   return rtensor;
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 Quantizer::~Quantizer() {}
+
+C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
+  get_qtensorimpl(self)->set_quantizer_(quantizer);
+}
 
 } // namespace at

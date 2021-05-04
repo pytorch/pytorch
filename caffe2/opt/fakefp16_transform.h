@@ -12,14 +12,14 @@ namespace caffe2 {
 namespace opt {
 
 // Mapping from fp32 ops to fakefp16 ops
-CAFFE2_API std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
+TORCH_API std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     bool use_fp16_acc = false,
     bool use_nnpi = false);
 
-CAFFE2_API void fakeFp16FuseOps(NetDef* net);
+TORCH_API void fakeFp16FuseOps(NetDef* net);
 
 // Transform normal fp32 operators to fakefp16 operators.
-CAFFE2_API void fakeFp16Transform(NetDef* net);
+TORCH_API void fakeFp16Transform(NetDef* net);
 
 } // namespace opt
 } // namespace caffe2

@@ -11,19 +11,24 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateComplexTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateBoolType.h>
 
@@ -49,6 +54,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
   if (tuple || list) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
     THLongStoragePtr storage(THLongStorage_newWithSize(nDim));
     for (int i = 0; i != nDim; ++i) {
@@ -68,6 +74,7 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
   if (tuple || list) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
     std::vector<int64_t> sizes(nDim);
     for (int i = 0; i != nDim; ++i) {
@@ -135,6 +142,7 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg)
 void THPUtils_setError(const char *format, ...)
 {
   static const size_t ERROR_BUFFER_SIZE = 1000;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char buffer[ERROR_BUFFER_SIZE];
   va_list fmt_args;
 
@@ -208,6 +216,7 @@ void THPPointer<THPGenerator>::free() {
 
 template class THPPointer<THPGenerator>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatBroadcastWarn = false;
 
 void setBackCompatBroadcastWarn(bool warn) {
@@ -218,6 +227,7 @@ bool getBackCompatBroadcastWarn() {
   return backCompatBroadcastWarn;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatKeepdimWarn = false;
 
 void setBackCompatKeepdimWarn(bool warn) {
@@ -252,3 +262,72 @@ void THPPointer<THPStorage>::free() {
 }
 
 template class THPPointer<THPStorage>;
+
+namespace torch { namespace gdb {
+/* ~~~ misc debugging utilities ~~~
+ *
+ * torch::gdb::* functions are NOT meant to be called by general pytorch code,
+ * but only from within a gdb session. As such, utils.h does not contain any
+ * declaration for those.
+ */
+
+// This is a helper needed by the torch-tensor-repr gdb command.
+// Return an human-readable representation of the given Tensor. The resulting
+// string is stored into a malloc()ed buffer. The caller is responsible to
+// free() it. We use malloc() instead of new[] because it's much easier to
+// call free than delete[] from withing gdb.
+// Currently the code for computing the repr of a tensor is written in Python,
+// so we need to wrap the Tensor into a Python object first.
+char *tensor_repr(at::Tensor tensor) {
+  PyGILState_STATE gil = PyGILState_Ensure();
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  PyObject *pytensor = NULL;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  PyObject *repr = NULL;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Py_ssize_t bufsize;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  const char *buf = NULL;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  char *result = NULL;
+
+  pytensor = THPVariable_Wrap(at::Tensor(tensor));
+  if (!pytensor)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    goto error;
+  repr = PyObject_Repr(pytensor);
+  if (!repr)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    goto error;
+  buf = PyUnicode_AsUTF8AndSize(repr, &bufsize);
+  if (!buf)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    goto error;
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  result = static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
+  if (!result) {
+    fprintf(stderr, "cannot allocate memory for the result\n");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    goto error;
+  }
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.strcpy)
+  strcpy(result, buf);
+  Py_XDECREF(pytensor);
+  Py_XDECREF(repr);
+  PyGILState_Release(gil);
+  return result;
+
+error:
+  fprintf(stderr, "torch::gdb::tensor_repr: unexpected error\n");
+  if (PyErr_Occurred())
+    PyErr_Print();
+  Py_XDECREF(pytensor);
+  Py_XDECREF(repr);
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  free(result);
+  PyGILState_Release(gil);
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  return NULL;
+}
+
+}} // namespace torch::gdb

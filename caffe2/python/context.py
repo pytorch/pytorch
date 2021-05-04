@@ -1,19 +1,15 @@
 ## @package context
 # Module caffe2.python.context
 
-
-
-
-
+import inspect
 import threading
-import six
+import functools
 
 
 class _ContextInfo(object):
-    def __init__(self, cls, allow_default, arg_name):
+    def __init__(self, cls, allow_default):
         self.cls = cls
         self.allow_default = allow_default
-        self.arg_name = arg_name
         self._local_stack = threading.local()
 
     @property
@@ -43,14 +39,10 @@ class _ContextRegistry(object):
     def __init__(self):
         self._ctxs = {}
 
-    def register(self, ctx_info):
-        assert isinstance(ctx_info, _ContextInfo)
-        assert (ctx_info.cls not in self._ctxs), (
-            'Context %s already registered' % ctx_info.cls)
-        self._ctxs[ctx_info.cls] = ctx_info
-
     def get(self, cls):
-        assert cls in self._ctxs, 'Context %s not registered.' % cls
+        if cls not in self._ctxs:
+            assert issubclass(cls, Managed), "must be a context managed class, got {}".format(cls)
+            self._ctxs[cls] = _ContextInfo(cls, allow_default=issubclass(cls, DefaultManaged))
         return self._ctxs[cls]
 
 
@@ -62,62 +54,53 @@ def _context_registry():
     return _CONTEXT_REGISTRY
 
 
-def __enter__(self):
-    if self._prev_enter is not None:
-        self._prev_enter()
-    _context_registry().get(self._ctx_class).enter(self)
-    return self
+def _get_managed_classes(obj):
+    return [
+        cls for cls in inspect.getmro(obj.__class__)
+        if issubclass(cls, Managed) and cls != Managed and cls != DefaultManaged
+    ]
 
 
-def __exit__(self, *args):
-    _context_registry().get(self._ctx_class).exit(self)
-    if self._prev_exit is not None:
-        self._prev_exit(*args)
+
+class Managed(object):
+    """
+    Managed makes the inheritted class a context managed class.
+
+        class Foo(Managed): ...
+
+        with Foo() as f:
+            assert f == Foo.current()
+    """
+
+    @classmethod
+    def current(cls, value=None, required=True):
+        ctx_info = _context_registry().get(cls)
+        if value is not None:
+            assert isinstance(value, cls), (
+                'Wrong context type. Expected: %s, got %s.' % (cls, type(value)))
+            return value
+        return ctx_info.get_active(required=required)
+
+    def __enter__(self):
+        for cls in _get_managed_classes(self):
+            _context_registry().get(cls).enter(self)
+        return self
+
+    def __exit__(self, *args):
+        for cls in _get_managed_classes(self):
+            _context_registry().get(cls).exit(self)
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return wrapper
 
 
-def __call__(self, func):
-    @six.wraps(func)
-    def wrapper(*args, **kwargs):
-        with self:
-            return func(*args, **kwargs)
-    return wrapper
-
-
-@classmethod
-def _current(cls, value=None, required=True):
-    return _get_active_context(cls, value, required)
-
-
-class define_context(object):
-    def __init__(self, arg_name=None, allow_default=False):
-        self.arg_name = arg_name
-        self.allow_default = allow_default
-
-    def __call__(self, cls):
-        assert not hasattr(cls, '_ctx_class'), (
-            '%s parent class (%s) already defines context.' % (
-                cls, cls._ctx_class))
-        cls._ctx_class = cls
-
-        _context_registry().register(
-            _ContextInfo(cls, self.allow_default, self.arg_name)
-        )
-
-        cls._prev_enter = cls.__enter__ if hasattr(cls, '__enter__') else None
-        cls._prev_exit = cls.__exit__ if hasattr(cls, '__exit__') else None
-
-        cls.__enter__ = __enter__
-        cls.__exit__ = __exit__
-        cls.__call__ = __call__
-        cls.current = _current
-
-        return cls
-
-
-def _get_active_context(cls, val=None, required=True):
-    ctx_info = _context_registry().get(cls)
-    if val is not None:
-        assert isinstance(val, cls), (
-            'Wrong context type. Expected: %s, got %s.' % (cls, type(val)))
-        return val
-    return ctx_info.get_active(required=required)
+class DefaultManaged(Managed):
+    """
+    DefaultManaged is similar to Managed but if there is no parent when
+    current() is called it makes a new one.
+    """
+    pass

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 
@@ -72,22 +73,44 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     }
 
     // Figure out what values we need to use as inputs and outputs for the
-    // replacement subgraph. These would be inputs and outputs of the subgraph
-    // we matched.
+    // replacement subgraph and where the replacement subgraph needs to be
+    // inserted.
+    Node* ins_point = nullptr;
     std::vector<Value*> inputs, outputs;
     for (Value* v : pattern_graph.inputs()) {
-      inputs.push_back(match.values_map.at(v));
+      Value* input = match.values_map.at(v);
+      if (!ins_point || ins_point->isBefore(input->node())) {
+        ins_point = input->node();
+      }
+      inputs.push_back(input);
     }
+    AT_ASSERT(ins_point);
+
+    // Check that the insertion point we've chosen precedes all the uses of the
+    // outputs - otherwise the replacement is incorrect and we have to skip it.
+    bool ins_point_before_uses = true;
     for (Value* v : pattern_graph.outputs()) {
+      Value* output = match.values_map.at(v);
       outputs.push_back(match.values_map.at(v));
+
+      for (const Use& u : output->uses()) {
+        if (u.user->isBefore(ins_point)) {
+          ins_point_before_uses = false;
+          break;
+        }
+      }
     }
 
-    // Insert a clone of replacement subgraph after the matched subgraph.
+    if (!ins_point_before_uses) {
+      continue;
+    }
+
+    // Insert a clone of replacement subgraph.
     // `inputs` vector holds values that we would use as incoming values to the
     // new subgraph, and we will get `new_outputs` vector containing values
     // produced by this new subgraph - we will then rewrite old outputs with the
     // new ones.
-    WithInsertPoint insert_point(match.anchor);
+    WithInsertPoint insert_point(ins_point->next());
     std::vector<Value*> new_outputs =
         insertGraph(*graph, replacement_graph, inputs);
 

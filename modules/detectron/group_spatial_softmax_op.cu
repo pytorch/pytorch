@@ -112,6 +112,7 @@ bool GroupSpatialSoftmaxOp<float, CUDAContext>::RunOnDevice() {
   GroupSpatialSoftmaxKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                          0, context_.cuda_stream()>>>(
       N, A, W, H, Xdata, Pdata, num_classes_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
 
@@ -158,11 +159,13 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   SumProbsKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0,
                    context_.cuda_stream()>>>(
     N, A, W, H, Ydata, dYdata, sum_probs_data, num_classes_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Step 2: dX[i] = dX[i] - s
   SubSumKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS, 0,
                   context_.cuda_stream()>>>(
     N, A, W, H, sum_probs_.data<float>(), dXdata, num_classes_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Step 3: dX[i] = Y[i] * dX[i]
   math::Mul<float, CUDAContext>(Y.size(), dXdata, Ydata, dXdata, &context_);

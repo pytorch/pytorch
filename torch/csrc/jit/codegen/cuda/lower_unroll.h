@@ -49,7 +49,7 @@ namespace cuda {
  * corners.
  */
 
-class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
+class TORCH_CUDA_CU_API UnrollPass : public OptOutDispatch {
  private:
   // Wrapper to access thread_predicates_ based on an output TV
   kir::Bool* getThreadPredicate(TensorView*);

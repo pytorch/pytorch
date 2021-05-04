@@ -4,58 +4,55 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/ir/scope.h"
-#include "torch/csrc/jit/jit_log.h"
-#include "torch/csrc/jit/passes/bailout_graph.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/guard_elimination.h"
-#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/insert_guards.h"
-#include "torch/csrc/jit/passes/liveness.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/serialization/import.h"
-
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/variable.h"
-
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/liveness.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/jit.h>
 #include <torch/script.h>
 
-#include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/jit.h"
-
-#include "onnx/onnx_pb.h"
+#include <onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -65,6 +62,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -93,6 +91,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   return out;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(prim::Param, Symbol::prim("Param"));
   ASSERT_EQ(prim::Return, Symbol::prim("Return"));
@@ -109,6 +108,7 @@ TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(Symbol(symstart + 2).toUnqualString(), std::string("What2"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FromQualStringTest, Basic) {
   ASSERT_EQ(Symbol::fromQualString("prim::Param"), Symbol::prim("Param"));
   ASSERT_EQ(Symbol::fromQualString("aten::mm"), Symbol::aten("mm"));
@@ -139,8 +139,11 @@ TEST(FromQualStringTest, Basic) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(THNNConvTest, Basic) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> kernel_size = {3, 5};
   std::vector<int64_t> stride = {1, 2};
   std::vector<int64_t> padding = {2, 1};
@@ -234,13 +237,17 @@ TEST(THNNConvTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATenNativeBatchNormTest, Basic) {
   // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
   // running_mean, Tensor running_var, bool training, float momentum, float eps)
   // -> (Tensor, Tensor, Tensor)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
   bool training = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float momentum = 0.9;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float eps = 1e-5;
 
   // make inputs
@@ -366,7 +373,12 @@ TEST(ATenNativeBatchNormTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, Basic) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
           %1 : Float(2, 3, 4)):
@@ -400,7 +412,12 @@ TEST(CustomFusionTest, Basic) {
   AT_ASSERT(hits == 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, NestedBlocks) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
         %1 : Float(2, 3, 4),
@@ -463,6 +480,7 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
@@ -486,12 +504,14 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
 
 // test a few features that are not directly used in schemas yet
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
@@ -499,20 +519,21 @@ TEST(SchemaParserTest, NestedArrays) {
   ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
                                               .at(0)
                                               .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+                                              ->expectRef<ListType>()
+                                              .getElementType()
+                                              ->expectRef<ListType>()
+                                              .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
                                               .at(0)
                                               .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+                                              ->expectRef<ListType>()
+                                              .getElementType()
+                                              ->expectRef<ListType>()
+                                              .getElementType()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NamedReturns) {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
@@ -522,18 +543,21 @@ TEST(SchemaParserTest, NamedReturns) {
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expect<FutureType>()->getElementType()));
+      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, BeforeAfterSets) {
   const auto s = parseSchema(
       "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"
@@ -558,6 +582,7 @@ TEST(SchemaParserTest, BeforeAfterSets) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, BeforeAfterSets2) {
   const auto s = parseSchema(
       "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
@@ -587,6 +612,7 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Basic) {
   Graph graph;
   auto node1 = graph.create(prim::AutogradZero);
@@ -638,6 +664,7 @@ TEST(TopologicalIndexTest, Basic) {
   ASSERT_TRUE(node2p->isBefore(node3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Reindex) {
   // Induce reindexing to test that path
   Graph graph;
@@ -646,6 +673,7 @@ TEST(TopologicalIndexTest, Reindex) {
   auto anchor = graph.create(prim::AutogradZero);
   graph.appendNode(anchor);
   // Inserting to the same place a lot will trigger reindexing
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100; ++i) {
     auto n = graph.create(prim::AutogradZero);
     n->insertAfter(anchor);
@@ -653,7 +681,9 @@ TEST(TopologicalIndexTest, Reindex) {
   }
 
   // Nodes should be in reverse order
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (auto j = i + 1; j < 100; ++j) {
       ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
     }
@@ -685,10 +715,10 @@ at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
   return module->forward({t}).toTensor();
 }
 
-using TracedTestInputs =
+using TracedTestValues =
     std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
 
-void checkTracedInputs(const TracedTestInputs& inputs) {
+void checkTracedInputs(const TracedTestValues& inputs) {
   bool found_test = false;
   bool found_pow = false;
   bool found_mul = false;
@@ -716,12 +746,70 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
+void checkTracedOutputs(const TracedTestValues& outputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& output : outputs) {
+    const auto& fn = std::get<0>(output);
+    const auto& sizes = std::get<1>(output);
+
+    if (fn == "test") {
+      found_test = true;
+      TORCH_CHECK(sizes.empty());
+    } else if (fn == "aten::pow") {
+      found_pow = true;
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "aten::mul") {
+      found_mul = true;
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static bool bad_scope = false;
+template <RecordScope scope, size_t* cnt>
+std::unique_ptr<at::ObserverContext> checkScopeCallback(
+    const at::RecordFunction& fn) {
+  if (fn.scope() == scope) {
+    ++(*cnt);
+  } else {
+    bad_scope = true;
+  }
+  return nullptr;
+}
+
+template <RecordScope scope, size_t* cnt>
+void pushScopedCallback() {
+  at::addGlobalCallback(
+      at::RecordFunctionCallback(checkScopeCallback<scope, cnt>)
+          .scopes({scope}));
+}
+
+// These cannot be function-local because that would prohibit them
+// from being used as template arguments prior to C++17.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static size_t fun_cnt;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static size_t ts_fun_cnt;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static size_t user_scope_cnt;
+
 void checkScopeCallbacks() {
-  bool found_function_scope = false;
-  bool found_method_scope = false;
-  bool found_user_scope = false;
+  static bool found_function_scope;
+  static bool found_method_scope;
+  static bool found_user_scope;
+  found_function_scope = false;
+  found_method_scope = false;
+  found_user_scope = false;
   at::addGlobalCallback(at::RecordFunctionCallback(
-      [&](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         if (fn.scope() == at::RecordScope::FUNCTION &&
             std::string(fn.name().str()) == "test_function") {
           found_function_scope = true;
@@ -734,31 +822,16 @@ void checkScopeCallbacks() {
             std::string(fn.name().str()) == "test_user_scope") {
           found_user_scope = true;
         }
-      },
-      [](const at::RecordFunction&) {}));
+        return nullptr;
+      }));
 
-  bool bad_scope = false;
-  auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
-    at::addGlobalCallback(
-        at::RecordFunctionCallback(
-            [&bad_scope, &cnt, scope](const at::RecordFunction& fn) {
-              if (fn.scope() == scope) {
-                ++cnt;
-              } else {
-                bad_scope = true;
-              }
-              return true;
-            },
-            [](const at::RecordFunction&) {})
-            .scopes({scope}));
-  };
-
-  size_t fun_cnt = 0;
-  pushScopedCallback(at::RecordScope::FUNCTION, fun_cnt);
-  size_t ts_fun_cnt = 0;
-  pushScopedCallback(at::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
-  size_t user_scope_cnt = 0;
-  pushScopedCallback(at::RecordScope::USER_SCOPE, user_scope_cnt);
+  bad_scope = false;
+  fun_cnt = 0;
+  pushScopedCallback<at::RecordScope::FUNCTION, &fun_cnt>();
+  ts_fun_cnt = 0;
+  pushScopedCallback<at::RecordScope::TORCHSCRIPT_FUNCTION, &ts_fun_cnt>();
+  user_scope_cnt = 0;
+  pushScopedCallback<at::RecordScope::USER_SCOPE, &user_scope_cnt>();
 
   TORCH_CHECK(at::hasCallbacks());
 
@@ -778,88 +851,144 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
-TEST(RecordFunctionTest, Basic) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static bool should_run = false;
+
+static bool shouldRunCallback(const RecordFunctionCallback&) {
+  return should_run;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static TracedTestValues traced_inputs;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static TracedTestValues traced_outputs;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::unordered_set<std::string> ts_input_names;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::unordered_set<std::string> ts_output_names;
+
+std::unique_ptr<at::ObserverContext> tracedInputsCallback(
+    const RecordFunction& fn) {
+  if (fn.scope() == RecordScope::FUNCTION) {
+    auto inputs = fn.inputs();
+    std::vector<std::vector<int64_t>> sizes;
+    for (const auto& input : inputs) {
+      if (input.isTensor()) {
+        sizes.push_back(input.toTensor().sizes().vec());
+      } else if (input.isScalar()) {
+        // NOLINTNEXTLINE(modernize-use-emplace)
+        sizes.push_back(std::vector<int64_t>());
+      }
+    }
+    traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+  } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+    ts_input_names.insert(fn.name().str());
+  }
+  return nullptr;
+}
+
+void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
+  if (fn.scope() == RecordScope::FUNCTION) {
+    auto outputs = fn.outputs();
+    std::vector<std::vector<int64_t>> sizes;
+    for (const auto& output : outputs) {
+      if (output.isTensor()) {
+        sizes.push_back(output.toTensor().sizes().vec());
+      } else if (output.isScalar()) {
+        sizes.emplace_back();
+      }
+    }
+    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+  } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+    ts_output_names.insert(fn.name().str());
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
-  TracedTestInputs traced_inputs;
-  std::unordered_set<std::string> ts_names;
   addGlobalCallback(
-      RecordFunctionCallback(
-          [&](const RecordFunction& fn) {
-            if (fn.scope() == RecordScope::FUNCTION) {
-              auto inputs = fn.inputs();
-              std::vector<std::vector<int64_t>> sizes;
-              for (const auto& input : inputs) {
-                if (input.isTensor()) {
-                  sizes.push_back(input.toTensor().sizes().vec());
-                } else if (input.isScalar()) {
-                  sizes.push_back(std::vector<int64_t>());
-                }
-              }
-              traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
-            } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-              ts_names.insert(fn.name().str());
-            }
-          },
-          [](const RecordFunction&) {})
-          .needsInputs(true));
+      RecordFunctionCallback(tracedInputsCallback, tracedOutputsCallback)
+          .needsInputs(true)
+          .needsOutputs(true));
 
-  TracedTestInputs eager_inputs, jit_inputs;
+  TracedTestValues eager_inputs, eager_outputs, jit_inputs, jit_outputs;
   {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = invokeTestRecordFunction(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     eager_inputs = traced_inputs;
+    eager_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
 
-    TORCH_CHECK(ts_names.empty());
+    TORCH_CHECK(ts_input_names.empty());
+    TORCH_CHECK(ts_output_names.empty());
 
     t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     t2 = invokeTestRecordFunctionJIT(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     jit_inputs = traced_inputs;
+    jit_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
   }
 
-  TORCH_CHECK(ts_names.find("forward") != ts_names.end());
-  TORCH_CHECK(ts_names.find("foo") != ts_names.end());
+  TORCH_CHECK(ts_input_names.find("forward") != ts_input_names.end());
+  TORCH_CHECK(ts_input_names.find("foo") != ts_input_names.end());
+  TORCH_CHECK(ts_output_names.find("forward") != ts_output_names.end());
+  TORCH_CHECK(ts_output_names.find("foo") != ts_output_names.end());
 
   checkTracedInputs(eager_inputs);
+  checkTracedOutputs(eager_outputs);
   checkTracedInputs(jit_inputs);
+  checkTracedOutputs(jit_outputs);
   at::clearCallbacks();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static int sampled_cb_ctr = 0;
+std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
+  if (std::string(fn.name().str()) == "test") {
+    ++sampled_cb_ctr;
+  }
+  return nullptr;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static int non_sampled_cb_ctr = 0;
+std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
+  if (std::string(fn.name().str()) == "test") {
+    ++non_sampled_cb_ctr;
+  }
+  return nullptr;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, SampledCallbacks) {
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
 
   // test sampled callbacks
-  int sampled_cb_ctr = 0;
-  auto setup_sampled_callback = [&sampled_cb_ctr](double sampling_prob) {
-    return addGlobalCallback(RecordFunctionCallback(
-                                 [&sampled_cb_ctr](const RecordFunction& fn) {
-                                   if (std::string(fn.name().str()) == "test") {
-                                     ++sampled_cb_ctr;
-                                   }
-                                   return true;
-                                 },
-                                 [](const RecordFunction&) {})
-                                 .samplingProb(sampling_prob));
+  sampled_cb_ctr = 0;
+  auto setup_sampled_callback = [](double sampling_prob) {
+    return addGlobalCallback(
+        RecordFunctionCallback(sampledCallback).samplingProb(sampling_prob));
   };
 
-  int non_sampled_cb_ctr = 0;
-  addGlobalCallback(RecordFunctionCallback(
-      [&non_sampled_cb_ctr](const RecordFunction& fn) {
-        if (std::string(fn.name().str()) == "test") {
-          ++non_sampled_cb_ctr;
-        }
-        return true;
-      },
-      [](const RecordFunction&) {}));
+  addGlobalCallback(RecordFunctionCallback(nonSampledCallback));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto handle = setup_sampled_callback(0.5);
 
   auto run_test_function = []() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (auto k = 0; k < 1000; k++) {
       invokeTestRecordFunction(t);
     }
@@ -879,6 +1008,7 @@ TEST(RecordFunctionTest, Basic) {
 
   sampled_cb_ctr = 0;
   removeCallback(handle);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   handle = setup_sampled_callback(1.0);
   run_test_function();
 
@@ -889,17 +1019,24 @@ TEST(RecordFunctionTest, Basic) {
   // test the scope of the callbacks
   checkScopeCallbacks();
   clearCallbacks();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, RecordFunctionGuard) {
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
+
+  static std::vector<std::string> fn_names;
+  static std::mutex guard_mtx;
 
   // check record function guard
-  std::vector<std::string> fn_names;
-  std::mutex mtx;
   addGlobalCallback(RecordFunctionCallback(
-      [&fn_names, &mtx](const RecordFunction& fn) {
-        std::lock_guard<std::mutex> lock(mtx);
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        std::lock_guard<std::mutex> lock(guard_mtx);
+        // NOLINTNEXTLINE(modernize-use-emplace)
         fn_names.push_back(fn.name().str());
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     RecordFunctionGuard g1(false);
     {
@@ -918,18 +1055,29 @@ TEST(RecordFunctionTest, Basic) {
   TORCH_CHECK(fn_names.size() == 1);
   TORCH_CHECK(fn_names[0] == "B");
   clearCallbacks();
+}
 
-  // test add/remove
-  std::vector<size_t> ids;
-  auto add_remove_test_add_cb = [&ids](size_t id) {
-    return addGlobalCallback(RecordFunctionCallback(
-        [&ids, id](const RecordFunction& fn) { ids.push_back(id); },
-        [](const RecordFunction&) {}));
-  };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::vector<size_t> ids;
 
-  auto h1 = add_remove_test_add_cb(1);
-  auto h2 = add_remove_test_add_cb(2);
-  auto h3 = add_remove_test_add_cb(3);
+template <size_t id>
+auto add_remove_test_add_cb() {
+  return addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ids.push_back(id);
+        return nullptr;
+      }));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, Callbacks) {
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
+
+  auto h1 = add_remove_test_add_cb<1>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  auto h2 = add_remove_test_add_cb<2>();
+  auto h3 = add_remove_test_add_cb<3>();
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -960,9 +1108,7 @@ TEST(RecordFunctionTest, Basic) {
   // thread local / global callbacks
 
   ids.clear();
-  addGlobalCallback(RecordFunctionCallback(
-      [&ids](const RecordFunction& fn) { ids.push_back(1); },
-      [](const RecordFunction&) {}));
+  add_remove_test_add_cb<1>();
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -970,10 +1116,12 @@ TEST(RecordFunctionTest, Basic) {
   TORCH_CHECK(ids[0] == 1);
   ids.clear();
 
-  auto th = std::thread([&ids]() {
+  auto th = std::thread([]() {
     addThreadLocalCallback(RecordFunctionCallback(
-        [&ids](const RecordFunction& fn) { ids.push_back(2); },
-        [](const RecordFunction&) {}));
+        [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+          ids.push_back(2);
+          return nullptr;
+        }));
 
     { RECORD_USER_SCOPE("test_thread"); }
   });
@@ -998,22 +1146,21 @@ TEST(RecordFunctionTest, Basic) {
   };
   ids.clear();
   { // START: global test
-    const int test_val = 123;
-    const std::string test_str = "test str";
     addGlobalCallback(RecordFunctionCallback(
-        [test_val, test_str, &ids](const RecordFunction& /* unused */) {
+        [](const RecordFunction&
+           /* unused */) -> std::unique_ptr<at::ObserverContext> {
           auto ctx = std::make_unique<TestContext>();
-          ctx->a = test_val;
-          ctx->b = test_str;
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          ctx->a = 123;
+          ctx->b = "test_str";
           ids.push_back(1);
           return ctx;
         },
-        [test_val, test_str](
-            const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
+        [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
           TORCH_CHECK(ctx_ptr != nullptr);
-          TORCH_CHECK(ctx->a == test_val);
-          TORCH_CHECK(ctx->b == test_str);
+          TORCH_CHECK(ctx->a == 123);
+          TORCH_CHECK(ctx->b == "test_str");
         }));
 
     { RECORD_USER_SCOPE("test"); }
@@ -1023,23 +1170,24 @@ TEST(RecordFunctionTest, Basic) {
     ids.clear();
   } // END: global test
   { // START: thread local test
-    auto ctx_th = std::thread([&ids]() {
+    auto ctx_th = std::thread([]() {
       const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [test_val, test_str, &ids](const RecordFunction& /* unused */) {
+          [](const RecordFunction&
+             /* unused */) -> std::unique_ptr<at::ObserverContext> {
             auto ctx = std::make_unique<TestContext>();
-            ctx->a = test_val;
-            ctx->b = test_str;
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+            ctx->a = 234;
+            ctx->b = "test_thread_str";
             ids.push_back(2);
             return ctx;
           },
-          [test_val, test_str](
-              const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
+          [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
             auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
             TORCH_CHECK(ctx_ptr != nullptr);
-            TORCH_CHECK(ctx->a == test_val);
-            TORCH_CHECK(ctx->b == test_str);
+            TORCH_CHECK(ctx->a == 234);
+            TORCH_CHECK(ctx->b == "test_thread_str");
           }));
 
       // Will call both global and thread local callbacks.
@@ -1053,18 +1201,22 @@ TEST(RecordFunctionTest, Basic) {
   } // END: thread local test
 
   clearCallbacks();
+}
 
-  // test should_run
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, ShouldRun) {
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
 
-  bool ran = false;
-  bool should_run = false;
+  should_run = false;
+  static bool ran = false;
   addGlobalCallback(
       RecordFunctionCallback(
-          [&ran](const RecordFunction& fn) { ran = true; },
-          [](const RecordFunction&) {})
-          .setShouldRun([&should_run](const RecordFunctionCallback&) {
-            return should_run;
-          }));
+          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+            ran = true;
+            return nullptr;
+          })
+          .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1077,45 +1229,85 @@ TEST(RecordFunctionTest, Basic) {
   TORCH_CHECK(ran);
 
   clearCallbacks();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, Basic) {
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
+
+  static std::string recorded_op;
+  static bool has_ids = false;
 
   // test propagation of TLS callbacks
   std::thread t([]() {
     RecordFunctionGuard enable_rec_fn;
-    std::string recorded_op;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
-        [&recorded_op](const RecordFunction& fn) {
+        [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
           recorded_op = fn.name().str();
-        },
-        [](const RecordFunction&) {}));
+          return nullptr;
+        }));
     ThreadLocalState state;
     std::thread t_child([state]() {
       ThreadLocalStateGuard g_tls(state);
       RECORD_USER_SCOPE("test_in_thread");
     });
     t_child.join();
-    TORCH_CHECK(recorded_op == "test_in_thread");
+    EXPECT_EQ(recorded_op, "test_in_thread");
     removeCallback(handle);
   });
   t.join();
   clearCallbacks();
 
   // test set ids
-  bool has_ids = false;
   addGlobalCallback(
       RecordFunctionCallback(
-          [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-          [](const RecordFunction&) {})
+          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+            has_ids = fn.handle() > 0;
+            return nullptr;
+          })
           .needsIds(true));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
   addGlobalCallback(RecordFunctionCallback(
-      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-      [](const RecordFunction&) {}));
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        has_ids = fn.handle() > 0;
+        return nullptr;
+      }));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordFunctionTest, OperatorNameOverload) {
+  static std::set<std::string> operator_names;
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [](const at::RecordFunction& fn)
+                                -> std::unique_ptr<at::ObserverContext> {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                              return nullptr;
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(false);
+  auto t2 = t.pow(2);
+
+  at::clearCallbacks();
+  EXPECT_TRUE(operator_names.count("No Operator Name") == 0)
+      << "Expected that all traced operators had an associated OperatorName object";
+  EXPECT_TRUE(operator_names.count("aten::randn") == 1)
+      << "Expected aten::randn to have been called and recorded, but it was not";
+  EXPECT_TRUE(operator_names.count("aten::pow.Tensor_Scalar") == 1)
+      << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
 }
 
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
@@ -1128,6 +1320,7 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~TestThreadLocalDebugInfo() {}
 
  private:
@@ -1135,31 +1328,35 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
 };
 
 void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
-  auto debug_info = c10::ThreadLocalDebugInfo::get(kind);
+  auto* debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
-  auto* test_debug_info =
-      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
+  auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
   TORCH_CHECK(test_debug_info != nullptr);
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ThreadLocalDebugInfoTest, Basic) {
+  static std::atomic<bool> done{false};
+
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   debug_info->setModelId(42);
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
   }
 
   // check that thread local debug info is propagated through fork calls
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
-  std::atomic<bool> done{false};
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
-    at::launch([&done]() {
+    at::launch([]() {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       done = true;
     });
@@ -1172,12 +1369,12 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   done = false;
   auto handle = addGlobalCallback(RecordFunctionCallback(
-      [&done](const RecordFunction&) {
+      [](const RecordFunction&) -> std::unique_ptr<at::ObserverContext> {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);
@@ -1194,17 +1391,23 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       {
         auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         debug_info->setModelId(314);
         c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO_2, debug_info);
         {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
           done = false;
-          at::launch([&done]() {
+          at::launch([]() {
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
             done = true;
           });
@@ -1216,6 +1419,7 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {
@@ -1321,6 +1525,7 @@ TEST(FallbackGraphsTest, Basic) {
 //   ASSERT_EQ((count, 200);
 // }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
@@ -1356,14 +1561,17 @@ TEST(NoneSchemaMatchTest, Basic) {
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
   return;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterPass p(fakePass);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PassManagementTest, Basic) {
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   parseIR(
@@ -1372,6 +1580,7 @@ graph(%a):
   return (%a))IR",
       &*graph);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
   auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
     GraphExecutor executor(graph, "");
@@ -1429,6 +1638,7 @@ bool is_loop(Node* n) {
   return n->kind() == prim::Loop;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, NoInductionVariableUse) {
   // do not use an induction variable explicitly
   static const auto str_func_def = R"JIT(
@@ -1471,6 +1681,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, YesInductionVariableUse) {
   // uses the induction variable
   static const auto str_func_def = R"JIT(
@@ -1513,6 +1724,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // tests with explicit termination conditions
   static const auto str_func_def = R"JIT(
@@ -1533,6 +1745,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // peeling 5 iterations should update the termination
   // condition to false
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1561,6 +1774,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
 }
 
 // tests simple nested loops
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1588,6 +1802,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
   }
 
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1599,6 +1814,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops2) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1627,6 +1843,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1638,6 +1855,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -1668,7 +1886,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   });
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
-      guard->input()->type()->expect<TensorType>()->sizes().size(),
+      guard->input()->type()->expectRef<TensorType>().sizes().size(),
       c10::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
@@ -1681,6 +1899,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_EQ(num_guards, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertBailOutsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic_loop(x, y):
@@ -1730,6 +1949,7 @@ TEST(InsertBailOutsTest, Basic) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerTest, Basic) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -1768,7 +1988,9 @@ TEST(ProfilerTest, Basic) {
   auto mm =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::add; });
   ASSERT_NE(mm, end);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> mm_expected{4, 2048};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> eltwise{4, 512};
   checkShape(mm->inputs().at(0)->node()->ty(attr::profiled_type), mm_expected);
   auto mul_n =
@@ -1780,6 +2002,7 @@ TEST(ProfilerTest, Basic) {
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CallStackTest, Basic) {
   const auto text = R"(
 def ham(x):
@@ -1811,9 +2034,10 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 7: {
           // Const 7 comes from function 'ham', which gets inlined to 'baz',
           // which is then inlined to 'foo'. The callstack for the corresponding
@@ -1821,10 +2045,11 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 11: {
           // Const 11 comes from function 'foo', which is not inlined anywhere
           // and thus it should not have a callstack.
@@ -1851,11 +2076,12 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CallStackTest, Caching) {
   const auto text = R"(
 
@@ -1885,6 +2111,7 @@ def c(x):
           n->kindOf(attr::value) != AttributeKind::s) {
         continue;
       }
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       std::string v = n->s(attr::value);
       if (n->callstack()) {
         callstack_objects[v] = n->callstack()->get();
@@ -1899,6 +2126,7 @@ def c(x):
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradSymbolsTest, Basic) {
   Symbol sym = Symbol::fromQualString("aten::test_symbol");
   Graph graph;
@@ -1918,6 +2146,7 @@ TEST(AutogradSymbolsTest, Basic) {
   TORCH_CHECK(!canRunWithAutograd(node));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultArgTypeHintingTest, Basic) {
   const auto text_non_hinted = R"(
 
@@ -1945,6 +2174,7 @@ def a(x, y:int=1):
 }
 
 // Basic set case.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Basic) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
@@ -1952,6 +2182,7 @@ TEST(FuturesTest, Basic) {
   int32_t sat1 = 0;
   int32_t sat2 = 0;
   f1->addCallback([&]() { ++sat1; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(43);
   ASSERT_TRUE(f1->completed());
   ASSERT_TRUE(f1->hasValue());
@@ -1965,6 +2196,7 @@ TEST(FuturesTest, Basic) {
 }
 
 // Basic error cases.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
@@ -1993,6 +2225,7 @@ TEST(FuturesTest, Error) {
 }
 
 // then
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
@@ -2007,11 +2240,13 @@ TEST(FuturesTest, Then) {
     done = true;
   });
   ASSERT_FALSE(done);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(42);
   ASSERT_TRUE(done);
 }
 
 // collectAll()
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAll) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
   auto s2 = c10::make_intrusive<Future>(IntType::get());
@@ -2031,6 +2266,7 @@ TEST(FuturesTest, CollectAll) {
   futures.push_back(s1);
   auto c2 = collectAll(futures);
   ASSERT_FALSE(c2->completed());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s1->markCompleted(5);
   ASSERT_TRUE(c2->completed());
   ASSERT_EQ(c2->value().toList().size(), 1);
@@ -2050,8 +2286,10 @@ TEST(FuturesTest, CollectAll) {
   futures.push_back(s3);
   auto c4 = collectAll(futures);
   ASSERT_FALSE(c4->completed());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s3->markCompleted(7);
   ASSERT_FALSE(c4->completed());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s2->markCompleted(6);
   ASSERT_TRUE(c4->completed());
   ASSERT_EQ(c4->value().toList().size(), 3);
@@ -2070,9 +2308,8 @@ TEST(FuturesTest, CollectAll) {
   s4->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_TRUE(c5->completed());
-  ASSERT_EQ(c5->value().toList().size(), 4);
   try {
-    (void)c5->value().toList().get(3).toFuture()->value();
+    c5->value();
     ASSERT_TRUE(false); // supposed to throw
   } catch (const std::exception& e) {
     ASSERT_EQ(std::string(e.what()), "Failed");
@@ -2080,6 +2317,7 @@ TEST(FuturesTest, CollectAll) {
 }
 
 // collectAny()
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAny) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
 
@@ -2093,6 +2331,7 @@ TEST(FuturesTest, CollectAny) {
   futures.push_back(s1);
   auto c2 = collectAny(futures);
   ASSERT_FALSE(c2->completed());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s1->markCompleted(5);
   ASSERT_TRUE(c2->completed());
   ASSERT_TRUE(c2->value().isInt());
@@ -2112,6 +2351,7 @@ TEST(FuturesTest, CollectAny) {
   futures.push_back(s3);
   auto c4 = collectAny(futures);
   ASSERT_FALSE(c4->completed());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s3->markCompleted(7);
   ASSERT_TRUE(c4->completed());
   ASSERT_EQ(c4->value().toInt(), 7);
@@ -2119,6 +2359,7 @@ TEST(FuturesTest, CollectAny) {
   ASSERT_EQ(c4->value().toInt(), 7);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = []() {
@@ -2127,7 +2368,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
   // test running callbacks with propagation of TLS state.
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2136,12 +2377,12 @@ TEST(TLSFutureCallbacksTest, Basic) {
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
     t.join();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
   // then() with TLS State
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2154,16 +2395,17 @@ TEST(TLSFutureCallbacksTest, Basic) {
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     t.join();
     s2->wait();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerDisableInCallbackTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = []() {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2176,10 +2418,11 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
     // Don't cleanup TLSState, and just consolidate.
     auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
     auto thread_event_lists =
-        torch::autograd::profiler::disableProfiler(std::move(opts));
+        // NOLINTNEXTLINE(performance-move-const-arg)
+        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
     // Ensure that the events from this thread are still profiled and we obtain
     // the expected in events in our consolidated list when calling
-    // disableProfiler().
+    // disableProfilerLegacy().
     bool found_ones = false;
     bool found_add = false;
     for (const auto& li : thread_event_lists) {
@@ -2201,13 +2444,14 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
   auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  // NOLINTNEXTLINE(performance-move-const-arg)
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
 
   // Similar to above test, but verifies correctness in the case where
   // continuation runs on the main thread.
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2215,9 +2459,11 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   // Runs callback inline
   s1->markCompleted(at::IValue(1));
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  // NOLINTNEXTLINE(performance-move-const-arg)
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueKWargsTest, Basic) {
   const auto text = R"(
     def foo(a : int, b : int, c : int = 4):
@@ -2226,6 +2472,114 @@ TEST(IValueKWargsTest, Basic) {
   auto cu = compile(text);
   auto result = cu->get_function("foo")({1}, {{"b", 3}});
   ASSERT_EQ(result.toInt(), 19);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ComputeFlopsTest, Basic) {
+  uint64_t flops = 0;
+
+  // Test unknown operator
+  std::unordered_map<std::string, c10::IValue> extra_args;
+  flops = computeFlops(std::string("aten::unknown"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::conv2d
+  extra_args.clear();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<int64_t> input_size = {4, 5, 6, 7};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<int64_t> weight_size = {3, 5, 2, 1};
+  std::vector<int64_t> padding = {1, 0};
+  std::vector<int64_t> stride = {1, 1};
+  std::vector<int64_t> dilation = {0, 0};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
+  extra_args["groups"] = 1;
+  extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
+  extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
+  extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
+  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  ASSERT_EQ(flops, 13440);
+
+  // Test aten::conv2d fail
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  input_size = {4, 5, 6, 7};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  weight_size = {4, 5, 6};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
+  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::conv2d fail 2
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  weight_size = {3, 5, 2, 1};
+  stride = {0, 0};
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
+  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::conv2d fail 3
+  extra_args.clear();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  input_size = {4, 5, 6, 7};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
+  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::mm
+  extra_args.clear();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<int64_t> mat1_sizes = {3, 4, 5, 6};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops = computeFlops(std::string("aten::mm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
+  // Test mm out of range
+  extra_args.clear();
+  flops = computeFlops(std::string("aten::mm"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::add.Tensor
+  extra_args.clear();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
+  extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
+  flops = computeFlops(std::string("aten::add"), extra_args);
+  ASSERT_EQ(flops, 360);
+
+  // Test aten::mul.Tensor
+  extra_args.clear();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  mat_sizes = {3, 4, 5, 6};
+  extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
+  flops = computeFlops(std::string("aten::mul"), extra_args);
+  ASSERT_EQ(flops, 360);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TestMutation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %9 : int = prim::Constant[value=4]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %7 : Tensor = aten::add_(%x.3, %2, %2)
+  %y.1 : Tensor = aten::add(%x.3, %9, %2)
+  return (%y.1))IR",
+      &*graph,
+      vmap);
+  RemoveTensorMutation(graph, [](Node*) { return false; });
+  testing::FileCheck().check("aten::add_")->run(*graph);
+  RemoveTensorMutation(graph, [](Node*) { return true; });
+  testing::FileCheck().check_not("aten::add_")->run(*graph);
 }
 
 } // namespace jit

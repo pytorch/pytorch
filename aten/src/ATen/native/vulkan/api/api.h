@@ -12,5 +12,6 @@
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 #endif /* USE_VULKAN_API */

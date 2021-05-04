@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
@@ -19,7 +20,7 @@ void inlineForkedClosure(Node* fork_closure) {
   Node* function_context_node = fork_closure->input()->node();
 
   if (function_context_node->inputs().size() != 2 ||
-      function_context_node->inputs().at(0)->node()->kind() != prim::Function ||
+      function_context_node->inputs().at(0)->node()->kind() != prim::Closure ||
       function_context_node->inputs().at(1)->node()->kind() !=
           prim::TupleConstruct) {
     throw ErrorReport(fork_closure->sourceRange()) << "Cannot fork this value";

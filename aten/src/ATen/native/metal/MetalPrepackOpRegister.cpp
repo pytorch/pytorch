@@ -1,10 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
-#include <torch/script.h>
-
-#if defined(C10_IOS)
-#import <ATen/native/metal/mpscnn/MPSCNNOps.h>
-#endif
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -17,13 +14,13 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   const Tensor weightContig = weight.contiguous();
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
   auto packedWeight = at::empty(ws);
-  int64_t size_bytes = at::prod_intlist(ws) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(ws) * sizeof(float);
   memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
@@ -51,8 +48,11 @@ TORCH_LIBRARY(metal, m) {
                 std::move(std::get<2>(state)),
                 std::move(std::get<3>(state)),
                 std::move(std::get<4>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<5>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<6>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<7>(state)));
           });
   m.def("copy_to_host(Tensor X) -> Tensor Y");
@@ -76,8 +76,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 4);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
@@ -90,36 +90,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
-Tensor conv2d_prepack_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-#if defined(C10_IOS)
-  return mpscnn::conv2d(input, *op_context);
-#else
-  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS");
-  return input;
-#endif
-}
-
-Tensor copy_to_host(const Tensor& input) {
-#if defined(C10_IOS)
-  return mpscnn::copy_to_host(input);
-#else
-  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS");
-  return input;
-#endif
-}
-
 TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
   m.impl("conv2d_prepack", TORCH_FN(conv2d_prepack));
-}
-
-TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
-  m.impl("conv2d_run", conv2d_prepack_run);
-}
-
-TORCH_LIBRARY_IMPL(metal, Metal, m) {
-  m.impl("copy_to_host", copy_to_host);
 }
 
 } // namespace metal

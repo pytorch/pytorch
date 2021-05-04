@@ -11,7 +11,7 @@ namespace serialize {
 // this is the interface for the (file/stream/memory) reader in
 // PyTorchStreamReader. with this interface, we can extend the support
 // besides standard istream
-class CAFFE2_API ReadAdapterInterface {
+class TORCH_API ReadAdapterInterface {
  public:
   virtual size_t size() const = 0;
   virtual size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")

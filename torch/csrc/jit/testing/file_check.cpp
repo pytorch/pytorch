@@ -43,7 +43,7 @@ struct Check {
       std::string str,
       c10::optional<size_t> count = c10::nullopt)
       : type_(type), search_str_(std::move(str)) {
-    count_ = std::move(count);
+    count_ = count;
   };
 
   CheckType type_;
@@ -86,7 +86,7 @@ namespace {
 size_t assertFind(
     const SourceRange& search_range,
     const std::string& sub,
-    std::function<void(std::ostream& out)> extra_msg = nullptr) {
+    const std::function<void(std::ostream& out)>& extra_msg = nullptr) {
   auto pos = search_range.source()->text().find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
     auto found_range =
@@ -166,7 +166,7 @@ struct FileCheckImpl {
     run(test_file);
   }
 
-  TORCH_API void addCheck(Check check) {
+  TORCH_API void addCheck(const Check& check) {
     // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
     if (groups.size() == 0 ||
         (check.type_ != CHECK_NOT && check.type_ != CHECK_DAG)) {
@@ -186,9 +186,10 @@ struct FileCheckImpl {
       CheckType type,
       const std::string& s,
       c10::optional<size_t> count = c10::nullopt) {
-    addCheck(Check(type, s, std::move(count)));
+    addCheck(Check(type, s, count));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_run = false;
 
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
@@ -548,7 +549,11 @@ FileCheck* FileCheck::check_count(
     const std::string& str,
     size_t count,
     bool exactly) {
-  fcImpl->addCheck(CHECK_COUNT, str, count);
+  TORCH_INTERNAL_ASSERT(
+      count != 0 || exactly, "Count == 0 && !exactly doesn't do anything");
+  if (count) {
+    fcImpl->addCheck(CHECK_COUNT, str, count);
+  }
   if (exactly) {
     fcImpl->addCheck(CHECK_NOT, str);
   }

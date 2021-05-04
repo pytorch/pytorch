@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -54,10 +55,12 @@ void GpuLower::replaceSymbolicSizes() {
       const Val* orig_size = id->extent();
 
       // Output sizes could have reduction axes, which isn't what gets output.
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (id->isReduction()) {
         continue;
       } else if (id->getIterType() == IterType::BroadcastWithoutStride) {
         continue;
+        // NOLINTNEXTLINE(bugprone-branch-clone)
       } else if (id->getIterType() == IterType::BroadcastWithStride) {
         dim++;
         continue;
@@ -147,7 +150,7 @@ Kernel* GpuLower::kernel() const {
 //
 // TODO(kir): this is a interim solution for easing the Kernel IR splitting
 //
-class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
+class TORCH_CUDA_CU_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
   explicit KernelIrMapper(GpuLower* gpu_lower)
       : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
@@ -205,6 +208,7 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
       default:
         TORCH_CHECK(false, "Unexpected expression type");
     }
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   }
 
   void handle(const Statement* node) override {

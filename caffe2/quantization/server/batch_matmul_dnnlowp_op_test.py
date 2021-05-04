@@ -124,7 +124,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         out_quantized=st.booleans(),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=2000)
     def test_dnnlowp_batch_matmul_int_constant_B(
         self, m, n, k, C_1, C_2, A_quantized, B_quantized, out_quantized, gc, dc
     ):

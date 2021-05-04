@@ -16,7 +16,7 @@ import numpy as np
 class MergeIdLists(ModelLayer):
     """Merge multiple ID_LISTs into a single ID_LIST
 
-    Arguments:
+    Args:
         model: A layer model instance
         input_record: Tuple (Struct) of ID_LIST features to be
         merged

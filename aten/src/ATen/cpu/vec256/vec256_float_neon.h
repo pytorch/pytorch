@@ -57,7 +57,8 @@ private:
   float32x4x2_t values;
 public:
   using value_type = float;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -282,6 +283,19 @@ public:
     }
     return mask;
   }
+  Vec256<float> isnan() const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float res[size()];
+    store(tmp);
+    for (int i = 0; i < size(); i++) {
+      if (_isnan(tmp[i])) {
+        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
+      } else {
+        std::memset(static_cast<void*>(&res[i]), 0, sizeof(float));
+      }
+    }
+    return loadu(res);
+  };
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
@@ -324,6 +338,16 @@ public:
     }
     return loadu(tmp);
   }
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_sign[size()];
+    store(tmp);
+    sign.store(tmp_sign);
+    for (size_type i = 0; i < size(); i++) {
+      tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<float> erf() const {
     return map(std::erf);
   }
@@ -361,6 +385,29 @@ public:
   }
   Vec256<float> i0() const {
     return map(calc_i0);
+  }
+  Vec256<float> i0e() const {
+    return map(calc_i0e);
+  }
+  Vec256<float> igamma(const Vec256<float> &x) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vec256<float> igammac(const Vec256<float> &x) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
   }
   Vec256<float> log() const {
     return map(std::log);
@@ -432,14 +479,23 @@ public:
         vsqrtq_f32(values.val[1]));
   }
   Vec256<float> reciprocal() const {
-    return Vec256<float>(
-        vrecpeq_f32(values.val[0]),
-        vrecpeq_f32(values.val[1]));
+    float32x4_t r0 = vrecpeq_f32(values.val[0]);
+    float32x4_t r1 = vrecpeq_f32(values.val[1]);
+    // Run two more Netwon's method iterations to get more accurate results
+    r0 = vmulq_f32(vrecpsq_f32(values.val[0], r0), r0);
+    r0 = vmulq_f32(vrecpsq_f32(values.val[0], r0), r0);
+    r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
+    r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
+    return Vec256<float>(r0, r1);
   }
   Vec256<float> rsqrt() const {
-    return Vec256<float>(
-        vrsqrteq_f32(values.val[0]),
-        vrsqrteq_f32(values.val[1]));
+    float32x4_t r0 =  vrsqrteq_f32(values.val[0]);
+    float32x4_t r1 =  vrsqrteq_f32(values.val[1]);
+    r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
+    r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
+    r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
+    r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
+    return Vec256<float>(r0, r1);
   }
   Vec256<float> pow(const Vec256<float> &exp) const {
     __at_align32__ float tmp[size()];
@@ -665,6 +721,6 @@ Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const
   return Vec256<float>(r0, r1);
 }
 
-#endif
+#endif /* defined(aarch64) */
 
 }}}

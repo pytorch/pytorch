@@ -41,14 +41,13 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
       const Shader::Descriptor& shader_descriptor,
-      const Shader::WorkGroup& local_work_group,
       const Shader::WorkGroup& global_work_group,
+      const Shader::WorkGroup& local_work_group_size,
       Arguments&&... arguments);
 
   // This function is expensive and its use consequential for performance. Only
@@ -129,7 +128,8 @@ inline void bind(
     const std::index_sequence<Indices...>,
     Arguments&&...arguments) {
   C10_UNUSED const int _[]{
-    (descriptor_set.bind(Indices, arguments), 0)...,
+    0,
+    (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
 }
 
@@ -140,8 +140,8 @@ inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group,
     const Shader::WorkGroup& global_work_group,
+    const Shader::WorkGroup& local_work_group_size,
     Arguments&&... arguments) {
   // Forward declaration
   Descriptor::Set dispatch_prologue(
@@ -155,7 +155,7 @@ inline void Context::dispatch(
       command_buffer,
       shader_layout_signature,
       shader_descriptor,
-      local_work_group);
+      local_work_group_size);
 
   detail::bind(
       descriptor_set,

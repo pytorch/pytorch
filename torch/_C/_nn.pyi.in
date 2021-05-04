@@ -1,5 +1,6 @@
-from torch import Tensor
-from typing import Callable, Optional, List
+from torch import Tensor, memory_format
+from typing import Callable, Optional, List, overload, Tuple
+from torch.types import _bool, _dtype, _device
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp
 
@@ -11,3 +12,14 @@ def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tens
 # Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
 def mkldnn_reorder_conv2d_weight(self: Tensor, padding: List, stride: List, dilatation: List, groups: int) -> Tensor: ...
 def mkldnn_reorder_conv3d_weight(self: Tensor, padding: List, stride: List, dilatation: List, groups: int) -> Tensor: ...
+
+# Defined at tools/autograd/templates/python_nn_functions.cpp
+@overload
+def _parse_to(device: _device, dtype: _dtype, non_blocking: _bool, copy: _bool, *,
+              memory_format: memory_format) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(dtype: _dtype, non_blocking: _bool, copy: _bool, *,
+              memory_format: memory_format) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(tensor: Tensor, non_blocking: _bool, copy: _bool, *,
+              memory_format: memory_format) -> Tuple[_device, _dtype, _bool, memory_format]: ...

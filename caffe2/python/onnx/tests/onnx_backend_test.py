@@ -13,7 +13,7 @@ import onnx.backend.test
 
 import caffe2.python.onnx.backend as c2
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 core.SetEnginePref({}, {})
 
 # This is a pytest magic variable to load extra plugins
@@ -127,6 +127,21 @@ backend_test.exclude('(test_cast_.*'
 # Temporarily skip some ONNX backend tests with broadcasting.
 backend_test.exclude('(test_pow_bcast'
                      '|test_pow_types.*'
+                     ')')
+
+# Temporarily skip some ONNX backend tests due to updates in opset 13.
+backend_test.exclude('(test_if_.*'  # added support for sequence type inputs
+                     '|test_if_seq_.*'  # added support for sequence type inputs
+                     '|test_logsoftmax_.*'  # axis attr default value changed from 1 to -1
+                     '|test_loop11_.*'  # seg fault issue
+                     '|test_loop13_seq_.*'  # no support for sequence inputs for scan input
+                     '|test_reduce_sum_.*'  # axes is now an input (not attr), added noop_with_empty_axes
+                     '|test_softmax_.*'  # axis attr default value changed from 1 to -1
+                     '|test_split_variable_parts_.*'  # axes is now an input (not attr)
+                     '|test_squeeze_.*'  # axes is now an input (not attr)
+                     '|test_unsqueeze_.*'  # axes is now an input (not attr)
+                     '|test_MaxPool1d_stride_padding_dilation_.*'
+                     '|test_MaxPool2d_stride_padding_dilation_.*'
                      ')')
 
 # Skip vgg to speed up CI

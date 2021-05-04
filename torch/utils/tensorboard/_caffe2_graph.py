@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import re
-import six
 
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
@@ -162,7 +161,7 @@ def _remap_keys(old_dict, rename_fn):
         None. Modifies old_dict in-place.
     '''
     new_dict = {rename_fn(key): value for key,
-                value in six.iteritems(old_dict)}
+                value in old_dict.items()}
     old_dict.clear()
     old_dict.update(new_dict)
 

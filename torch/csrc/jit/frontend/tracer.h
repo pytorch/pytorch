@@ -44,10 +44,15 @@ struct TORCH_API TracingState
   TracingState();
   ~TracingState();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool warn = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool force_outplace = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
 
@@ -137,6 +142,7 @@ struct ArgumentStash {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local ArgumentStash stash;
   std::unordered_map<std::string, IntArrayRefTrace> intlists;
   std::unordered_map<std::string, Value*> values;
@@ -152,9 +158,13 @@ inline bool isTracing() {
 }
 
 using warn_fn_type = void (*)(const std::string& msg);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_CONSTRUCTOR;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_RESIZE;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
@@ -214,7 +224,8 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool strict = true,
     bool force_outplace = false,
-    Module* self = nullptr);
+    Module* self = nullptr,
+    const std::vector<std::string>& argument_names = {});
 
 TORCH_API void abandon();
 
@@ -255,6 +266,10 @@ TORCH_API void addInputs(
     const char* name,
     ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const List<c10::optional<at::Tensor>>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

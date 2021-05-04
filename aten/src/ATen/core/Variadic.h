@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <c10/util/ArrayRef.h>
+#include <ATen/core/List.h>
 
 namespace at {
 
@@ -49,6 +50,15 @@ struct IterArgs {
 
   template <typename T>
   void operator()(at::ArrayRef<T> args) {
+    for (const auto& arg : args) {
+      self()(arg);
+      if (self().short_circuit())
+        return;
+    }
+  }
+
+  template <typename T>
+  void operator()(const torch::List<T>& args) {
     for (const auto& arg : args) {
       self()(arg);
       if (self().short_circuit())

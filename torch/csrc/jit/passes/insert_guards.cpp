@@ -60,7 +60,7 @@ void InsertGuards(std::shared_ptr<Graph> graph) {
   gi.run();
 }
 
-void RemoveProfilingNodes(std::shared_ptr<Graph> graph) {
+void RemoveProfilingNodes(const std::shared_ptr<Graph>& graph) {
   removeProfilingNodes(graph->block());
 }
 

@@ -2,9 +2,7 @@
 #define THC_TENSOR_MATH_MAGMA_CUH
 
 #ifdef USE_MAGMA
-#include <magma.h>
-#else
-#include <THC/THCBlas.h>
+#include <magma_v2.h>
 #endif
 
 #ifdef USE_MAGMA

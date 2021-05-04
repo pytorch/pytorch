@@ -43,8 +43,10 @@ struct Pipeline final {
       VkPipelineStageFlags dst;
     } stage;
 
-    c10::SmallVector<Resource::Buffer::Barrier, 1u> buffers;
-    c10::SmallVector<Resource::Image::Barrier, 1u> images;
+    c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
+    c10::SmallVector<Resource::Image::Barrier, 4u> images;
+
+    operator bool() const;
   };
 
   //
@@ -70,7 +72,7 @@ struct Pipeline final {
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef Handle<VkPipelineLayout, Deleter> Handle;
+      typedef api::Handle<VkPipelineLayout, Deleter> Handle;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
@@ -94,6 +96,21 @@ struct Pipeline final {
     }
   } layout;
 
+  //
+  // Stage
+  //
+
+  struct Stage final {
+    typedef uint8_t Flags;
+
+    enum Type : Flags {
+      None = 0u << 0u,
+      Compute = 1u << 0u,
+      Host = 1u << 1u,
+      Transfer = 1u << 2u,
+    };
+  };
+
   /*
     Descriptor
   */
@@ -114,7 +131,7 @@ struct Pipeline final {
 
     typedef Pipeline::Descriptor Descriptor;
     typedef VK_DELETER(Pipeline) Deleter;
-    typedef Handle<VkPipeline, Deleter> Handle;
+    typedef api::Handle<VkPipeline, Deleter> Handle;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;
@@ -169,10 +186,21 @@ struct Pipeline final {
 // Impl
 //
 
+inline Pipeline::Barrier::operator bool() const {
+  return (0u != stage.src) ||
+         (0u != stage.dst) ||
+         !buffers.empty() ||
+         !images.empty();
+}
+
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
     const Pipeline::Layout::Descriptor& _2) {
-  return (_1.descriptor_set_layout == _2.descriptor_set_layout);
+  static_assert(
+      std::is_trivially_copyable<Pipeline::Layout::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Layout::Descriptor)));
 }
 
 inline size_t Pipeline::Layout::Factory::Hasher::operator()(
@@ -183,9 +211,11 @@ inline size_t Pipeline::Layout::Factory::Hasher::operator()(
 inline bool operator==(
     const Pipeline::Descriptor& _1,
     const Pipeline::Descriptor& _2) {
-  return (_1.pipeline_layout == _2.pipeline_layout) &&
-         (_1.shader_module == _2.shader_module) &&
-         (_1.local_work_group == _2.local_work_group);
+  static_assert(
+      std::is_trivially_copyable<Pipeline::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Descriptor)));
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
@@ -193,9 +223,9 @@ inline size_t Pipeline::Factory::Hasher::operator()(
   return c10::get_hash(
       descriptor.pipeline_layout,
       descriptor.shader_module,
-      descriptor.local_work_group.x,
-      descriptor.local_work_group.y,
-      descriptor.local_work_group.z);
+      descriptor.local_work_group.data[0u],
+      descriptor.local_work_group.data[1u],
+      descriptor.local_work_group.data[2u]);
 }
 
 inline Pipeline::Object::operator bool() const {
@@ -210,10 +240,6 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
     descriptor.pipeline_layout,
     descriptor.local_work_group,
   };
-}
-
-inline void Pipeline::Cache::purge() {
-  cache_.purge();
 }
 
 } // namespace api

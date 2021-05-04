@@ -39,6 +39,7 @@ void _dim_apply(
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
     .add_output(values)
     .add_output(indices)
@@ -47,10 +48,10 @@ void _dim_apply(
   auto values_dim_stride = values.stride(dim);
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
-  
+
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Bool, ScalarType::Half, iter.dtype(),
-    method_name, [&] {
+    "sorting_kernel_method_name", [&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
@@ -68,7 +69,7 @@ void _dim_apply(
           indices_data_bytes += strides[1];
         }
       };
-      
+
       iter.for_each(loop);
     }
   );
@@ -96,7 +97,8 @@ static void sort_kernel(
     Tensor& values,
     Tensor& indices,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
   _dim_apply(
@@ -114,14 +116,26 @@ static void sort_kernel(
       auto composite_accessor = CompositeRandomAccessorCPU<
         decltype(values_accessor), decltype(indices_accessor)
       >(values_accessor, indices_accessor);
-      
+
       if (descending) {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompDesc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+        }
       }
       else {
-        std::sort(composite_accessor, composite_accessor + dim_size,
-          KeyValueCompAsc<scalar_t>());
+        if (stable) {
+          std::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
+        else {
+          std::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+        }
       }
     }
   );
@@ -203,7 +217,9 @@ static void topk_kernel(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
 }} //at::native

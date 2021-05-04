@@ -2,6 +2,7 @@
 
 #include <string>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
 
@@ -40,7 +41,7 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 
 static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
-  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
+  auto & var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
@@ -84,13 +85,14 @@ static PyObject * THPSize_repr(THPSize *self)
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
+    repr += std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPSizeType;
 
 template<typename FnType, FnType fn, typename ...Args>
@@ -107,12 +109,16 @@ static PyObject* wrap_tuple_fn(Args ... args)
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PySequenceMethods THPSize_as_sequence = {
   nullptr,                                          /* sq_length */
   wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
@@ -124,6 +130,7 @@ static PySequenceMethods THPSize_as_sequence = {
   nullptr                                           /* sq_contains */
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPSize_as_mapping = {
     nullptr,                                        /* mp_length */
     wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
@@ -136,7 +143,7 @@ static PyObject *THPSize_numel(PyObject *_self, PyObject *noargs)
   auto self = (THPSize*)_self;
   int64_t numel = 1;
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
-    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+    numel *= THPUtils_unpackLong(PyTuple_GET_ITEM(self, i));
   }
   return THPUtils_packInt64(numel);
   END_HANDLE_TH_ERRORS
@@ -169,6 +176,7 @@ static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPSize_methods[] = {
   {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
   {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},
@@ -176,12 +184,14 @@ static PyMethodDef THPSize_methods[] = {
 };
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPSizeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Size",                          /* tp_name */
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

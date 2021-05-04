@@ -5,12 +5,17 @@
 
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DECLARE_bool(torch_jit_disable_warning_prints);
+
 namespace at {
 class Tensor;
-}
+TORCH_API void launch(std::function<void()> func);
+} // namespace at
 namespace c10 {
 struct IValue;
 struct OperatorName;
@@ -32,9 +37,11 @@ struct Node;
 struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
+using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
+  explicit Code(CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
   // `prim::BailOut`s to control the maximum depth of bailout chains
@@ -45,6 +52,7 @@ struct TORCH_API Code {
   ~Code();
 
   const std::vector<GraphExecutor*>& grad_executors();
+  const std::vector<GraphExecutor*>& diff_graph_op_executors();
 
   explicit operator bool() const {
     return pImpl != nullptr;
@@ -55,6 +63,7 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<c10::TypePtr>& type_table() const;
   const std::vector<Instruction>& instructions() const;
+  const std::unordered_map<std::string, int>& op_to_num_specified_args() const;
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;
@@ -65,10 +74,20 @@ struct TORCH_API Code {
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
 };
 
+struct TORCH_API MobileCode : Code {
+  explicit MobileCode(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      size_t remaining_bailout_depth = 0);
+  ~MobileCode();
+};
+
 struct InterpreterState {
-  TORCH_API InterpreterState(const Code& code);
+  TORCH_API InterpreterState(
+      const Code& code,
+      TaskLauncher taskLauncher = at::launch);
   TORCH_API void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  TORCH_API c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
   TORCH_API ~InterpreterState();
 
@@ -98,7 +117,7 @@ struct Suspend : public std::exception {
 // thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
   InterpreterContinuation(
-      InterpreterState state_,
+      const InterpreterState& state_,
       Stack stack_,
       int64_t dist_autograd_context_id = 0,
       c10::optional<at::ThreadLocalState> tls_state = c10::nullopt)

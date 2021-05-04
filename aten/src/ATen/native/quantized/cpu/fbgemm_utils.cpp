@@ -1,21 +1,17 @@
 #include <ATen/ATen.h>
-#include <ATen/native/TensorFactories.h>
-
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
-
+#include <c10/util/accumulate.h>
 #include <torch/custom_class.h>
-
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
@@ -29,6 +25,7 @@ namespace fbgemm_utils {
 namespace {
 
 bool IsChannelsLast3d(const Tensor& tensor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (tensor.dim() != 5) {
     return false;
   }
@@ -60,6 +57,32 @@ void CopyToChannelsLast3dTensor(
   }
 }
 
+template <typename T>
+void CopyICFirst3dTensorToChannelsLast3dTensor(
+    int64_t G,
+    int64_t IC_G,
+    int64_t OC_G,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    const T* src,
+    T* dst) {
+  // IC OC/G THW -> G OC/G THW IC/G
+  const int64_t inner_size = D * H * W;
+  for (int64_t i = 0; i < G * OC_G; ++i) {
+    for (int64_t j = 0; j < inner_size; ++j) {
+      for (int64_t ic = 0; ic < IC_G; ++ic) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+        int g = i / OC_G;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+        int oc = i % OC_G;
+        dst[(i * inner_size + j) * IC_G + ic] =
+            src[((g * IC_G + ic) * OC_G + oc) * inner_size + j];
+      }
+    }
+  }
+}
+
 } // namespace
 
 template <int kSpatialDim>
@@ -75,11 +98,17 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& dilations,
     const std::vector<int>& output_padding,
     bool transposed) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> image_shape_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> kernels_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> strides_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim * 2> pads_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> dilations_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> output_padding_;
   std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
   std::move(
@@ -119,7 +148,7 @@ Tensor MakeStridedQTensorCPU(
   AT_ASSERT(options.device().is_cpu());
   at::native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();
-  const int64_t nelements = at::prod_intlist(sizes);
+  const int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
@@ -213,8 +242,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<2>(const Tensor& src, int groups) {
   // OC IC/G HW -> IC OC/G HW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3});
 }
 
@@ -256,6 +285,75 @@ template fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
     const std::vector<int>& dilations,
     const std::vector<int>& output_padding,
     bool transposed);
+template <>
+Tensor TransposeConvTensorUnpackConversion<3>(const Tensor& src, int groups) {
+  // OC IC/G DHW -> IC OC/G DHW logically
+  auto oc_g_ic_g_hw_tensors = src.chunk(groups);
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
+  return fused_tensor.permute({1, 0, 2, 3, 4});
+}
+
+template <>
+Tensor ConvertConvWeightsToChannelLastTensor<2>(
+    const at::Tensor& src,
+    int groups,
+    bool transpose) {
+  return transpose ?
+                   // 2D conv transpose weight transform
+                   // IC OC/G KH KW -> G OC/G KH KW IC/G
+      [&]() {
+        auto ic_g_oc_g_hw_tensors = src.chunk(groups);
+        for (auto& tensor : ic_g_oc_g_hw_tensors) {
+          tensor = tensor.unsqueeze(0);
+        }
+        auto fused_tensor = at::cat(ic_g_oc_g_hw_tensors);
+        set_quantizer_(fused_tensor, src.quantizer());
+        return fused_tensor.permute({0, 2, 3, 4, 1})
+            .contiguous(c10::MemoryFormat::Contiguous);
+      }()
+                   // 2d conv weight transform
+                   : src.contiguous(c10::MemoryFormat::ChannelsLast);
+}
+
+template <>
+Tensor ConvertConvWeightsToChannelLastTensor<3>(
+    const at::Tensor& src,
+    int groups,
+    bool transpose) {
+  if (!transpose) {
+    return ConvertToChannelsLast3dTensor(src);
+  } else {
+    TORCH_CHECK(src.dim() == 5);
+    Tensor dst;
+    const int64_t N = src.size(0);
+    const int64_t IC_G = N / groups;
+    const int64_t OC_G = src.size(1);
+    const int64_t D = src.size(2);
+    const int64_t H = src.size(3);
+    const int64_t W = src.size(4);
+    dst = MakeStridedQTensorCPU(
+        {groups * OC_G, IC_G, D, H, W},
+        {D * H * W * IC_G, 1, H * W * IC_G, W * IC_G, IC_G},
+        src.options(),
+        src.quantizer());
+    AT_DISPATCH_QINT_TYPES(
+        src.scalar_type(), "CopyICFirst3dTensorToChannelsLast3dTensor", [&]() {
+          const Tensor src_contig = src.contiguous();
+          CopyICFirst3dTensorToChannelsLast3dTensor<scalar_t>(
+              groups,
+              IC_G,
+              OC_G,
+              D,
+              H,
+              W,
+              src_contig.data_ptr<scalar_t>(),
+              dst.data_ptr<scalar_t>());
+        });
+    return dst;
+  }
+}
+
 } // namespace fbgemm_utils
 } // namespace native
 } // namespace at
@@ -263,8 +361,9 @@ template fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
 
 #endif // USE_FBGEMM
 
-template <int kSpatialDim = 2>
-CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+    template <int kSpatialDim = 2>
+    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
+    register_conv_params() {
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
@@ -303,9 +402,9 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
 }
 
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
@@ -400,6 +499,7 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
             std::vector<at::Tensor> tensors;
             std::vector<double> doubles;
             std::vector<int64_t> longs;
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t version;
             std::tie(version, tensors, doubles, longs) = std::move(state);
 
@@ -418,9 +518,13 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv2d_params = register_conv_params<2>();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv3d_params = register_conv_params<3>();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto embedding_params = register_embedding_params();
 
 } // namespace

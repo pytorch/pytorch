@@ -11,13 +11,19 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemmNoTransNoTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor X(std::vector<int>{5, 10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor W(std::vector<int>{10, 6}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor Y(std::vector<int>{5, 6}, CPU);
   EXPECT_EQ(X.numel(), 50);
   EXPECT_EQ(W.numel(), 60);
@@ -39,8 +45,11 @@ TEST(MathTest, GemmNoTransNoTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       X.data<float>(),
@@ -56,8 +65,11 @@ TEST(MathTest, GemmNoTransNoTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       X.data<float>(),
@@ -73,8 +85,11 @@ TEST(MathTest, GemmNoTransNoTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kPointFive,
       X.data<float>(),
@@ -88,11 +103,15 @@ TEST(MathTest, GemmNoTransNoTrans) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemmNoTransTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor X(std::vector<int>{5, 10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor W(std::vector<int>{6, 10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor Y(std::vector<int>{5, 6}, CPU);
   EXPECT_EQ(X.numel(), 50);
   EXPECT_EQ(W.numel(), 60);
@@ -114,8 +133,11 @@ TEST(MathTest, GemmNoTransTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       X.data<float>(),
@@ -131,8 +153,11 @@ TEST(MathTest, GemmNoTransTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       X.data<float>(),
@@ -147,8 +172,11 @@ TEST(MathTest, GemmNoTransTrans) {
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kPointFive,
       X.data<float>(),
@@ -166,16 +194,20 @@ namespace {
 
 constexpr float kEps = 1e-5;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class GemmBatchedTest
     : public testing::TestWithParam<testing::tuple<bool, bool>> {
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
     ReinitializeTensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         &X_, std::vector<int64_t>{3, 5, 10}, at::dtype<float>().device(CPU));
     ReinitializeTensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         &W_, std::vector<int64_t>{3, 6, 10}, at::dtype<float>().device(CPU));
     ReinitializeTensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         &Y_, std::vector<int64_t>{3, 5, 6}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(
         X_.numel(), 1, X_.mutable_data<float>(), cpu_context_.get());
@@ -202,8 +234,11 @@ class GemmBatchedTest
         trans_X_ ? CblasTrans : CblasNoTrans,
         trans_W_ ? CblasTrans : CblasNoTrans,
         3,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         alpha,
         X_array.data(),
@@ -224,8 +259,11 @@ class GemmBatchedTest
         trans_X_ ? CblasTrans : CblasNoTrans,
         trans_W_ ? CblasTrans : CblasNoTrans,
         3,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         alpha,
         X_data,
@@ -244,33 +282,53 @@ class GemmBatchedTest
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor W_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor Y_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool trans_X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool trans_W_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_P(GemmBatchedTest, GemmBatchedFloatTest) {
   RunGemmBatched(1.0f, 0.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(10.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunGemmBatched(1.0f, 0.5f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(15.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunGemmBatched(0.5f, 1.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(20.0f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_P(GemmBatchedTest, GemmStridedBatchedFloatTest) {
   RunGemmStridedBatched(1.0f, 0.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(10.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunGemmStridedBatched(1.0f, 0.5f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(15.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunGemmStridedBatched(0.5f, 1.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(20.0f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_CASE_P(
     GemmBatchedTrans,
     GemmBatchedTest,
@@ -278,11 +336,15 @@ INSTANTIATE_TEST_CASE_P(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemvNoTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor A(std::vector<int>{5, 10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor X(std::vector<int>{10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor Y(std::vector<int>{5}, CPU);
   EXPECT_EQ(A.numel(), 50);
   EXPECT_EQ(X.numel(), 10);
@@ -303,7 +365,9 @@ TEST(MathTest, GemvNoTrans) {
   const float kZero = 0.0;
   math::Gemv<float, CPUContext>(
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       A.data<float>(),
@@ -317,7 +381,9 @@ TEST(MathTest, GemvNoTrans) {
   // Test Accumulate
   math::Gemv<float, CPUContext>(
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       A.data<float>(),
@@ -331,7 +397,9 @@ TEST(MathTest, GemvNoTrans) {
   // Test Accumulate
   math::Gemv<float, CPUContext>(
       CblasNoTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kPointFive,
       A.data<float>(),
@@ -344,11 +412,15 @@ TEST(MathTest, GemvNoTrans) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, GemvTrans) {
   DeviceOption option;
   CPUContext cpu_context(option);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor A(std::vector<int>{6, 10}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor X(std::vector<int>{6}, CPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor Y(std::vector<int>{10}, CPU);
   EXPECT_EQ(A.numel(), 60);
   EXPECT_EQ(X.numel(), 6);
@@ -369,7 +441,9 @@ TEST(MathTest, GemvTrans) {
   const float kZero = 0.0;
   math::Gemv<float, CPUContext>(
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       A.data<float>(),
@@ -383,7 +457,9 @@ TEST(MathTest, GemvTrans) {
   // Test Accumulate
   math::Gemv<float, CPUContext>(
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kOne,
       A.data<float>(),
@@ -397,7 +473,9 @@ TEST(MathTest, GemvTrans) {
   // Test Accumulate
   math::Gemv<float, CPUContext>(
       CblasTrans,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       kPointFive,
       A.data<float>(),
@@ -410,9 +488,12 @@ TEST(MathTest, GemvTrans) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float b = 1.75f;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float c = 128.125f;
 
   float converted_a = static_cast<float>(at::Half(a));
@@ -456,27 +537,36 @@ class BroadcastTest : public testing::Test {
         Y_.mutable_data<float>(),
         cpu_context_.get());
     ASSERT_EQ(Y_data.size(), Y_.numel());
-    for (int i = 0; i < Y_data.size(); ++i) {
+    for (const auto i : c10::irange(Y_data.size())) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor Y_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(BroadcastTest, BroadcastFloatTest) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunBroadcastTest({2}, {2}, {1.0f, 2.0f}, {1.0f, 2.0f});
   RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
   RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RunBroadcastTest({2, 1}, {2, 2}, {1.0f, 2.0f}, {1.0f, 1.0f, 2.0f, 2.0f});
   RunBroadcastTest(
       {2, 1},
       {2, 2, 2},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1.0f, 2.0f},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
 }
 
@@ -485,13 +575,18 @@ class RandFixedSumTest : public testing::Test {
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RandFixedSumTest, UpperBound) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> l(20);
   math::RandFixedSum<int, CPUContext>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20, 1, 1000, 1000, l.data(), cpu_context_.get());
 }
 

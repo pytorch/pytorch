@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_API GpuLower {
+class TORCH_CUDA_CU_API GpuLower {
   class KernelIrMapper;
 
  public:

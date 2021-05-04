@@ -1,4 +1,4 @@
-#pragma once 
+#pragma once
 
 // //////////////////////////////////////////////////////////
 // Crc32.h
@@ -680,12 +680,12 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
 
   // put operator for one zero bit in odd
   odd[0] = Polynomial;    // CRC-32 polynomial
-  for (int i = 1; i < CrcBits; i++)
+  for (uint32_t i = 1; i < CrcBits; i++)
     odd[i] = 1 << (i - 1);
 
   // put operator for two zero bits in even
   // same as gf2_matrix_square(even, odd);
-  for (int i = 0; i < CrcBits; i++)
+  for (uint32_t i = 0; i < CrcBits; i++)
   {
     uint32_t vec = odd[i];
     even[i] = 0;
@@ -695,7 +695,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   }
   // put operator for four zero bits in odd
   // same as gf2_matrix_square(odd, even);
-  for (int i = 0; i < CrcBits; i++)
+  for (uint32_t i = 0; i < CrcBits; i++)
   {
     uint32_t vec = even[i];
     odd[i] = 0;
@@ -711,7 +711,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   for (; lengthB > 0; lengthB >>= 1)
   {
     // same as gf2_matrix_square(a, b);
-    for (int i = 0; i < CrcBits; i++)
+    for (uint32_t i = 0; i < CrcBits; i++)
     {
       uint32_t vec = b[i];
       a[i] = 0;

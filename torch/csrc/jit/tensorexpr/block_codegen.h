@@ -58,6 +58,7 @@ class BlockAnalysis : public IRVisitor {
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
   std::unordered_set<const Buf*> store_targets_;
   std::unordered_set<const Buf*> loads_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int block_size_ = 32;
 };
 
@@ -111,8 +112,9 @@ class TORCH_API BlockCodeGen : public CodeGen {
   BlockCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::Device(at::kCPU))
-      : CodeGen(stmt, buffer_args, device) {
+      at::Device device = at::Device(at::kCPU),
+      const std::string& kernel_func_name = "func")
+      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
     Initialize();
   }
 
@@ -122,7 +124,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   void Initialize();
 
-  std::string getCodeText() override {
+  std::string getCodeText(const std::string& attr = "") override {
     return oss_.str();
   }
 

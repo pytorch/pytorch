@@ -2,7 +2,7 @@
 import operator_benchmark as op_bench
 import torch
 import numpy as np
-
+from typing import Optional
 
 from torch.testing._internal.common_quantization import (
     lengths_to_offsets
@@ -20,7 +20,7 @@ embedding_bag_rowwise_offsets_short_configs = op_bench.cross_product_configs(
     is_pruned_weights=(True, False,),
     use_32bit_indices=(True, False),
     use_32bit_offsets=(True, False),
-    tags=('short',),
+    tags=['short'],
 )
 
 
@@ -33,11 +33,11 @@ embedding_bag_rowwise_offsets_long_configs = op_bench.cross_product_configs(
     is_pruned_weights=(True, False,),
     use_32bit_indices=(True, False),
     use_32bit_offsets=(True, False),
-    tags=('long',)
+    tags=['long']
 )
 
 
-full_configs = embedding_bag_rowwise_offsets_long_configs + embedding_bag_rowwise_offsets_short_configs
+full_configs = embedding_bag_rowwise_offsets_short_configs + embedding_bag_rowwise_offsets_long_configs
 
 four_bit_rowwise_ops = op_bench.op_list(
     attrs=(
@@ -117,14 +117,37 @@ class EmbedddingBag4BitRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
         if self.is_pruned_weights:
             self.prepacked_weights, self.compressed_indices = get_pruned_weights_and_mapping(self.prepacked_weights)
 
+        self.inputs = {
+            "prepacked_weights": self.prepacked_weights,
+            "indices": self.indices,
+            "offsets": self.offsets,
+            "mode": 0,
+            "per_sample_weights": self.per_sample_weights,
+            "include_last_offset": self.include_last_offset,
+            "is_pruned_weights": self.is_pruned_weights,
+            "compressed_indices": self.compressed_indices
+        }
+
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.prepacked_weights, self.indices, self.offsets,
-                            mode=0, per_sample_weights=self.per_sample_weights,
-                            include_last_offset=self.include_last_offset,
-                            pruned_weights=self.is_pruned_weights,
-                            compressed_indices_mapping=self.compressed_indices)
+    def forward(
+        self,
+        prepacked_weights,
+        indices,
+        offsets,
+        mode: int,
+        per_sample_weights: Optional[torch.Tensor],
+        include_last_offset: bool,
+        is_pruned_weights: bool,
+        compressed_indices: Optional[torch.Tensor]
+    ):
+
+        return self.op_func(prepacked_weights, indices, offsets,
+                            mode=mode,
+                            per_sample_weights=per_sample_weights,
+                            include_last_offset=include_last_offset,
+                            pruned_weights=is_pruned_weights,
+                            compressed_indices_mapping=compressed_indices)
 
 
 class EmbedddingBagByteRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
@@ -176,13 +199,41 @@ class EmbedddingBagByteRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
             low=0.01, high=0.5, size=[len(self.indices)]).astype(np.float32)) if \
             self.enable_per_sample_weights else None
 
+        self.compressed_indices = None
+
+        if self.is_pruned_weights:
+            self.prepacked_weights, self.compressed_indices = get_pruned_weights_and_mapping(self.prepacked_weights)
+
+        self.inputs = {
+            "prepacked_weights": self.prepacked_weights,
+            "indices": self.indices,
+            "offsets": self.offsets,
+            "mode": 0,
+            "per_sample_weights": self.per_sample_weights,
+            "include_last_offset": self.include_last_offset,
+            "is_pruned_weights": self.is_pruned_weights,
+            "compressed_indices": self.compressed_indices
+        }
+
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.prepacked_weights, self.indices, self.offsets,
-                            mode=0, per_sample_weights=self.per_sample_weights,
+    def forward(
+        self,
+        prepacked_weights,
+        indices,
+        offsets,
+        mode: int,
+        per_sample_weights: Optional[torch.Tensor],
+        include_last_offset: bool,
+        is_pruned_weights: bool,
+        compressed_indices: Optional[torch.Tensor]
+    ):
+        return self.op_func(prepacked_weights, indices, offsets,
+                            mode=0,
+                            per_sample_weights=per_sample_weights,
                             include_last_offset=self.include_last_offset,
-                            pruned_weights=self.is_pruned_weights)
+                            pruned_weights=self.is_pruned_weights,
+                            compressed_indices_mapping=self.compressed_indices)
 
 
 op_bench.generate_pt_tests_from_op_list(four_bit_rowwise_ops,

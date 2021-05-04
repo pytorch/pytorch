@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #endif
 
+#include <torch/csrc/utils/python_numbers.h>
 #include <random>
 
 static PyObject * THPStorage_(sharedDecref)(PyObject *_self, PyObject *noargs)
@@ -63,6 +64,7 @@ static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   long long size;
   if (!PyArg_ParseTuple(args, "L", &size)) {
     return nullptr;
@@ -76,6 +78,7 @@ static PyObject * THPStorage_(shareFilename)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   THWStorage *storage = self->cdata;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THManagedMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
   if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr()))) {
@@ -95,7 +98,7 @@ static PyObject * THPStorage_(shareFilename)(PyObject *_self, PyObject *noargs)
   if (!manager_handle) return nullptr;
   THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle) return nullptr;
-  THPObjectPtr size(PyLong_FromLong(storage->nbytes() / sizeof(scalar_t)));
+  THPObjectPtr size(THPUtils_packUInt64(storage->nbytes() / sizeof(scalar_t)));
   if (!size) return nullptr;
 
   THPObjectPtr tuple(PyTuple_New(3));
@@ -146,6 +149,7 @@ static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   long long size;
   if (!PyArg_ParseTuple(args, "L", &size)) {
     return nullptr;
@@ -159,6 +163,7 @@ static PyObject * THPStorage_(shareFd)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   THWStorage *storage = self->cdata;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
   if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr()))) {
@@ -172,9 +177,9 @@ static PyObject * THPStorage_(shareFd)(PyObject *_self, PyObject *noargs)
     AT_ASSERT(ctx);
   }
 
-  THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
+  THPObjectPtr storage_handle(THPUtils_packInt32(ctx->fd()));
   if (!storage_handle) return nullptr;
-  THPObjectPtr size(PyLong_FromLong(storage->nbytes() / sizeof(scalar_t)));
+  THPObjectPtr size(THPUtils_packUInt64(storage->nbytes() / sizeof(scalar_t)));
   if (!size) return nullptr;
 
   THPObjectPtr tuple(PyTuple_New(2));
@@ -196,6 +201,7 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
         1, "a file descriptor (int) and storage size (int)");
     return nullptr;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int fd;
   int tmp_fd = (int) THPUtils_unpackLong(_tmp_fd);
   int64_t size = THPUtils_unpackLong(_size);
@@ -231,14 +237,14 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
 
   at::DeviceGuard device_guard(storage->device());
   THPObjectPtr tuple(PyTuple_New(8));
-  THPObjectPtr device(PyLong_FromLong(storage->device().index()));
+  THPObjectPtr device(THPUtils_packInt32(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size_bytes(PyLong_FromLong(storage->nbytes()));
-  THPObjectPtr _offset_bytes(PyLong_FromLong(0));
+  THPObjectPtr size_bytes(THPUtils_packUInt64(storage->nbytes()));
+  THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
   THPObjectPtr _ref_counter(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr _ref_counter_offset(PyLong_FromLong(0));
+  THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
   THPObjectPtr _event_handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr _event_sync_required(Py_None);
@@ -261,7 +267,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
     auto sent_data  =  static_cast<torch::CudaIPCSentData*>(storage->data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
-    _ref_counter_offset = PyLong_FromLong(sent_data->offset());
+    _ref_counter_offset = THPUtils_packInt64(sent_data->offset());
 
 
     cudaIpcEventHandle_t ipc_event_handle;
@@ -515,7 +521,7 @@ PyObject * THPStorage_(sharedFd)(PyObject *_self, PyObject *noargs)
 #endif
 
   THPUtils_assert(ctx, "couldn't retrieve a shared file descriptor");
-  return PyLong_FromLong(ctx->fd());
+  return THPUtils_packInt32(ctx->fd());
   END_HANDLE_TH_ERRORS
 }
 
@@ -534,6 +540,7 @@ PyObject * THPStorage_(isShared)(PyObject *_self, PyObject *noargs)
 #endif
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_with_weak_ptr", THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
 #ifdef THC_GENERIC_FILE

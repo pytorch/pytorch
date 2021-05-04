@@ -9,3 +9,5 @@ labels_to_circle_params:
         - release/.*
       tags:
         - v[0-9]+(\.[0-9]+)*-rc[0-9]+
+    set_to_false:
+      - run_build

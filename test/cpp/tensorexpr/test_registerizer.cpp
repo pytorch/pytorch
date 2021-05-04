@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/test_utils.h"
@@ -11,18 +12,20 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 // Can replace a simple scalar access with a local variable.
-void testRegisterizerSimple() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(a, {0}, Add::make(Load::make(a, {0}), x))}))});
 
   /*
    * A[0] = 0;
@@ -56,18 +59,21 @@ void testRegisterizerSimple() {
 }
 
 // Won't do replacement of a loop access.
-void testRegisterizerLoop() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoop) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {x}, Add::make(Load::make(a, {x}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(a, {x}, Add::make(Load::make(a, {x}), x))}))});
 
   /*
    * A[0] = 0;
@@ -103,18 +109,20 @@ void testRegisterizerLoop() {
 
 // Won't replace even if the load is a fixed scalar, since the store could
 // invalidate it.
-void testRegisterizerLoopFixedLoad() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopFixedLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(a, {x}, Add::make(Load::make(a, {0}), x))}))});
 
   /*
    * A[0] = 0;
@@ -150,17 +158,19 @@ void testRegisterizerLoopFixedLoad() {
 
 // We can registerize accesses that occur entirely within inner scopes, even if
 // they depend on the loop var.
-void testRegisterizerLoopInternal() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopInternal) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Block::make(
-          {Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), x), 1),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), x), 1)}))});
+          {Store::make(a, {x}, Add::make(Load::make(a, {x}), x)),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), x))}))});
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -171,11 +181,15 @@ void testRegisterizerLoopInternal() {
 
   stmt = registerize(stmt);
 
+  // TODO: the order of terms in addition changes and in general depends on
+  // some hash value. This results in unpredictable swaps of the operands from
+  // random changes, which is not great. Ideally, we should ensure some
+  // specific order (ideally, the original one).
   /*
    * for (int x = 0; x < 10; x++) {
    *   int A_1 = A[x];
-   *   A_1 = A_1 + x;
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
+   *   A_1 = x + A_1;
    *   A[x] = A_1;
    * }
    */
@@ -187,8 +201,8 @@ void testRegisterizerLoopInternal() {
       R"IR(
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK: int A_1 = A[x];
-# CHECK:   A_1 = A_1 + x;
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = x + A_1;
 # CHECK:   A[x] = A_1;
 # CHECK: })IR";
 
@@ -197,9 +211,12 @@ void testRegisterizerLoopInternal() {
 
 // An access can be overlapped by another read in the same Expr. In this case
 // B[z] and B[y] overlap and prevent registerization of both accesses.
-void testRegisterizerLoopInternalLoadOverlap() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -207,12 +224,10 @@ void testRegisterizerLoopInternalLoadOverlap() {
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      Store::make(
-          a,
-          {x},
-          Add::make(Load::make(b, {y}, 1), Load::make(b, {z}, 1)),
-          1))});
+      Store::make(a, {x}, Add::make(Load::make(b, {y}), Load::make(b, {z}))))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -232,7 +247,8 @@ void testRegisterizerLoopInternalLoadOverlap() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoopInternalRepeated() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopInternalRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -240,17 +256,19 @@ void testRegisterizerLoopInternalRepeated() {
       {For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(Load::make(a, {1}, 1), x), 1),
-                Store::make(a, {0}, Add::make(Load::make(a, {1}, 1), x), 1)})),
+               {Store::make(a, {0}, Add::make(Load::make(a, {1}), x)),
+                Store::make(a, {0}, Add::make(Load::make(a, {1}), x))})),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(Load::make(a, {1}, 1), x), 1),
-                Store::make(a, {0}, Add::make(Load::make(a, {1}, 1), x), 1)}))
+               {Store::make(a, {0}, Add::make(Load::make(a, {1}), x)),
+                Store::make(a, {0}, Add::make(Load::make(a, {1}), x))}))
 
       });
 
@@ -304,7 +322,8 @@ void testRegisterizerLoopInternalRepeated() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerLoopInternalRepeatedOverlapLoopVar() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -312,19 +331,22 @@ void testRegisterizerLoopInternalRepeatedOverlapLoopVar() {
       {For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(Load::make(a, {x}, 1), x), 1),
-                Store::make(a, {0}, Add::make(Load::make(a, {x}, 1), x), 1)})),
+               {Store::make(a, {0}, Add::make(Load::make(a, {x}), x)),
+                Store::make(a, {0}, Add::make(Load::make(a, {x}), x))})),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(Load::make(a, {x}, 1), x), 1),
-                Store::make(a, {0}, Add::make(Load::make(a, {x}, 1), x), 1)}))
+               {Store::make(a, {0}, Add::make(Load::make(a, {x}), x)),
+                Store::make(a, {0}, Add::make(Load::make(a, {x}), x))}))
 
       });
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -349,7 +371,8 @@ void testRegisterizerLoopInternalRepeatedOverlapLoopVar() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoopInternalRepeatedOverlapOther() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -358,17 +381,19 @@ void testRegisterizerLoopInternalRepeatedOverlapOther() {
       {For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(x, Load::make(a, {y}, 1)), 1),
-                Store::make(a, {0}, Add::make(x, Load::make(a, {y}, 1)), 1)})),
+               {Store::make(a, {0}, Add::make(x, Load::make(a, {y}))),
+                Store::make(a, {0}, Add::make(x, Load::make(a, {y})))})),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(x, Load::make(a, {y}, 1)), 1),
-                Store::make(a, {0}, Add::make(x, Load::make(a, {y}, 1)), 1)}))
+               {Store::make(a, {0}, Add::make(x, Load::make(a, {y}))),
+                Store::make(a, {0}, Add::make(x, Load::make(a, {y})))}))
 
       });
 
@@ -396,20 +421,22 @@ void testRegisterizerLoopInternalRepeatedOverlapOther() {
 }
 
 // Will registerize multiple accesses of different items of the same buffer.
-void testRegisterizerMultiVar() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
-      Store::make(a, {0}, 0, 1),
-      Store::make(a, {1}, 0, 1),
+      Store::make(a, {0}, 0),
+      Store::make(a, {1}, 0),
       For::make(
           x,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           Block::make(
-              {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1),
-               Store::make(a, {1}, Sub::make(Load::make(a, {1}, 1), x), 1)})),
+              {Store::make(a, {0}, Add::make(Load::make(a, {0}), x)),
+               Store::make(a, {1}, Sub::make(Load::make(a, {1}), x))})),
   });
 
   /*
@@ -452,24 +479,25 @@ void testRegisterizerMultiVar() {
 }
 
 // Will registerize the valid accesses while skipping invalid replacements.
-void testRegisterizerVariableLoad() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerVariableLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle x2("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 0, 1),
-       For::make(x, 0, 10, Store::make(b, {x}, x, 1)),
+      {Store::make(a, {0}, 0),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       For::make(x, 0, 10, Store::make(b, {x}, x)),
        For::make(
            x2,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make({Store::make(
-               a,
-               {0},
-               Add::make(Load::make(a, {0}, 1), Load::make(b, {x2}, 1)),
-               1)}))});
+               a, {0}, Add::make(Load::make(a, {0}), Load::make(b, {x2})))}))});
 
   /*
    * A[0] = 0;
@@ -511,20 +539,22 @@ void testRegisterizerVariableLoad() {
 }
 
 // Can registerize variable accesses so long as the variable does not change.
-void testRegisterizerSymbolicIndices() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerSymbolicIndices) {
   KernelScope kernel_scope;
   VarHandle i("i", kInt);
   VarHandle N("N", kInt);
   BufHandle a("A", {N}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {i}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {i}, Add::make(Load::make(a, {i}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {i}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(a, {i}, Add::make(Load::make(a, {i}), x))}))});
 
   /*
    * A[i] = 0;
@@ -558,26 +588,28 @@ void testRegisterizerSymbolicIndices() {
 }
 
 // Can registerize accesses dependent on multiple loop vars.
-void testRegisterizerMultiLoop() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 0, 1),
+      {Store::make(a, {0}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            For::make(
                y,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
                Block::make({Store::make(
                    a,
                    {0},
-                   Mul::make(Add::make(Load::make(a, {0}, 1), x), y),
-                   1)})))});
+                   Mul::make(Add::make(Load::make(a, {0}), x), y))})))});
 
   /*
    * A[0] = 0;
@@ -616,20 +648,22 @@ void testRegisterizerMultiLoop() {
 }
 
 // Can registerize correctly if scalars already exist in the program.
-void testRegisterizerRepeated() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
-      Store::make(a, {0}, 0, 1),
-      Store::make(a, {1}, 0, 1),
+      Store::make(a, {0}, 0),
+      Store::make(a, {1}, 0),
       For::make(
           x,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           Block::make(
-              {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1),
-               Store::make(a, {1}, Sub::make(Load::make(a, {1}, 1), x), 1)})),
+              {Store::make(a, {0}, Add::make(Load::make(a, {0}), x)),
+               Store::make(a, {1}, Sub::make(Load::make(a, {1}), x))})),
   });
 
   // Registerize manually to make sure we only replace a single target.
@@ -673,14 +707,19 @@ void testRegisterizerRepeated() {
 }
 
 // Can registerize the load of A.
-void testRegisterizerNoLoads() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNoLoads) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 0, 1),
+      {Store::make(a, {0}, 0),
        For::make(
-           x, 0, 10, Block::make({Store::make(a, {0}, Add::make(x, 1), 1)}))});
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make({Store::make(a, {0}, Add::make(x, 1))}))});
 
   /*
    * A[0] = 0;
@@ -714,19 +753,22 @@ void testRegisterizerNoLoads() {
 }
 
 // Can registerize the load of A but not the store of B.
-void testRegisterizerNoRepeatedStores() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNoRepeatedStores) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           b, {x}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(b, {x}, Add::make(Load::make(a, {0}), x))}))});
 
   /*
    * A[0] = 0;
@@ -763,22 +805,24 @@ void testRegisterizerNoRepeatedStores() {
 }
 
 // Won't registerize if there are multiple accesses which may overlap.
-void testRegisterizerMultiVarOverlap() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiVarOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
-      Store::make(a, {0}, 0, 1),
-      Store::make(a, {1}, 0, 1),
+      Store::make(a, {0}, 0),
+      Store::make(a, {1}, 0),
       For::make(
           x,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           Block::make(
-              {Store::make(a, {x}, Add::make(Load::make(a, {0}, 1), x), 1),
-               Store::make(
-                   a, {x + 1}, Sub::make(Load::make(a, {1}, 1), x), 1)})),
+              {Store::make(a, {x}, Add::make(Load::make(a, {0}), x)),
+               Store::make(a, {x + 1}, Sub::make(Load::make(a, {1}), x))})),
   });
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -792,28 +836,29 @@ void testRegisterizerMultiVarOverlap() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerAllocs() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerAllocs) {
   KernelScope kernel_scope;
 
   BufHandle a("A", {2}, kInt);
-  BufHandle b("B", {1}, kInt);
   BufHandle c("C", {1}, kInt);
   VarHandle x("x", kInt);
 
-  VarHandle b_(b.node()->base_handle());
+  BufHandle b("B", {Load::make(c, {0})}, kInt);
 
   Stmt* stmt = Block::make(
-      {Allocate::make(b_, kInt, {Load::make(c, {0}, 1)}),
-       Store::make(a, {0}, Load::make(c, {0}, 1), 1),
-       Store::make(b, {0}, 0, 1),
+      {Allocate::make(b),
+       Store::make(a, {0}, Load::make(c, {0})),
+       Store::make(b, {0}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(b, {0}, Add::make(Load::make(b, {0}, 1), x), 1),
-                Store::make(a, {0}, Load::make(c, {0}, 1), 1)})),
-       Free::make(b_)});
+               {Store::make(b, {0}, Add::make(Load::make(b, {0}), x)),
+                Store::make(a, {0}, Load::make(c, {0}))})),
+       Free::make(b)});
 
   /*
    * Allocate(B, int, {C[0]});
@@ -861,16 +906,17 @@ void testRegisterizerAllocs() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNoInitializer() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNoInitializer) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      Block::make(
-          {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+      Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), x))}))});
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -902,16 +948,18 @@ void testRegisterizerNoInitializer() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNoInitializerLoopVar() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      Block::make(
-          {Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), x), 1)}))});
+      Block::make({Store::make(a, {x}, Add::make(Load::make(a, {x}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -931,7 +979,8 @@ void testRegisterizerNoInitializerLoopVar() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoadThenStore() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoadThenStore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -939,9 +988,11 @@ void testRegisterizerLoadThenStore() {
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      Block::make({Store::make(b, {0}, Add::make(Load::make(a, {0}, 1), x), 1),
-                   Store::make(a, {0}, Load::make(b, {0}, 1), 1)}))});
+      Block::make(
+          {Store::make(b, {0}, Add::make(Load::make(a, {0}), x)),
+           Store::make(a, {0}, Load::make(b, {0}))}))});
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -981,21 +1032,22 @@ void testRegisterizerLoadThenStore() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerParallelized() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerParallelized) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   LoopOptions loopOpts;
   loopOpts.set_gpu_block_index(0);
-  Stmt* stmt =
-      Block::make({Store::make(a, {0}, 0, 1),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}),
-                       loopOpts)});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {0}, 0),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), x))}),
+           loopOpts)});
 
   /*
    * A[0] = 0;
@@ -1011,19 +1063,24 @@ void testRegisterizerParallelized() {
 
 // Should be able to registerize this since the scalar would exist before the
 // branch.
-void testRegisterizerConditionAfter() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionAfter) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1),
+      {Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr)});
 
   /*
@@ -1061,20 +1118,25 @@ void testRegisterizerConditionAfter() {
 
 // Should be able to registerize this since the scalar exists in the same form
 // after the branch and there is no overlap.
-void testRegisterizerConditionBefore() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionBefore) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr),
-       Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1)});
+       Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(c, {x}, Load::make(a, {x}))});
 
   /*
    * if (x<5 ? 1 : 0) {
@@ -1113,22 +1175,27 @@ void testRegisterizerConditionBefore() {
 }
 
 // Should be able to registerize this as the combination of the two above rules.
-void testRegisterizerConditionInside() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionInside) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1),
+      {Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr),
-       Store::make(b, {x}, Load::make(a, {x}, 1), 1),
-       Store::make(a, {x}, Load::make(c, {x}, 1), 1)});
+       Store::make(b, {x}, Load::make(a, {x})),
+       Store::make(a, {x}, Load::make(c, {x}))});
 
   /*
    * A[x] = B[x];
@@ -1173,27 +1240,33 @@ void testRegisterizerConditionInside() {
 // An example where an access is cut by an overlapping access inside a
 // condition, and both sides are large enough to be registerized but cannot be
 // because there is no safe place to put the initializer or finalizer.
-void testRegisterizerConditionInsideOverlap1() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1),
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+      {Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({
-               Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
-               Store::make(a, {0}, 3, 1),
-               Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+               Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
+               Store::make(a, {0}, 3),
+               Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            }),
            nullptr),
-       Store::make(b, {x}, Load::make(a, {x}, 1), 1),
-       Store::make(a, {x}, Load::make(c, {x}, 1), 1)});
+       Store::make(b, {x}, Load::make(a, {x})),
+       Store::make(a, {x}, Load::make(c, {x}))});
 
   /*
    * A[x] = B[x];
@@ -1232,29 +1305,35 @@ void testRegisterizerConditionInsideOverlap1() {
 // from the loop. Registerization occurs but does not include any accesses in
 // the condition, and the first group must be finalized before the Cond, the
 // second initialized after it.
-void testRegisterizerConditionInsideOverlap2() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(a, {x}, Load::make(b, {x + 1}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1),
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+      {Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(a, {x}, Load::make(b, {x + 1})),
+       Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({
-               Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
-               Store::make(a, {0}, 3, 1),
-               Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+               Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
+               Store::make(a, {0}, 3),
+               Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            }),
            nullptr),
-       Store::make(b, {x}, Load::make(a, {x}, 1), 1),
-       Store::make(b, {x + 1}, Load::make(a, {x}, 1), 1),
-       Store::make(a, {x}, Load::make(c, {x}, 1), 1)});
+       Store::make(b, {x}, Load::make(a, {x})),
+       Store::make(b, {x + 1}, Load::make(a, {x})),
+       Store::make(a, {x}, Load::make(c, {x}))});
 
   /*
    * A[x] = B[x];
@@ -1317,21 +1396,27 @@ void testRegisterizerConditionInsideOverlap2() {
 // program, because we don't know if the branch would be taken and if it isn't
 // the accesses in it don't need to be valid (think size checks on the index).
 // In this case the accesses cannot be registerized.
-void testRegisterizerConditionHidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionHidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr)});
 
   /*
@@ -1359,22 +1444,28 @@ void testRegisterizerConditionHidden() {
 // that that access is valid in the higher scope (or at least if its not it's
 // the user's fault). It "unhides" the conditional accesses, allowing
 // registerization to occur.
-void testRegisterizerConditionUnhidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionUnhidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr),
-       Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+       Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
-           Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
+           Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
            nullptr)});
 
   /*
@@ -1420,20 +1511,27 @@ void testRegisterizerConditionUnhidden() {
 }
 
 // Can registerize a load that occurs in the condition of a Cond.
-void testRegisterizerCondCondition() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerCondCondition) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(b, {x}, 1), 1),
-       Store::make(c, {x}, Load::make(a, {x}, 1), 1),
+      {Store::make(a, {x}, Load::make(b, {x})),
+       Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
            CompareSelect::make(
-               Load::make(a, {x}, 1), 5, CompareSelectOperation::kLT),
-           Store::make(c, {x}, Add::make(Load::make(c, {x}, 1), 1), 1),
+               Load::make(a, {x}),
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+               5,
+               CompareSelectOperation::kLT),
+           Store::make(c, {x}, Add::make(Load::make(c, {x}), 1)),
            nullptr)});
 
   /*
@@ -1471,18 +1569,23 @@ void testRegisterizerCondCondition() {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
-void testRegisterizerCondConditionUnhidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerCondConditionUnhidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make({Cond::make(
-      CompareSelect::make(
-          Load::make(a, {x}, 1), 5, CompareSelectOperation::kLT),
-      Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 1), 1),
-      Store::make(a, {x}, Add::make(Load::make(a, {x}, 1), 10), 1))});
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      CompareSelect::make(Load::make(a, {x}), 5, CompareSelectOperation::kLT),
+      Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(a, {x}, Add::make(Load::make(a, {x}), 10)))});
 
   /*
    * if ((A[x])<5 ? 1 : 0) {
@@ -1521,10 +1624,14 @@ void testRegisterizerCondConditionUnhidden() {
 }
 
 // Conditional hiding also works for IfThenElse exprs.
-void testRegisterizerIfThenElseHidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseHidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1534,18 +1641,18 @@ void testRegisterizerIfThenElseHidden() {
            b,
            {y},
            IfThenElse::make(
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-               Add::make(Load::make(a, {x}, 1), 1),
-               Add::make(Load::make(a, {x + 1}, 1), 2)),
-           1),
+               Add::make(Load::make(a, {x}), 1),
+               Add::make(Load::make(a, {x + 1}), 2))),
        Store::make(
            b,
            {y + 1},
            IfThenElse::make(
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-               Add::make(Load::make(a, {x}, 1), 1),
-               Add::make(Load::make(a, {x + 1}, 1), 2)),
-           1)});
+               Add::make(Load::make(a, {x}), 1),
+               Add::make(Load::make(a, {x + 1}), 2)))});
 
   /*
    * B[y] = IfThenElse(x<5 ? 1 : 0, (A[x]) + 1, (A[x + 1]) + 2);
@@ -1565,32 +1672,36 @@ void testRegisterizerIfThenElseHidden() {
 }
 
 // Conditional unhiding also works for IfThenElse exprs.
-void testRegisterizerIfThenElseUnhidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make({
-      Store::make(a, {x}, 0, 1),
+      Store::make(a, {x}, 0),
       Store::make(
           b,
           {y},
           IfThenElse::make(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-              Add::make(Load::make(a, {x}, 1), 1),
-              Add::make(Load::make(a, {x + 1}, 1), 2)),
-          1),
+              Add::make(Load::make(a, {x}), 1),
+              Add::make(Load::make(a, {x + 1}), 2))),
       Store::make(
           b,
           {y + 1},
           IfThenElse::make(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-              Add::make(Load::make(a, {x}, 1), 1),
-              Add::make(Load::make(a, {x + 1}, 1), 2)),
-          1),
+              Add::make(Load::make(a, {x}), 1),
+              Add::make(Load::make(a, {x + 1}), 2))),
   });
 
   /*
@@ -1622,11 +1733,16 @@ void testRegisterizerIfThenElseUnhidden() {
 }
 
 // Nested IfThenElse exprs can't promote to higher level scopes.
-void testRegisterizerIfThenElseNested() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseNested) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle d("D", {5}, kInt);
   VarHandle x("x", kInt);
 
@@ -1637,13 +1753,13 @@ void testRegisterizerIfThenElseNested() {
           CompareSelect::make(x, 3, CompareSelectOperation::kLT),
           IfThenElse::make(
               CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-              Load::make(d, {x}, 1),
-              Load::make(b, {x}, 1)),
+              Load::make(d, {x}),
+              Load::make(b, {x})),
           IfThenElse::make(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               CompareSelect::make(x, 5, CompareSelectOperation::kEQ),
-              Load::make(c, {x}, 1),
-              Load::make(d, {x}, 1))),
-      1)});
+              Load::make(c, {x}),
+              Load::make(d, {x}))))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0,
@@ -1667,10 +1783,13 @@ void testRegisterizerIfThenElseNested() {
 // branch, since it is not a Stmt and cannot hold variable definitions. We need
 // to check that we don't promote the initializer/finalizer to the enclosing
 // Block.
-void testRegisterizerIfThenElseInternal() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseInternal) {
   KernelScope kernel_scope;
   // Making these floats so they don't get simplified to a single access.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kFloat);
   VarHandle x("x", kInt);
 
@@ -1679,9 +1798,8 @@ void testRegisterizerIfThenElseInternal() {
       {x},
       IfThenElse::make(
           CompareSelect::make(x, 3, CompareSelectOperation::kLT),
-          Add::make(Load::make(b, {x}, 1), Load::make(b, {x}, 1)),
-          Load::make(b, {x}, 1)),
-      1)});
+          Add::make(Load::make(b, {x}), Load::make(b, {x})),
+          Load::make(b, {x})))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0, (B[x]) + (B[x]), B[x]);
@@ -1705,9 +1823,8 @@ void testRegisterizerIfThenElseInternal() {
 
   stmt = Block::make({Cond::make(
       CompareSelect::make(x, 3, CompareSelectOperation::kLT),
-      Store::make(
-          a, {x}, Add::make(Load::make(b, {x}, 1), Load::make(b, {x}, 1)), 1),
-      Store::make(a, {x}, Load::make(b, {x}, 1), 1))});
+      Store::make(a, {x}, Add::make(Load::make(b, {x}), Load::make(b, {x}))),
+      Store::make(a, {x}, Load::make(b, {x})))});
 
   /*
    * if (x<3 ? 1 : 0) {
@@ -1748,24 +1865,30 @@ void testRegisterizerIfThenElseInternal() {
 }
 
 // Can registerize a load that occurs in the condition of an IfThenElse;
-void testRegisterizerIfThenElseCondition() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseCondition) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
   Stmt* stmt = Block::make(
-      {Store::make(a, {x}, Load::make(a, {x}, 1), 1),
+      {Store::make(a, {x}, Load::make(a, {x})),
        Store::make(
            a,
            {x},
            IfThenElse::make(
                CompareSelect::make(
-                   Load::make(a, {x}, 1), 5, CompareSelectOperation::kLT),
-               Load::make(b, {0}, 1),
-               Load::make(c, {0}, 1)),
-           1)});
+                   Load::make(a, {x}),
+                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                   5,
+                   CompareSelectOperation::kLT),
+               Load::make(b, {0}),
+               Load::make(c, {0})))});
 
   /*
    * A[x] = A[x];       <---- just here so there are enough accesses to combine.
@@ -1795,10 +1918,14 @@ void testRegisterizerIfThenElseCondition() {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
-void testRegisterizerIfThenElseConditionUnhidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
@@ -1807,10 +1934,13 @@ void testRegisterizerIfThenElseConditionUnhidden() {
       {x},
       IfThenElse::make(
           CompareSelect::make(
-              Load::make(a, {x}, 1), 5, CompareSelectOperation::kLT),
-          Add::make(Load::make(a, {x}, 1), 1),
-          Add::make(Load::make(a, {x}, 1), 10)),
-      1)});
+              Load::make(a, {x}),
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              5,
+              CompareSelectOperation::kLT),
+          Add::make(Load::make(a, {x}), 1),
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Add::make(Load::make(a, {x}), 10)))});
 
   /*
    * B[x] = IfThenElse((A[x])<5 ? 1 : 0, (A[x]) + 1, (A[x]) + 10);
@@ -1836,34 +1966,42 @@ void testRegisterizerIfThenElseConditionUnhidden() {
 
 // Cannot promote accesses internal to IfThenElse branches even if the enclosing
 // scope if conditional.
-void testRegisterizerConditionBranchOnly() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerConditionBranchOnly) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Block::make({
           Cond::make(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
               Store::make(
                   a,
                   {x},
                   IfThenElse::make(
+                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-                      Add::make(Load::make(a, {x}, 1), x),
-                      Add::make(Load::make(a, {x - 5}, 1), x)),
-                  1),
+                      Add::make(Load::make(a, {x}), x),
+                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                      Add::make(Load::make(a, {x - 5}), x))),
               Store::make(
                   a,
+                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   {x - 5},
                   IfThenElse::make(
+                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-                      Add::make(Load::make(a, {x}, 1), x),
-                      Add::make(Load::make(a, {x - 5}, 1), x)),
-                  1)),
+                      Add::make(Load::make(a, {x}), x),
+                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                      Add::make(Load::make(a, {x - 5}), x)))),
       }))});
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -1888,10 +2026,14 @@ void testRegisterizerConditionBranchOnly() {
 
 // We can registerize an IfThenElse that appears in the condition branch of a
 // Cond. This is a weird but valid thing to do.
-void testRegisterizerCondIfThenElse() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerCondIfThenElse) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
@@ -1899,12 +2041,15 @@ void testRegisterizerCondIfThenElse() {
       CompareSelect::make(
           IfThenElse::make(
               CompareSelect::make(
-                  Load::make(a, {x}, 1), 5, CompareSelectOperation::kLT),
-              Load::make(a, {x}, 1),
-              Load::make(b, {x}, 1)),
+                  Load::make(a, {x}),
+                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                  5,
+                  CompareSelectOperation::kLT),
+              Load::make(a, {x}),
+              Load::make(b, {x})),
           x,
           CompareSelectOperation::kEQ),
-      Store::make(c, {x}, Add::make(Load::make(c, {x}, 1), 1), 1),
+      Store::make(c, {x}, Add::make(Load::make(c, {x}), 1)),
       nullptr)});
 
   /*
@@ -1938,9 +2083,12 @@ void testRegisterizerCondIfThenElse() {
 
 // Can registerize a conditional access in the RHS of a store unhidden by it's
 // LHS, and hoist it out of a loop.
-void testRegisterizerIfThenElseLoop() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseLoop) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1948,15 +2096,15 @@ void testRegisterizerIfThenElseLoop() {
   Stmt* stmt = For::make(
       y,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Store::make(
           a,
           {x},
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
-              Load::make(a, {x}, 1),
-              Load::make(b, {y}, 1)),
-          1));
+              Load::make(a, {x}),
+              Load::make(b, {y}))));
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -1989,9 +2137,12 @@ void testRegisterizerIfThenElseLoop() {
 }
 
 // Cannot registerize if the RHS overlaps the access creating visibility.
-void testRegisterizerIfThenElseLoopCut() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1999,15 +2150,15 @@ void testRegisterizerIfThenElseLoopCut() {
   Stmt* stmt = Block::make({For::make(
       y,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Store::make(
           a,
           {x},
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
-              Load::make(a, {x}, 1),
-              Load::make(a, {y}, 1)),
-          1))});
+              Load::make(a, {x}),
+              Load::make(a, {y}))))});
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -2029,19 +2180,22 @@ void testRegisterizerIfThenElseLoopCut() {
 
 // Simple case where an access is cut by an overlapping access later in the
 // program, we can registerize up until the overlap.
-void testRegisterizerPartialAfter() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 0, 1),
+      {Store::make(a, {0}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)})),
-       For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}, 1), 1))});
+               {Store::make(a, {0}, Add::make(Load::make(a, {0}), x))})),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1})))});
 
   /*
    * A[0] = 0;
@@ -2058,7 +2212,7 @@ void testRegisterizerPartialAfter() {
   /*
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * for (int x = 1; x < 10; x++) {
@@ -2073,7 +2227,7 @@ void testRegisterizerPartialAfter() {
       R"IR(
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2086,19 +2240,22 @@ void testRegisterizerPartialAfter() {
 
 // We can registerize an access which overlaps a previous access, the
 // initializer must be inserted after the previous access.
-void testRegisterizerPartialBefore() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}, 1), 1)),
-       Store::make(a, {0}, 0, 1),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}))),
+       Store::make(a, {0}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
-           Block::make({Store::make(
-               a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)}))});
+           Block::make(
+               {Store::make(a, {0}, Add::make(Load::make(a, {0}), x))}))});
 
   /*
    * for (int x = 1; x < 10; x++) {
@@ -2118,7 +2275,7 @@ void testRegisterizerPartialBefore() {
    * }
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    */
@@ -2134,7 +2291,7 @@ void testRegisterizerPartialBefore() {
 # CHECK: }
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;)IR";
 
@@ -2143,26 +2300,29 @@ void testRegisterizerPartialBefore() {
 
 // The combination of the previous two tests, an access is cut by an overlapping
 // access in both directions.
-void testRegisterizerPartialInside() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialInside) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x1("x1", kInt);
   VarHandle x2("x2", kInt);
   VarHandle x3("x3", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 2, 1),
+      {Store::make(a, {0}, 2),
        For::make(
            x1,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x1), 1)),
-       For::make(
-           x2, 1, 10, Store::make(a, {x2}, Load::make(a, {x2 - 1}, 1), 1)),
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x1))),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       For::make(x2, 1, 10, Store::make(a, {x2}, Load::make(a, {x2 - 1}))),
        For::make(
            x3,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x3), 1))});
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x3)))});
 
   /*
    * A[0] = 2;
@@ -2182,7 +2342,7 @@ void testRegisterizerPartialInside() {
   /*
    * int A_1 = 2;
    * for (int x1 = 0; x1 < 10; x1++) {
-   *   A_1 = A_1 + x1;
+   *   A_1 = x1 + A_1;
    * }
    * A[0] = A_1;
    * for (int x2 = 1; x2 < 10; x2++) {
@@ -2190,7 +2350,7 @@ void testRegisterizerPartialInside() {
    * }
    * int A_2 = A[0];
    * for (int x3 = 0; x3 < 10; x3++) {
-   *   A_2 = A_2 + x3;
+   *   A_2 = x3 + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2202,7 +2362,7 @@ void testRegisterizerPartialInside() {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x1;
+# CHECK:   A_1 = x1 + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2210,7 +2370,7 @@ void testRegisterizerPartialInside() {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x3;
+# CHECK:   A_2 = x3 + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2220,26 +2380,30 @@ void testRegisterizerPartialInside() {
 // An element could be registerized program wide but is cut by a conditional
 // access, we should break this into two scalars and write back to the buffer
 // before the condition.
-void testRegisterizerPartialCondition() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 2, 1),
+      {Store::make(a, {0}, 2),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1)),
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x))),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Store::make(a, {x}, Load::make(a, {x - 1}, 1), 1),
+           Store::make(a, {x}, Load::make(a, {x - 1})),
            nullptr),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), x), 1))});
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x)))});
 
   /*
    * A[0] = 2;
@@ -2259,7 +2423,7 @@ void testRegisterizerPartialCondition() {
   /*
    * int A_1 = 2;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * if (x<5 ? 1 : 0) {
@@ -2267,7 +2431,7 @@ void testRegisterizerPartialCondition() {
    * }
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = A_2 + x;
+   *   A_2 = x + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2279,7 +2443,7 @@ void testRegisterizerPartialCondition() {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: if (
@@ -2287,7 +2451,7 @@ void testRegisterizerPartialCondition() {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x;
+# CHECK:   A_2 = x + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2296,19 +2460,22 @@ void testRegisterizerPartialCondition() {
 
 // Tests case where an access is cut by an internal conditional access which
 // itself is registerized.
-void testRegisterizerPartialConditionInternalCut() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 1, 1),
-       Store::make(a, {0}, 3, 1),
+      {Store::make(a, {0}, 1),
+       Store::make(a, {0}, 3),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Block::make({Store::make(a, {x}, 1, 1), Store::make(a, {x}, 3, 1)}),
+           Block::make({Store::make(a, {x}, 1), Store::make(a, {x}, 3)}),
            nullptr),
-       Store::make(a, {0}, 4, 1),
-       Store::make(a, {0}, 6, 1)});
+       Store::make(a, {0}, 4),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       Store::make(a, {0}, 6)});
 
   /*
    * A[0] = 1;
@@ -2359,19 +2526,22 @@ void testRegisterizerPartialConditionInternalCut() {
 
 // First statment in condition closes outer access, but can be registerized with
 // later statements.
-void testRegisterizerPartialConditionInternalStart() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, 1, 1),
-       Store::make(a, {0}, 3, 1),
+      {Store::make(a, {0}, 1),
+       Store::make(a, {0}, 3),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
-           Block::make({Store::make(a, {x}, 1, 1), Store::make(a, {x}, 3, 1)}),
+           Block::make({Store::make(a, {x}, 1), Store::make(a, {x}, 3)}),
            nullptr),
-       Store::make(a, {x}, 4, 1),
-       Store::make(a, {x}, 6, 1)});
+       Store::make(a, {x}, 4),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       Store::make(a, {x}, 6)});
 
   /*
    * A[0] = 1;
@@ -2423,17 +2593,20 @@ void testRegisterizerPartialConditionInternalStart() {
 }
 
 // An access cuts two open overlaps and creates four scalar variables.
-void testRegisterizerPartialOverlapsTwo() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({Store::make(a, {1}, Load::make(a, {0}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            For::make(x, 1, 10, Store::make(a, {x}, x, 1)),
-                            Store::make(a, {1}, Load::make(a, {0}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1),
-                            Store::make(a, {0}, Load::make(a, {1}, 1), 1)});
+  Stmt* stmt = Block::make(
+      {Store::make(a, {1}, Load::make(a, {0})),
+       Store::make(a, {0}, Load::make(a, {1})),
+       Store::make(a, {0}, Load::make(a, {1})),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       For::make(x, 1, 10, Store::make(a, {x}, x)),
+       Store::make(a, {1}, Load::make(a, {0})),
+       Store::make(a, {0}, Load::make(a, {1})),
+       Store::make(a, {0}, Load::make(a, {1}))});
 
   /*
    * A[1] = A[0];
@@ -2493,17 +2666,19 @@ void testRegisterizerPartialOverlapsTwo() {
 
 // Nested blocks will automatically be flattened and do not provent
 // registerization of enclosed accesses.
-void testRegisterizerNestedBlocks() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedBlocks) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+      {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
+       Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
        Block::make(
-           {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 2), 1)}),
-       Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 3), 1),
-                    Block::make({Store::make(
-                        a, {0}, Add::make(Load::make(a, {0}, 1), 4), 1)})})});
+           {Store::make(a, {0}, Add::make(Load::make(a, {0}), 3)),
+            Block::make(
+                {Store::make(a, {0}, Add::make(Load::make(a, {0}), 4))})})});
 
   /*
    * A[0] = (A[0]) + 1;
@@ -2546,17 +2721,19 @@ void testRegisterizerNestedBlocks() {
 
 // The access can be registerized internally to a condition, but must ensure
 // that both initializer and finalizer are within the same condition.
-void testRegisterizerNestedConditions() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({Cond::make(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
       Block::make(
-          {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+          {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
            Cond::make(
                CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                nullptr)}),
       nullptr)});
 
@@ -2602,19 +2779,21 @@ void testRegisterizerNestedConditions() {
 
 // If an access exists outside the scope of the condition then we can lift
 // nested conditional usages into the same scalar.
-void testRegisterizerNestedConditionsUnhidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+      {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make(
-               {Store::make(a, {1}, 1, 1),
+               {Store::make(a, {1}, 1),
                 Cond::make(
                     CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-                    Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+                    Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                     nullptr)}),
            nullptr)});
 
@@ -2658,20 +2837,22 @@ void testRegisterizerNestedConditionsUnhidden() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNestedConditionsHiddenFirst() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
            nullptr),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({Cond::make(
                CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                nullptr)}),
            nullptr)});
 
@@ -2697,24 +2878,27 @@ void testRegisterizerNestedConditionsHiddenFirst() {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
-void testRegisterizerNestedConditionsHiddenSecond() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({Cond::make(
                CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                nullptr)}),
            nullptr),
        Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
            nullptr)});
 
   /*
@@ -2739,24 +2923,27 @@ void testRegisterizerNestedConditionsHiddenSecond() {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
 // If an access is cut by another access internal to a condition block, it still
 // cuts the access.
-void testRegisterizerNestedConditionsCut() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+      {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make(
-               {Store::make(a, {x}, 1, 1),
+               {Store::make(a, {x}, 1),
                 Cond::make(
                     CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-                    Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+                    Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                     nullptr)}),
            nullptr)});
 
@@ -2783,25 +2970,29 @@ void testRegisterizerNestedConditionsCut() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerNestedConditionLoopHidden() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-           Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
            nullptr),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make(
-               {Store::make(b, {x}, 0, 1),
+               {Store::make(b, {x}, 0),
                 Cond::make(
                     CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
-                    Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+                    Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
                     nullptr)}))});
 
   /*
@@ -2830,13 +3021,16 @@ void testRegisterizerNestedConditionLoopHidden() {
 
 // Three loops and four element regions, three of which should be registerized
 // at different levels of the IR.
-void testRegisterizerNestedConditionThreeDeep() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {4}, 0, 1),
+      {Store::make(a, {4}, 0),
        Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kGT),
            Cond::make(
@@ -2846,18 +3040,18 @@ void testRegisterizerNestedConditionThreeDeep() {
                        CompareSelect::make(x, 4, CompareSelectOperation::kGT),
                        Block::make({
                            Store::make(
-                               a, {1}, Add::make(Load::make(a, {1}, 1), 1), 1),
+                               a, {1}, Add::make(Load::make(a, {1}), 1)),
                            Store::make(
-                               a, {2}, Add::make(Load::make(a, {2}, 1), 1), 1),
+                               a, {2}, Add::make(Load::make(a, {2}), 1)),
                            Store::make(
-                               a, {3}, Add::make(Load::make(a, {3}, 1), 1), 1),
+                               a, {3}, Add::make(Load::make(a, {3}), 1)),
                            Store::make(
-                               a, {4}, Add::make(Load::make(a, {4}, 1), 1), 1),
+                               a, {4}, Add::make(Load::make(a, {4}), 1)),
                            Store::make(
-                               a, {1}, Add::make(Load::make(a, {1}, 1), 1), 1),
+                               a, {1}, Add::make(Load::make(a, {1}), 1)),
                        }),
                        nullptr),
-                   Store::make(a, {2}, Add::make(Load::make(a, {2}, 1), 1), 1),
+                   Store::make(a, {2}, Add::make(Load::make(a, {2}), 1)),
                }),
                nullptr),
            nullptr)});
@@ -2930,7 +3124,8 @@ void testRegisterizerNestedConditionThreeDeep() {
 
 // Can replace a simple scalar access with a local variable even when that
 // variable is an outer loop var.
-void testRegisterizerNestedLoopSimple() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerNestedLoopSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2938,13 +3133,15 @@ void testRegisterizerNestedLoopSimple() {
   Stmt* stmt = Block::make({For::make(
       y,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       For::make(
           x,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
-          Block::make({Store::make(
-              a, {y}, Add::make(Load::make(a, {y}, 1), x), 1)})))});
+          Block::make(
+              {Store::make(a, {y}, Add::make(Load::make(a, {y}), x))})))});
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -2985,33 +3182,36 @@ void testRegisterizerNestedLoopSimple() {
 // Test the positive case of the hiddenAccess split, where an internal
 // conditional access can be hoisted up through a loop to match an existing
 // access in a higher scope and the two can be registerized.
-void testRegisterizerHiddenAccessYes() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerHiddenAccessYes) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
-          {Store::make(a, {0}, 0, 1),
+          {Store::make(a, {0}, 0),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
                Block::make(
-                   {Store::make(b, {x}, 0, 1),
+                   {Store::make(b, {x}, 0),
+                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                     Cond::make(
                         CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                         For::make(
                             y,
                             0,
+                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             10,
                             Store::make(
-                                a,
-                                {0},
-                                Add::make(Load::make(a, {0}, 1), 1),
-                                1)),
+                                a, {0}, Add::make(Load::make(a, {0}), 1))),
                         nullptr)}))}),
       nullptr)});
 
@@ -3070,9 +3270,12 @@ void testRegisterizerHiddenAccessYes() {
 // Test the negative case of the hiddenAccess split, where the hoisted access is
 // never unhidden at a higher scope and registerization occurs at the lower
 // scope.
-void testRegisterizerHiddenAccessNo() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerHiddenAccessNo) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -3081,17 +3284,19 @@ void testRegisterizerHiddenAccessNo() {
       Block::make({For::make(
           x,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           Block::make(
-              {Store::make(b, {x}, 0, 1),
+              {Store::make(b, {x}, 0),
+               // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                Cond::make(
                    CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                    For::make(
                        y,
                        0,
+                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        10,
-                       Store::make(
-                           a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1)),
+                       Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
                    nullptr)}))}),
       nullptr)});
 
@@ -3150,34 +3355,36 @@ void testRegisterizerHiddenAccessNo() {
 // In this case the conditional access must be hoisted by two loops, there are
 // two accesses here one is unhidden and the other isnt. A[0] can be
 // registerized but B[0] cannot.
-void testRegisterizerHiddenAccessMultiLoop() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
-          {Store::make(a, {0}, 0, 1),
+          {Store::make(a, {0}, 0),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
                For::make(
                    y,
                    0,
+                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    10,
                    Block::make({Cond::make(
                        CompareSelect::make(y, 3, CompareSelectOperation::kEQ),
                        Block::make(
                            {Store::make(
-                                a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1),
+                                a, {0}, Add::make(Load::make(a, {0}), 1)),
                             Store::make(
-                                b,
-                                {0},
-                                Add::make(Load::make(b, {0}, 1), 1),
-                                1)}),
+                                b, {0}, Add::make(Load::make(b, {0}), 1))}),
                        nullptr)})))}),
       nullptr)});
 
@@ -3235,26 +3442,31 @@ void testRegisterizerHiddenAccessMultiLoop() {
 
 // Accesses are registerized inside two conditions, but the immeidate parent is
 // not a condition.
-void testRegisterizerTwoConditionalLoops() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerTwoConditionalLoops) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1)),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1)),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr)});
 
   /*
@@ -3313,27 +3525,33 @@ void testRegisterizerTwoConditionalLoops() {
 }
 
 // Accesses are registerized inside two conditions, cut in the middle.
-void testRegisterizerTwoConditionalLoopsCut() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1)),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr),
-       For::make(x, 0, 10, Store::make(a, {x}, 1, 1)),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+       For::make(x, 0, 10, Store::make(a, {x}, 1)),
        Cond::make(
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
            For::make(
                x,
                0,
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                10,
-               Store::make(a, {0}, Add::make(Load::make(a, {0}, 1), 1), 1)),
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr)});
 
   /*
@@ -3401,18 +3619,22 @@ void testRegisterizerTwoConditionalLoopsCut() {
 
 // references a Let var in a local scope which cannot be hoisted out of the
 // loop.
-void testRegisterizerLoopLetVar() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopLetVar) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Block::make(
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {Let::make(y, 30),
-           Store::make(a, {y}, Add::make(x, Load::make(a, {y}, 1)), 1)}))});
+           Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))});
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3435,19 +3657,23 @@ void testRegisterizerLoopLetVar() {
 
 // references a Let var in an outer scope that does not prevent hoisting the
 // initializer.
-void testRegisterizerLoopLetVarOuter() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerLoopLetVarOuter) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt =
-      Block::make({Let::make(y, 30),
-                   For::make(
-                       x,
-                       0,
-                       10,
-                       Block::make({Store::make(
-                           a, {y}, Add::make(x, Load::make(a, {y}, 1)), 1)}))});
+  Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {Let::make(y, 30),
+       For::make(
+           x,
+           0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           10,
+           Block::make(
+               {Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))});
 
   /*
    * int y = 30;
@@ -3483,18 +3709,21 @@ void testRegisterizerLoopLetVarOuter() {
 
 // Okay so the registerizer generally goes after index flattening, but just in
 // case. Test multi index registerization.
-void testRegisterizerMultiDim() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDim) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0, 1, 2}, 0, 1),
+      {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make({Store::make(
-               a, {0, 1, 2}, Add::make(Load::make(a, {0, 1, 2}, 1), x), 1)}))});
+               a, {0, 1, 2}, Add::make(Load::make(a, {0, 1, 2}), x))}))});
 
   /*
    * A[0, 1, 2] = 0;
@@ -3529,18 +3758,21 @@ void testRegisterizerMultiDim() {
 
 // Wont registerize if only some dims match, but will still registerize distinct
 // elements.
-void testRegisterizerMultiDimPartial() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDimPartial) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0, 1, 2}, 0, 1),
+      {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make({Store::make(
-               a, {0, 2, 2}, Add::make(Load::make(a, {0, 1, 4}, 1), x), 1)}))});
+               a, {0, 2, 2}, Add::make(Load::make(a, {0, 1, 4}), x))}))});
 
   /*
    * A[0, 1, 2] = 0;
@@ -3577,19 +3809,23 @@ void testRegisterizerMultiDimPartial() {
 }
 
 // If they could overlap across all dimensions we cannot registerize.
-void testRegisterizerMultiDimOverlap() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDimOverlap) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0, 1, 2}, 0, 1),
+      {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make({Store::make(
-               a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 2}, 1), x), 1)}))});
+               a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 2}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * A[0, 1, 2] = 0;
@@ -3611,19 +3847,22 @@ void testRegisterizerMultiDimOverlap() {
 }
 
 // But, if one dimension is known to be distinct they do not overlap.
-void testRegisterizerMultiDimPartialOverlap() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make(
-      {Store::make(a, {0, 1, 2}, 0, 1),
+      {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
            0,
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            10,
            Block::make({Store::make(
-               a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 4}, 1), x), 1)}))});
+               a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 4}), x))}))});
 
   /*
    * A[0, 1, 2] = 0;                          <---- 2nd dim overlaps with store.
@@ -3638,7 +3877,7 @@ void testRegisterizerMultiDimPartialOverlap() {
    * A[0, 1, 2] = 0;
    * int A_1 = A[y, 2, 4];
    * for (int x = 0; x < 10; x++) {
-   *   A[0, x, 2] = A_1 + x;
+   *   A[0, x, 2] = x + A_1;
    * }
    */
 
@@ -3650,17 +3889,21 @@ void testRegisterizerMultiDimPartialOverlap() {
 # CHECK: A[0, 1, 2] = 0;
 # CHECK: int A_1 = A[y, 2, 4];
 # CHECK: for (
-# CHECK:   A[0, x, 2] = A_1 + x;
+# CHECK:   A[0, x, 2] = x + A_1;
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
 // A 3D reduction with different input dimensionality.
-void testRegisterizerMultiDim3DReduction1() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10, 10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {10, 10, 10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -3668,23 +3911,24 @@ void testRegisterizerMultiDim3DReduction1() {
   Stmt* stmt = For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       For::make(
           y,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           For::make(
               z,
               0,
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               10,
               Store::make(
                   c,
                   {x, y, z},
                   Add::make(
-                      Load::make(c, {x, y, z}, 1),
-                      Mul::make(
-                          Load::make(b, {x, y}, 1), Load::make(a, {x}, 1))),
-                  1))));
+                      Load::make(c, {x, y, z}),
+                      Mul::make(Load::make(b, {x, y}), Load::make(a, {x})))))));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3731,10 +3975,14 @@ void testRegisterizerMultiDim3DReduction1() {
 
 // A 3D reduction with the same smaller dimensionality using different loop
 // vars.
-void testRegisterizerMultiDim3DReduction2() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -3742,22 +3990,25 @@ void testRegisterizerMultiDim3DReduction2() {
   Stmt* stmt = For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       For::make(
           y,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           10,
           For::make(
               z,
               0,
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               10,
               Store::make(
                   c,
                   {x},
                   Add::make(
-                      Load::make(c, {x}, 1),
-                      Mul::make(Load::make(b, {y}, 1), Load::make(a, {x}, 1))),
-                  1))));
+                      Load::make(c, {x}),
+                      Mul::make(Load::make(b, {y}), Load::make(a, {x})))))));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3777,12 +4028,12 @@ void testRegisterizerMultiDim3DReduction2() {
 
   /*
    * for (int x = 0; x < 10; x++) {
-   *   int A_1 = A[x];
    *   int C_1 = C[x];
+   *   int A_1 = A[x];
    *   for (int y = 0; y < 10; y++) {
    *     int B_1 = B[y];
    *     for (int z = 0; z < 10; z++) {
-   *       C_1 = B_1 * A_1 + C_1;
+   *       C_1 = C_1 + A_1 * B_1;
    *     }
    *   }
    *   C[x] = C_1;
@@ -3795,12 +4046,12 @@ void testRegisterizerMultiDim3DReduction2() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int x
-# CHECK:   int A_1 = A[x];
 # CHECK:   int C_1 = C[x];
+# CHECK:   int A_1 = A[x];
 # CHECK:   for (int y
 # CHECK:     int B_1 = B[y];
 # CHECK:       for (int z
-# CHECK:         C_1 = B_1 * A_1 + C_1;
+# CHECK:         C_1 = C_1 + A_1 * B_1;
 # CHECK:       }
 # CHECK:     }
 # CHECK:   C[x] = C_1;

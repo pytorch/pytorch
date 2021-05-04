@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -192,6 +193,7 @@ struct FunctionalGraphSlicer {
   std::unordered_set<Value*> mutated_values_;
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t minSubgraphSize_ = 6;
 };
 

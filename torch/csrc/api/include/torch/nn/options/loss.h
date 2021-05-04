@@ -362,7 +362,9 @@ struct TORCH_API TripletMarginLossOptions {
   /// reach in order to incur zero loss. Default: 1
   TORCH_ARG(double, margin) = 1.0;
   /// Specifies the norm degree for pairwise distance. Default: 2
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 2.0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-6;
   /// The distance swap is described in detail in the paper Learning shallow
   /// convolutional feature descriptors with triplet losses by V. Balntas,
@@ -472,7 +474,7 @@ using CTCLossFuncOptions = CTCLossOptions;
 ///
 /// Example:
 /// ```
-/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// SmoothL1Loss model(SmoothL1LossOptions().reduction(torch::kNone).beta(0.5));
 /// ```
 struct TORCH_API SmoothL1LossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
@@ -484,6 +486,8 @@ struct TORCH_API SmoothL1LossOptions {
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the threshold at which to change between L1 and L2 loss. Default: 1.0
+  TORCH_ARG(double, beta) = 1.0;
 };
 
 namespace functional {
@@ -498,6 +502,42 @@ namespace functional {
 /// F::smooth_l1_loss(input, target, F::SmoothL1LossFuncOptions(torch::kNone));
 /// ```
 using SmoothL1LossFuncOptions = SmoothL1LossOptions;
+} // namespace functional
+
+// ============================================================================
+
+/// Options for the `HuberLoss` module.
+///
+/// Example:
+/// ```
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
+/// ```
+struct TORCH_API HuberLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(HuberLossOptions, reduction, kNone, kMean, kSum)
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the threshold at which to change between L1 and L2 loss. Default: 1.0
+  TORCH_ARG(double, delta) = 1.0;
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::huber_loss`.
+///
+/// See the documentation for `torch::nn::HuberLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::huber_loss(input, target, F::HuberLossFuncOptions(torch::kNone));
+/// ```
+using HuberLossFuncOptions = HuberLossOptions;
 } // namespace functional
 
 // ============================================================================
@@ -519,6 +559,7 @@ struct TORCH_API PoissonNLLLossOptions {
   TORCH_ARG(bool, full) = false;
   /// Small value to avoid evaluation of `log(0)` when `log_input = false`.
   /// Default: 1e-8
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
@@ -586,6 +627,7 @@ struct TORCH_API NLLLossOptions {
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies a target value that is ignored
   /// and does not contribute to the input gradient.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
@@ -621,6 +663,7 @@ struct TORCH_API CrossEntropyLossOptions {
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies a target value that is ignored
   /// and does not contribute to the input gradient.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;

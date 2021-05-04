@@ -7,7 +7,7 @@
 
 namespace at {
 
-struct CAFFE2_API CPUGeneratorImpl : public c10::GeneratorImpl {
+struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CPUGeneratorImpl(uint64_t seed_in = default_rng_seed_val);
   ~CPUGeneratorImpl() = default;
@@ -17,6 +17,8 @@ struct CAFFE2_API CPUGeneratorImpl : public c10::GeneratorImpl {
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
+  void set_state(const c10::TensorImpl& new_state) override;
+  c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
   static DeviceType device_type();
   uint32_t random();
   uint64_t random64();
@@ -36,8 +38,8 @@ private:
 
 namespace detail {
 
-CAFFE2_API const Generator& getDefaultCPUGenerator();
-CAFFE2_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
+TORCH_API const Generator& getDefaultCPUGenerator();
+TORCH_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
 
 } // namespace detail
 

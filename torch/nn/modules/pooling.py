@@ -5,7 +5,8 @@ from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
 
-from ..common_types import _size_any_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
+from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
+                            _ratio_3_t, _ratio_2_t, _size_any_opt_t, _size_2_opt_t, _size_3_opt_t)
 
 
 class _MaxPoolNd(Module):
@@ -44,6 +45,10 @@ class MaxPool1d(_MaxPoolNd):
     If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
     for :attr:`padding` number of points. :attr:`dilation` is the stride between the elements within the
     sliding window. This `link`_ has a nice visualization of the pooling parameters.
+
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
 
     Args:
         kernel_size: The size of the sliding window, must be > 0.
@@ -103,6 +108,10 @@ class MaxPool2d(_MaxPoolNd):
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -173,6 +182,10 @@ class MaxPool3d(_MaxPoolNd):
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -474,6 +487,10 @@ class AvgPool1d(_AvgPoolNd):
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
 
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
     an ``int`` or a one-element tuple.
 
@@ -537,6 +554,10 @@ class AvgPool2d(_AvgPoolNd):
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
 
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
@@ -581,7 +602,7 @@ class AvgPool2d(_AvgPoolNd):
     count_include_pad: bool
 
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0,
-                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: bool = None) -> None:
+                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
@@ -613,6 +634,10 @@ class AvgPool3d(_AvgPoolNd):
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
     for :attr:`padding` number of points.
+
+    Note:
+        When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
+        or the input. Sliding windows that would start in the right padded region are ignored.
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -662,7 +687,7 @@ class AvgPool3d(_AvgPoolNd):
     count_include_pad: bool
 
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0,
-                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override=None) -> None:
+                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
@@ -929,7 +954,7 @@ class _AdaptiveMaxPoolNd(Module):
     __constants__ = ['output_size', 'return_indices']
     return_indices: bool
 
-    def __init__(self, output_size: _size_any_t, return_indices: bool = False) -> None:
+    def __init__(self, output_size: _size_any_opt_t, return_indices: bool = False) -> None:
         super(_AdaptiveMaxPoolNd, self).__init__()
         self.output_size = output_size
         self.return_indices = return_indices
@@ -996,7 +1021,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     """
 
-    output_size: _size_2_t
+    output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
@@ -1033,7 +1058,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     """
 
-    output_size: _size_3_t
+    output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
@@ -1042,7 +1067,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 class _AdaptiveAvgPoolNd(Module):
     __constants__ = ['output_size']
 
-    def __init__(self, output_size: _size_any_t) -> None:
+    def __init__(self, output_size: _size_any_opt_t) -> None:
         super(_AdaptiveAvgPoolNd, self).__init__()
         self.output_size = output_size
 
@@ -1101,7 +1126,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     """
 
-    output_size: _size_2_t
+    output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_avg_pool2d(input, self.output_size)
@@ -1135,7 +1160,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     """
 
-    output_size: _size_3_t
+    output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_avg_pool3d(input, self.output_size)

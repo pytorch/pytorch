@@ -32,7 +32,7 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
  * Quantized Tensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
  * share the same Quantizer. Quantizer should be immutable.
  */
-struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
+struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   const ScalarType scalar_type_;
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
   virtual ~Quantizer();

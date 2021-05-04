@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(torch_jit_enable_new_executor);
 
 namespace torch {
@@ -55,10 +56,12 @@ struct TORCH_API EnableProfilingGuard {
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+  GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
 
   void run(Stack& inputs);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch);
 
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if
@@ -69,7 +72,9 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
-  ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
+  const ExecutionPlan& getPlanFor(
+      Stack& inputs,
+      size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
@@ -80,6 +85,8 @@ struct TORCH_API GraphExecutor {
   GraphExecutorState getDebugState();
 
   static size_t getDefaultNumBailOuts();
+
+  void debugFlushCompilationCache();
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
@@ -121,6 +128,8 @@ struct TORCH_API GraphOptimizerEnabledGuard {
 namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op);
+
+GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
 
 // for debugging information we expose a way to get the last actually
 // run graph. Previous approaches allowed querying the GraphExecutor

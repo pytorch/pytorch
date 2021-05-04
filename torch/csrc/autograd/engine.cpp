@@ -19,6 +19,7 @@
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -37,6 +38,7 @@
 namespace torch { namespace autograd {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -62,23 +64,28 @@ static void track_bad_autograd_forks() {
 //    backward call we use the caller thread to drive engine execution.
 // This is used when handling reentrant backwards calls;
 // See Note [Reentrant backwards]
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int worker_device = NO_DEVICE;
 
 // This variable is true if ALL invocations in the stack of re-entrant engine
 // invocations are imperative backwards. This special variable is needed for the
 // gradient checkpointing feature only.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int current_depth = 0;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total nested
 //   reentrant backwards depths over all device threads.
 // For CPU devices, it is the total depth associated with the original backward call.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int total_depth = 0;
 
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 
 // Every autograd worker thread is associated with a ready queue, which specifies
@@ -95,6 +102,7 @@ static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 // because we reached the maximum depth, the new thread will just reuse the same
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 
 // Note [Reentrant backwards]
@@ -168,6 +176,15 @@ int NodeTask::getReentrantDepth() const {
   }
 }
 
+CheckpointValidGuard::CheckpointValidGuard(const std::shared_ptr<const GraphTask>& graph_task) {
+  prev_checkpoint_valid_state = checkpoint_valid;
+  checkpoint_valid = graph_task->can_checkpoint() && prev_checkpoint_valid_state;
+}
+
+CheckpointValidGuard::~CheckpointValidGuard() {
+  checkpoint_valid = prev_checkpoint_valid_state;
+}
+
 auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
@@ -213,14 +230,29 @@ bool ReadyQueue::empty() const {
 
 Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
+Engine::~Engine() {
+  stop();
+}
+
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
-Engine::~Engine() {
+void Engine::stop() {
+  if (stopped_) {
+    return;
+  }
+  stopped_ = true;
+  // Under some conditions, autograd threads can hang on shutdown
+  // Do not wait for them to shutdown indefinitely but rely on timeout
+  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  if (!wait_duration_str) {
+    wait_duration_str = "10.0";
+  }
+  auto wait_duration = std::atof(wait_duration_str);
   bool noBackward = true;
   for (auto& queue: device_ready_queues_) {
     noBackward =  noBackward && queue->empty();
   }
-  if (noBackward) {
+  if (noBackward && wait_duration > 0.0f) {
     for (auto& queue : device_ready_queues_) {
      queue->pushShutdownTask();
     }
@@ -228,9 +260,16 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || defined(C10_USE_MSVC_STATIC_RUNTIME)
+
+    using namespace std::chrono_literals;
+    // Set a deadline for how long it is OK to wait device threads to shutdown
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    auto wait_deadline = std::chrono::steady_clock::now() + wait_duration * 1.0s;
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_condvar_.wait(lk);
+      if (non_reentrant_device_thread_condvar_.wait_until(lk, wait_deadline) == std::cv_status::timeout) {
+        break;
+      }
     }
 #endif
   }
@@ -471,6 +510,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -525,6 +565,7 @@ void GraphTask::set_exception(
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->setError(std::move(eptr));
   }
 }
@@ -636,9 +677,7 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
-  bool prev_checkpoint_valid_state = checkpoint_valid;
-  checkpoint_valid =
-      graph_task->can_checkpoint() && prev_checkpoint_valid_state;
+  CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
       call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
@@ -650,29 +689,26 @@ static variable_list call_function(
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  {
-    at::ThreadLocalStateGuard guard(graph_task->thread_locals_);
-    if (has_post_hooks) {
-      // In functions/accumulate_grad.cpp, there is some logic to check the
-      // conditions under which the incoming gradient can be stolen directly
-      // (which elides a deep copy) instead of cloned. One of these conditions
-      // is that the incoming gradient's refcount must be 1 (nothing else is
-      // referencing the same data).  Stashing inputs_copy here bumps the
-      // refcount, so if post hooks are employed, it's actually still ok for
-      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
-      //
-      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
-      // accumulate_grad.cpp accounts for this, but also creates a silent
-      // dependency between engine.cpp (ie, this particular engine
-      // implementation) and accumulate_grad.cpp.
-      //
-      // If you change the logic here, make sure it's compatible with
-      // accumulate_grad.cpp.
-      auto inputs_copy = inputs;
-      outputs = fn(std::move(inputs_copy));
-    } else {
-      outputs = fn(std::move(inputs));
-    }
+  if (has_post_hooks) {
+    // In functions/accumulate_grad.cpp, there is some logic to check the
+    // conditions under which the incoming gradient can be stolen directly
+    // (which elides a deep copy) instead of cloned. One of these conditions
+    // is that the incoming gradient's refcount must be 1 (nothing else is
+    // referencing the same data).  Stashing inputs_copy here bumps the
+    // refcount, so if post hooks are employed, it's actually still ok for
+    // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+    // accumulate_grad.cpp accounts for this, but also creates a silent
+    // dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with
+    // accumulate_grad.cpp.
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
+  } else {
+    outputs = fn(std::move(inputs));
   }
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
@@ -680,7 +716,6 @@ static variable_list call_function(
     ss << "Function "  << fn.name() << " returned an " << msg;
     return ss.str();
   });
-  checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -714,6 +749,11 @@ void Engine::evaluate_function(
       return;
     }
   }
+
+  // Set the ThreadLocalState before calling the function.
+  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+  // always saves ThreadLocalState without grad_mode.
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
 
   // Switches to a function's CUDA stream (if applicable) before calling it
   const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -818,9 +858,21 @@ void Engine::evaluate_function(
   }
 }
 
-/* Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
-  // Just to make sure that they will never be added to the queue again
+inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
+  // Computes the mininum topological number among all the outputs
+  if (outputs.empty()) {
+    return 0;
+  }
+  auto min_topo_nr = std::numeric_limits<uint64_t>::max();
+  for (auto & output_edge : outputs) {
+    auto topo_nr = output_edge.function.get()->topological_nr();
+    min_topo_nr = (min_topo_nr < topo_nr) ? min_topo_nr : topo_nr;
+  }
+  return min_topo_nr;
+}
+
+auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> void {
+  // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
 
@@ -829,6 +881,9 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
+    if (fn->topological_nr() < min_topo_nr) {
+      continue;
+    }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -843,16 +898,17 @@ auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
+                     bool accumulate_grad,
                      const edge_list& outputs) -> variable_list {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
 
-  // A frech first time Engine::execute call should start on the CPU device, initialize
+  // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
-  // then memorize the local_ready_queue in GraphTask
+  // then memoize the local_ready_queue in GraphTask
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
@@ -862,15 +918,36 @@ auto Engine::execute(const edge_list& roots,
       /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue);
 
-  // Now compute the dependencies for all executable functions and queue the root
-  auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
-  compute_dependencies(graph_root.get(), *graph_task);
+  // If we receive a single root, skip creating extra root node
+  bool skip_dummy_node = roots.size() == 1;
+  auto graph_root = skip_dummy_node ?
+    roots.at(0).function :
+    std::make_shared<GraphRoot>(roots, inputs);
+
+  auto min_topo_nr = compute_min_topological_nr(outputs);
+  // Now compute the dependencies for all executable functions
+  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (!outputs.empty()) {
-    graph_task->init_to_execute(*graph_root, outputs);
+    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
-  execute_with_graph_task(graph_task, graph_root);
+  // Queue the root
+  if (skip_dummy_node) {
+    InputBuffer input_buffer(roots.at(0).function->num_inputs());
+    auto input = inputs.at(0);
+
+    const auto input_stream = InputMetadata(input).stream();
+    const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
+    input_buffer.add(roots.at(0).input_nr,
+                      std::move(input),
+                      input_stream,
+                      opt_next_stream);
+
+    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+  } else {
+    execute_with_graph_task(graph_task, graph_root, InputBuffer(variable_list()));
+  }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
   // in dist_engine.cpp).
@@ -889,13 +966,13 @@ void Engine::initialize_device_threads_pool() {
 
 std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  ready_queue(graph_task->cpu_ready_queue_, at::kCPU)->push(
-      NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
+  auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -908,8 +985,12 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     // set the graph_task owner to the current device
     graph_task->owner_ = worker_device;
 
-    // The owning thread start to drive the engine execution with the GraphTask
-    // that has already been pushed to the current CPU thread's ready_queue
+    // Now that all the non-thread safe fields of the graph_task have been populated,
+    // we can enqueue it.
+    queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
+
+    // The owning thread start to drive the engine execution for any CPU task that
+    // was just pushed or will be added later from other worker threads
     lock.unlock();
     thread_main(graph_task);
     TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
@@ -922,6 +1003,11 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     // If worker_device is any devices (i.e. CPU, CUDA): this is a re-entrant
     //    backward call from that device.
     graph_task->owner_ = worker_device;
+
+    // Now that all the non-thread safe fields of the graph_task have been populated,
+    // we can enqueue it.
+    queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
+
     if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
@@ -960,6 +1046,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
@@ -1006,7 +1093,7 @@ size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at
 
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
-  if (device.type() == at::kCPU) {
+  if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
@@ -1022,6 +1109,8 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    // Static cast is ok here as the number of device should never overflow an int.
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.
@@ -1043,6 +1132,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
+    // NOLINTNEXTLINE(modernize-make-shared)
     queue.reset(new ReadyQueue());
   }
 
@@ -1055,7 +1145,7 @@ auto Engine::start_device_threads() -> void {
   // Wait for the threads to start
   {
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    while(non_reentrant_device_thread_count_.load() != num_devices) {
+    while(non_reentrant_device_thread_count_.load() != static_cast<uint32_t>(num_devices)) {
       non_reentrant_device_thread_condvar_.wait(lk);
     }
   }
@@ -1079,26 +1169,53 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
-  exec_info_[&graph_root].needed_ = true;
-
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr) {
+  // Populates exec_info so nodes that should be executed have `exec_info[node].needed_ = true`
+  // Only nodes that have a path to any edge in `outputs` should be executed.
+  // The code below populates exec_info using recursion, but the actual code does this
+  // iteratively. Refer to the numbering to see how the actual code corresponds.
+  // A difference to note is that in the iterative version, when you are working with
+  // the current Node, you are reponsible to update your parent's is_needed after all your
+  // children have been updated.
+  //
+  // is_needed = {fn: True for fn in outputs}             # (0)
+  // seen = {}
+  // def compute_is_needed(fn):
+  //   for next_edge in fn.next_edges:
+  //     child_fn = next_edge.fn
+  //     if child_fn in seen and is_needed[child_fn]:     # (1)
+  //       is_needed[fn] = true
+  //     else:
+  //       seen.add(child_fn)
+  //       if compute_is_needed(child_fn):
+  //         is_needed[fn] = true                         # (2)
+  //                                                      # (3) exit for-loop
+  //   return is_needed[fn]
+  // compute_is_needed(graph_root)
+  //
+  // NB: you might be wondering why we don't populate `seen` with outputs. We cannot
+  // because in the case where two outputs lie on the same path, we still need to explore past
+  // the first output or we would miss the nodes that are required to compute the second output.
   int output_idx = 0;
   for (auto & output_edge : outputs) {
+    // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node *output = output_edge.function.get();
     auto & info = exec_info_[output];
-    if (!info.captures_)
-      info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
-    info.captures_->emplace_back(output_edge.input_nr, output_idx++);
+    if (accumulate_grad) {
+      // if called through `.backward()` we directly set `needed_` for all the outputs to true
+      info.needed_ = true;
+    } else {
+      // otherwise it is `.grad()` and we set exec_info[fn].captures_ instead
+      // In terms of populating the rest of exec_info though, you can basically
+      // think of this as the same as setting `needed_` is true directly.
+      if (!info.captures_) {
+        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
+      }
+      info.captures_->emplace_back(output_edge.input_nr, output_idx++);
+    }
   }
   captured_vars_.resize(output_idx);
 
-  // NB: this is an uglier version (recursion replaced with iteration) of the following code:
-  // is_needed = {}
-  // def compute_is_needed(fn):
-  //   if fn not in is_needed:
-  //     is_needed[fn] = any(compute_is_needed(next_edge)
-  //                         for next_edge in fn.next_edges)
-  //   return is_needed[fn]
   struct Frame {
     Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
     Node *fn_;
@@ -1114,30 +1231,43 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
       return nullptr;
     }
   };
+
+  auto nodeShouldExecute = [this](Node *fn) {
+    auto it = exec_info_.find(fn);
+    return it != exec_info_.end() && it->second.should_execute();
+  };
+
   std::vector<Frame> stack;
   std::unordered_set<Node*> seen;
-  for (const auto & input : graph_root.next_edges()) {
-    if (seen.count(input.function.get()) > 0) continue;
-    stack.emplace_back(input.function.get());
-    while (!stack.empty()) {
-      auto &frame = stack.back();
-      if (Node *next_fn = frame.get_next_fn()) {
-        if (/* bool unseen = */ seen.emplace(next_fn).second) {
-          stack.emplace_back(next_fn);
-          continue; // recurse
-        }
-      } else {
-        // NB: if we were using real recursion we could have saved some lookups
-        // using a return value from recursive call. It would make this manually unrolled
-        // version a lot more complicated, so I skipped that.
-        const auto & next_edges = frame.fn_->next_edges();
-        const bool needed = std::any_of(
-            next_edges.begin(), next_edges.end(), [&](const Edge& edge) {
-              auto it = exec_info_.find(edge.function.get());
-              return it != exec_info_.end() && it->second.should_execute();
-            });
-        exec_info_[frame.fn_].needed_ = needed;
-        stack.pop_back();
+  stack.emplace_back(&graph_root);
+  exec_info_.emplace(stack.back().fn_, ExecInfo());
+
+  while (!stack.empty()) {
+    auto &frame = stack.back();
+    const auto fn = frame.fn_;
+
+    Node *child_fn = nullptr;
+    while((child_fn = frame.get_next_fn()) && !seen.emplace(child_fn).second) {
+      // (1) next child exists AND has already been seen
+      if (nodeShouldExecute(child_fn)) {
+        exec_info_[fn].needed_ = true;
+      }
+    }
+
+    if (child_fn) {
+      // (2) next child exists but has not been seen
+      if (child_fn->topological_nr() < min_topo_nr) {
+        // child created before the first output means this child cannot have
+        // an edge to output
+        continue;
+      }
+      stack.emplace_back(child_fn);
+    } else {
+      // (3) no next child exists for `fn` means its `needed` has already been
+      // finalized. pop stack and update parent
+      stack.pop_back();
+      if (nodeShouldExecute(fn) && !stack.empty()) {
+        exec_info_[stack.back().fn_].needed_ = true;
       }
     }
   }

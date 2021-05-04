@@ -7,6 +7,7 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
+using namespace torch::test;
 
 #define ASSERT_VARIABLE_EQ(a,b) ASSERT_TRUE(torch::allclose((a),(b)))
 #define EXPECT_VARIABLE_EQ(a,b) EXPECT_TRUE(torch::allclose((a),(b)))
@@ -27,6 +28,7 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -37,6 +39,7 @@ TEST(AutogradAPITests, BackwardSimpleTest) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -49,6 +52,7 @@ TEST(AutogradAPITests, BackwardTest) {
   ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradSimpleTest) {
   // basic grad
   Variable x = torch::randn({2,2}, torch::requires_grad());
@@ -60,6 +64,7 @@ TEST(AutogradAPITests, GradSimpleTest) {
   ASSERT_VARIABLE_EQ(grad_res[1], x + torch::ones({2, 2}) * 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -79,12 +84,14 @@ TEST(AutogradAPITests, GradTest) {
   ASSERT_VARIABLE_EQ(y.grad(), y_grad);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradNonLeafTest) {
   Variable x_init = torch::randn({2, 2}, torch::requires_grad());
   Variable x = x_init;
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   Variable grad_output = torch::ones({2, 2});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++ i) {
     auto res = simple_fn(x, y);
     auto input_grads = grad({res}, {x}, {grad_output}, {}, true);
@@ -93,6 +100,7 @@ TEST(AutogradAPITests, GradNonLeafTest) {
     ASSERT_VARIABLE_EQ(input_grads[0], grad_x_expected);
     ASSERT_FALSE(x.grad().defined());
     ASSERT_FALSE(y.grad().defined());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x = x + 0.05 * input_grads[0];
   }
 
@@ -105,6 +113,7 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   ASSERT_TRUE(y.grad().defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradUnreachableTest) {
   Variable x = torch::ones({1}, torch::requires_grad());
   Variable y = torch::ones({1}, torch::requires_grad());
@@ -128,6 +137,31 @@ TEST(AutogradAPITests, GradUnreachableTest) {
   ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
+  // Test that certain nodes are not erroneously executed when an input
+  // is unreachable. See #39784
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable var) {
+      return var;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      ADD_FAILURE() << "This node should not be executed!";
+      return grad_output;
+    }
+  };
+
+  auto x = torch::randn(1, torch::requires_grad());
+  auto x1 = torch::randn(1);
+  auto x2 = MyFunction::apply(x + x1);
+
+  auto y = torch::randn(1, torch::requires_grad());
+  auto grad_res = torch::autograd::grad({x2}, {y}, {}, {}, false, true);
+  ASSERT_FALSE(grad_res[0].defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
@@ -138,8 +172,10 @@ TEST(AutogradAPITests, RetainGrad) {
   h1.retain_grad();
 
   // Gradient should be accumulated
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
 
@@ -154,6 +190,44 @@ TEST(AutogradAPITests, RetainGrad) {
   ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, AnomalyMode) {
+  // Needs to have backtrace as warning and then throw an error
+  torch::autograd::DetectAnomalyGuard detect_anomaly;
+  {
+    WarningCapture warnings;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    auto x = torch::tensor({5.0}, torch::requires_grad());
+    auto y = x * x;
+    auto z = y * y;
+    y += 1;
+    ASSERT_THROWS_WITH(z.backward(), "inplace");
+    ASSERT_TRUE(
+        warnings.str().find("Traceback of forward") != std::string::npos);
+  }
+  {
+    WarningCapture warnings;
+    // Double backward
+    auto x = torch::tensor({0.0}, torch::requires_grad());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    auto y = x.pow(1.5);
+    auto gr =
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
+    auto msgs = warnings.messages();
+    ASSERT_EQ(msgs.size(), 2);
+    ASSERT_TRUE(
+        msgs[0].find("Traceback of forward call that caused the error") !=
+        std::string::npos);
+    ASSERT_TRUE(
+        msgs[1].find(
+            "Traceback of forward call that induced the previous calculation") !=
+        std::string::npos);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -172,7 +246,9 @@ TEST(CustomAutogradTest, CustomFunction) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable x = torch::randn({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable y = torch::randn({5,5}, torch::requires_grad());
   auto res = MyFunction::apply(x,2,y);
   auto go = torch::ones({}, torch::requires_grad());
@@ -182,6 +258,7 @@ TEST(CustomAutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1) {
@@ -198,6 +275,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -211,7 +289,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   };
 
   auto x = torch::ones(1, torch::requires_grad());
-  
+
   MyFunction::apply(x).backward();
   ASSERT_FALSE(x.grad().defined());
 
@@ -225,6 +303,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
     {MyFunction::apply(x)}, {x}, {}, false, false, true)[0].defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -241,6 +320,7 @@ TEST(CustomAutogradTest, MaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DontMaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -258,6 +338,7 @@ TEST(CustomAutogradTest, DontMaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
  struct MyOp : public Function<MyOp> {
@@ -270,6 +351,7 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
    }
  };
 
+ // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
  auto x = torch::ones({5,5}, torch::requires_grad());
  {
     at::NoGradGuard no_grad;
@@ -278,6 +360,7 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkDirty) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -289,11 +372,13 @@ TEST(CustomAutogradTest, MarkDirty) {
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return { (grad_output[0]*2.0) };
     }
   };
 
   // Clone here because modifying leafs inplace is not allowed
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad()).clone();
   auto version_before = x._version();
   auto out = MyFunction::apply(x);
@@ -302,6 +387,7 @@ TEST(CustomAutogradTest, MarkDirty) {
   out.sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -315,6 +401,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
   auto mask = MyFunction::apply(x);
   ASSERT_FALSE(mask.requires_grad());
@@ -322,6 +409,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
   y.sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -339,6 +427,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
   auto out = MyFunction::apply(x);
 
@@ -348,6 +437,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones({5,5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -361,11 +451,13 @@ TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
   auto r = MyFunction::apply(x * x);
   (r * x).sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnLeafInplace) {
   struct Inplace : public Function<Inplace> {
     static variable_list forward(AutogradContext *ctx, Variable a, Variable b) {
@@ -378,7 +470,9 @@ TEST(CustomAutogradTest, ReturnLeafInplace) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable x = torch::randn({5,5});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable y = torch::randn({5,5}, torch::requires_grad());
 
   auto out = Inplace::apply(x,y);
@@ -389,6 +483,7 @@ TEST(CustomAutogradTest, ReturnLeafInplace) {
   ASSERT_VARIABLE_EQ(y.grad(), torch::ones({5,5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   struct DoubleInplace : public Function<DoubleInplace> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -402,6 +497,7 @@ TEST(CustomAutogradTest, ReturnDuplicateInplace) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
 
   ASSERT_THROWS_WITH(DoubleInplace::apply(x), "leaf Variable that requires grad");
@@ -411,6 +507,7 @@ TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicate) {
   struct DoubleDuplicate : public Function<DoubleDuplicate> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -423,11 +520,13 @@ TEST(CustomAutogradTest, ReturnDuplicate) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
   auto out = DoubleDuplicate::apply(x);
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, SaveEmptyForBackward) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -443,12 +542,14 @@ TEST(CustomAutogradTest, SaveEmptyForBackward) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable x = torch::randn({5,5}, torch::requires_grad());
   auto y = MyFunction::apply(x);
   y.sum().backward();
   ASSERT_VARIABLE_EQ(x.grad(), 2*x);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, InvalidGradients) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -456,16 +557,20 @@ TEST(CustomAutogradTest, InvalidGradients) {
     }
 
     static variable_list backward(AutogradContext *ctsx, variable_list grad_outputs) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return {torch::randn(10, torch::dtype(torch::kFloat).requires_grad(true))};
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input1 = torch::randn({5,5}, torch::dtype(torch::kFloat).requires_grad(true));
   ASSERT_THROWS_WITH(
     MyFunction::apply(input1).sum().backward(), "expected shape");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable x) {
@@ -477,6 +582,7 @@ TEST(CustomAutogradTest, NoGradInput) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y;
   {
@@ -488,6 +594,7 @@ TEST(CustomAutogradTest, NoGradInput) {
   ASSERT_FALSE(y.grad_fn());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, TooManyGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable input) {
@@ -501,6 +608,7 @@ TEST(CustomAutogradTest, TooManyGrads) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DepNoGrad) {
   struct F1 : public Function<F1> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -524,6 +632,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn(5, torch::requires_grad());
   auto out = F1::apply(x);
   Variable &a = out[0], &b = out[1];
@@ -536,6 +645,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones(x.sizes()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Reentrant) {
   static Variable y_data = torch::randn({2, 2});
   struct Reenter : public Function<Reenter> {
@@ -573,6 +683,7 @@ TEST(CustomAutogradTest, Reentrant) {
 
 // NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
 // the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -596,10 +707,12 @@ TEST(CustomAutogradTest, DeepReentrant) {
   };
 
   // This should not stack overflow
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::tensor({8193}, torch::dtype(torch::kFloat).requires_grad(true));
   DeepReenter::apply(v).sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReentrantPriority) {
   static std::vector<int> order;
 
@@ -636,7 +749,9 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = MyFunction::apply(torch::tensor({6}, torch::dtype(torch::kFloat).requires_grad(true)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = Reenter::apply(torch::tensor({9}, torch::dtype(torch::kFloat).requires_grad(true)));
   auto v = a*b;
   v.backward();
@@ -647,10 +762,15 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   ASSERT_EQ(order.size(), 10);
   ASSERT_EQ(std::count(order.begin(), order.end(), 1), 9);
   ASSERT_EQ(order.back(), 0);
+  // Clear static variable in case test get executed in a loop
+  order.clear();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Hooks) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable x = torch::ones({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Variable y = torch::ones({5,5})*4;
   y.set_requires_grad(true);
 
@@ -667,16 +787,19 @@ TEST(CustomAutogradTest, Hooks) {
   auto hook_1 = z.register_hook([&bw_hook](Variable grad){
     bw_hook(1, grad);
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 1);
 
   auto hook_2 = z.register_hook([&bw_hook](Variable grad){
     bw_hook(2, grad);
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 4);
 
   z.remove_hook(hook_2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 5);
 
@@ -687,17 +810,20 @@ TEST(CustomAutogradTest, Hooks) {
   z.remove_hook(hook_1);
   z.register_hook(bw_hook_modify);
   y.grad().zero_();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   z.backward(torch::ones({5,5}), true, false);
   ASSERT_VARIABLE_EQ(y.grad(), (x+1)*2);
 
   y.register_hook(bw_hook_modify);
   y.grad().zero_();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   z.backward(torch::ones({5,5}), false, false);
   ASSERT_VARIABLE_EQ(y.grad(), (x+1)*4);
 
   ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, HookNone) {
   struct NoneGradientFunction : public Function<NoneGradientFunction> {
     static variable_list forward(AutogradContext *ctx, Variable x, Variable y) {
@@ -716,7 +842,9 @@ TEST(CustomAutogradTest, HookNone) {
     was_called = true;
   });
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = torch::randn({5,5});
 
   auto out = NoneGradientFunction::apply(x,y);
@@ -726,6 +854,46 @@ TEST(CustomAutogradTest, HookNone) {
   ry.register_hook(hook);
   (rx+ry).sum().backward();
   ASSERT_TRUE(was_called);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithInputs) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  z.backward(torch::ones({5, 5}), false, false, {x});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+  ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{}), "cannot be empty");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x;
+  Variable w = z + x * y + y * y;
+  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
 }
 
 // TODO add these tests if needed

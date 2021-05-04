@@ -119,12 +119,14 @@ torch::nn::MarginRankingLoss|Yes|No
 torch::nn::HingeEmbeddingLoss|Yes|No
 torch::nn::MultiLabelMarginLoss|Yes|No
 torch::nn::SmoothL1Loss|Yes|No
+torch::nn::HuberLoss|Yes|No
 torch::nn::SoftMarginLoss|Yes|No
 torch::nn::MultiLabelSoftMarginLoss|Yes|No
 torch::nn::CosineEmbeddingLoss|Yes|No
 torch::nn::MultiMarginLoss|Yes|No
 torch::nn::TripletMarginLoss|Yes|No
 torch::nn::PixelShuffle|Yes|No
+torch::nn::PixelUnshuffle|Yes|No
 torch::nn::Upsample|Yes|No
 torch::nn::DataParallel|No|No
 torch::nn::parallel::DistributedDataParallel|No|No
@@ -228,6 +230,7 @@ F::multilabel_soft_margin_loss|Yes|No
 F::multi_margin_loss|Yes|No
 F::nll_loss|Yes|No
 F::smooth_l1_loss|Yes|No
+F::huber_loss|Yes|No
 F::soft_margin_loss|Yes|No
 F::triplet_margin_loss|Yes|No
 F::pixel_shuffle|Yes|No

@@ -317,16 +317,17 @@ __global__ void avg_pool3d_cuda_update_grad_input(
   }
 }
 
-#define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW: \
+#define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:      \
   avg_pool3d_cuda_update_output<KW, scalar_t, accscalar_t>  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
-       work_input.packed_accessor64<scalar_t, 4>(),           \
-       work_output.packed_accessor64<scalar_t, 4>(),          \
+       work_input.packed_accessor64<scalar_t, 4>(),         \
+       work_output.packed_accessor64<scalar_t, 4>(),        \
        kT, kH,                                              \
        dT, dH, dW,                                          \
        padT, padH, padW,                                    \
        count_include_pad,                                   \
        offsetZ, divisor);                                   \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                           \
   break
 
 void avg_pool3d_out_cuda_template(
@@ -443,10 +444,9 @@ void avg_pool3d_out_cuda_template(
                 padT, padH, padW,
                 count_include_pad,
                 offsetZ, divisor);
-            break;
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+          break;
         }
-
-        AT_CUDA_CHECK(cudaGetLastError());
 
         totalZ -= 65535;
         offsetZ += 65535;
@@ -581,8 +581,7 @@ void avg_pool3d_backward_out_cuda_template(
               kT, kH, kW,
               1.0f/divide_factor,
               offsetZ);
-
-          AT_CUDA_CHECK(cudaGetLastError());
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
 
           totalZ -= 65535;
           offsetZ += 65535;
@@ -614,6 +613,7 @@ void avg_pool3d_backward_out_cuda_template(
                   padT, padH, padW,
                   count_include_pad,
                   offsetZ, divisor);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
           else {
             avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
@@ -625,9 +625,8 @@ void avg_pool3d_backward_out_cuda_template(
                   padT, padH, padW,
                   count_include_pad,
                   offsetZ, divisor);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
-
-          AT_CUDA_CHECK(cudaGetLastError());
 
           totalZ -= 65535;
           offsetZ += 65535;
@@ -639,15 +638,14 @@ void avg_pool3d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& avg_pool3d_out_cuda(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool3d_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool3d_out_cuda_template(
     output,
@@ -683,16 +681,15 @@ Tensor avg_pool3d_cuda(
   return output;
 }
 
-Tensor& avg_pool3d_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

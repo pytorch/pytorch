@@ -219,7 +219,7 @@ class DynamicSimpleElementBench(benchmark.DynamicShape, SimpleElementBench):
 
     @classmethod
     def module(cls):
-        return "dynamic_simple_element"
+        return "simple_dynamic_element"
 
     def instantiate_input(self):
         N, = self.rand_shape([self.N])

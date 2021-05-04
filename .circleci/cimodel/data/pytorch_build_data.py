@@ -32,24 +32,9 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9.2", [
-                ("3.6", [
-                    X(True),
-                    ("cuda_gcc_override", [
-                        ("gcc5.4", [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
-                ])
-            ]),
-            ("10.1", [
-                ("3.6", [
-                    ('build_only', [X(True)]),
-                ]),
-            ]),
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [XImportant(True)]),
+                    ("shard_test", [X(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [X(True)]),
@@ -57,9 +42,9 @@ CONFIG_TREE_DATA = [
                     ]),
                 ]),
             ]),
-            ("11.0", [
+            ("11.1", [
                 ("3.8", [
-                    X(True),
+                    ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [XImportant(True)]),
@@ -72,7 +57,9 @@ CONFIG_TREE_DATA = [
     ("bionic", [
         ("clang", [
             ("9", [
-                XImportant("3.6"),
+                ("3.6", [
+                    ("noarch", [XImportant(True)]),
+                ]),
             ]),
             ("9", [
                 ("3.6", [
@@ -84,12 +71,16 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [
                 ("3.8", [
-                    ("coverage", [XImportant(True)]),
+                    ("coverage", [
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),
         ("rocm", [
-            ("3.7", [
+            ("3.9", [
                 ("3.6", [
                     ('build_only', [XImportant(True)]),
                 ]),
@@ -163,8 +154,10 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "asan": AsanConfigNode,
             "xla": XlaConfigNode,
+            "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
+            "noarch": NoarchConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -195,6 +188,16 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class MLCConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "MLC=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_mlc"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -239,6 +242,14 @@ class ParallelTBBConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class NoarchConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_noarch"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

@@ -8,6 +8,8 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <string>
 
@@ -37,6 +39,7 @@ at::Tensor PackedLinearWeight::apply_impl(
       "The dimension of input tensor should be larger than or equal to 2");
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
 
   auto packB = w.get();
@@ -48,6 +51,7 @@ at::Tensor PackedLinearWeight::apply_impl(
       "The number of rows in the packB should be equal to K: " +
           std::to_string(K));
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float input_scale_float = input.q_scale();
   int32_t input_zero_point_int32 = input.q_zero_point();
 
@@ -65,7 +69,7 @@ at::Tensor PackedLinearWeight::apply_impl(
     // Process the per channel quantization.
     output_multiplier_float.resize(N, 0.0);
     act_times_w_scale.resize(N, 1.0f);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       act_times_w_scale[i] = (input_scale_float * w_scale[i]);
       output_multiplier_float[i] =
           act_times_w_scale[i] / static_cast<float>(output_scale);
@@ -101,7 +105,7 @@ at::Tensor PackedLinearWeight::apply_impl(
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       // This operation does the following:
       // 1) Creates a "row buffer" vector with offset values that must be
       //    added to the integer matrix multiplication operation to ensure
@@ -187,6 +191,7 @@ at::Tensor PackedLinearWeight::apply_impl(
                 packA.getRowOffsetBuffer(),
                 col_offsets.data(),
                 bias_ptr,
+                // NOLINTNEXTLINE(bugprone-argument-comment)
                 N, /*nCol=*/
                 1, /* groups*/
                 act_times_w_scale.data());
@@ -251,6 +256,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, input_scale, output_scale, requantization_scales);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -261,6 +267,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
@@ -298,6 +305,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
     rows_input *= input_contig.size(i);
   }
@@ -324,10 +332,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       output_zero_point);
 
   auto output_min = ReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();

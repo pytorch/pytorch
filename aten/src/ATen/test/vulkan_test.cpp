@@ -1,3 +1,5 @@
+#ifndef USE_VULKAN_API
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -9,6 +11,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   for (auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return diff.abs().max().item<float>() < (0.01 + 2e-2 * maxValue);
 }
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -19,6 +22,7 @@ bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.f;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, ToVulkanToCpu) {
   if (!at::is_vulkan_available())
     return;
@@ -31,23 +35,32 @@ TEST(VulkanTest, ToVulkanToCpu) {
   ASSERT_TRUE(almostEqual(t2, t));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, upsampleNearest2D) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
       at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_out_expected = at::upsample_nearest2d(t_in, {4, 6});
   auto tv_in =
       t_in.to(at::TensorOptions{at::Device{at::kVulkan}}.dtype(at::kFloat));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tv_out = at::upsample_nearest2d(tv_in, {4, 6});
   auto t_out =
       tv_out.to(at::TensorOptions{at::Device{at::kCPU}}.dtype(at::kFloat));
 
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, add) {
   if (!at::is_vulkan_available())
     return;
@@ -62,10 +75,13 @@ TEST(VulkanTest, add) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, add_not4dim) {
   if (!at::is_vulkan_available())
     return;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_in0 = at::rand({1, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_in1 = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::add(t_in0, t_in1, 2);
   auto tv_in0 = t_in0.vulkan();
@@ -76,11 +92,14 @@ TEST(VulkanTest, add_not4dim) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, add_cpu_vulkan) {
   if (!at::is_vulkan_available())
     return;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_in0 = at::rand({2, 96, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_in1 =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 2, 96, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::add(t_in0, t_in1, 2);
   auto tv_in0 = t_in0.vulkan();
@@ -95,6 +114,7 @@ TEST(VulkanTest, add_cpu_vulkan) {
   ASSERT_TRUE(almostEqual(t_out2, t_out_expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, add_) {
   if (!at::is_vulkan_available())
     return;
@@ -114,6 +134,7 @@ TEST(VulkanTest, add_) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, mulScalar) {
   if (!at::is_vulkan_available())
     return;
@@ -132,6 +153,7 @@ TEST(VulkanTest, mulScalar) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, addScalar) {
   if (!at::is_vulkan_available())
     return;
@@ -139,6 +161,7 @@ TEST(VulkanTest, addScalar) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -157,6 +180,7 @@ TEST(VulkanTest, addScalar) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, conv2d) {
   if (!at::is_vulkan_available())
     return;
@@ -187,6 +211,7 @@ TEST(VulkanTest, conv2d) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   if (!at::is_vulkan_available())
     return;
@@ -208,9 +233,15 @@ TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   auto tv_in = t_in.vulkan();
   auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, addmm) {
   if (!at::is_vulkan_available())
     return;
@@ -218,6 +249,7 @@ TEST(VulkanTest, addmm) {
   auto t_m2 = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float beta = 100;
   float alpha = 2;
   auto t_out_expected = at::addmm(t_b, t_m1, t_m2, beta, alpha);
@@ -227,13 +259,21 @@ TEST(VulkanTest, addmm) {
   auto tv_b = t_b.vulkan();
   auto tv_out = at::addmm(tv_b, tv_m1, tv_m2, beta, alpha);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, mm) {
   if (!at::is_vulkan_available())
     return;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_m1 = at::rand({10, 20}, at::device(at::kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_m2 = at::rand({20, 30}, at::device(at::kCPU).dtype(at::kFloat));
 
   auto t_out_expected = t_m1.mm(t_m2);
@@ -242,14 +282,23 @@ TEST(VulkanTest, mm) {
   auto tv_m2 = t_m2.vulkan();
   auto tv_out = tv_m1.mm(tv_m2);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, clamp) {
   if (!at::is_vulkan_available())
     return;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float min = -0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float max = 0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_in = at::rand({1, 3, 16, 16}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::clamp(t_in, min, max);
 
@@ -260,11 +309,15 @@ TEST(VulkanTest, clamp) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, hardtanh_) {
   if (!at::is_vulkan_available())
     return;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float min = -0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float max = 0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_in = at::rand({1, 3, 16, 16}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::hardtanh_(t_in, min, max);
 
@@ -275,6 +328,7 @@ TEST(VulkanTest, hardtanh_) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, relu_) {
   if (!at::is_vulkan_available())
     return;
@@ -293,6 +347,7 @@ TEST(VulkanTest, relu_) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, mean) {
   if (!at::is_vulkan_available())
     return;
@@ -301,7 +356,12 @@ TEST(VulkanTest, mean) {
   auto tv_in = t_in.vulkan();
   auto tv_out = at::mean(tv_in, {2, 3}, false);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 enum class OpType { conv2d, hardtanh_, mean, addmm };
@@ -319,6 +379,7 @@ class Hardtanh_ : public BaseOp {
  public:
   Hardtanh_() : BaseOp(OpType::hardtanh_) {}
   at::Tensor run(at::Tensor& t) override {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::hardtanh_(t, 0, 6);
   }
   std::string toString() override {
@@ -392,6 +453,7 @@ class Conv2d : public BaseOp {
 
 class OpsList {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   OpsList() {}
   OpsList(std::vector<std::unique_ptr<BaseOp>>& _ops) : ops(std::move(_ops)) {}
 
@@ -430,131 +492,196 @@ class OpsList {
 class MobileNetV2 : public OpsList {
  public:
   MobileNetV2() {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({32, 3, 3, 3}, 1, 2, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({32, 1, 3, 3}, 32, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({16, 32, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({96, 16, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({96, 1, 3, 3}, 96, 2, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({24, 96, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({24, 144, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 2, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({32, 144, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 2, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({64, 192, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
     ops.emplace_back(new Mean());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ops.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, DISABLED_mobilenetv2) {
   if (!at::is_vulkan_available())
     return;
 
   MobileNetV2 mn2{};
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
   auto tv_in = t_in.vulkan();
   mn2.runDual(t_in, tv_in);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, OpsList) {
   if (!at::is_vulkan_available())
     return;
 
   std::vector<std::unique_ptr<BaseOp>> ops;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({32, 3, 3, 3}, 1, 2, 1));
   ops.emplace_back(new Hardtanh_());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({32, 1, 3, 3}, 32, 1, 1));
   ops.emplace_back(new Hardtanh_());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({16, 32, 1, 1}, 1, 1, 0));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({96, 16, 1, 1}, 1, 1, 0));
   ops.emplace_back(new Hardtanh_());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({96, 1, 3, 3}, 96, 2, 1));
   ops.emplace_back(new Hardtanh_());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({24, 96, 1, 1}, 1, 1, 0));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0)); // 1, 144, 56, 56
   ops.emplace_back(new Hardtanh_());
   ops.emplace_back(new Mean());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ops.emplace_back(new Addmm(1, 144, 1000, 0, 1));
   OpsList opsList(ops);
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = opsList.run(t_in);
 
@@ -591,6 +718,7 @@ inline std::vector<c10::IValue> callOpByName(
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, conv2dPrepack) {
   if (!at::is_vulkan_available())
     return;
@@ -604,6 +732,7 @@ TEST(VulkanTest, conv2dPrepack) {
   std::vector<int64_t> stride{1, 1};
   std::vector<int64_t> padding{0, 0};
   std::vector<int64_t> dilation{1, 1};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float output_min = 0.25;
   float output_max = 1.0;
 
@@ -647,11 +776,13 @@ TEST(VulkanTest, conv2dPrepack) {
   ASSERT_TRUE(prepack_check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 2, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::adaptive_avg_pool2d(t_in, {3, 3});
   auto tv_in = t_in.vulkan();
@@ -668,11 +799,13 @@ TEST(VulkanTest, adaptive_avg_pool2d) {
 }
 
 // TODO: Enable when view operator for Vulkan landed
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, DISABLED_adaptive_avg_pool2d_2) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 1280, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::adaptive_avg_pool2d(t_in, {1, 1});
   auto tv_in = t_in.vulkan();
@@ -688,14 +821,18 @@ TEST(VulkanTest, DISABLED_adaptive_avg_pool2d_2) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, reshape) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 8, 1, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t_out_expected = at::reshape(t_in, {1, 8});
   auto tv_in = t_in.vulkan();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tv_out = at::reshape(tv_in, {1, 8});
   auto t_out = tv_out.cpu();
 
@@ -707,6 +844,7 @@ TEST(VulkanTest, reshape) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, reshape2) {
   if (!at::is_vulkan_available())
     return;
@@ -727,6 +865,7 @@ TEST(VulkanTest, reshape2) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, tensor5d) {
   if (!at::is_vulkan_available())
     return;
@@ -736,6 +875,7 @@ TEST(VulkanTest, tensor5d) {
   auto tv_in = t_in.vulkan();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, tensor5d_transpose) {
   if (!at::is_vulkan_available())
     return;
@@ -745,6 +885,7 @@ TEST(VulkanTest, tensor5d_transpose) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -760,6 +901,7 @@ TEST(VulkanTest, tensor5d_transpose) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, view) {
   if (!at::is_vulkan_available())
     return;
@@ -779,6 +921,7 @@ TEST(VulkanTest, view) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, slice) {
   if (!at::is_vulkan_available())
     return;
@@ -788,6 +931,7 @@ TEST(VulkanTest, slice) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -803,6 +947,7 @@ TEST(VulkanTest, slice) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, select) {
   if (!at::is_vulkan_available())
     return;
@@ -812,6 +957,7 @@ TEST(VulkanTest, select) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -827,6 +973,7 @@ TEST(VulkanTest, select) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, unsqueeze) {
   if (!at::is_vulkan_available())
     return;
@@ -836,6 +983,7 @@ TEST(VulkanTest, unsqueeze) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -851,6 +999,7 @@ TEST(VulkanTest, unsqueeze) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, cat) {
   if (!at::is_vulkan_available())
     return;
@@ -860,6 +1009,7 @@ TEST(VulkanTest, cat) {
   auto t_in1 =
       at::rand({1, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto t_in2 =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 5, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
   auto t_out_expected = at::cat({t_in0, t_in1, t_in2}, 1);
@@ -874,11 +1024,13 @@ TEST(VulkanTest, cat) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanTest, max_pool2d) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(VulkanTest, DISABLED_max_pool2d) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 3, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = at::max_pool2d(t_in, {2, 2}, {1}, {0}, {1});
   auto tv_in = t_in.vulkan();
@@ -894,16 +1046,18 @@ TEST(VulkanTest, max_pool2d) {
   ASSERT_TRUE(check);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VulkanTest, avg_pool2d) {
   if (!at::is_vulkan_available())
     return;
 
   auto t_in =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({1, 3, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, {1});
+  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, true);
   auto tv_in = t_in.vulkan();
 
-  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, {1});
+  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, true);
   auto t_out = tv_out.cpu();
 
   const auto check = almostEqual(t_out, t_out_expected);
@@ -913,3 +1067,5 @@ TEST(VulkanTest, avg_pool2d) {
   }
   ASSERT_TRUE(check);
 }
+
+#endif /* USE_VULKAN_API */

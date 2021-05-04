@@ -1,19 +1,32 @@
 #!/bin/bash
 set -eux -o pipefail
 
-if [[ "$CUDA_VERSION" == "10" ]]; then
-    cuda_complete_version="10.1"
+cuda_major_version=${CUDA_VERSION%.*}
+
+if [[ "$cuda_major_version" == "10" ]]; then
     cuda_installer_name="cuda_10.1.243_426.00_win10"
     msbuild_project_dir="CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
     cuda_install_packages="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
-elif [[ "$CUDA_VERSION" == "11" ]]; then
-    cuda_complete_version="11.0"
-    cuda_installer_name="cuda_11.0.2_451.48_win10"
-    msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-    cuda_install_packages="nvcc_11.0 cuobjdump_11.0 nvprune_11.0 nvprof_11.0 cupti_11.0 cublas_11.0 cublas_dev_11.0 cudart_11.0 cufft_11.0 cufft_dev_11.0 curand_11.0 curand_dev_11.0 cusolver_11.0 cusolver_dev_11.0 cusparse_11.0 cusparse_dev_11.0 npp_11.0 npp_dev_11.0 nvrtc_11.0 nvrtc_dev_11.0 nvml_dev_11.0"
+elif [[ "$cuda_major_version" == "11" ]]; then
+    if [[ "${CUDA_VERSION}" == "11.1" ]]; then
+        cuda_installer_name="cuda_11.1.0_456.43_win10"
+        msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+        cuda_install_packages="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
+    elif [[ "${CUDA_VERSION}" == "11.2" ]]; then
+        cuda_installer_name="cuda_11.2.2_461.33_win10_1"
+        msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+        cuda_install_packages="nvcc_11.2 cuobjdump_11.2 nvprune_11.2 nvprof_11.2 cupti_11.2 cublas_11.2 cublas_dev_11.2 cudart_11.2 cufft_11.2 cufft_dev_11.2 curand_11.2 curand_dev_11.2 cusolver_11.2 cusolver_dev_11.2 cusparse_11.2 cusparse_dev_11.2 npp_11.2 npp_dev_11.2 nvrtc_11.2 nvrtc_dev_11.2 nvml_dev_11.2"
+    else
+        echo "This should not happen! ABORT."
+        exit 1
+    fi
 else
     echo "CUDA_VERSION $CUDA_VERSION is not supported yet"
     exit 1
+fi
+
+if [[ "$cuda_major_version" == "11" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+    cuda_install_packages="${cuda_install_packages} Display.Driver"
 fi
 
 cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
@@ -44,7 +57,7 @@ then
     export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
 fi
 
-if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${cuda_complete_version}/bin/nvcc.exe"
+if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe"
 then
     echo "CUDA installation failed"
     mkdir -p /c/w/build-results
