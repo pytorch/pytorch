@@ -2029,13 +2029,16 @@ Keyword args:
 """.format(**common_args))
 
 add_docstr(torch.clamp, r"""
-clamp(input, min, max, *, out=None) -> Tensor
+clamp(input, min=None, max=None, *, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
-Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
+Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
+Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
 
 .. math::
-    y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
+    y_i = \min(\max(x_i, \text{min\_value}_i), \text{max\_value}_i)
+
+If :attr:`min` is ``None``, there is no lower bound.
+Or, if :attr:`max` is ``None`` there is no upper bound.
 """ + r"""
 
 .. note::
@@ -2044,8 +2047,8 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 
 Args:
     {input}
-    min (Number): lower-bound of the range to be clamped to
-    max (Number): upper-bound of the range to be clamped to
+    min (Number or Tensor, optional): lower-bound of the range to be clamped to
+    max (Number or Tensor, optional): upper-bound of the range to be clamped to
 
 Keyword args:
     {out}
@@ -2058,47 +2061,14 @@ Example::
     >>> torch.clamp(a, min=-0.5, max=0.5)
     tensor([-0.5000,  0.1734, -0.0478, -0.0922])
 
-.. function:: clamp(input, *, min, out=None) -> Tensor
+    >>> min = torch.linspace(-1, 1, steps=4)
+    >>> torch.clamp(a, min=min)
+    tensor([-1.0000,  0.1734,  0.3333,  1.0000])
 
-Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
-
-Args:
-    {input}
-
-Keyword args:
-    min (Number): minimal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([-0.0299, -2.3184,  2.1593, -0.8883])
-    >>> torch.clamp(a, min=0.5)
-    tensor([ 0.5000,  0.5000,  2.1593,  0.5000])
-
-.. function:: clamp(input, *, max, out=None) -> Tensor
-
-Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-Args:
-    {input}
-
-Keyword args:
-    max (Number): maximal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
-    >>> torch.clamp(a, max=0.5)
-    tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
 """.format(**common_args))
 
 add_docstr(torch.clip, r"""
-clip(input, min, max, *, out=None) -> Tensor
+clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
@@ -4706,8 +4676,8 @@ Similar to SciPy's `scipy.special.xlogy`.
 """ + r"""
 
 Args:
-    input (Number or Tensor)
-    other (Number or Tensor)
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
 
 .. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
