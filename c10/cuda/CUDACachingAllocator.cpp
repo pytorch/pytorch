@@ -1313,7 +1313,9 @@ static void uncached_delete(void* ptr) {
 struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = (1UL << 60UL);
-    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < one_exa_bytes,
+    TORCH_CHECK_WITH(
+      CUDAOutOfMemoryError,
+      size < one_exa_bytes,
       "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
