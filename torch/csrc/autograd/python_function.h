@@ -45,12 +45,16 @@ struct PyNode : public Node {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~PyNode() {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
-    pybind11::gil_scoped_acquire g;
-    Py_DECREF(obj);
+    // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      Py_DECREF(obj);
+    }
   }
 };
 
@@ -116,7 +120,9 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject *module);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPFunctionType;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPFunctionClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
