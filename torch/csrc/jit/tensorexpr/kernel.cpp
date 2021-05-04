@@ -1944,6 +1944,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::hardswish:
     case aten::batch_norm:
     case aten::log:
     case aten::log10:
