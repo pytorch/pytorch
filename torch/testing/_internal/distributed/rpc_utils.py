@@ -95,7 +95,7 @@ class ForkHelper(MultiProcessTestCase):
         super().tearDown()
 
 @unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    TEST_WITH_ASAN or TEST_WITH_TSAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):

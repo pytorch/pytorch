@@ -247,11 +247,19 @@ class TCPStoreTest(TestCase, StoreTestBase):
     @unittest.skipIf(
         IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
     )
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+    )
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
     @unittest.skipIf(
         IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
+    )
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
     )
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(-1)
