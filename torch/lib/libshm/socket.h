@@ -34,11 +34,11 @@ protected:
   struct sockaddr_un prepare_address(const char *path) {
     struct sockaddr_un address;
     address.sun_family = AF_UNIX;
-    // Maximum size for sun_path is 108
     strcpy(address.sun_path, path);
     return address;
   }
 
+  // Implemented based on https://man7.org/linux/man-pages/man7/unix.7.html
   size_t address_length(struct sockaddr_un address) {
     return offsetof(sockaddr_un, sun_path) + strlen(address.sun_path) + 1;
   }
