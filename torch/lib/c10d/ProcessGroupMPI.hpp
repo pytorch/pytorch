@@ -85,14 +85,10 @@ class ProcessGroupMPI : public ProcessGroup {
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
-        : ProcessGroup::Work(
-              -1,
-              OpType::UNKNOWN,
-              profilingTitle,
-              inputTensors),
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))) {}
+              c10::ListType::create(c10::TensorType::get()))) {}
 
     std::vector<at::Tensor> result() override;
 
@@ -102,8 +98,8 @@ class ProcessGroupMPI : public ProcessGroup {
     friend class ProcessGroupMPI;
 
    private:
-    void finishCompleteFuture();
-    void finishCompleteErrorFuture(std::exception_ptr eptr);
+    void finishWorkMPI();
+    void finishWorkMPIError(std::exception_ptr eptr);
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;

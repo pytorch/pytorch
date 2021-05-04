@@ -102,12 +102,12 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
   return future_;
 }
 
-void ProcessGroupMPI::WorkMPI::finishCompleteErrorFuture(std::exception_ptr eptr) {
+void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
   future_->setError(eptr);
   finish(eptr);
 }
 
-void ProcessGroupMPI::WorkMPI::finishCompleteFuture() {
+void ProcessGroupMPI::WorkMPI::finishWorkMPI() {
   future_->markCompleted(at::IValue(outputTensors_));
   finish();
 }
@@ -352,9 +352,9 @@ void ProcessGroupMPI::runLoop() {
 
     try {
       workEntry->run(workEntry);
-      work->finishCompleteFuture();
+      work->finishWorkMPI();
     } catch (...) {
-      work->finishCompleteErrorFuture(std::current_exception());
+      work->finishWorkMPIError(std::current_exception());
     }
 
     lock.lock();
