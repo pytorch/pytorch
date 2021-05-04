@@ -622,35 +622,6 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
 }
 
-TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
-  // Test current runtime can load and run bytecode version 4 and 5.
-  std::string file_path(__FILE__);
-  auto test_model_file_v5 =
-      file_path.substr(0, file_path.find_last_of("/\\") + 1);
-  auto test_model_file_v4 = test_model_file_v5;
-  test_model_file_v4.append("script_module_v4.ptl");
-  test_model_file_v5.append("script_module_v5.ptl");
-  Module jit_module_v4 = load(test_model_file_v4);
-  Module jit_module_v5 = load(test_model_file_v5);
-  mobile::Module mobile_module_v4 = _load_for_mobile(test_model_file_v4);
-  mobile::Module mobile_module_v5 = _load_for_mobile(test_model_file_v4);
-
-  auto input_data = std::vector<IValue>({IValue(1)});
-  auto jit_module_v4_output = jit_module_v4.forward(input_data).toTensor();
-  auto jit_module_v5_output = jit_module_v5.forward(input_data).toTensor();
-  auto mobile_module_v4_output =
-      mobile_module_v4.forward(input_data).toTensor();
-  auto mobile_module_v5_output =
-      mobile_module_v5.forward(input_data).toTensor();
-
-  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
-
-  AT_ASSERT(jit_module_v4_output.equal(expected_result));
-  AT_ASSERT(jit_module_v5_output.equal(expected_result));
-  AT_ASSERT(mobile_module_v4_output.equal(expected_result));
-  AT_ASSERT(mobile_module_v5_output.equal(expected_result));
-}
-
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
@@ -687,6 +658,26 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV4ToV3) {
 }
 
 namespace {
+void runTorchScriptModel(Module m) {
+  // Run the backport model, then compare the result with expect
+  // result
+  auto input_data = std::vector<IValue>({IValue(1)});
+  auto actual_result = m.forward(input_data).toTensor();
+  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
+
+  AT_ASSERT(actual_result.equal(expected_result));
+}
+
+void runByteCodeModel(mobile::Module m) {
+  // Run the backport model, then compare the result with expect
+  // result
+  auto input_data = std::vector<IValue>({IValue(1)});
+  auto actual_result = m.forward(input_data).toTensor();
+  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
+
+  AT_ASSERT(actual_result.equal(expected_result));
+}
+
 void backportBasicCheck(
     std::string test_model_file,
     const int64_t expect_from_version) {
@@ -713,12 +704,12 @@ void backportBasicCheck(
 
     // Load and run the backport model, then compare the result with expect
     // result
-    auto input_data = std::vector<IValue>({IValue(1)});
-    mobile::Module m = _load_for_mobile(iss);
-    auto actual_result = m.forward(input_data).toTensor();
-    auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
+    mobile::Module m_mobile = _load_for_mobile(iss);
+    runByteCodeModel(m_mobile);
 
-    AT_ASSERT(actual_result.equal(expected_result));
+    Module m_torch_script = load(iss);
+    runTorchScriptModel(m_torch_script);
+
     current_to_version--;
   }
 }
@@ -732,6 +723,24 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV5ToV4) {
 
   // Run basic check for backport from v5 to v4
   backportBasicCheck(test_model_file_v5, 5);
+}
+
+TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
+  // Test current runtime can load and run bytecode version 4 and 5.
+  std::string file_path(__FILE__);
+  auto test_model_file_v5 =
+      file_path.substr(0, file_path.find_last_of("/\\") + 1);
+  auto test_model_file_v4 = test_model_file_v5;
+  test_model_file_v4.append("script_module_v4.ptl");
+  test_model_file_v5.append("script_module_v5.ptl");
+  Module ts_module_v4 = load(test_model_file_v4);
+  Module ts_module_v5 = load(test_model_file_v5);
+  mobile::Module mobile_module_v4 = _load_for_mobile(test_model_file_v4);
+  mobile::Module mobile_module_v5 = _load_for_mobile(test_model_file_v4);
+  runByteCodeModel(mobile_module_v4);
+  runByteCodeModel(mobile_module_v5);
+  runTorchScriptModel(ts_module_v4);
+  runTorchScriptModel(ts_module_v5);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

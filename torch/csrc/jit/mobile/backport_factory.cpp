@@ -25,10 +25,10 @@ bool backport_v5_to_v4(
     caffe2::serialize::PyTorchStreamReader& reader,
     caffe2::serialize::PyTorchStreamWriter& writer);
 
-BackportFactory* BackportFactory::instance = 0;
+BackportFactory* BackportFactory::instance = nullptr;
 
 BackportFactory* BackportFactory::getInstance() {
-  if (instance == 0) {
+  if (instance == nullptr) {
     instance = new BackportFactory();
   }
   return instance;
