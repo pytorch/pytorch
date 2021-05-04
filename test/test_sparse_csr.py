@@ -62,10 +62,10 @@ class TestSparseCSR(TestCase):
                                     dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "0th value of crow_indices must be 0"):
-            torch.sparse_csr_tensor(torch.tensor([-1, -1, -1]), torch.tensor(col_indices), torch.tensor(values), size,
+            torch.sparse_csr_tensor(torch.tensor([-1, 0, 4]), torch.tensor(col_indices), torch.tensor(values), size,
                                     dtype=dtype, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "last value of crow_indices should be less than length of col_indices."):
+        with self.assertRaisesRegex(RuntimeError, "last value of crow_indices should be equal to the length of col_indices."):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 0, 0]), torch.tensor(values), size,
                                     dtype=dtype, device=device)
 

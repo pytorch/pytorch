@@ -7,6 +7,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Resize.h>
 #include <algorithm>
 
 #include <cuda_runtime.h>
@@ -37,9 +38,9 @@ Tensor& add_out_dense_sparse_csr_cuda(
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
-  AT_ASSERT(dense.layout() == kStrided);
-  AT_ASSERT(src.is_sparse_csr());
-  AT_ASSERT(dense.is_cuda());
+  TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
+  TORCH_INTERNAL_ASSERT(src.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(dense.is_cuda());
 
   TORCH_CHECK(
       output.is_contiguous(),
@@ -76,7 +77,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
   Tensor src_crow_indices = src.crow_indices();
   Tensor src_col_indices = src.col_indices();
 
-  output.resize_as_(dense);
+  at::native::resize_output(output, dense.sizes());
   Tensor resultBuffer = output;
   Tensor valuesBuffer = src_values.to(commonDtype);
 
