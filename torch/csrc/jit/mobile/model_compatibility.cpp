@@ -1,6 +1,8 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
+#include <torch/csrc/jit/mobile/import.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
@@ -21,9 +23,20 @@ c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
   c10::optional<at::Device> device;
+  std::shared_ptr<CompilationUnit> compilation_unit =
+      std::make_shared<CompilationUnit>();
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    return typeResolverGeneral(qn, compilation_unit);
+  };
+
+  std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
+      std::make_shared<mobile::CompilationUnit>();
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+    return objLoaderGeneral(type, input, mobile_compilation_unit);
+  };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, nullptr, nullptr, device, stream_reader);
+      archive_name, type_resolver, obj_loader, device, stream_reader);
   return ivalues;
 }
 
@@ -43,9 +56,9 @@ bool check_zip_file(std::shared_ptr<ReadAdapterInterface> rai) {
     // files that do not start with the file entry, so it is relatively safe to
     // perform this check.
     TORCH_WARN("The zip file might be problematic. Please check it again.");
-    return true;
+    return false;
   }
-  return false;
+  return true;
 }
 
 std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
@@ -70,7 +83,7 @@ int64_t _get_model_bytecode_version(const std::string& filename) {
 }
 
 int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
-  if (check_zip_file(rai)) {
+  if (!check_zip_file(rai)) {
     return -1;
   }
   PyTorchStreamReader reader(std::move(rai));
