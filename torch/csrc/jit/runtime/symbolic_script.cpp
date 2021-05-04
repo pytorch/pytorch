@@ -849,7 +849,7 @@ const std::vector<std::string> functions = {
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (result >= 3.).type_as(result)
+                m = (result > 3.).type_as(result)
                 m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
                 return grad_output * m
 
