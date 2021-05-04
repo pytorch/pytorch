@@ -2,10 +2,9 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-// keeping THC headers for gpuAtomicAdd
-#include <THC/THCAtomics.cuh>
 
 #include <thrust/pair.h>
 
@@ -95,14 +94,19 @@ template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
     scalar_t * grad_input, scalar_t * grad_output,
     int64_t input_w,
-    int64_t pad_l, int64_t pad_r) {
+    int64_t pad_l, int64_t pad_r, int64_t gi_numel) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
-    gpuAtomicAdd(
-      &grad_input[index_pair.first], grad_output[index_pair.second]);
+    fastAtomicAdd(
+      grad_input,
+      index_pair.first,
+      gi_numel,
+      grad_output[index_pair.second],
+      true
+    );
   }
 }
 
@@ -130,7 +134,7 @@ template <typename scalar_t>
 __global__ void reflection_pad2d_backward_out_kernel(
     scalar_t * grad_input, scalar_t * grad_output,
     int64_t input_dim_x, int64_t input_dim_y,
-    int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane) {
+    int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane, int64_t gi_numel) {
   auto output_xy = threadIdx.x + blockIdx.x * blockDim.x;
   auto output_dim_x = input_dim_x + pad_l + pad_r;
   auto output_dim_y = input_dim_y + pad_t + pad_b;
@@ -142,7 +146,13 @@ __global__ void reflection_pad2d_backward_out_kernel(
       pad_l, pad_t,
       output_xy, y_shift, z_shift, nplane);
 
-    gpuAtomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
+    fastAtomicAdd(
+      grad_input,
+      index_pair.first,
+      gi_numel,
+      grad_output[index_pair.second],
+      true
+    );
   }
 }
 
@@ -191,7 +201,7 @@ void reflection_pad1d_backward_out_template(
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
+          input_w, pad_l, pad_r, grad_input.numel());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
@@ -350,7 +360,7 @@ void reflection_pad2d_backward_out_template(
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
               grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
               input_w, input_h,
-              pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
+              pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane, grad_input.numel());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
