@@ -157,7 +157,7 @@ def insert_observer_rewrite(
 
 def get_target_dtype_for_node_rewrite(
     node: Node,
-    qconfig_map: Dict[str, QConfigAny],
+    qconfig: QConfigAny,
     inputs_seen_counter: int,
     outputs_seen_counter: int,
     input_quantized_idxs: List[int],
@@ -168,10 +168,9 @@ def get_target_dtype_for_node_rewrite(
     convert.
     """
     if node.op == 'placeholder':
-        cur_input_idx = inputs_seen_counter
         if inputs_seen_counter in input_quantized_idxs:
-            # TODO: properly set between quint8 and qint8
-            return torch.qint8
+            # TODO(before land): properly set between quint8 and qint8
+            return torch.quint8
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
@@ -180,20 +179,21 @@ def get_target_dtype_for_node_rewrite(
     elif node.op in ('call_module', 'call_method', 'call_function'):
 
         # get qconfig to determine the eventual dtype of this node
-        local_qconfig = qconfig_map.get(node.name, None)
-        if local_qconfig is not None:
+        if qconfig is not None:
             act_dtype, weight_dtype, act_compute_dtype = \
-                get_qconfig_dtypes(local_qconfig)
+                get_qconfig_dtypes(qconfig)
             # print(f'dtypes act {act_dtype} weight {weight_dtype} act_compute {act_compute_dtype}')
             return act_dtype
         else:
             return torch.float
 
+    elif node.op == 'get_attr':
+        return torch.float
+
     elif node.op == 'output':
-        cur_output_idx = outputs_seen_counter
         if outputs_seen_counter in output_quantized_idxs:
-            # TODO: properly set between quint8 and qint8
-            return torch.qint8
+            # TODO(before land): properly set between quint8 and qint8
+            return torch.quint8
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
@@ -207,7 +207,10 @@ def maybe_insert_input_observers_for_node_rewrite(
     qconfig: QConfigAny,
     load_arg: Callable,
     model: torch.nn.Module,
+    modules: Dict[str, torch.nn.Module],
     graph: Graph,
+    node_name_to_target_dtype: Dict[str, Any],
+    cache_for_no_tensor_check: Dict[Node, bool],
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -236,25 +239,31 @@ def maybe_insert_input_observers_for_node_rewrite(
             # TODO(before land): handle fixedqparamsquantizehandler
             is_bias = node_arg_is_bias(node, arg)
             # TODO(before land): add no_tensors check
+            arg_args_have_no_tensors = \
+                all_node_args_have_no_tensors(
+                    arg, modules, cache_for_no_tensor_check)
             weight_needs_obs = is_weight and weight_is_quantized(qconfig)
             bias_needs_obs = \
                 (is_bias and activation_dtype(qconfig) == torch.float16) and \
                 weight_dtype(qconfig) == torch.float16
+
+            arg_dtype = node_name_to_target_dtype[arg.name]
+            node_dtype = node_name_to_target_dtype[node.name]
             dtype_changes_and_second_dtype_not_float = (
                 # if the dtypes are different, we need an observer
-                (arg.dtype != node.dtype) and
+                (arg_dtype != node_dtype) and
                 # except if the second dtype is float, a dequant will be inserted
                 # without an observer in convert
                 # TODO(future PR): change this so a placeholder is inserted for
                 # future dequants, to make the logic easier to understand
-                (node.dtype != torch.float)
+                (node_dtype != torch.float)
             )
 
             needs_obs = (
                 weight_needs_obs or
                 bias_needs_obs or
                 dtype_changes_and_second_dtype_not_float
-            )
+            ) and not (arg_args_have_no_tensors)
 
             if needs_obs:
                 observer = act_post_process_ctr()
@@ -262,7 +271,8 @@ def maybe_insert_input_observers_for_node_rewrite(
                 new_obs = insert_observer_rewrite(
                     arg_this_env, observer, model, graph)
                 # set the type, so the next node can read it
-                new_obs.dtype = node.dtype
+                node_name_to_target_dtype[new_obs.name] = node_dtype
+                # new_obs.dtype = node.dtype
                 # override this arg to be the observed arg
                 new_arg = new_obs
 
@@ -277,6 +287,7 @@ def maybe_insert_output_observer_for_node_rewrite(
     model: torch.nn.Module,
     graph: Graph,
     matches: Dict[str, MatchResult],
+    node_name_to_target_dtype: Dict[str, Any],
 ) -> Optional[Node]:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
@@ -301,15 +312,19 @@ def maybe_insert_output_observer_for_node_rewrite(
             observer = qconfig.activation()  # type: ignore[union-attr]
             new_obs = insert_observer_rewrite(node, observer, model, graph)
             # set the type, so the next node can read it
-            new_obs.dtype = node.dtype
+            node_name_to_target_dtype[new_obs.name] = \
+                node_name_to_target_dtype[node.name]
+            # new_obs.dtype = node.dtype
             return new_obs
 
     elif node.op == 'output':
         prev_node = node.args[0]
         assert isinstance(prev_node, Node)
+        prev_node_dtype = node_name_to_target_dtype[prev_node.name]
+        node_dtype = node_name_to_target_dtype[node.name]
         should_insert_observer = (
-            prev_node.dtype == torch.float and
-            node.dtype != torch.float
+            prev_node_dtype == torch.float and
+            node_dtype != torch.float
         )
         if should_insert_observer:
             # TODO(before land): handle fixedqparamsquantizehandler
@@ -318,7 +333,8 @@ def maybe_insert_output_observer_for_node_rewrite(
             new_obs = insert_observer_rewrite(
                 prev_node, observer, model, graph)
             # set the type, so the next node can read it
-            new_obs.dtype = node.dtype
+            node_name_to_target_dtype[new_obs.name] = node_dtype
+            # new_obs.dtype = node.dtype
             return new_obs
 
     return None
@@ -641,6 +657,8 @@ def insert_observers_for_model_rewrite(
     """
 
     env: Dict[Any, Any] = {}
+    node_name_to_target_dtype: Dict[str, Any] = {}
+    cache_for_no_tensor_check: Dict[Node, bool] = dict()
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -651,7 +669,9 @@ def insert_observers_for_model_rewrite(
 
     for node in model.graph.nodes:
         # print('\nobs graph', observed_graph, '\n')
-        print('processing node', node.format_node())
+        # print('\nenv', env)
+        # print('\nnode_name_to_target_dtype', node_name_to_target_dtype)
+        print('processing node', node.format_node(), '\n')
 
         # copy the current node as is
         new_node = observed_graph.node_copy(node, load_arg)
@@ -663,10 +683,9 @@ def insert_observers_for_model_rewrite(
         # print('match results', root_node, matched_nodes, pattern, qhandler, qconfig)
 
         # assign a target dtype to the current node
-        new_node.dtype = get_target_dtype_for_node_rewrite(
-            node, qconfig_map, inputs_seen_counter, outputs_seen_counter,
+        node_name_to_target_dtype[new_node.name] = get_target_dtype_for_node_rewrite(
+            node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs)
-        # print('dtype', new_node.dtype)
 
         #
         # After this point, the current node and all of its arguments
@@ -682,27 +701,66 @@ def insert_observers_for_model_rewrite(
             pass
 
         elif new_node.op in ('call_module', 'call_method', 'call_function', 'output'):
-            skip_inserting_observers = (
-                (qconfig is None) or
+            # TODO(before land): fix the modules hack
+            modules = dict(model.named_modules())
+            args_have_no_tensors = \
+                all_node_args_have_no_tensors(
+                    new_node, modules, cache_for_no_tensor_check)
+            is_like_copy_node = \
                 (qhandler is not None and (
                     isinstance(qhandler, CopyNodeQuantizeHandler) or
-                    qhandler.num_tensor_args == 0
+                    args_have_no_tensors
                 ))
-            )
+
+            skip_inserting_observers = (
+                (qconfig is None) or
+                is_like_copy_node
+            ) and (not new_node.op == 'output')
 
             if not skip_inserting_observers:
-                # this modifies new_node inplace
-                maybe_insert_input_observers_for_node_rewrite(
-                    new_node, qconfig, load_arg, model, observed_graph)
-                # this returns the new observer node if it was needed
-                maybe_output_obs = maybe_insert_output_observer_for_node_rewrite(
-                    new_node, model, observed_graph, matches)
-                if maybe_output_obs is not None:
-                    env[new_node.name] = maybe_output_obs
+                if new_node.op != 'output':
+                    # this modifies new_node inplace
+                    maybe_insert_input_observers_for_node_rewrite(
+                        new_node, qconfig, load_arg, model, modules, observed_graph,
+                        node_name_to_target_dtype, cache_for_no_tensor_check)
+                    # this returns the new observer node if it was needed
+                    maybe_output_obs = maybe_insert_output_observer_for_node_rewrite(
+                        new_node, model, observed_graph, matches,
+                        node_name_to_target_dtype)
+                    if maybe_output_obs is not None:
+                        env[new_node.name] = maybe_output_obs
+                        env[maybe_output_obs.name] = maybe_output_obs
+                else:  # output
+                    # TODO(before land): check for non-node args?
+                    prev_node = new_node.args[0]
+                    if isinstance(prev_node, Node):
+                        if is_activation_post_process_node(prev_node, modules):
+                            prev_node = prev_node.args[0]
+                    elif isinstance(prev_node, dict):
+                        # get first value
+                        # TODO(before land): make generic
+                        prev_node = list(prev_node.items())[0][1]
+                        if is_activation_post_process_node(prev_node, modules):
+                            prev_node = prev_node.args[0]
+                    prev_node_qconfig = qconfig_map[prev_node.name]
+                    # this modifies new_node inplace
+                    maybe_insert_input_observers_for_node_rewrite(
+                        new_node, prev_node_qconfig, load_arg, model, modules, observed_graph,
+                        node_name_to_target_dtype, cache_for_no_tensor_check)
             else:
                 # if we skipped observation and we have a copy node,
                 # assign the dtype to the dtype of the previous node
-                new_node.dtype = new_node.args[0].dtype
+                # new_node.dtype = new_node.args[0].dtype
+                if (qhandler is not None and (
+                    isinstance(qhandler, CopyNodeQuantizeHandler)
+                )):
+                    prev_node = new_node.args[0]
+                    if isinstance(prev_node, Node):
+                        node_name_to_target_dtype[new_node.name] = \
+                            node_name_to_target_dtype[prev_node.name]
+                elif args_have_no_tensors:
+                    node_name_to_target_dtype[new_node.name] = \
+                        torch.float
 
         #
         # After this point, the current node has input and output observers
@@ -715,8 +773,6 @@ def insert_observers_for_model_rewrite(
             inputs_seen_counter += 1
         elif node.op == 'output':
             outputs_seen_counter += 1
-
-        if new_node.op == 'output':
             results_node = env[new_node.name]
 
     return results_node
@@ -1109,7 +1165,8 @@ class Quantizer:
         output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
-        if True:
+        use_new = True
+        if use_new:
             result_node = insert_observers_for_model_rewrite(
                 model, self.modules, matches, self.qconfig_map,
                 observed_graph, prepare_custom_config_dict,
@@ -1117,7 +1174,7 @@ class Quantizer:
 
         # for now, gate the old logic out for easy review
         # if the RFC goes forward, this will get deleted
-        if False:
+        if not use_new:
             result_node = insert_observers_for_model(
                 model, self.modules, matches, quants, observed_node_names_set,
                 self.qconfig_map, self.activation_post_process_map, self.activation_post_process_indexes,

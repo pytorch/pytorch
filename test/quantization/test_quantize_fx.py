@@ -1104,8 +1104,10 @@ class TestQuantizeFx(QuantizationTestCase):
         # the first transpose is not quantized because the input is not quantized
         node_list2 = [
             ns.call_module(nn.Conv2d),
-            ns.call_function(torch.quantize_per_tensor),
+            # TODO(before land): verify that this change is ok
+            # ns.call_function(torch.quantize_per_tensor),
             ns.call_method("transpose"),
+            ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
             ns.call_method("transpose"),
             ns.call_method("dequantize"),
@@ -1120,6 +1122,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = M().eval()
             m = prepare_fx(m, qconfig_dict)
             m(torch.randn(2, 1, 3, 3))
+            print(m)
             m = convert_fx(m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
             # make sure it runs
