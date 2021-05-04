@@ -935,23 +935,18 @@ if(BUILD_PYTHON)
   # then these will just use "python", but at least they'll be consistent with
   # each other).
   if(NOT DEFINED PYTHON_INCLUDE_DIR)
-    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
-    # which sometimes outputs directories that do not exist
-    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    # TODO: Verify that sysconfig isn't inaccurate
+    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
       set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
     else()
-      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
-      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
-        set(PYTHON_INCLUDE_DIR "${_py_inc}")
-        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
-      endif()
+      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
     endif()
   endif(NOT DEFINED PYTHON_INCLUDE_DIR)
 
   if(NOT DEFINED PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
       if(MSVC)
@@ -1431,15 +1426,6 @@ endif()
 
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
-
-  include_directories(../third_party/optimizer)
-  set(ONNX_SRCS
-    "../third_party/optimizer/onnxoptimizer/optimize.cc"
-    "../third_party/optimizer/onnxoptimizer/pass.cc"
-    "../third_party/optimizer/onnxoptimizer/pass_registry.cc"
-    "../third_party/optimizer/onnxoptimizer/pass_manager.cc")
-  list(APPEND Caffe2_CPU_SRCS ${ONNX_SRCS})
-
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
@@ -1461,6 +1447,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer EXCLUDE_FROM_ALL)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
@@ -1473,8 +1460,13 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
       caffe2_interface_library(onnx onnx_library)
+      caffe2_interface_library(onnx_optimizer onnx_library)
     endif()
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
+    endif()
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
