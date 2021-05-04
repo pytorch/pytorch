@@ -13,12 +13,19 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_keyset_excluded(autocast_dispatch_keyset);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
+}
+
+bool is_cpu_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
+}
+
+void set_cpu_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
 }
 
 namespace {

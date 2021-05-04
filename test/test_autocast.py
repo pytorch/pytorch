@@ -25,9 +25,9 @@ class TestAutocastCPU(TestCase):
         if add_kwargs is None:
             add_kwargs = {}
 
-        self.assertFalse(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_cpu_enabled())
         with torch.cpu.amp.autocast():
-            self.assertTrue(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_cpu_enabled())
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
 
@@ -70,7 +70,7 @@ class TestAutocastCPU(TestCase):
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.cpu.amp.autocast(enabled=False):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_cpu_enabled())
 
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
@@ -79,8 +79,8 @@ class TestAutocastCPU(TestCase):
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
-            self.assertTrue(torch.is_autocast_enabled())
-        self.assertFalse(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_cpu_enabled())
+        self.assertFalse(torch.is_autocast_cpu_enabled())
 
     def args_maybe_kwargs(self, op_with_args):
         if len(op_with_args) == 2:
