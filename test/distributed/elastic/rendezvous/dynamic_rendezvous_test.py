@@ -36,6 +36,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _RendezvousCloseOp,
     _RendezvousContext,
     _RendezvousExitOp,
+    _RendezvousJoinOp,
     _RendezvousKeepAliveOp,
     _RendezvousState,
     _RendezvousStateHolder,
@@ -875,6 +876,113 @@ class TestRendezvousExitOp(AbstractTestRendezvousOp, TestCase):
 
     def test_finishes_if_node_is_not_participant(self) -> None:
         self._assert_action(_Action.FINISH)
+
+
+class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
+    def _create_op(self) -> Callable:
+        return _RendezvousJoinOp()
+
+    def test_raises_closed_if_rendezvous_is_closed(self) -> None:
+        self._state.closed = True
+
+        self._assert_action(_Action.ERROR_CLOSED)
+
+    def test_finishes_if_rendezvous_is_complete_and_node_is_participant(self) -> None:
+        self._state.participants[self._node] = 0
+
+        self._state.complete = True
+
+        self._assert_action(_Action.FINISH)
+
+    def _assert_waits_rendezvous_completion(self) -> None:
+        keep_alive_time = self._now - self._keep_alive_interval
+
+        for delta, expected_action in [
+            (timedelta(seconds=0), _Action.KEEP_ALIVE),
+            (timedelta(seconds=1), _Action.SYNC),
+        ]:
+            self._state.last_heartbeats[self._node] = keep_alive_time + delta
+
+            self._assert_action(expected_action)
+
+    def test_waits_next_round_if_rendezvous_is_complete(self) -> None:
+        self._max_nodes = 1
+
+        self._state.complete = True
+
+        self._assert_waits_rendezvous_completion()
+
+    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_in_wait_list(self) -> None:
+        self._state.wait_list.add(self._node)
+
+        self._state.complete = True
+
+        self._assert_waits_rendezvous_completion()
+
+    def test_adds_to_wait_list_if_rendezvous_is_complete_and_num_nodes_is_less_than_max_nodes(
+        self,
+    ) -> None:
+        self._state.complete = True
+
+        self._assert_action(_Action.ADD_TO_WAIT_LIST)
+
+    def test_waits_rendezvous_to_complete_if_node_is_participant(self) -> None:
+        self._max_nodes = 3
+
+        self._state.participants[self._node] = 0
+
+        self._state.deadline = self._now
+
+        self._assert_waits_rendezvous_completion()
+
+    def test_marks_rendezvous_complete_if_node_is_participant_and_last_call_deadline_exceeded(
+        self,
+    ) -> None:
+        self._max_nodes = 3
+
+        self._state.participants[self._node] = 0
+
+        self._state.deadline = self._now - timedelta(seconds=1)
+
+        self._assert_action(_Action.MARK_RENDEZVOUS_COMPLETE)
+
+    def test_adds_to_participants(self) -> None:
+        self._assert_action(_Action.ADD_TO_PARTICIPANTS)
+
+    def test_raises_timeout_if_deadline_exceeded(self) -> None:
+        self._deadline = 0
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_participant(self) -> None:
+        self._deadline = 0
+
+        self._state.participants[self._node] = 0
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_in_wait_list(self) -> None:
+        self._deadline = 0
+
+        self._state.wait_list.add(self._node)
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_removes_from_participants_if_timed_out_but_rollback_deadline_is_not_reached(
+        self,
+    ) -> None:
+        self._deadline = 5
+
+        self._state.participants[self._node] = 0
+
+        self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS)
+
+    def test_removes_from_wait_list_if_timed_out_but_rollback_deadline_is_not_reached(self) -> None:
+        self._deadline = 5
+
+        self._state.wait_list.add(self._node)
+
+        self._assert_action(_Action.REMOVE_FROM_WAIT_LIST)
 
 
 class TestRendezvousCloseOp(AbstractTestRendezvousOp, TestCase):

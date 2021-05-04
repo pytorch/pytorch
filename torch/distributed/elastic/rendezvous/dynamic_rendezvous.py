@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Optional, Set, Tuple, cast
 
 from torch.distributed import Store
 
@@ -702,6 +702,71 @@ class _RendezvousExitOp:
                 return _Action.ERROR_TIMEOUT
             return _Action.REMOVE_FROM_PARTICIPANTS
         return _Action.FINISH
+
+
+class _RendezvousJoinOp:
+    """Represents a rendezvous join operation."""
+
+    def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
+        state = ctx.state
+
+        # A closed rendezvous means that it no longer accepts new nodes.
+        if state.closed:
+            return _Action.ERROR_CLOSED
+
+        is_participant = ctx.node in state.participants
+
+        # If we are part of the rendezvous and it is already complete there is
+        # no further action to take.
+        if state.complete and is_participant:
+            return _Action.FINISH
+
+        now = time.monotonic()
+        if now > deadline:
+            rollback_period = 5  # 5 seconds
+
+            # If we still have time to rollback (a short period on top of the
+            # operation deadline), try to remove ourself from the rendezvous.
+            # It is okay if we can't though as our keep-alive will eventually
+            # expire.
+            if now <= deadline + rollback_period:
+                # If we are part of the rendezvous, it means we couldn't find
+                # enough participants to complete it on time.
+                if is_participant:
+                    return _Action.REMOVE_FROM_PARTICIPANTS
+                # If we are in the wait list, it means we couldn't wait till the
+                # next round of the rendezvous.
+                if ctx.node in state.wait_list:
+                    return _Action.REMOVE_FROM_WAIT_LIST
+            return _Action.ERROR_TIMEOUT
+
+        if state.complete:
+            # If we are here, it means we are not part of the rendezvous. In
+            # case the rendezvous has capacity for additional participants add
+            # ourself to the wait list for the next round.
+            if len(state.participants) < ctx.settings.max_nodes:
+                if ctx.node not in state.wait_list:
+                    return _Action.ADD_TO_WAIT_LIST
+        elif is_participant:
+            # If the rendezvous has enough number of participants including us,
+            # check whether we have passed the rendezvous deadline. If yes,
+            # complete it.
+            if len(state.participants) >= ctx.settings.min_nodes:
+                if cast(datetime, state.deadline) < datetime.utcnow():
+                    return _Action.MARK_RENDEZVOUS_COMPLETE
+        else:
+            # The rendezvous is not complete yet and we are not part of it. Try
+            # to join.
+            return _Action.ADD_TO_PARTICIPANTS
+
+        if _should_keep_alive(ctx):
+            return _Action.KEEP_ALIVE
+
+        # At this point either the rendezvous is not complete, but we are part
+        # of it, which means we have to wait for other participants to join; or
+        # the rendezvous is complete, but we are not part of it, which means we
+        # have to wait for the next round.
+        return _Action.SYNC
 
 
 class _RendezvousCloseOp:
