@@ -248,13 +248,13 @@ struct AllocParams {
         block(nullptr),
         err(cudaSuccess) {}
 
-  int device() {
+  int device() const {
     return search_key.device;
   }
-  cudaStream_t stream() {
+  cudaStream_t stream() const {
     return search_key.stream;
   }
-  size_t size() {
+  size_t size() const {
     return search_key.size;
   }
 
