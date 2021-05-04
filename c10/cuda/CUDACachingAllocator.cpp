@@ -14,11 +14,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <regex>
 
 namespace c10 {
 
@@ -316,12 +316,15 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 } // namespace
 
 class CachingAllocatorConfig {
-public:
-  static size_t max_split_size() { return instance().m_max_split_size; }
-private:
+ public:
+  static size_t max_split_size() {
+    return instance().m_max_split_size;
+  }
+
+ private:
   static std::once_flag s_flag;
   static CachingAllocatorConfig* s_instance;
-  static CachingAllocatorConfig &instance() {
+  static CachingAllocatorConfig& instance() {
     std::call_once(s_flag, &CachingAllocatorConfig::init);
     return *s_instance;
   }
@@ -331,12 +334,11 @@ private:
   }
 
   CachingAllocatorConfig()
-  : m_max_split_size(std::numeric_limits<size_t>::max())
-  { }
+      : m_max_split_size(std::numeric_limits<size_t>::max()) {}
   size_t m_max_split_size;
 
   void parseArgs() {
-    const char *val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
     if (val != NULL) {
       const std::string config(val);
 
@@ -354,13 +356,16 @@ private:
           /* Maximum split size in MB.  Limited to large size blocks */
           if (kv[0].compare("max_split_size_mb") == 0) {
             size_t val2 = stoi(kv[1]);
-            TORCH_CHECK(val2 > kLargeBuffer/(1024*1024), "CachingAllocator option max_split_size_mb too small, must be >= ",
-              kLargeBuffer/(1024*1024), "");
-            val2 = std::max(val2, kLargeBuffer/(1024*1024));
-            val2 = std::min(val2, (std::numeric_limits<size_t>::max() / (1024*1024)));
+            TORCH_CHECK(
+                val2 > kLargeBuffer / (1024 * 1024),
+                "CachingAllocator option max_split_size_mb too small, must be >= ",
+                kLargeBuffer / (1024 * 1024),
+                "");
+            val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
+            val2 = std::min(
+                val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
             m_max_split_size = val2 * 1024 * 1024;
-          }
-          else {
+          } else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
           }
         }
@@ -368,9 +373,8 @@ private:
     }
   }
 };
-CachingAllocatorConfig *CachingAllocatorConfig::s_instance;
+CachingAllocatorConfig* CachingAllocatorConfig::s_instance;
 std::once_flag CachingAllocatorConfig::s_flag;
-
 
 class DeviceCachingAllocator {
  private:
@@ -425,8 +429,7 @@ class DeviceCachingAllocator {
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
-        small_blocks(BlockComparator, /*is_small=*/true)
-  {
+        small_blocks(BlockComparator, /*is_small=*/true) {
     stats.max_split_size = CachingAllocatorConfig::max_split_size();
   }
 
@@ -465,7 +468,8 @@ class DeviceCachingAllocator {
         // Attempt allocate
         || alloc_block(params, false)
         // Free enough available cached blocks to satisfy alloc and retry alloc.
-        || (release_available_cached_blocks(params) && alloc_block(params, false))
+        ||
+        (release_available_cached_blocks(params) && alloc_block(params, false))
         // Free all non-split cached blocks and retry alloc.
         || (release_cached_blocks() && alloc_block(params, true));
 
@@ -503,19 +507,30 @@ class DeviceCachingAllocator {
       // Note that at this point free_cached_blocks has already returned all
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
-      TORCH_CHECK_WITH(CUDAOutOfMemoryError, false,
-        "CUDA out of memory. Tried to allocate ", format_size(alloc_size),
-        " (GPU ", device, "; ",
-        format_size(device_total), " total capacity; ",
-        format_size(stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current),
-        " already allocated; ",
-        format_size(device_free), " free; ",
-        allowed_info,
-        format_size(stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current),
-        " reserved in total by PyTorch)",
-        " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
-        " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
-        "");
+      TORCH_CHECK_WITH(
+          CUDAOutOfMemoryError,
+          false,
+          "CUDA out of memory. Tried to allocate ",
+          format_size(alloc_size),
+          " (GPU ",
+          device,
+          "; ",
+          format_size(device_total),
+          " total capacity; ",
+          format_size(
+              stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                  .current),
+          " already allocated; ",
+          format_size(device_free),
+          " free; ",
+          allowed_info,
+          format_size(
+              stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                  .current),
+          " reserved in total by PyTorch)",
+          " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
+          " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
+          "");
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -977,7 +992,8 @@ class DeviceCachingAllocator {
     if (block->pool->is_small) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < CachingAllocatorConfig::max_split_size()) && (remaining > kSmallSize);
+      return (size < CachingAllocatorConfig::max_split_size()) &&
+          (remaining > kSmallSize);
     }
   }
 
@@ -997,10 +1013,12 @@ class DeviceCachingAllocator {
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
       return false;
     // Do not return an oversized block for a large request
-    if ((p.size() < CachingAllocatorConfig::max_split_size()) && ((*it)->size >= CachingAllocatorConfig::max_split_size()))
+    if ((p.size() < CachingAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= CachingAllocatorConfig::max_split_size()))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= CachingAllocatorConfig::max_split_size()) && ((*it)->size >= p.size() + kLargeBuffer))
+    if ((p.size() >= CachingAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -1071,46 +1089,49 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  /** Free one or more oversize blocks to the system allocator.  But only enough **/
+  /** Free one or more oversize blocks to the system allocator.  But only enough
+   * **/
   /** to satisfy the target size **/
-  bool release_available_cached_blocks(const AllocParams& p)
-  {
-    if (CachingAllocatorConfig::max_split_size() == std::numeric_limits<size_t>::max())
+  bool release_available_cached_blocks(const AllocParams& p) {
+    if (CachingAllocatorConfig::max_split_size() ==
+        std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
     Block key = p.search_key;
-    key.size = (key.size < CachingAllocatorConfig::max_split_size()) ? CachingAllocatorConfig::max_split_size() : key.size;
+    key.size = (key.size < CachingAllocatorConfig::max_split_size())
+        ? CachingAllocatorConfig::max_split_size()
+        : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
-      // No single block is large enough; free multiple oversize blocks, starting with the largest
+      // No single block is large enough; free multiple oversize blocks,
+      // starting with the largest
       if (it == pool.blocks.begin())
         return false;
       size_t totalReleased = 0;
-      --it;  // Back up one item.  Now on the largest block for the correct stream
-      while ((totalReleased < key.size) && ((*it)->size >= CachingAllocatorConfig::max_split_size())
-              && ((*it)->stream == p.stream())) {
-          auto cur = it;
-          totalReleased += (*it)->size;
-          if (it != pool.blocks.begin()) {
-            --it;
-            release_block(*cur);
-          }
-          else {
-            release_block(*cur);
-            break;
-          }
+      --it; // Back up one item.  Now on the largest block for the correct
+            // stream
+      while ((totalReleased < key.size) &&
+             ((*it)->size >= CachingAllocatorConfig::max_split_size()) &&
+             ((*it)->stream == p.stream())) {
+        auto cur = it;
+        totalReleased += (*it)->size;
+        if (it != pool.blocks.begin()) {
+          --it;
+          release_block(*cur);
+        } else {
+          release_block(*cur);
+          break;
+        }
       }
       if (totalReleased < key.size)
         return false;
-    }
-    else {
+    } else {
       release_block(*it);
     }
     return true;
   }
 
-  bool release_cached_blocks()
-  {
+  bool release_cached_blocks() {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
     synchronize_and_free_events();
@@ -1137,14 +1158,14 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  void release_block(Block *block)
-  {
+  void release_block(Block* block) {
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
+        true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
@@ -1154,8 +1175,7 @@ class DeviceCachingAllocator {
     delete block;
   }
 
-  void release_blocks(BlockPool& pool)
-  {
+  void release_blocks(BlockPool& pool) {
     // Frees all non-split blocks
     auto it = pool.blocks.begin();
     while (it != pool.blocks.end()) {
