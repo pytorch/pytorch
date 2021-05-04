@@ -15,10 +15,6 @@ class DiGraph:
     def add_node(self, n, **kwargs):
         """Add a node to the graph.
 
-        Adding a node that already exists in the graph is an error. This is
-        a difference from the networkx API, but adding a node multiple times
-        is a sign in the bug in the dependency graph implementation.
-
         Args:
             n: the node. Can we any object that is a valid dict key.
             **kwargs: any metadata you want to attach to the node.
@@ -27,7 +23,7 @@ class DiGraph:
             self._node[n] = kwargs
             self._succ[n] = {}
         else:
-            raise ValueError(f"Tried to add a node twice: '{n}'.")
+            self._node[n].update(kwargs)
 
     def add_edge(self, u, v):
         # add nodes
