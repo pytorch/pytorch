@@ -55,7 +55,7 @@ std::vector<c10::Device> getDevicesForTensors(
       remoteName);
   std::vector<c10::Device> devices;
   devices.reserve(tensors.size());
-  bool hasMappedTensor = false;
+  bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
       const auto deviceIter = deviceMap.find(c10::kCPU);
@@ -63,7 +63,7 @@ std::vector<c10::Device> getDevicesForTensors(
         devices.emplace_back(c10::kCPU);
       } else {
         devices.emplace_back(deviceIter->second);
-        hasMappedTensor = true;
+        hasMappedDevice = true;
       }
     } else {
       const auto deviceIter = deviceMap.find(t.device());
@@ -74,10 +74,10 @@ std::vector<c10::Device> getDevicesForTensors(
           t.device(),
           " but received a tensor on that device.");
       devices.push_back(deviceIter->second);
-      hasMappedTensor = true;
+      hasMappedDevice = true;
     }
   }
-  if (!hasMappedTensor) {
+  if (!hasMappedDevice) {
     devices.clear();
   }
   return devices;
