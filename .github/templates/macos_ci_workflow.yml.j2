@@ -44,6 +44,7 @@ jobs:
           zip -r artifacts.zip dist/ build/
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
+        working-directory: pytorch/
         with:
           name: !{{ build_environment }}
           retention-days: 30
