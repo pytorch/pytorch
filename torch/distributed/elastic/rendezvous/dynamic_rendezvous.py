@@ -683,6 +683,16 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._state.closed = True
 
 
+def _should_keep_alive(ctx: _RendezvousContext) -> bool:
+    """Determines whether a keep-alive heartbeat should be sent."""
+    try:
+        last_heartbeat = ctx.state.last_heartbeats[ctx.node]
+    except KeyError:
+        return False
+
+    return last_heartbeat <= datetime.utcnow() - ctx.settings.keep_alive_interval
+
+
 class _RendezvousCloseOp:
     """Represents a rendezvous close operation."""
 
@@ -692,6 +702,17 @@ class _RendezvousCloseOp:
         if time.monotonic() > deadline:
             return _Action.ERROR_TIMEOUT
         return _Action.MARK_RENDEZVOUS_CLOSED
+
+
+class _RendezvousKeepAliveOp:
+    """Represents a rendezvous keep-alive update operation."""
+
+    def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
+        if _should_keep_alive(ctx):
+            if time.monotonic() > deadline:
+                return _Action.ERROR_TIMEOUT
+            return _Action.KEEP_ALIVE
+        return _Action.FINISH
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
