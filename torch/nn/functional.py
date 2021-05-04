@@ -62,8 +62,8 @@ Args:
 
 Examples::
 
-    >>> inputs = torch.randn(33,16,30)
-    >>> filters = torch.randn(20,16,5)
+    >>> inputs = torch.randn(33, 16, 30)
+    >>> filters = torch.randn(20, 16, 5)
     >>> F.conv1d(inputs, filters)
 """,
 )
