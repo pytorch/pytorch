@@ -45,16 +45,21 @@ namespace {
 template <typename T>
 class IntrusivePtrNoGilDestructor {
   c10::intrusive_ptr<T> impl_;
-public:
+
+ public:
   IntrusivePtrNoGilDestructor() = default;
   IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
   IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
-  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) = default;
-  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) = default;
-  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
+  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
+      default;
+  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) =
+      default;
+  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
+      : impl_(std::move(impl)) {}
   // This ctor is very important; see
   // https://github.com/pybind/pybind11/issues/2957
-  explicit IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  explicit IntrusivePtrNoGilDestructor(T* impl)
+      : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
   ~IntrusivePtrNoGilDestructor() {
     if (impl_) {
       if (PyGILState_Check()) {
@@ -65,10 +70,18 @@ public:
       }
     }
   }
-  T& operator*() const noexcept { return *impl_; }
-  T* operator->() const noexcept { return impl_.get(); }
-  C10_NODISCARD T* get() const noexcept { return impl_.get(); }
-  void reset() noexcept { impl_.reset(); }
+  T& operator*() const noexcept {
+    return *impl_;
+  }
+  T* operator->() const noexcept {
+    return impl_.get();
+  }
+  C10_NODISCARD T* get() const noexcept {
+    return impl_.get();
+  }
+  void reset() noexcept {
+    impl_.reset();
+  }
   operator bool() const noexcept {
     return impl_;
   }
@@ -85,6 +98,7 @@ namespace c10d {
 namespace {
 
 #ifdef USE_C10D_GLOO
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable,cppcoreguidelines-avoid-non-const-global-variables)
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
@@ -109,7 +123,8 @@ template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 template <typename T>
-using intrusive_ptr_no_gil_destructor_class_ = py::class_<T, IntrusivePtrNoGilDestructor<T>>;
+using intrusive_ptr_no_gil_destructor_class_ =
+    py::class_<T, IntrusivePtrNoGilDestructor<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -145,6 +160,27 @@ class PythonStore : public ::c10d::Store {
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
     std::string str = pybind11::cast<py::bytes>(fn(key));
+    return std::vector<uint8_t>(str.begin(), str.end());
+  }
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that the Python-side function can
+  // return a py::bytes instead of a std::vector<uint8_t>.
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "compare_set");
+    TORCH_INTERNAL_ASSERT(fn);
+    // Cast return value from Python to py::bytes, then implicitly
+    // convert that to a std::string, so that we can construct a
+    // std::vector<uint8_t>. There is no API for directly accessing
+    // the contents of the py::bytes object.
+    std::string str =
+        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
@@ -312,8 +348,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               int64_t,
               bool,
               bool,
-              std::unordered_map<size_t, std::string>
-            >(),
+              std::unordered_map<size_t, std::string>>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
@@ -321,7 +356,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
           py::arg("gradient_as_bucket_view") = false,
-          py::arg("param_to_name_mapping") = std::unordered_map<size_t, std::string>(),
+          py::arg("param_to_name_mapping") =
+              std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
@@ -337,8 +373,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
-          [](::c10d::Reducer& reducer, const at::Tensor& output)
-              -> void { reducer.prepare_for_backward({output}); },
+          [](::c10d::Reducer& reducer, const at::Tensor& output) -> void {
+            reducer.prepare_for_backward({output});
+          },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
       .def(
@@ -368,6 +405,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
           py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -399,6 +440,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_set_uneven_input_join",
           &::c10d::Logger::set_uneven_input_join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
@@ -530,39 +575,37 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& current_value,
-                 const std::string& new_value) -> py::bytes {
-                std::vector<uint8_t> currentValue_(
-                    current_value.begin(), current_value.end());
-                std::vector<uint8_t> newValue_(
-                    new_value.begin(), new_value.end());
-                auto value = store.compareSet(key, currentValue_, newValue_);
+                 const std::string& expected_value,
+                 const std::string& desired_value) -> py::bytes {
+                std::vector<uint8_t> expectedValue_(
+                    expected_value.begin(), expected_value.end());
+                std::vector<uint8_t> desiredValue_(
+                    desired_value.begin(), desired_value.end());
+                auto value =
+                    store.compareSet(key, expectedValue_, desiredValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
-will only be placed if ``current_value`` for the ``key`` already exists in the store.
-
-.. warning::
-    The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or class:`~torch.distributed.HashStore` will result in an exception.
+performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
+will only be set if ``expected_value`` for the ``key`` already exists in the store or if ``expected_value``
+is an empty string.
 
 Arguments:
     key (str): The key to be checked in the store.
-    current_value (str): The value associated with ``key`` to be checked before insertion.
-    new_value (str): The value associated with ``key`` to be added to the store.
+    expected_value (str): The value associated with ``key`` to be checked before insertion.
+    desired_value (str): The value associated with ``key`` to be added to the store.
 
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
-    >>> store.set("first_key", "first_value")
-    >>> store.compare_set("first_key", "second_value", "first_value")
+    >>> store.set("key", "first_value")
+    >>> store.compare_set("key", "first_value", "second_value")
     >>> # Should return "second_value"
-    >>> store.get("first_key")
+    >>> store.get("key")
 )")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
@@ -1178,8 +1221,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
-      module, "ProcessGroupGloo", processGroup);
+  auto processGroupGloo =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
+          module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
@@ -1242,6 +1286,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             }
 
             options->timeout = timeout;
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
@@ -1315,8 +1360,9 @@ Example::
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
-      module, "ProcessGroupMPI", processGroup);
+  auto processGroupMPI =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
+          module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not

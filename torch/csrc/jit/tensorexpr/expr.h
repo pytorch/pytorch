@@ -126,6 +126,8 @@ class TORCH_API ExprHandle {
   ExprHandle operator<=(const ExprHandle& other) const;
   ExprHandle operator&(const ExprHandle& other) const;
   ExprHandle operator|(const ExprHandle& other) const;
+  ExprHandle operator&&(const ExprHandle& other) const;
+  ExprHandle operator||(const ExprHandle& other) const;
   ExprHandle operator^(const ExprHandle& other) const;
   ExprHandle operator<<(const ExprHandle& other) const;
   ExprHandle operator>>(const ExprHandle& other) const;

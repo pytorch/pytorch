@@ -382,6 +382,7 @@ bool is_scalar_list(PyObject* obj) {
   }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
@@ -1103,7 +1104,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::AutoDispatchBelowInplaceOrView guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
