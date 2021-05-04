@@ -33,10 +33,10 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma, skipCUDAVersionIn,
+    skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipCPUIfNoLapack, skipMeta,
+    skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
 from typing import Dict, List
@@ -3966,23 +3966,6 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
-    def test_nondeterministic_alert_index_add(self, device):
-        def test_func(op_call):
-            input = torch.randn(10, device=device)
-            dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def forward_func(slf, device):
-                op_call(input, dim, index, src)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.index_add_)
-        test_func(torch.Tensor.index_add)
-        test_func(torch.index_add)
-
     # Ensures that index_put throws nondeterministic alerts in the correct cases
     @onlyOnCPUAndCUDA
     def test_nondeterministic_alert_index_put(self, device):
@@ -4032,38 +4015,6 @@ else:
 
         test_func(torch.Tensor.put)
         test_func(torch.Tensor.put_)
-
-    def test_nondeterministic_alert_index_select(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device, requires_grad=True)
-            dim = 0
-            indices = torch.tensor([0, 1], device=device)
-            res = op_call(a, dim, indices)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.index_select)
-        test_func(torch.Tensor.index_select)
-
-    def test_nondeterministic_alert_repeat_interleave(self, device):
-        def test_func(op_call):
-            a = torch.randn(2, 2, device=device, requires_grad=True)
-            res = op_call(a, 2)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.repeat_interleave)
-        test_func(torch.Tensor.repeat_interleave)
 
     def test_nondeterministic_alert_histc(self, device):
         def test_func(op_call):
@@ -5133,11 +5084,25 @@ else:
         with self.assertRaises(IndexError):
             a.index_copy_(1, idx, c)
 
+    @onlyCPU
+    def test_index_copy_deterministic(self, device):
+        m = 6
+        n = 3
+        x = torch.zeros(m, n, device=device)
+        elems = 20000
+        src = torch.rand(elems, n, device=device)
+        index = torch.randint(m, (elems,), device=device)
+        with DeterministicGuard(True):
+            y0 = torch.index_copy(x, 0, index, src)
+            for _ in range(10):
+                y = torch.index_copy(x, 0, index, src)
+                self.assertEqual(y, y0, atol=0, rtol=0)
+
     # Ensures that index_copy throws nondeterministic alerts in the correct cases
-    @onlyOnCPUAndCUDA
+    @onlyCUDA
     @dtypes(torch.double)
     def test_nondeterministic_alert_index_copy(self, device, dtype):
-        @expectedAlertNondeterministic('index_copy')
+        @expectedAlertNondeterministic('index_copy_cuda', 'cuda')
         def test_func(slf, device, call_type):
             S = 10
             a = torch.randn(S, device=device)
@@ -5155,6 +5120,31 @@ else:
         test_func(self, device, 'function')
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
+
+    @onlyOnCPUAndCUDA
+    def test_index_add_deterministic(self, device):
+        for dim in range(3):
+            a = [5, 4, 3]
+            a[dim] = 1000
+            alpha = random.random() + 1
+            x = torch.zeros(a, device=device)
+            b = a.copy()
+            elems = a[dim] * 20
+            b[dim] = elems
+            src = torch.rand(b, device=device)
+            index = torch.randint(a[dim], (elems,), device=device)
+
+            # on CPU it should be deterministic regardless of the deterministic mode
+            with DeterministicGuard(True):
+                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
+                for _ in range(3):
+                    y = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y, y0, atol=0, rtol=0)
+
+            with DeterministicGuard(False):
+                for _ in range(3):
+                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_fill(self, device, dtype):
@@ -6205,7 +6195,7 @@ else:
         x = torch.empty(0, device="cpu")
         y = torch.empty(0, device=device)
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6214,7 +6204,7 @@ else:
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6663,8 +6653,13 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    def test_dlpack_conversion(self, device):
-        x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -6796,6 +6791,36 @@ else:
             self.assertEqual(sample_indices.dim(), 1, msg="wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, msg="wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, msg="wrong number of samples")
+
+        # CUDA misalignment issue (#46702)
+        n_row, n_col = 2, 3
+        prob_dist = make_prob_dist([n_row, n_col], True)
+        n_sample = 1
+        sample_indices = torch.multinomial(prob_dist, n_sample, True)
+        self.assertEqual(sample_indices.dim(), 2, msg="wrong number of dimensions")
+        self.assertEqual(sample_indices.size(1), n_sample, msg="wrong number of samples")
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_multinomial_deterministic(self, device, dtype):
+        gen = torch.Generator(device=device)
+
+        trials = 5
+        seed = 0
+        prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
+        n_sample = 1
+
+        for i in range(trials):
+            gen.manual_seed(seed)
+            samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            gen.manual_seed(seed)
+            samples_2 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            self.assertEqual(samples_1, samples_2)
+            self.assertEqual(samples_1.dim(), 2, msg="wrong number of dimensions")
+            self.assertEqual(samples_1.size(1), n_sample, msg="wrong number of samples")
+
 
     @slowTest
     @dtypes(torch.float)
@@ -7433,6 +7458,49 @@ class TestDevicePrecision(TestCase):
         x.copy_(y)
         self.assertEqual(x[3], y)
 
+    @dtypes(torch.int64, torch.float32, torch.float64)
+    def test_clamp(self, device, dtype):
+        test_args = [
+            *product(
+                [(100, 50), (10, 64), (97,)],  # shape
+                (True, False),  # non-contiguous
+            )
+        ]
+
+        for shape, noncontig in test_args:
+            x = make_tensor(shape, device=device, dtype=dtype,
+                            noncontiguous=noncontig)
+            ub = make_tensor(shape, device=device, dtype=dtype,
+                             noncontiguous=noncontig)
+            lb = make_tensor(shape, device=device, dtype=dtype,
+                             noncontiguous=noncontig)
+
+            expect = x.max(lb).min(ub)
+            actual = x.clamp(lb, ub)
+            self.assertEqual(expect, actual)
+
+            expect = np.clip(x.cpu().numpy(), lb.cpu().numpy(), ub.cpu().numpy())
+            self.assertEqual(expect, actual)
+
+            expect = x.max(lb)
+            actual = x.clamp(min=lb)
+            self.assertEqual(expect, actual)
+
+            expect = x.min(ub)
+            actual = x.clamp(max=ub)
+            self.assertEqual(expect, actual)
+
+            # Test broadcasting min & max
+            expect = x.max(lb[0]).min(ub[..., :1])
+            actual = x.clamp(lb[0], ub[..., :1])
+            self.assertEqual(expect, actual)
+
+            # Test broadcasting x
+            expect = x[..., :1].max(lb).min(ub)
+            actual = x[..., :1].clamp(lb, ub)
+            self.assertEqual(expect, actual)
+
+
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
 # the results. In-place variants of the ops can also be run.
@@ -7744,10 +7812,6 @@ tensor_op_tests = [
     ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mvlgamma', '2d_p=1', lambda t, d: _small_2d(t, d).clamp(0.1, 10), lambda t, d: [1],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
-    ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
     ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'tensor', _small_3d,
@@ -7828,9 +7892,6 @@ tensor_op_tests = [
     ('triu', 'negative', _medium_2d, lambda t, d: [-2], ),
     ('unsqueeze', '', _new_t((2, 3, 4)), lambda t, d: [2],),
     ('unsqueeze', 'neg_dim', _new_t((2, 3, 4)), lambda t, d: [-2], ),
-    ('view', 'contiguous', _small_3d, lambda t, d: [25, 5], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('view_as', '', _small_3d, lambda t, d: [_make_tensor((25, 5), t, d)],
-        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('zero_', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('new_zeros', '', _small_3d, lambda t, d: [1, 2, 3, 4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('flip', 'd0', _small_3d, lambda t, d: [0], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
@@ -7845,19 +7906,6 @@ tensor_op_tests = [
         lambda t, d: torch.pow(2, torch.arange(3, 7).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
         1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
-    # lapack tests
-    ('qr', 'square', _small_2d, lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'skinny', _new_t((3, 4)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'fat', _new_t((4, 3)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'big', _large_2d, lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
-    ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
@@ -8012,6 +8060,16 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         # ensure sharing is not broken
         c = deepcopy([a, a.grad])
         self.assertTrue(c[0].grad is c[1])
+
+    def test_tensor_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+
+        # But construction of subclass is OK
+        class T(torch._C._TensorBase):
+            pass
+
+        T()
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
