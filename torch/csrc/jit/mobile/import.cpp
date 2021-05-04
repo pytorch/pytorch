@@ -4,10 +4,11 @@
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
 
 #include <exception>
@@ -220,7 +221,9 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
@@ -248,6 +251,7 @@ void BytecodeDeserializer::parseMethods(
         ? at::optional<IValue>{m_tuple[2]}
         : at::nullopt;
 
+    // NOLINTNEXTLINE(modernize-make-unique)
     auto function = std::unique_ptr<mobile::Function>(
         new mobile::Function(c10::QualifiedName(function_name)));
 
@@ -459,26 +463,6 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
 c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) -> size_t {
-    if (bytes_read >= pickle_size) {
-      return 0;
-    }
-    len = std::min(pickle_size - bytes_read, len);
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return len;
-  };
-
   auto type_resolver = [this](const c10::QualifiedName& qn) {
     return c10::StrongTypePtr(compilation_unit_, resolveTypeName(qn));
   };
@@ -522,19 +506,9 @@ c10::IValue BytecodeDeserializer::readArchive(
     }
   };
 
-  auto read_record = [&](const std::string& name) {
-    std::stringstream ss;
-    ss << archive_name << "/" << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
-  };
-
-  Unpickler unpickler(
-      reader,
-      std::move(type_resolver),
-      std::move(obj_loader),
-      std::move(read_record),
-      device_);
-  return unpickler.parse_ivalue();
+  auto ivalues = torch::jit::readArchiveAndTensors(
+      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+  return ivalues;
 }
 
 } // namespace
@@ -612,6 +586,7 @@ mobile::Module _load_for_mobile_impl(
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
@@ -620,7 +595,7 @@ mobile::Module _load_for_mobile_impl(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   std::string error_message;
-  c10::scope_exit guard = c10::make_scope_exit([&]() {
+  auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
     }
@@ -656,6 +631,7 @@ void _load_extra_only_for_mobile(
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
@@ -665,5 +641,26 @@ void _load_extra_only_for_mobile(
   deserializer.deserialize_only_extra(device, extra_files);
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

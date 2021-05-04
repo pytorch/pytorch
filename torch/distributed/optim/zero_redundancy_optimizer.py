@@ -81,7 +81,7 @@ def _broadcast_object(
 
 
 def _get_global_rank(group: Any, rank: int) -> int:
-    return rank if group is dist.group.WORLD else dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
+    return rank if group is dist.group.WORLD else dist.distributed_c10d._get_global_rank(group, rank)
 
 
 class ZeroRedundancyOptimizer(Optimizer):
@@ -407,7 +407,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         # Run the optimizer step on this shard only:
         if closure is not None:
-            loss = self.optim.step(closure=closure, **kwargs)  # type: ignore
+            loss = self.optim.step(closure=closure, **kwargs)  # type: ignore[call-arg]
         else:
             loss = self.optim.step(**kwargs)
 

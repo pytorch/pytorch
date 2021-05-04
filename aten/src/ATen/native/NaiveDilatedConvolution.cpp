@@ -441,7 +441,8 @@ Tensor slow_conv_dilated2d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
@@ -546,7 +547,8 @@ Tensor slow_conv_dilated3d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
@@ -558,6 +560,7 @@ Tensor slow_conv_dilated3d_cpu(
       stride_size,
       pad_size,
       dilation_size);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_batch = input.dim() == 5;
   auto options = input.options();
   // calculate output tensor size
@@ -607,6 +610,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
       stride_size,
       pad_size,
       dilation_size);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_batch = input.dim() == 5;
   auto options = grad_output.options();
   // template function assumes batched tensors.  unsqueeze(0) will

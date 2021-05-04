@@ -13,6 +13,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/Utils.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -38,7 +39,9 @@ class Reducer {
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
-      bool gradient_as_bucket_view);
+      bool gradient_as_bucket_view,
+      std::unordered_map<size_t, std::string>
+          paramNames);
 
   ~Reducer() noexcept(false);
 
@@ -52,8 +55,7 @@ class Reducer {
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
-  void prepare_for_backward(
-      const std::vector<at::Tensor>& outputs);
+  void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
   // Called at the begginning of forward() inside DistributedDataParallel,
   // right now it caputures the starting time of forward in each iteration.
@@ -122,6 +124,9 @@ class Reducer {
   // first 10 iterations, after 10 iteratons time stats will be
   // recorded once every "sample_rate" training iterations.
   void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
+  // Specify the training graph is static.
+  void set_static_graph();
 
  protected:
   // Forward declaration.
@@ -203,9 +208,7 @@ class Reducer {
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
-  void runGradCallbackForVariable(
-      at::Tensor& variable,
-      GradCallback&& cb);
+  void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -419,14 +422,41 @@ class Reducer {
   // Division factor for reduction of gradients.
   int divFactor_;
 
+  bool static_graph_;
+
  private:
+  // reset counting for buckets before backward starts
   void reset_bucket_counting();
+  // search unused parameters beore backward starts
   void search_unused_parameters(
-    const std::vector<torch::autograd::Variable>& outputs);
+      const std::vector<torch::autograd::Variable>& outputs);
+  void set_divide_factor();
+  // kick off all reduce for the ready bucket
+  void all_reduce_bucket(Bucket& bucket);
+  // kick off all reduce to local used map, it can help find global unused parameters
+  void all_reduce_local_used_map();
+
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Current thread local state
   at::ThreadLocalState thread_local_state_;
+  // Debug level setting. It is parsed once when Reducer is constructed, and
+  // remains the same across a single invocation of DDP training.
+  DistributedDebugLevel ddp_debug_level_;
+  // Mapping of variable index to fully qualified name of model to notify users
+  // about errors when certain parameters do not get gradient.
+  std::unordered_map<size_t, std::string> param_names_;
+  // Per iteration set of parameter indices that have been marked ready.
+  std::unordered_set<size_t> perIterationReadyParams_;
+  // Retrieves parameter names that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<std::string> getUnmarkedParamsForIteration();
+  // Retrives parameter indices that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<size_t> getUnmarkedParamIndicesForIteration();
+  // Raises appropriate error if mark_variable_ready is called on the same
+  // variable twice, which is unexpected.
+  void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   friend class Logger;
 };
 
