@@ -1710,14 +1710,12 @@ class _NnapiSerializer(object):
                     2,
                     f"({flex_name(image_id, 2)} - {args.kernel_h} + {args.pad_t} + {args.pad_b}) // {args.stride_h} + 1"
                 )
-                out_h = 0
             if in_w == 0:
                 self.compute_operand_shape(
                     out_id,
                     3,
                     f"({flex_name(image_id, 3)} - {args.kernel_w} + {args.pad_l} + {args.pad_r}) // {args.stride_w} + 1"
                 )
-                out_w = 0
 
 
 def serialize_model(module, inputs, config=None):
