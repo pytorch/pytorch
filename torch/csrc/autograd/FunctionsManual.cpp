@@ -3341,8 +3341,10 @@ std::tuple<Tensor, Tensor> polar_backward(
 }
 
 Tensor i1_backward(const Tensor& grad, const Tensor& self, const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::kHalf, at::kBFloat16, self.scalar_type(), "i1_backward", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1_backward", [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0
         auto eps = std::numeric_limits<scalar_t>::epsilon();
         auto self_is_not_tiny = self.abs() > eps;
         auto safe_self = at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
@@ -3352,8 +3354,10 @@ Tensor i1_backward(const Tensor& grad, const Tensor& self, const Tensor& result)
 }
 
 Tensor i1e_backward(const Tensor& grad, const Tensor& self, const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::kHalf, at::kBFloat16, self.scalar_type(), "i1e_backward", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1e_backward", [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0
         auto eps = std::numeric_limits<scalar_t>::epsilon();
         auto self_is_not_tiny = self.abs() > eps;
         auto safe_self = at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
