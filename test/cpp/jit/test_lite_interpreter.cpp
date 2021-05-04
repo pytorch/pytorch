@@ -620,6 +620,11 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
 }
 
+TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
+  auto runtime_ops = _get_runtime_ops_and_info();
+  AT_ASSERT(runtime_ops.size() > 2900);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
