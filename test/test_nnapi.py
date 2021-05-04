@@ -345,6 +345,39 @@ class TestNNAPI(TestCase):
                         qpt([1.0, 2.0], 0.25, 128),
                         qpt([3.0, 4.0], 0.25, 128),
                     ])
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                    ]
+                )
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ]
+                )
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                    ]
+                )
                 # NOTE: NNAPI qadd supports broadcast, but PT does not.
 
     def test_qlinear(self):
