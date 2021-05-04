@@ -79,17 +79,17 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
-            # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
-            # gen_structured() has special logic to handle auto-generated kernels.
-            if f.structured:
-                return self.gen_structured(f)
-            elif not self.backend_index.use_out_as_primary:
+            if not self.backend_index.use_out_as_primary:
                 # For external backends that specify that they'd like to primarily implement functional kernels (namely XLA),
                 # we can generate anonymous wrappers for the out and in-place kernels for them, even for un-structured operators.
                 # Note that we can't go the other way around (generate the functional using the out), since we don't know
                 # how to create the output tensor without a meta function.
                 return list(mapMaybe(
                     lambda x: self.gen_inplace_out_wrapper(x, f), f.functions(functional_first=True)))  # type: ignore[arg-type]
+            # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
+            # gen_structured() has special logic to handle auto-generated kernels.
+            elif f.structured:
+                return self.gen_structured(f)
             else:
                 return list(mapMaybe(self.gen_unstructured, f.functions()))
         elif isinstance(f, NativeFunction):
