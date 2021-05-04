@@ -166,6 +166,11 @@ void Method::run(Stack& stack) const {
       observer->onExitRunMethod(instance_key);
     }
   } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
+        function_->getExceptionDebugHandle());
+    error.add_context(debug_string);
+#endif
     if (observer) {
       observer->onFailRunMethod(instance_key, error.what());
     }
@@ -183,6 +188,11 @@ void Method::run(Stack& stack) const {
         }
       }
     } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+      auto debug_string = owner_->getDebugTable().getSourceDebugString(
+          function_->getExceptionDebugHandle());
+      error.add_context(debug_string);
+#endif
       if (observer) {
         observer->onFailRunMethod(instance_key, error.what());
       }
