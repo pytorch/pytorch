@@ -305,12 +305,25 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      function->append_instruction(op_code, X, N);
+      // TODO: Save debug handles for all instructions, not just for OP
       if (op_code == OP) {
-        std::string module_debug_info = (has_debug_info)
-            ? module_debug_info_list[X].toString()->string()
-            : "";
-        function->set_module_info(module_debug_info, i);
+        // In later PRs we will refactor this to always save debug handles.
+        // Debug info, source range and inlined callstack ptr saving will become
+        // optional.
+        if (has_debug_info) {
+          auto module_debug_tuple =
+              module_debug_info_list[X].toTuple()->elements();
+          std::string module_debug_info =
+              module_debug_tuple[0].toString()->string();
+          int64_t debug_handle = module_debug_tuple[1].toInt();
+          function->set_module_info(module_debug_info, i);
+          function->append_instruction(op_code, X, N, debug_handle);
+        } else {
+          function->set_module_info("", i);
+          function->append_instruction(op_code, X, N);
+        }
+      } else {
+        function->append_instruction(op_code, X, N);
       }
     }
 
@@ -441,7 +454,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   }
   parseMethods(bvals, debug_info_bvals, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
-  return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+  auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  MobileDebugTable debug_table = MobileDebugTable(reader_);
+  m.setDebugTable(std::move(debug_table));
+#endif
+  return m;
 }
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::

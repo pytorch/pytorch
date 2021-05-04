@@ -4182,8 +4182,8 @@ def foo(xyz):
         debug_files = debug_records_from_mod(ft3)
         for debug_file in debug_files:
             for i in range(len(debug_file) - 1):
-                offset, source_range = debug_file[i]
-                offset2, source_range2 = debug_file[i + 1]
+                offset, source_range_tag, source_range = debug_file[i]
+                offset2, source_range_tag2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
 
     def test_circular_dependency(self):
