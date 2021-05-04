@@ -2692,6 +2692,12 @@ class RpcTest(RpcAgentTestFixture):
         # clear states for check 2
         rpc.rpc_sync(worker_name(dst_rank), clear_global_rref)
 
+        # Wait for owner rref to be cleared.
+        while int(info["num_owner_rrefs"]) != 0:
+            info = _rref_context_get_debug_info()
+            time.sleep(0.1)
+        dist.barrier()
+
         # Check 3: rpc.remote call should update owners_ map
         ####################################################
         rref2 = rpc.remote(
