@@ -229,14 +229,17 @@ TEST(StaticRuntime, IndividualOps_Norm) {
   auto dim = std::vector<int64_t>({1});
   auto dtype = at::ScalarType::Float;
 
-  std::vector<IValue> args0{a, 2, dtype};
-  testStaticRuntime(norm_3arg, args0);
+  std::vector<IValue> args2{a, 2};
+  testStaticRuntime(norm_2arg, args2);
 
-  std::vector<IValue> args1{a, 3, dim, false};
-  testStaticRuntime(norm_4arg, args1);
+  std::vector<IValue> args3{a, 2, dtype};
+  testStaticRuntime(norm_3arg, args3);
 
-  std::vector<IValue> args2{a, 4, dim, true, dtype};
-  testStaticRuntime(norm_5arg, args2);
+  std::vector<IValue> args4{a, 3, dim, false};
+  testStaticRuntime(norm_4arg, args4);
+
+  std::vector<IValue> args5{a, 4, dim, true, dtype};
+  testStaticRuntime(norm_5arg, args5);
 
 }
 
