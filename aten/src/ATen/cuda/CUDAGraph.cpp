@@ -180,6 +180,12 @@ void CUDAGraph::replay() {
 
     // graph_exec_ may be replayed in any stream.
     AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+
+    // Temporary workaround for bug in libcuda.so that causes replayed graphs
+    // with certain topologies to be corrupted (kernels elided, internal syncs
+    // ignored) when replayed back to back without a sync in between.
+    // I hate to use a hard sync, but it's the only surefire workaround at the moment.
+    cudaDeviceSynchronize();
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
