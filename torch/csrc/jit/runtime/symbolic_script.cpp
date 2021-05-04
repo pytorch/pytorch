@@ -1403,9 +1403,9 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
-        def clamp(self,
-                  min: Optional[number],
-                  max: Optional[number]):
+        def clamp_1(self,
+                    min: Optional[number],
+                    max: Optional[number]):
           def backward(grad_output):
             if min is not None and max is not None:
                 mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
@@ -1415,6 +1415,23 @@ const std::vector<std::string> functions = {
                 return grad_output * mask, None, None
             elif max is not None:
                 mask = (self <= float(max)).type_as(self)
+                return grad_output * mask, None, None
+            else: #min is None and max is None
+                return grad_output, None, None
+          return torch.clamp(self, min=min, max=max), backward
+
+        def clamp_2(self,
+                    min: Optional[Tensor],
+                    max: Optional[Tensor]):
+          def backward(grad_output):
+            if min is not None and max is not None:
+                mask = ((self >= min) * (self <= max)).type_as(self)
+                return grad_output * mask, None, None
+            elif min is not None:
+                mask = (self >= min).type_as(self)
+                return grad_output * mask, None, None
+            elif max is not None:
+                mask = (self <= max).type_as(self)
                 return grad_output * mask, None, None
             else: #min is None and max is None
                 return grad_output, None, None
