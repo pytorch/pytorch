@@ -246,6 +246,24 @@ Tensor lu_unpack_backward(
   const Tensor& LU_data,
   bool unpack_data
 );
+Tensor scatter_self_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& src,
+    const c10::optional<std::string>& reduce);
+Tensor scatter_self_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& index,
+    const Scalar& src,
+    const c10::optional<std::string>& reduce);
+Tensor scatter_src_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const c10::optional<std::string>& reduce);
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
