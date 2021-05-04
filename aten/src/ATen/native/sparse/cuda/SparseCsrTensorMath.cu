@@ -77,7 +77,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
   Tensor src_crow_indices = src.crow_indices();
   Tensor src_col_indices = src.col_indices();
 
-  at::native::resize_output(output, dense.sizes());
+  resize_output(output, dense.sizes());
 
   Tensor resultBuffer = output;
   Tensor valuesBuffer = src_values.to(commonDtype);
