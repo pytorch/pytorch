@@ -84,7 +84,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
       dim_k,
       ", got ",
       op1.size(1));
-  at::native::resize_output(out, {dim_i, dim_j});
+  resize_output(out, {dim_i, dim_j});
 
   auto col_indices = op1.col_indices();
   auto crow_indices = op1.crow_indices();
@@ -268,7 +268,7 @@ Tensor& add_out_dense_sparse_csr_cpu(
   auto src_crow_indices = src.crow_indices();
   auto src_col_indices = src.col_indices();
 
-  at::native::resize_output(out, dense.sizes());
+  resize_output(out, dense.sizes());
 
   Tensor resultBuffer = out;
   Tensor valuesBuffer = src_values.to(commonDtype);

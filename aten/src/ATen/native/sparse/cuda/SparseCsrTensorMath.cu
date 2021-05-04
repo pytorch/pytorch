@@ -91,7 +91,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
       dim_k,
       ", got ",
       op1.size(1));
-  at::native::resize_output(out, {dim_i, dim_j});
+  resize_output(out, {dim_i, dim_j});
 
   auto values = op1.values();
 
@@ -172,7 +172,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
   Tensor src_crow_indices = src.crow_indices();
   Tensor src_col_indices = src.col_indices();
 
-  at::native::resize_output(output, dense.sizes());
+  resize_output(output, dense.sizes());
 
   Tensor resultBuffer = output;
   Tensor valuesBuffer = src_values.to(commonDtype);
