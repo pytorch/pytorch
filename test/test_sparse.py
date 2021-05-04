@@ -254,8 +254,8 @@ class TestSparse(TestCase):
         indices = torch.tensor([[N, N - 1]] * 4, dtype=torch.int64, device=device)
         values = torch.tensor([1, 2], dtype=dtype, device=device)
         self.assertRaises(RuntimeError,
-                          lambda: torch.sparse_coo_tensor(indices, values,
-                                                          (N + 1,) * 4, device=device))
+                          lambda: torch.sparse_coo_tensor(
+                              indices, values, (N + 1,) * 4, device=device).coalesce())
 
     @dtypes(torch.double, torch.cdouble)
     def test_ctor_size_checks(self, device, dtype):
