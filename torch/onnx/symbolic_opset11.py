@@ -41,17 +41,38 @@ def clamp(g, self, min, max):
     if dtype is not None:
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
-    return g.op("Clip", self, min, max)
+
+    if sym_help._is_none(min):
+        return clamp_max(g, self, max)
+    elif sym_help._is_none(max):
+        return clamp_min(g, self, min)
+    else:
+        if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
+            return g.op("Clip", self, min, max)
+        else:
+            return clamp_max(g, clamp_min(g, self, min), max)
 
 
+@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    max = unused(g)
-    return clamp(g, self, min, max)
+    dtype = self.type().scalarType()
+    min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    if sym_help._get_tensor_rank(min) == 0:
+        max = unused(g)
+        return g.op("Clip", self, min, max)
+    else:
+        return g.op("Max", self, min)
 
 
+@parse_args('v', 'v')
 def clamp_max(g, self, max):
-    min = unused(g)
-    return clamp(g, self, min, max)
+    dtype = self.type().scalarType()
+    max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    if sym_help._get_tensor_rank(max) == 0:
+        min = unused(g)
+        return g.op("Clip", self, min, max)
+    else:
+        return g.op("Min", self, max)
 
 
 # Opset 11 gather accepts negative indices
@@ -256,6 +277,9 @@ def __getitem_(g, self, i):
         from torch.onnx.symbolic_opset9 import __getitem_ as getitem
         return getitem(g, self, i)
 
+def _set_item(g, tensor_list, i, v):
+    tensor_list = g.op("SequenceErase", tensor_list, i)
+    return g.op("SequenceInsert", tensor_list, v, i)
 
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)

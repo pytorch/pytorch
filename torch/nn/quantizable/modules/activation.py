@@ -59,18 +59,17 @@ class MultiheadAttention(nn.MultiheadAttention):
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None, batch_first: bool = False):
+                 kdim: int = None, vdim: int = None, batch_first: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first)
-        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
-
-        # TODO: The use of the `_LinearWithBias` increases the quantization noise
-        # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
-        # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)  # type: ignore
+                                                 add_zero_attn, kdim, vdim, batch_first,
+                                                 **factory_kwargs)
+        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -99,8 +98,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed.qconfig = other.qconfig
 
         # Set the linear weights
-        observed.out_proj.weight = other.out_proj.weight  # type: ignore
-        observed.out_proj.bias = other.out_proj.bias  # type: ignore
+        observed.out_proj.weight = other.out_proj.weight
+        observed.out_proj.bias = other.out_proj.bias
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -136,9 +135,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
             observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
-                observed.linear_Q.bias = None  # type: ignore
-                observed.linear_K.bias = None  # type: ignore
-                observed.linear_V.bias = None  # type: ignore
+                observed.linear_Q.bias = None  # type: ignore[assignment]
+                observed.linear_K.bias = None  # type: ignore[assignment]
+                observed.linear_V.bias = None  # type: ignore[assignment]
             else:
                 observed.linear_Q.bias = nn.Parameter(other.in_proj_bias[0:other.embed_dim])
                 observed.linear_K.bias = nn.Parameter(other.in_proj_bias[other.embed_dim:(other.embed_dim * 2)])
@@ -169,16 +168,16 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Set the linear weights
         # Note: Because the linear layers are quantized, mypy does not nkow how
         # to deal with them -- might need to ignore the typing checks.
-        w, b = self.out_proj._weight_bias()  # type: ignore
+        w, b = self.out_proj._weight_bias()  # type: ignore[operator]
         fp.out_proj.weight = nn.Parameter(w.dequantize())
         if b is not None:
             fp.out_proj.bias = nn.Parameter(b)
 
-        wQ, bQ = self.linear_Q._weight_bias()  # type: ignore
+        wQ, bQ = self.linear_Q._weight_bias()  # type: ignore[operator]
         wQ = wQ.dequantize()
-        wK, bK = self.linear_K._weight_bias()  # type: ignore
+        wK, bK = self.linear_K._weight_bias()  # type: ignore[operator]
         wK = wK.dequantize()
-        wV, bV = self.linear_V._weight_bias()  # type: ignore
+        wV, bV = self.linear_V._weight_bias()  # type: ignore[operator]
         wV = wV.dequantize()
         if fp._qkv_same_embed_dim:
             # Use separate params
@@ -206,9 +205,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.k_proj_weight = nn.Parameter(wK)
             fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
-                self.linear_Q.bias = None  # type: ignore
-                self.linear_K.bias = None  # type: ignore
-                self.linear_V.bias = None  # type: ignore
+                self.linear_Q.bias = None
+                self.linear_K.bias = None
+                self.linear_V.bias = None
             else:
                 fp.in_proj_bias[0:fp.embed_dim] = bQ
                 fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = bK
@@ -440,7 +439,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output)  # type: ignore
+        attn_output = self.out_proj(attn_output)
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:

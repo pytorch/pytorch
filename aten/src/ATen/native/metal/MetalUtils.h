@@ -70,7 +70,9 @@ static inline MetalCommandBuffer* getCommandBufferFromTensor(
   TORCH_CHECK(tensor.is_metal());
   auto implStorage = getTensorImplStorage(tensor);
   MetalCommandBuffer* cmdBuffer = implStorage.texture()->commandBuffer();
-  TORCH_CHECK(cmdBuffer);
+  if (!cmdBuffer || !cmdBuffer.valid) {
+    cmdBuffer = [MetalCommandBuffer currentBuffer];
+  }
   return cmdBuffer;
 }
 

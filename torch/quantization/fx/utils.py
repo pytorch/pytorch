@@ -11,6 +11,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+import operator
 from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
@@ -100,20 +101,20 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
-    dtype = activation_post_process.dtype  # type: ignore
+    dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore
-            ch_axis = int(activation_post_process.ch_axis)  # type: ignore
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
-            quantize_op = torch.quantize_per_tensor  # type: ignore
+            quantize_op = torch.quantize_per_tensor
     elif dtype == torch.float16:
         node_type = "call_method"
         quantize_op = "to"
@@ -364,9 +365,11 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
         if is_activation_post_process(modules[node.target]):
-            result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore
+            result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
+    elif node.op == 'call_function' and node.target is operator.getitem:
+        result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'get_attr':
         result = False
     elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
@@ -405,6 +408,12 @@ def node_return_type_is_int(node: Node) -> bool:
     Returns true if this node results in an integer, even if some of the args
     are Tensors.
     """
-    if node.op == 'call_method' and node.target == 'size':
-        return True
-    return False
+    return node.op == 'call_method' and node.target == 'size'
+
+def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
+    """
+    Returns indexes of boolean Tensor args
+    """
+    if node.op == "call_method" and node.target == "masked_fill":
+        return [1]
+    return []

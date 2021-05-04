@@ -29,8 +29,9 @@ class Vec256<float> {
   using value_type = float;
   using vec_internal_type = vfloat32;
   using vec_internal_mask_type = vbool32;
+  using size_type = int;
 
-  static constexpr int size() {
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -226,7 +227,7 @@ class Vec256<float> {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
 
-  Vec256<float> _isnan() const {
+  Vec256<float> isnan() const {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
@@ -265,7 +266,9 @@ class Vec256<float> {
   Vec256<float> atan2(const Vec256<float>& b) const {
      return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
-
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
+  }
   Vec256<float> lgamma() const {
      return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
@@ -456,8 +459,8 @@ class Vec256<float> {
     // inf and nan checks
 #if 0
                     ret = blendv(ret, v_inf, x >= vf_89);
-                    ret = blendv(ret, v_inf, ret._isnan());
-                    ret = blendv(ret, v_nan, this->_isnan());
+                    ret = blendv(ret, v_inf, ret.isnan());
+                    ret = blendv(ret, v_nan, this->isnan());
 #endif
     return ret;
   }

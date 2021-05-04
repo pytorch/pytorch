@@ -20,11 +20,13 @@ from ..utils import (
     activation_is_int8_quantized,
     weight_is_statically_quantized,
     get_qconfig_dtypes,
+    activation_dtype,
 )
 
 from .pattern_utils import (
     register_quant_pattern,
-    mark_input_output_not_observed,
+    get_default_output_activation_post_process_map,
+    Pattern,
 )
 
 from .utils import (
@@ -44,7 +46,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List
+from typing import Any, Callable, Dict, Union, Optional, Tuple, List, Set
 
 # -------------------------
 # Pattern Registrations
@@ -65,6 +67,59 @@ class QuantizeHandler(ABC):
         # all inputs are tensors or not, e.g. add/mul
         self.num_tensor_args = len(node.args)
         self.all_node_args_are_tensors = True
+
+    def input_output_observed(self) -> bool:
+        """
+        Returns True if the pattern matched to this qhandler could be
+        be observed, and False it it should not be observed.
+        """
+        return True
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        """
+        Returns true if an observer should be inserted for the output of
+        the pattern matched to this QuantizeHandler instance during the
+        prepare step.
+        """
+        # TODO(future PR): potentially clean up and deduplicate these
+        # mappings.
+        return self.all_node_args_are_tensors and self.input_output_observed()
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        """
+        Returns true if the output of this pattern instance should be marked
+        as observed based on the observed status of inputs to this pattern.
+        """
+        return False
+
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        """
+        Returns true if after convert, the output of the matched pattern is
+        quantized iff the first input is also quantized.
+        """
+        return False
+
+    def get_activation_ctr(
+        self,
+        qconfig: Any,
+        pattern: Pattern,
+    ) -> Optional[Callable]:
+        """
+        Returns the constructor for the activation observer which should be
+        used for the pattern matched to this handler. Some handlers override
+        this to a different value than what is specified in the qconfig.
+        """
+        return qconfig.activation
+
 
     @abstractmethod
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
@@ -136,7 +191,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.binary_op_node = node
         self.binary_op = node.target
 
@@ -168,7 +223,47 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if self.binary_op in qbin_op_mapping:
             self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
                 if self.relu_node is not None \
-                else qbin_op_mapping[self.binary_op]  # type: ignore
+                else qbin_op_mapping[self.binary_op]
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        """
+        Returns true if an observer should be inserted for the output of
+        the pattern matched to this QuantizeHandler instance during the
+        prepare step.
+        """
+        if self.num_tensor_args == 1:
+            return activation_dtype(qconfig) == torch.float16
+        elif self.all_node_args_are_tensors and self.input_output_observed():
+            return True
+        else:
+            return False
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        if self.num_tensor_args == 1:
+            # If only one of the inputs is a tensor, the output is
+            # observed if the tensor input is observed
+            def input_is_observed(arg):
+                return (isinstance(arg, Node) and
+                        arg.name in observed_node_names_set)
+            # This is checking if one of the argument of add/mul
+            # is an observed node
+            # If both of the inputs are number,
+            # we will not consider the output to be observed
+            return (
+                input_is_observed(self.binary_op_node.args[0]) or
+                input_is_observed(self.binary_op_node.args[1])
+            )
+        else:
+            # If either none or both inputs are tensors, this code
+            # path will not be hit.
+            return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -281,19 +376,8 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        cur_idx = quantizer.activation_post_process_indexes[node.name]
-        activation_post_process = \
-            quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
         quantizer.activation_post_process_indexes[node.name] += 1
-        scale, zero_point = activation_post_process.calculate_qparams()
-        scale = float(scale)
-        zero_point = int(zero_point)
-
-        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_arg, 'zero_point': zero_point_arg}
-        return quantizer.quantized_graph.create_node(
-            'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=True))
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
@@ -335,7 +419,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.conv_node = node
         if node.op == "call_module":
             self.conv = quantizer.modules[self.conv_node.target]
@@ -491,7 +575,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = quantizer.modules[self.linear_node.target]
@@ -659,7 +743,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         if weight_dtype == torch.qint8 \
                         else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
-                    qlinear_args = (linear_input, packed_weight)  # type: ignore
+                    qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
                     # Store the name of the dynamic op to get the path of node after replacement as well.
@@ -716,10 +800,12 @@ class BatchNormQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
-@mark_input_output_not_observed()
 class EmbeddingQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
+
+    def input_output_observed(self) -> bool:
+        return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -761,10 +847,12 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.LSTMCell)
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
-@mark_input_output_not_observed()
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
+
+    def input_output_observed(self) -> bool:
+        return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -993,6 +1081,47 @@ class ELUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
 @register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+        self.node = node
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        if model_is_training:
+            # in QAT, always insert fake_quants
+            return True
+        else:
+            # in PTQ, only insert observers when emulating fp16
+            return activation_dtype(qconfig) == torch.float16
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        # For these ops if input is observed, output is also observed
+        def is_observed(input_arg):
+            if isinstance(input_arg, Node):
+                return input_arg.name in observed_node_names_set
+            elif isinstance(input_arg, list):
+                return all(map(is_observed, input_arg))
+        return is_observed(self.node.args[0])
+
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        return True
+
+    # some qhandlers override the activations constructor
+    def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
+        if activation_dtype(qconfig) == torch.float16:
+            return qconfig.activation
+        else:
+            return get_default_output_activation_post_process_map().get(
+                pattern, None)
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1071,6 +1200,11 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNodeQuantizeHandler(QuantizeHandler):
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        return True
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1131,7 +1265,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore
+        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = quantizer.modules[node.target]
         input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()
         quantized_standalone_module = convert(observed_standalone_module, is_reference=is_reference)

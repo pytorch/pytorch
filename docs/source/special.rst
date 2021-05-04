@@ -30,3 +30,4 @@ Functions
 .. autofunction:: i1
 .. autofunction:: i1e
 .. autofunction:: logit
+.. autofunction:: xlog1py
