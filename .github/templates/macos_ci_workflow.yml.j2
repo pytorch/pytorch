@@ -38,6 +38,7 @@ jobs:
         run: |
           ln -s (which sccache) clang++
           echo '' > test.cpp
+
           echo "#include <iostream>" >> test.cpp
           echo "int main() { std::cout << 2; return 0; }" >> test.cpp
 
