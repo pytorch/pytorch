@@ -89,6 +89,20 @@ class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
 
+class PickleTorchCustomOpsModule(torch.nn.Module):
+    def forward(self, a):
+        b = torch.ops.aten.sigmoid(a)
+        c = torch.ops.aten.cat([a, b])
+        return torch.ops.aten.cat((c, c))
+
+class TestPickleGraphModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.st = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return self.st(x)
+
 class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
@@ -606,15 +620,7 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
-        class Nested(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.st = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.st(x)
-
-        n = Nested()
+        n = TestPickleGraphModule()
         traced = symbolic_trace(n)
         traced.graph.lint()
         pickled = pickle.dumps(traced)
@@ -843,12 +849,7 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
     def test_pickle_torch_custom_ops(self):
-        class M(torch.nn.Module):
-            def forward(self, a):
-                b = torch.ops.aten.sigmoid(a)
-                c = torch.ops.aten.cat([a, b])
-                return torch.ops.aten.cat((c, c))
-        m = M()
+        m = PickleTorchCustomOpsModule()
         input = torch.randn(3)
         ref_out = m(input)
         gm = symbolic_trace(m)
