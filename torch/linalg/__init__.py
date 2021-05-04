@@ -700,7 +700,7 @@ Examples::
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
-Computes a solution to the least squares problem  of a system of linear equations.
+Computes a solution to the least squares problem of a system of linear equations.
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 the **least squares problem** for a linear system :math:`AX = B` with
@@ -717,7 +717,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 :attr:`driver` chooses the LAPACK/MAGMA function that will be used.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank and `m < n`.
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
 To choose the best driver on CPU consider:
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
