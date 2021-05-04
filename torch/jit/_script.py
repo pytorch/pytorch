@@ -879,20 +879,21 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
         if monkeytype_trace:
             monkeytype_config = JitTypeTraceConfig(type_trace_db)
             with monkeytype_trace(monkeytype_config):
-                if isinstance(obj, torch.nn.Module) or inspect.isclass(obj):
+                if isinstance(example_inputs, Dict):
                     # If the obj is an nn.Module or a class, then each method is
                     # executed with the arguments provided in the example inputs.
-                    # example inputs here will be of tuple(class.method, (arguments))
+                    # example inputs here will be of type Dict(class.method, (arguments))
                     # This is used to infer type annotations for those methods
                     # which are not called directly under the hood of monkeytype.
-                    assert isinstance(example_inputs, Dict)
                     for module, example_input in example_inputs.items():
                         for example in example_input:
                             module(*example)
-                else:
-                    assert isinstance(example_inputs, List)
+                elif isinstance(example_inputs, List):
                     for examples in example_inputs:
                         obj(*examples)
+                else:
+                    warnings.warn("Error: The example inputs are not of the right format. Please format the inputs to be of "
+                                  "type `List[Tuple]` or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
         else:
             warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                           "to enable Profile-Directed Typing in TorchScript. Refer to "
