@@ -693,6 +693,17 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
     return last_heartbeat <= datetime.utcnow() - ctx.settings.keep_alive_interval
 
 
+class _RendezvousExitOp:
+    """Represents a rendezvous exit operation."""
+
+    def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
+        if ctx.node in ctx.state.participants:
+            if time.monotonic() > deadline:
+                return _Action.ERROR_TIMEOUT
+            return _Action.REMOVE_FROM_PARTICIPANTS
+        return _Action.FINISH
+
+
 class _RendezvousCloseOp:
     """Represents a rendezvous close operation."""
 

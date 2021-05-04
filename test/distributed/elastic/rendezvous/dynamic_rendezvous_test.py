@@ -35,6 +35,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _NodeDescGenerator,
     _RendezvousCloseOp,
     _RendezvousContext,
+    _RendezvousExitOp,
     _RendezvousKeepAliveOp,
     _RendezvousState,
     _RendezvousStateHolder,
@@ -854,6 +855,26 @@ class AbstractTestRendezvousOp(ABC):
         action = self._get_next_action()
 
         self.assertEqual(action, expected_action)
+
+
+class TestRendezvousExitOp(AbstractTestRendezvousOp, TestCase):
+    def _create_op(self) -> Callable:
+        return _RendezvousExitOp()
+
+    def test_removes_from_participants_if_node_is_participant(self) -> None:
+        self._state.participants[self._node] = 1
+
+        self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS)
+
+    def test_raises_timeout_if_deadline_exceeded(self) -> None:
+        self._deadline = 0
+
+        self._state.participants[self._node] = 1
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_finishes_if_node_is_not_participant(self) -> None:
+        self._assert_action(_Action.FINISH)
 
 
 class TestRendezvousCloseOp(AbstractTestRendezvousOp, TestCase):
