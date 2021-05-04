@@ -33,6 +33,8 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
+// This is a dummy comment in order to run A/A tests on torchbenchmark.
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
