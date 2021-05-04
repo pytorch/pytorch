@@ -37,6 +37,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
     skip_if_small_worldsize,
     skip_if_lt_x_gpu,
+    nccl_skip_if_lt_x_gpu,
     skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
@@ -413,7 +414,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [
-            self.test_ddp_model_diff_across_ranks.__wrapped__,
+           self.test_ddp_model_diff_across_ranks.__wrapped__,
         ]
 
     def tearDown(self):
@@ -3432,28 +3433,29 @@ class DistributedTest:
             to the ``ddp_model``. The hook fed into this function should not change
             the resulting gradients.
             """
-            process_group = _get_default_group()
+            group, group_id, rank = self._init_global_test()
             world_size = get_world_size()
-            rank = dist.get_rank()
 
             if BACKEND == "mpi":
                 global_batch_size = world_size
                 local_batch_size = 1
                 model, ddp_model, input, target = self._prepare_cpu_module(
-                    process_group, global_batch_size, gradient_as_bucket_view
+                    group_id, global_batch_size, gradient_as_bucket_view
                 )
 
             if BACKEND == "nccl":
-                int_devices = gpus_for_rank(world_size)[rank][:1]
+                rank_to_GPU = self._init_multigpu_helper()
+                int_devices = rank_to_GPU[rank][:1]
                 devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+                # print (int_devices, devices)
                 global_batch_size = world_size
                 local_batch_size = len(devices)
                 model, ddp_model, input, target = self._prepare_single_device_module(
-                    rank, process_group, devices, devices, global_batch_size, gradient_as_bucket_view
+                    rank, group_id, devices, devices, global_batch_size, gradient_as_bucket_view
                 )
 
             if ddp_comm_hook is not None:
-                ddp_model.register_comm_hook(process_group, ddp_comm_hook)
+                ddp_model.register_comm_hook(group_id, ddp_comm_hook)
 
             def step_model(model, input, target):
                 model.train()
@@ -3499,20 +3501,12 @@ class DistributedTest:
                 torch.manual_seed(1337 + iteration)
                 input = input[torch.randperm(global_batch_size)]
 
-        @unittest.skipIf(
-            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
-            "get_future is only supported on mpi and nccl"
-        )
-        def test_accumulate_gradients_no_sync(self):
-            """
-            Runs _test_accumulate_gradients_no_sync using default inputs
-            """
-            self._test_accumulate_gradients_no_sync()
 
         @unittest.skipIf(
-            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
+            BACKEND != "mpi" and BACKEND != 'nccl',
             "get_future is only supported on mpi and nccl"
         )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_grad_is_view(self):
             """
             Runs _test_accumulate_gradients_no_sync using default inputs
@@ -3520,9 +3514,10 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
 
         @unittest.skipIf(
-            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
+            BACKEND != "mpi" and BACKEND != 'nccl',
             "get_future is only supported on mpi and nccl"
         )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync
@@ -3533,19 +3528,20 @@ class DistributedTest:
             world_size = get_world_size()
 
             def allreduce_hook(
-                    process_group: object, bucket: dist.GradBucket
+                    group_id: object, bucket: dist.GradBucket
             ) -> torch._C.Future:
                 tensors = [bucket.get_tensor() / world_size]
-                return process_group.allreduce(tensors).get_future()
+                return group_id.allreduce(tensors).get_future()
 
             self._test_accumulate_gradients_no_sync(
                 num_iters=4, ddp_comm_hook=allreduce_hook
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
+            BACKEND != "mpi" and BACKEND != 'nccl',
             "get_future is only supported on mpi and nccl"
         )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
@@ -3557,9 +3553,9 @@ class DistributedTest:
             world_size = get_world_size()
 
             def allreduce_with_then_hook(
-                    process_group: object, bucket: dist.GradBucket
+                    group_id: object, bucket: dist.GradBucket
             ) -> torch.futures.Future:
-                fut = process_group.allreduce([bucket.get_tensor()]).get_future()
+                fut = group_id.allreduce([bucket.get_tensor()]).get_future()
 
                 def mult(fut):
                     # Multiply the result by 2.
@@ -3576,9 +3572,10 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi",
+            BACKEND != "mpi" and BACKEND != "nccl",
             "get_future is only supported on mpi"
         )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_get_future(self):
             def mult(fut):
                 return [t * 3 for t in fut.wait()]
@@ -3587,11 +3584,16 @@ class DistributedTest:
                 return [t + 1 for t in fut.wait()]
             group, group_id, rank = self._init_global_test()
             input = _build_tensor(3, 2)
+            if BACKEND == "nccl":
+                rank_to_GPU = self._init_multigpu_helper()
+                device_id = rank_to_GPU[rank][0]
+                input = input.to(device_id)
             fut = group_id.allreduce([input]).get_future()
             res = fut.then(mult).then(add).wait()
             expected = _build_tensor(3, 2 * len(group) * 3 + 1)
 
             self.assertEqual(res[0], expected)
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
