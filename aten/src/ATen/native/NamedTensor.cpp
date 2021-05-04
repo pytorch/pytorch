@@ -344,16 +344,22 @@ Tensor& index_select_out(const Tensor& self, Dimname dim, const Tensor& index, T
 Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
   reportNYIDimnameOverload("index_select");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, c10::optional<std::string> reduce) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, c10::optional<std::string> reduce) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
+Tensor& scatter_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, c10::optional<std::string> reduce, Tensor& out) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source, c10::optional<std::string> reduce) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source, c10::optional<std::string> reduce) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_out(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source, c10::optional<std::string> reduce, Tensor& out) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
