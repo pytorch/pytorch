@@ -14,6 +14,14 @@ jobs:
   build:
     runs-on: macos-10.15
     steps:
+      - name: env test build
+        working-directory: pytorch/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
+          TEST: hello
+        run: |
+          printenv | sort
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -45,6 +53,7 @@ jobs:
           zip -r artifacts.zip dist/ build/
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
+        working-directory: pytorch/
         with:
           name: pytorch-macos-10.15
           retention-days: 30
