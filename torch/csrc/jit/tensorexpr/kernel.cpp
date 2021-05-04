@@ -239,6 +239,21 @@ void annotateInputShapes(
   }
 }
 
+std::shared_ptr<Graph> removeUnusedSelfArgument(
+    const std::shared_ptr<Graph>& graph) {
+  if (graph->inputs().size() == 0) {
+    return graph;
+  }
+  jit::Value* self_argument = graph->inputs().at(0);
+  if (self_argument->uses().size() != 0 ||
+      !self_argument->type()->is_module()) {
+    return graph;
+  }
+  std::shared_ptr<Graph> res = graph->copy();
+  res->eraseInput(0);
+  return res;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

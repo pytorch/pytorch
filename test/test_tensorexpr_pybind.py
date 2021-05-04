@@ -154,5 +154,57 @@ graph(%a : Tensor, %b : Tensor):
         correct = torch.mul(x, y)
         np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    @unittest.skip("Does not work until shape propagation is implemented")
+    def test_kernel_shape_prop_module(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x * x + y
+
+        graph = torch.jit.script(TestModule()).graph
+
+        # Try compiling the graph as-is. It should fail because it doesn't have
+        # shape info.
+        exception_thrown = False
+        try:
+            kernel = torch._C._te.TensorExprKernel(graph)
+        except RuntimeError:
+            exception_thrown = True
+            pass
+        assert exception_thrown
+
+        # Try injecting shape info for graph inputs
+        example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
+
+        exception_thrown = False
+        try:
+            torch._C._te.annotate_input_shapes(graph, example_inputs)
+        except RuntimeError:
+            # Graph has a 'self' argument for which we can't set shapes
+            exception_thrown = True
+            pass
+        assert exception_thrown
+
+        # Remove 'self' argument and try annotating shapes one more time
+        graph = torch._C._te.remove_unused_self_argument(graph)
+
+        # Inject shape info and try compiling again
+        torch._C._te.annotate_input_shapes(graph, example_inputs)
+
+        # TODO: once we have shape propagation as well we should erase type
+        # info for %c from the input IR and run shape propagation here - it
+        # should be able to reconstruct that info
+
+        # Now compilation should pass
+        kernel = torch._C._te.TensorExprKernel(graph)
+
+        device, size = 'cpu', (4, 4)
+        x = torch.rand(size, device=device)
+        y = torch.rand(size, device=device)
+
+        res = kernel.run((x, y))
+        correct = TestModule().forward(x, y)
+        np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
+
 if __name__ == '__main__':
     run_tests()
