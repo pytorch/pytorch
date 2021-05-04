@@ -1830,8 +1830,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t compute_numel() const {
     int64_t n = 1;
     for (auto s : sizes()) {
-      TORCH_CHECK(s == 0 || n <= LONG_MAX / s,
-                  "numel: integer multiplication overflow");
+      TORCH_CHECK(
+          s == 0 || n <= LONG_MAX / s,
+          "numel: integer multiplication overflow");
       n *= s;
     }
     return n;
