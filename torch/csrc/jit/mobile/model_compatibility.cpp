@@ -131,42 +131,55 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   return _get_model_ops_and_info(bytecode_values);
 }
 
+/* A function to retrieve the root (top level) operators of a model and their
+ * corresponding compatibility info. These root operators can call other
+ * operators within them (traced ops), and a root op can call many different
+ * traced ops depending on internal code paths in the root op. These traced ops
+ * are not returned by this function. Those operators are abstracted into the
+ * runtime as an implementation detail (and the traced ops themselves can also
+ * call other operators) making retrieving them difficult and their value from
+ * this api negligible since they will differ between which runtime version the
+ * model is run on. Because of this, there is a false positive this api can't
+ * prevent in a compatibility usecase. All the root ops of a model are present
+ * in a target runtime, but not all the traced ops are which prevents a model
+ * from being able to run.
+ **/
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues) {
   if (_get_model_bytecode_version(bytecode_ivalues) < 6) {
     TORCH_WARN(
-        "This model likely has an older bytecode version without operator schema information. Please re-export your model to generate it");
+        "Only models with bytecode version 6 and above contain operator schema information. Please re-export your model to generate it");
   }
   std::unordered_map<std::string, OperatorInfo> result;
-  if (!bytecode_ivalues.empty()) {
-    // loop over all the functions in the bytecode
-    for (int i = 1; i < bytecode_ivalues.size(); i++) {
-      // descend to the operators list
-      auto method_tuple = bytecode_ivalues[i].toTuple()->elements();
-      auto operators_tuple = method_tuple[1].toTuple()->elements()[1];
-      auto operators = operators_tuple.toTuple()->elements()[1];
-      for (auto& op_tuple : operators.toTuple()->elements()) {
-        auto op = op_tuple.toTuple()->elements();
-
-        // grab name
-        std::string op_name = op[0].toStringRef();
-        std::string op_overload_name = op[1].toStringRef();
-        if (op_overload_name != "") {
-          op_name.append(".");
-          op_name.append(op_overload_name);
-        }
-
-        // grab schema
-        int num_args = -1;
-        if (op.size() > 2) {
-          num_args = op[2].toInt();
-        }
-        result.emplace(op_name, OperatorInfo{num_args});
-      }
-    }
+  if (bytecode_ivalues.empty()) {
+    TORCH_WARN("Failed to get model ops and info.");
     return result;
   }
-  TORCH_WARN("Failed to get model ops and info.");
+  // loop over all the functions in the bytecode
+  for (int i = 1; i < bytecode_ivalues.size(); i++) {
+    // descend to the operators list
+    auto method_tuple = bytecode_ivalues[i].toTuple()->elements();
+    auto operators_tuple = method_tuple[1].toTuple()->elements()[1];
+    auto operators = operators_tuple.toTuple()->elements()[1];
+    for (auto& op_tuple : operators.toTuple()->elements()) {
+      auto op = op_tuple.toTuple()->elements();
+
+      // grab name
+      std::string op_name = op[0].toStringRef();
+      std::string op_overload_name = op[1].toStringRef();
+      if (op_overload_name != "") {
+        op_name.append(".");
+        op_name.append(op_overload_name);
+      }
+
+      // grab schema size
+      if (op.size() > 2) {
+        result.emplace(op_name, OperatorInfo{(int)op[2].toInt()});
+      } else { // no schema information use default
+        result.emplace(op_name, OperatorInfo{});
+      }
+    }
+  }
   return result;
 }
 

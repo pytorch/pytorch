@@ -1694,7 +1694,7 @@ void initJitScriptBindings(PyObject* module) {
         return _get_model_bytecode_version(in);
       });
   py::class_<OperatorInfo>(m, "OperatorInfo")
-      .def_readonly("num_args", &OperatorInfo::num_args);
+      .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
     return _get_model_ops_and_info(filename);
   });

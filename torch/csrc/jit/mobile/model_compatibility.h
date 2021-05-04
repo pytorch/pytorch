@@ -23,7 +23,10 @@ TORCH_API int64_t _get_model_bytecode_version(
 
 // Struct storing metadata of an operator that can be useful for versioning
 struct OperatorInfo {
-  int num_args;
+  // The number of arguments within the schema of the op
+  // default to -1 if no schema information is available as that value
+  // cannot exist in a well formed schema
+  int num_schema_args = -1;
 };
 
 // The family of methods below to get the root ops and information from a model

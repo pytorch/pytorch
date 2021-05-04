@@ -29,7 +29,7 @@ class testVariousModelVersions(TestCase):
     def test_get_model_ops_and_info(self):
         script_module_v6 = pytorch_test_dri / "cpp" / "jit" / "script_module_v6.ptl"
         ops_v6 = _get_model_ops_and_info(script_module_v6)
-        assert(ops_v6["aten::linear"].num_args == 3)
+        assert(ops_v6["aten::linear"].num_schema_args == 3)
 
 if __name__ == '__main__':
     run_tests()
