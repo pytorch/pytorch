@@ -1,3 +1,6 @@
+#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
+
+#include <c10/core/StreamGuard.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
@@ -7,7 +10,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
-#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
@@ -73,6 +75,8 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          messageType = request.type(),
          id = request.id(),
          ctx = std::move(ctx)]() mutable {
+          c10::MultiStreamGuard guard(
+              ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
           // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
           // of 10us.
@@ -357,7 +361,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 
   // Need to reverse the device map for the backward pass of distributed
   // autograd.
-  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+  std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
   for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
     reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
   }
