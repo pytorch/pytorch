@@ -239,7 +239,7 @@ void nnc_aten_digamma(
   const at::Tensor& x = tensors[1];
   try {
     at::digamma_out(r, x);
-  } catch(...) {
+  } catch (...) {
   }
 }
 
