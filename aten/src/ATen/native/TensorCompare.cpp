@@ -72,7 +72,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   } else {
     cast_other = other;
   }
-  Tensor allowed_error = atol + (rtol * cast_other).abs();
+  Tensor allowed_error = (rtol * cast_other).abs() - (-atol);
   Tensor actual_error = (self - cast_other).abs();
 
   // Computes finite closeness

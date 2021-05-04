@@ -100,16 +100,22 @@ void BinaryTensorIteratorBase::setup(
   setup_type_and_device(config);
 
   // Check fast setup
-  TORCH_CHECK(
-      !(input_needs_broadcast_ || input_needs_type_promotion_ ||
-        output_needs_resize_ || output_needs_type_promotion_),
-      "unsupported -_-");
+  if (input_needs_broadcast_ || input_needs_type_promotion_ ||
+        output_needs_resize_ || output_needs_type_promotion_) {
+    TORCH_INTERNAL_ASSERT(
+        !input_needs_broadcast_, "broadcast is not supported");
+    TORCH_INTERNAL_ASSERT(
+        !input_needs_type_promotion_, "input type promotion is not supported");
+    TORCH_INTERNAL_ASSERT(!output_needs_resize_, "output resize is not supported");
+    TORCH_INTERNAL_ASSERT(
+        !output_needs_type_promotion_, "output type promotion is not supported");
+  }
 
   // TODO: the out check can be skipped for INPLACE, by similar switch...
   bool all_contiguous = a_.is_contiguous(at::MemoryFormat::Contiguous) &&
       b_.is_contiguous(at::MemoryFormat::Contiguous) &&
       (!out_.defined() || out_.is_contiguous(at::MemoryFormat::Contiguous));
-  TORCH_CHECK(all_contiguous, "unsupported -_-");
+  TORCH_CHECK(all_contiguous, "not all continous, unsupported -_-");
 
   // set output with contiguous
   // cannot call into a pure virtual function in constructor
@@ -152,6 +158,7 @@ void BinaryTensorIteratorBase::setup_type_and_device(
     input_needs_type_promotion_ = true;
   }
 
+  // TODO: out check can be skipped for inplace convention.
   if (out_.defined() && out_.scalar_type() != common_dtype_) {
     output_needs_type_promotion_ = true;
   }
