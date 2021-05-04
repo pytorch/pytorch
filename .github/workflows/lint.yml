@@ -23,12 +23,12 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      - name: Install requirements
-        id: requirements
-        run: pip install -r requirements.txt
       # TODO: remove this step before merging
       - name: Epic fail
         run: 'false'
+      - name: Install requirements
+        id: requirements
+        run: pip install -r requirements.txt
       - name: Ensure consistent CircleCI YAML config
         if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
