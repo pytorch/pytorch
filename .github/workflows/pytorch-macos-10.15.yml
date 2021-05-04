@@ -34,13 +34,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
         run: |
           ln -s (which sccache) clang++
-          echo '
-          #include <iostream>
-
-          int main() {
-              std::cout << "hi\n";
-              return 0;
-          }' > test.cpp
+          echo '' > test.cpp
+          echo "#include <iostream>" >> test.cpp
+          echo "int main() { std::cout << 2; return 0; }" >> test.cpp
 
           sccache --stop-server || echo server already stopped
           sccache --start-server
