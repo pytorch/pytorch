@@ -648,7 +648,10 @@ class DistributedTest:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.05)
             else:
-                time.sleep(timeout.total_seconds())
+                pass
+
+            # Exit all processes together instead of sleeping other ranks.
+            self._barrier(wait_for=int(os.environ["WORLD_SIZE"]))
 
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         @unittest.skipIf(
