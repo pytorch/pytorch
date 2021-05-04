@@ -69,12 +69,16 @@ class ProcessGroupGloo : public ProcessGroup {
   // operations using the new AsyncWork base class. Over time we will port
   // all operations and perform needed cleanup.
   //
+  // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
+  // by a background thread.
   class AsyncWork : public ProcessGroup::Work {
    public:
     AsyncWork(
+        std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
-        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+          outputTensors_(outputTensors) {
     }
 
     static void execute(c10::intrusive_ptr<AsyncWork> work) {
@@ -89,8 +93,13 @@ class ProcessGroupGloo : public ProcessGroup {
 
     virtual void run() = 0;
 
+    std::vector<at::Tensor> result() override;
+
    protected:
     friend class ProcessGroupGloo;
+
+   private:
+    std::vector<at::Tensor> outputTensors_;
   };
 
   // Wrap c10d store as Gloo store
