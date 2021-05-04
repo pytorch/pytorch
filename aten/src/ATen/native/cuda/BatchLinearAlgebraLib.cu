@@ -429,7 +429,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 //     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
 //     See https://github.com/pytorch/pytorch/issues/53879.
 template<typename scalar_t>
-inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
+inline static void apply_cholesky_cusolver(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-1);
@@ -494,18 +494,10 @@ inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool
 #endif // USE_CUSOLVER_64_BIT
 }
 
-Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
-  const int64_t batch_size = batchCount(self);
-  at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
-  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
-    apply_cholesky_cusolver_potrf<scalar_t>(self_working_copy, upper, infos);
+void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
+    apply_cholesky_cusolver<scalar_t>(input, upper, info);
   });
-
-  batchCheckErrors(infos, "cholesky_cuda");
-
-  return self_working_copy;
 }
 
 

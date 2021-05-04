@@ -17,6 +17,9 @@ enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 // linear algebra operations
 
 template <class scalar_t>
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
+
+template <class scalar_t>
 void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template <class scalar_t, class value_t=scalar_t>
@@ -157,6 +160,9 @@ void lapackLstsq(
 }
 
 #endif
+
+using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
+DECLARE_DISPATCH(cholesky_fn, cholesky_stub);
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
 
