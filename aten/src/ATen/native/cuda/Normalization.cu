@@ -26,7 +26,7 @@ inline Impl batch_norm_choose_impl(const Tensor& self) {
   }
 
   if (self.is_contiguous()) {
-    return self.dim() == 2 ? Impl::ChannelsLast : Impl::Contiguous;
+    return self.strides()[1] == 1 ? Impl::ChannelsLast : Impl::Contiguous;
   }
 
   if (self.is_contiguous(at::MemoryFormat::ChannelsLast)) {
