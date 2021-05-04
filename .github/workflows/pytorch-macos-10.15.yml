@@ -15,7 +15,6 @@ jobs:
     runs-on: macos-10.15
     steps:
       - name: env test build
-        working-directory: pytorch/
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
