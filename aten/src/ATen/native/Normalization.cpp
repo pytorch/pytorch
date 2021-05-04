@@ -498,16 +498,14 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
 
-  if (impl_index == 0) {
+  // backward in inference mode is not supported in cudnn, fallback to native
+  // TODO: verify the same thing in miopen
+  if (impl_index == 0 || (!train)) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
-    if (train) {
-      // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
-      // format conversion is done inside cudnn_batch_norm_backward instead
-      return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace);
-    } else {
-      return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
-    }
+    // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
+    // format conversion is done inside cudnn_batch_norm_backward instead
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace);
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   }
