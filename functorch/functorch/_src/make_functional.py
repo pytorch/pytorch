@@ -76,7 +76,53 @@ def load_buffers(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
 
+def load_state(
+        model: nn.Module,
+        weights: List[Tensor], weight_names: List[str],
+        buffers=(), buffer_names=()):
+    """load_state(model, weights, weight_names, buffers=(), buffer_names=()) -> model
+
+    load_state takes `weights` and `buffers` and assigns them to the model.
+    This is the inverse operation of `make_functional`.
+    """
+    assert len(weight_names) == len(weights)
+    load_weights(model, weight_names, weights)
+    if len(buffers) > 0:
+        assert len(buffer_names) == len(buffers)
+        load_buffers(model, buffer_names, buffers)
+    return model
+
+
 def make_functional(model: nn.Module):
+    """make_functional(model) -> weights, func, weight_names
+
+    Given an nn.Module, make_functional extracts the state (weights)
+    and returns a functional version of the model, `func`. This makes
+    it so that it is possible use transforms over the parameters of
+    `model`.
+
+    `func` can be invoked as follows:
+    ```
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    weights, func, _ = make_functional(model)
+    func(weights, (x,))
+    ```
+
+    And here is an example of applying the grad transform:
+    ```
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    weights, _, func = make_functional(model)
+    grad_weights = grad(func)(weights, (x,))
+    ```
+
+    To put the state back into a model, use `load_state`.
+    """
+    buffers = list(model.buffers())
+    if len(buffers) > 0:
+        raise RuntimeError('make_functional(model): `model` has buffers. Please use '
+                           'make_functional_with_buffers(model) instead.')
     weights, descriptors = extract_weights(model)
 
     def fun(weights, data):
@@ -87,6 +133,30 @@ def make_functional(model: nn.Module):
     return weights, fun, descriptors
 
 def make_functional_with_buffers(model: nn.Module):
+    """make_functional_with_buffers(model) -> weights, buffers, func, weight_names, buffer_names
+
+    Given an nn.Module, make_functional_with_buffers extracts the state (weights and buffers)
+    and returns a functional version of the model, `func`.
+
+    `func` can be invoked as follows:
+    ```
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    weights, buffers, func, _, _ = make_functional_with_buffers(model)
+    func(weights, buffers, (x,))
+    ```
+
+    And here is an example of applying the grad transform:
+    ```
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    weights, buffers, func, _, _ = make_functional_with_buffers(model)
+    func(weights, buffers, (x,))
+    grad_weights = grad(func)(weights, buffers, (x,))
+    ```
+
+    To put the state back into a model, use `load_state`.
+    """
     weights, weight_descriptors = extract_weights(model)
     buffers, buf_descriptors = extract_buffers(model)
 
