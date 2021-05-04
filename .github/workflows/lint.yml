@@ -79,12 +79,12 @@ jobs:
         if: always()
         run: |
           # shellcheck disable=SC2016
-          (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
+          (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' '**.pyi' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       - name: Ensure no unqualified type ignore
         if: always()
         run: |
           # shellcheck disable=SC2016
-          (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+          (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -261,6 +261,7 @@ jobs:
             git submodule update --init --recursive
 
             export USE_NCCL=0
+            export USE_DEPLOY=1
             # We really only need compile_commands.json, so no need to build!
             time python setup.py --cmake-only build
 
