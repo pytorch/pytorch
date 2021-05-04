@@ -1465,14 +1465,12 @@ enum class OpType {
 
 class BaseOp {
  public:
-  explicit BaseOp(const OpType type) : type_(type) {}
+  explicit BaseOp(const OpType) {}
   virtual ~BaseOp() = default;
 
   virtual at::Tensor run(at::Tensor&) const = 0;
   virtual std::string toString() const = 0;
 
- private:
-  OpType type_;
 };
 
 class Addmm final : public BaseOp {

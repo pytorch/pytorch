@@ -910,8 +910,8 @@ void conv2d_winograd_2_3(
       v_input_winograd.extents(),
       0u,
       {
-        v_input.sizes()[Layout::Activation4D::width],
-        v_input.sizes()[Layout::Activation4D::height],
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
       },
       {
         safe_downcast<int32_t>(padding[Layout::Parameter::width]),
@@ -964,8 +964,8 @@ void conv2d_winograd_2_3(
         },
         VK_KERNEL(conv2d_winograd_2_3),
         {
-          out_w_units,
-          out_h_units,
+          safe_downcast<uint32_t>(out_w_units),
+          safe_downcast<uint32_t>(out_h_units),
           v_output.extents().data[2u],
         },
         context->gpu().adapter->local_work_group_size(),
@@ -1134,7 +1134,7 @@ Conv2dOpContext::Conv2dOpContext(
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),
-      groups,
+      safe_downcast<int32_t>(groups),
       output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
       output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
     },
