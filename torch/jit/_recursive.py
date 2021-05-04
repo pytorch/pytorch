@@ -153,8 +153,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             elif isinstance(item, torch.jit.Attribute):
                 ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
                 attr_type = torch._C.InferredType(ann_to_type)
-            elif isinstance(item, torch.jit.RecursiveScriptClass):
-                attr_type = torch._C._jit_try_infer_type(item._c)
             else:
                 attr_type = torch._C._jit_try_infer_type(item)
                 inferred = True
@@ -299,12 +297,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 name,
                 torch._C._jit_try_infer_type(value).type(),
                 value)
-            continue
-
-        # Handle ScriptClass attributes.
-        if isinstance(value, torch.jit.RecursiveScriptClass):
-            attr_type, _ = infer_type(name, value)
-            concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
 
         # If we got here, this is a regular "data" attribute, add it to the concrete type
