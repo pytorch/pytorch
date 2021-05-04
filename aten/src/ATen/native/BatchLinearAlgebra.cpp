@@ -10,7 +10,6 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
-#include <torch/csrc/autograd/functions/utils.h>
 #include <c10/util/irange.h>
 
 #include <TH/TH.h>  // for USE_LAPACK
@@ -2809,7 +2808,7 @@ Tensor linalg_svdvals(const Tensor& input) {
 
   // if input requires grad we must compute the singular vectors to make this function differentiable
   // the singular vectors are not exposed to the user
-  const bool input_requires_grad = torch::autograd::compute_requires_grad(input);
+  const bool input_requires_grad = (at::GradMode::is_enabled() && input.requires_grad());
   std::tie(std::ignore, singular_values, std::ignore) =
       at::_svd_helper(input, /*some=*/input_requires_grad, /*compute_uv=*/input_requires_grad);
   return singular_values;
