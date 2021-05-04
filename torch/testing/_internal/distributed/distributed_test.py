@@ -48,7 +48,6 @@ from torch.testing._internal.common_distributed import (
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
-from test_c10d_common import gpus_for_rank
 
 try:
     import torchvision
