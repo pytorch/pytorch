@@ -279,6 +279,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self.graph: Optional['Tracer'] = None
 
     @property
     def owning_module(self):
