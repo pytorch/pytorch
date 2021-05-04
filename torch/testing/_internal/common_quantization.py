@@ -813,6 +813,7 @@ class QuantizationTestCase(TestCase):
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            # print('qgraph', qgraph)
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
 
