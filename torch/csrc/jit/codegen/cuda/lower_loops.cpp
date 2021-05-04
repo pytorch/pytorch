@@ -108,12 +108,11 @@ void LoopNestGenerator::handle(const Expr* expr) {
   // Fill the entire loop structure by Looking at each axis
   // individually in out's domain
   for (size_t out_i = 0; out_i < out_tv->nDims(); out_i++) {
-    auto out_id = out_tv->axis(out_i);
-    // If out_id is derived from trivial reductions and its root axes
-    // are also all the case, it's safe to skip this axis.
-    if (gpu_lower->trivialReductionInfo().isDerivedFromRoot(out_id)) {
-      continue;
-    }
+    // Note: It is not safe to skip trivial reduction axes as they could be
+    // inlined with other tensor views. This happens in
+    // NVFuserTest.FusionBNRepro_CUDA as of this commit on norm_hack_2_rebased
+    // branch
+
     // Look up the concrete ID in the parallel map, not in the loop
     // map, which also maps non-CA axes.
     auto concrete_id =

@@ -32,6 +32,9 @@ bool isDebugDumpEnabled(DebugDumpOption option);
 // errors are encountered. Helpful for debugging.
 bool useFallback();
 
+// Returns if unrolling should not be used for kernels with RNG in them.
+bool disableRNGUnrolling();
+
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
   return (a + b - 1) / b;

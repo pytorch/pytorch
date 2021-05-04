@@ -95,6 +95,7 @@ at::DimVector graphReductionAxes(
 
   at::DimVector reduction_axes;
   // TODO: let check that we have only single reduction node in the graph.
+  int reduction_count = 0;
   for (const auto& n : graph->nodes()) {
     if (isReductionToSizeNode(n)) {
       // TODO: we don't support permutation with ReductionToSize;
@@ -109,11 +110,15 @@ at::DimVector graphReductionAxes(
       for (const auto dim : dims_list->vec()) {
         reduction_axes.emplace_back(static_cast<int>(dim));
       }
+      ++reduction_count;
       // we should return here, but we don't!
       // We continue the traversal and check for other reduction node. Because
-      // our permutation doesn't really support intermediate reduction; Continue
-      // traversal would trigger the `TORCH_INTERNAL_ASSERT`, it's not ideal but
-      // at least it's not silent error.
+      // our permutation doesn't really support intermediate reduction, hence we
+      // mark simple_reduction as false;
+      if (reduction_count != 1) {
+        simple_reduction = false;
+        return reduction_axes;
+      }
     }
     // TODO: this doesn't apply any more, clean it up
   }

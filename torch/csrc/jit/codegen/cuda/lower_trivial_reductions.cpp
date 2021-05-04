@@ -23,7 +23,7 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
       root_id->definition() == nullptr, "Not root IterDomain: ", root_id);
 
   if (tv->definition() == nullptr) {
-    // This is an input tensor, so no rafactor tensor to traverse.
+    // This is an input tensor, so no rfactor tensor to traverse.
     return false;
   }
 

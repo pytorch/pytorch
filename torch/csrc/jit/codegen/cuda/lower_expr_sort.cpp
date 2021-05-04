@@ -67,11 +67,26 @@ struct ExprGroupConnections {
   ExprGroupConnections(
       ExprGroup* group_from,
       ExprGroup* group_to,
-      Val* val_to_connect)
-      : from(group_from), to(group_to), val(val_to_connect) {}
+      Val* producer_val,
+      Val* consumer_val)
+      : from(group_from),
+        to(group_to),
+        producer_val_(producer_val),
+        consumer_val_(consumer_val) {}
+  // Producer group from which the edge starts
   ExprGroup* from;
+
+  // Consumer group from which the edge ends
   ExprGroup* to;
-  Val* val;
+
+  // The value from the producer group connecting the groups
+  // This value helps us resolve the compute at position of expr groups
+
+  Val* producer_val_;
+
+  // The value that the producer val gets used to create on this edge
+  // This value helps us resolve the produce at position of expr groups
+  Val* consumer_val_;
 };
 
 struct ExprSortPayload : public PolymorphicBase {
@@ -311,7 +326,27 @@ class ExprSegmentationSorter {
 //     if (i + 1 != group->exprs().size())
 //       os << ", ";
 //   }
-//   os << "} (" << group->payload()->ca_domains_.size() << ", "
+//   os << "} producers(";
+//   for(auto p_e : group->producerEdges()){
+//     auto producer_group = p_e->from;
+//     os << "g{";
+//     for (size_t i = 0; i < producer_group->exprs().size(); i++) {
+//       os << producer_group->exprs()[i]->name();
+//       if (i + 1 != producer_group->exprs().size())
+//         os << ", ";
+//     } os<<" }, ";
+//   }
+//   os << ") consumers (";
+//   for(auto c_e : group->consumerEdges()){
+//     auto consumer_group = c_e->to;
+//     os << "g{";
+//     for (size_t i = 0; i < consumer_group->exprs().size(); i++) {
+//       os << consumer_group->exprs()[i]->name();
+//       if (i + 1 != consumer_group->exprs().size())
+//         os << ", ";
+//     } os<<" }, ";
+//   }
+//   os << ") ca, pa (" << group->payload()->ca_domains_.size() << ", "
 //      << group->payload()->pa_domains_.size() << ")";
 //   os << " ca_ids {";
 //   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
@@ -548,8 +583,9 @@ std::string ExprSegmentationSorter::toString(int verbosity) const {
       if (group->producerEdges().size() > 0) {
         ss << "    produced by groups: { \n";
         for (auto producer_edge : group->producerEdges()) {
-          ss << "      " << producer_edge->from << " via " << producer_edge->val
-             << "\n";
+          ss << "      " << producer_edge->from << " via "
+             << producer_edge->producer_val_ << " -> "
+             << producer_edge->consumer_val_ << "\n";
         }
         ss << "    }"
            << "\n";
@@ -646,6 +682,10 @@ std::vector<IterDomain*> mergeDomains(
   auto it1 = domain1.begin();
   auto it2 = domain2.begin();
 
+  if (domain1.empty() || domain2.empty()) {
+    return domain1.empty() ? domain2 : domain1;
+  }
+
   // Need to merge domains together. These domains are representative of what's
   // within all the compute at positions of their respective groups (could be
   // many Exprs). The domains do not necessarily match, and we want to pull in
@@ -680,9 +720,9 @@ std::vector<IterDomain*> mergeDomains(
       // domain1
       resulting_domain.push_back(*it2++);
     } else {
-      // This should not be reachalble since the axes here only
+      // This should not be reachable since the axes here only
       // include the shared axes between the two expr groups.
-      TORCH_INTERNAL_ASSERT(false, "Should not be reachable.");
+      // TODO: Evaluate
       resulting_domain.push_back(*it1++);
       resulting_domain.push_back(*it2++);
     }
@@ -740,10 +780,11 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // Connect joined group to resulting neighbors
   for (auto& edge : producer_edges) {
     auto from = edge->from;
-    auto val = edge->val;
+    auto producer_val = edge->producer_val_;
+    auto consumer_val = edge->consumer_val_;
 
-    edges_.push_back(
-        std::make_unique<ExprGroupConnections>(from, joined_groups, val));
+    edges_.push_back(std::make_unique<ExprGroupConnections>(
+        from, joined_groups, producer_val, consumer_val));
 
     joined_groups->addProducerEdge(edges_.back().get());
     from->addConsumerEdge(edges_.back().get());
@@ -753,48 +794,48 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
 
   for (auto& edge : consumer_edges) {
     auto to = edge->to;
-    auto val = edge->val;
+    auto producer_val = edge->producer_val_;
+    auto consumer_val = edge->consumer_val_;
 
-    edges_.push_back(
-        std::make_unique<ExprGroupConnections>(joined_groups, to, val));
+    edges_.push_back(std::make_unique<ExprGroupConnections>(
+        joined_groups, to, producer_val, consumer_val));
     joined_groups->addConsumerEdge(edges_.back().get());
     edge->to->addProducerEdge(edges_.back().get());
   }
 
-  if (std::all_of(
-          producer->consumerEdges().begin(),
-          producer->consumerEdges().end(),
-          [&consumer](ExprGroupConnections* connection) {
-            return connection->to == consumer;
-          })) {
-    // If all consumers of producer were resolved (i.e. last consumer of
-    // producer is the one we're merging with), don't forward the compute at
-    // axes of producer
-    joined_groups->payload()->ca_domains_ = consumer->payload()->ca_domains_;
-  } else {
-    // Merge all compute at domains of producer and consumer
-    std::vector<IterDomain*> resulting_ca_axes =
-        mergeDomains(sg1->payload()->ca_domains_, sg2->payload()->ca_domains_);
-    joined_groups->payload()->ca_domains_ = resulting_ca_axes;
+  // Merge the compute at domain of all edges going out from the newly joined
+  // group. The val's we're looking for are from our consumer edges, but we want
+  // to grab the producer val as that's the one we generate.
+  std::vector<IterDomain*> joined_ca_domains;
+  for (auto consumer_group_edge : joined_groups->consumerEdges()) {
+    auto producer_of_consumer_edge = consumer_group_edge->producer_val_;
+    if (producer_of_consumer_edge->isA<TensorView>()) {
+      auto tv = producer_of_consumer_edge->as<TensorView>();
+      std::vector<IterDomain*> local_ca_domains;
+      for (size_t tv_i = 0; tv_i < tv->getComputeAtPosition(); tv_i++) {
+        local_ca_domains.push_back(tv->axis(tv_i));
+      }
+      joined_ca_domains = mergeDomains(joined_ca_domains, local_ca_domains);
+    }
   }
+  joined_groups->payload()->ca_domains_ = joined_ca_domains;
 
-  if (std::all_of(
-          consumer->producerEdges().begin(),
-          consumer->producerEdges().end(),
-          [&producer](ExprGroupConnections* connection) {
-            return connection->from == producer;
-          })) {
-    // If all producere edges were resolved (i.e. last producer of consumer is
-    // the one we're merging with), don't forward the produce at axes of
-    // consumer
-    joined_groups->payload()->pa_domains_ = producer->payload()->pa_domains_;
-  } else {
-    // Merge all produce at domains of producer and consumer
-    std::vector<IterDomain*> resulting_pa_axes =
-        mergeDomains(sg1->payload()->pa_domains_, sg2->payload()->pa_domains_);
-
-    joined_groups->payload()->pa_domains_ = resulting_pa_axes;
+  // Merge the produce at domain of all edges coming into the newly joined
+  // group. The val's we're looking for are from our producer edges, but we want
+  // to grab the consumer val as that's the one we generate.
+  std::vector<IterDomain*> joined_pa_domains;
+  for (auto producer_group_edge : joined_groups->producerEdges()) {
+    auto consumer_of_producer_edge = producer_group_edge->consumer_val_;
+    if (consumer_of_producer_edge->isA<TensorView>()) {
+      auto tv = consumer_of_producer_edge->as<TensorView>();
+      std::vector<IterDomain*> local_pa_domains;
+      for (size_t tv_i = 0; tv_i < tv->getMaxProducerPosition(); tv_i++) {
+        local_pa_domains.push_back(tv->axis(tv_i));
+      }
+      joined_pa_domains = mergeDomains(joined_pa_domains, local_pa_domains);
+    }
   }
+  joined_groups->payload()->pa_domains_ = joined_pa_domains;
 
   return joined_groups;
 }
@@ -814,19 +855,14 @@ bool canReduceCA(ExprGroup* group) {
   // compute at axis, otherwise it should be lowered.
   for (auto consumer_edge : group->consumerEdges()) {
     auto consumer = consumer_edge->to;
-    bool has_match = false;
     for (auto c_id : consumer->payload()->pa_domains_) {
       if (GpuLower::current()->caLoopMap().areMapped(c_id, g_last_id)) {
-        has_match = true;
-        break;
+        return false;
       }
-    }
-    if (!has_match) {
-      return true;
     }
   }
 
-  return false;
+  return true;
 }
 
 bool canReducePA(ExprGroup* group) {
@@ -1008,6 +1044,7 @@ void ExprSegmentationSorter::sort() {
   // Create edges between the Exprs. Mark inputs and outputs of the fusion.
   for (auto expr : complete_fusion_->exprs()) {
     auto expr_group = expr2group.at(expr);
+    auto out = expr->outputs()[0];
     for (auto inp : expr->inputs()) {
       if (inp->isFusionInput()) {
         continue;
@@ -1020,11 +1057,11 @@ void ExprSegmentationSorter::sort() {
         continue;
       }
 
-      auto def_group = expr2group.at(inp->definition());
-      edges_.push_back(
-          std::make_unique<ExprGroupConnections>(def_group, expr_group, inp));
+      auto inp_def_group = expr2group.at(inp->definition());
+      edges_.push_back(std::make_unique<ExprGroupConnections>(
+          inp_def_group, expr_group, inp, out));
       expr_group->addProducerEdge(edges_.back().get());
-      def_group->addConsumerEdge(edges_.back().get());
+      inp_def_group->addConsumerEdge(edges_.back().get());
     }
   }
   bool inter_iter_update = true;

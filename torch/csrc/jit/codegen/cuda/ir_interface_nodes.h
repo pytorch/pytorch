@@ -196,6 +196,10 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return compute_at_pos_ > 0;
   }
 
+  bool hasMaxProducerPosition() const {
+    return max_producer_pos_ > 0;
+  }
+
   size_t nDims() const;
 
   // Returns the position that this tensor is produced at relative to its axes.

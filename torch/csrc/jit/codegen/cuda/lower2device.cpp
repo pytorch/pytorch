@@ -80,6 +80,8 @@ void GpuLower::replaceSymbolicSizes() {
         ss << "T" << tv->name() << ".size[" << dim++ << "]";
         kir_val_map_[orig_size] = ir_builder.create<kir::NamedScalar>(
             ss.str(), orig_size->getDataType().value());
+      } else {
+        dim++;
       }
     }
   }

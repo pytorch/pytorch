@@ -220,13 +220,6 @@ kir::Bool* PredicateCompute::getInlinePredicate(
         return ir_builder.create<kir::Bool>(true);
       }
     }
-    // Never inline predicate block broadcasts
-    if (auto broadcast = dynamic_cast<const kir::BroadcastOp*>(expr)) {
-      const auto domain = broadcast->out()->as<kir::TensorView>()->domain();
-      if (domain->hasBlockBroadcast()) {
-        return ir_builder.create<kir::Bool>(true);
-      }
-    }
   }
 
   auto out_tv = firstTvOutput(expr);

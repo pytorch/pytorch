@@ -111,19 +111,9 @@ class IrParser {
       }
     }
 
-    // TODO: disable unroll to ensure rand_like generates identical output as
-    // with eager mode
-    bool disable_unroll = false;
-    bool has_reduction = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
-      if (node->kind() == aten::rand_like) {
-        disable_unroll = true;
-      }
-      if (node->kind() == aten::sum) {
-        has_reduction = true;
-      }
     }
 
     // mark output;
