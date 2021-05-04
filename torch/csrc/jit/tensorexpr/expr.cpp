@@ -50,6 +50,22 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
+ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, other, ExprHandle(getImmediateByType(other.dtype(), 0)));
+}
+
+ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, ExprHandle(getImmediateByType(other.dtype(), 1)), other);
+}
+
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
