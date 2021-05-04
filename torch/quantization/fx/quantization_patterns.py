@@ -67,6 +67,24 @@ class QuantizeHandler(ABC):
         # all inputs are tensors or not, e.g. add/mul
         self.num_tensor_args = len(node.args)
         self.all_node_args_are_tensors = True
+        # the last node of the matched pattern
+        self.last_node = node
+
+    def _maybe_get_last_node_only_observer(
+        self,
+        quantizer: QuantizerCls,
+    ) -> Optional[torch.quantization.ObserverBase]:
+        """
+        If the last node of the pattern is observed, return the observer
+        instance. Otherwise, return None.
+        """
+        for maybe_obs_node, _ in self.last_node.users.items():
+            if maybe_obs_node.op == 'call_module':
+                maybe_obs = quantizer.modules[maybe_obs_node.name]
+                if isinstance(maybe_obs, torch.quantization.ObserverBase):
+                    return maybe_obs
+        return None
+
 
     def input_output_observed(self) -> bool:
         """
@@ -627,18 +645,23 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         weight_dtype = dtypes[1]
         # TODO: reference_model option for linear module
         if self.linear_node.op == 'call_module':
+
+            output_activation_post_process = \
+                self._maybe_get_last_node_only_observer(quantizer)
+
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
             # 1. attach output activation post process to linear module
-            if node.name in quantizer.activation_post_process_map:
-                # this is the static quantization case
-                cur_idx = quantizer.activation_post_process_indexes[node.name]
-                output_activation_post_process = \
-                    quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                quantizer.activation_post_process_indexes[node.name] += 1
-            else:
-                output_activation_post_process = None
+            if False:
+                if node.name in quantizer.activation_post_process_map:
+                    # this is the static quantization case
+                    cur_idx = quantizer.activation_post_process_indexes[node.name]
+                    output_activation_post_process = \
+                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
+                    quantizer.activation_post_process_indexes[node.name] += 1
+                else:
+                    output_activation_post_process = None
 
             if output_activation_post_process:
                 self.linear.activation_post_process = output_activation_post_process

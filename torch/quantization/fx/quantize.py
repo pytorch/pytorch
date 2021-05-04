@@ -98,6 +98,7 @@ MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
 # Helper Functions
 # ------------------------
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def insert_observer(
         node: Node, observer: torch.quantization.ObserverBase,
         model: torch.nn.Module,
@@ -135,6 +136,195 @@ def insert_observer(
         'call_module', observer_name, (load_arg(node),), {})
     observed_node_names_set.add(node.name)
 
+def insert_observer_rewrite(
+    node: Node,
+    observer: torch.quantization.ObserverBase,
+    model: torch.nn.Module,
+    graph: Graph,
+) -> Node:
+    model_device = assert_and_get_unique_device(model)
+    if model_device:
+        observer.to(model_device)
+    # add observer module as attribute
+    prefix = node.name + '_activation_post_process_'
+    get_new_observer_name = get_new_attr_name_with_prefix(prefix)
+    observer_name = get_new_observer_name(model)
+    setattr(model, observer_name, observer)
+    with graph.inserting_after(node):
+        new_obs = graph.create_node(
+            'call_module', observer_name, (node,), {})
+    return new_obs
+
+def get_target_dtype_for_node_rewrite(
+    node: Node,
+    qconfig_map: Dict[str, QConfigAny],
+    inputs_seen_counter: int,
+    outputs_seen_counter: int,
+    input_quantized_idxs: List[int],
+    output_quantized_idxs: List[int],
+) -> Any:  # TODO: real typehint
+    """
+    Returns the expected dtype of the input and output of this node after
+    convert.
+    """
+    if node.op == 'placeholder':
+        cur_input_idx = inputs_seen_counter
+        if inputs_seen_counter in input_quantized_idxs:
+            # TODO: properly set between quint8 and qint8
+            return torch.qint8
+        else:
+            # if dtype is fp32 (default), do nothing
+            # note: other dtypes are not supported
+            return torch.float
+
+    elif node.op in ('call_module', 'call_method', 'call_function'):
+
+        # get qconfig to determine the eventual dtype of this node
+        local_qconfig = qconfig_map.get(node.name, None)
+        if local_qconfig is not None:
+            act_dtype, weight_dtype, act_compute_dtype = \
+                get_qconfig_dtypes(local_qconfig)
+            # print(f'dtypes act {act_dtype} weight {weight_dtype} act_compute {act_compute_dtype}')
+            return act_dtype
+        else:
+            return torch.float
+
+    elif node.op == 'output':
+        cur_output_idx = outputs_seen_counter
+        if outputs_seen_counter in output_quantized_idxs:
+            # TODO: properly set between quint8 and qint8
+            return torch.qint8
+        else:
+            # if dtype is fp32 (default), do nothing
+            # note: other dtypes are not supported
+            return torch.float
+
+    else:
+        raise AssertionError(f'need to handle {node.format_node()}')
+
+def maybe_insert_input_observers_for_node_rewrite(
+    node: Node,
+    qconfig: QConfigAny,
+    load_arg: Callable,
+    model: torch.nn.Module,
+    graph: Graph,
+) -> None:
+    """
+    If needed, inserts observers to the input args and kwargs of `node`.
+    Note: modifies `node` inplace.
+    """
+
+    if qconfig is None:
+        # if quantization is turned off for this node, we do not need
+        # to insert input observers
+        return
+    assert qconfig is not None
+
+    # Look through every input arg.  If that arg's target dtype does not
+    # match the current node's target dtype, insert an observer.
+    # print('\nnew_node', new_node.format_node(), new_node.op)
+    new_args = []
+    for arg in node.args:
+
+        # default (no observer)
+        new_arg = arg
+
+        if isinstance(arg, Node):
+            is_weight = node_arg_is_weight(node, arg)
+            act_post_process_ctr = qconfig.weight if is_weight else \
+                qconfig.activation
+            # TODO(before land): handle fixedqparamsquantizehandler
+            is_bias = node_arg_is_bias(node, arg)
+            # TODO(before land): add no_tensors check
+            weight_needs_obs = is_weight and weight_is_quantized(qconfig)
+            bias_needs_obs = \
+                (is_bias and activation_dtype(qconfig) == torch.float16) and \
+                weight_dtype(qconfig) == torch.float16
+            dtype_changes_and_second_dtype_not_float = (
+                # if the dtypes are different, we need an observer
+                (arg.dtype != node.dtype) and
+                # except if the second dtype is float, a dequant will be inserted
+                # without an observer in convert
+                # TODO(future PR): change this so a placeholder is inserted for
+                # future dequants, to make the logic easier to understand
+                (node.dtype != torch.float)
+            )
+
+            needs_obs = (
+                weight_needs_obs or
+                bias_needs_obs or
+                dtype_changes_and_second_dtype_not_float
+            )
+
+            if needs_obs:
+                observer = act_post_process_ctr()
+                arg_this_env = load_arg(arg)
+                new_obs = insert_observer_rewrite(
+                    arg_this_env, observer, model, graph)
+                # set the type, so the next node can read it
+                new_obs.dtype = node.dtype
+                # override this arg to be the observed arg
+                new_arg = new_obs
+
+        new_args.append(new_arg)
+    # assign the new args to the node, inplace
+    node.args = tuple(new_args)
+    # TODO(before land): repeat for kwargs
+
+
+def maybe_insert_output_observer_for_node_rewrite(
+    node: Node,
+    model: torch.nn.Module,
+    graph: Graph,
+    matches: Dict[str, MatchResult],
+) -> Optional[Node]:
+    """
+    If `node` needs an output observer, creates it, inserts it into `graph`
+    and returns it.
+
+    If `node` does not need an output observer, returns None.
+    """
+    root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+        node.name, (None, None, None, None, None))
+
+    if qhandler is not None:
+        assert qconfig is not None
+
+        # after this point, all the observers up to this node are correct
+        # if needed by this node, also insert an observer for the output
+        should_insert_observer = \
+            qhandler.should_insert_observer_for_output(
+                qconfig, model.training)
+        if should_insert_observer:
+            # TODO(before land): handle fixedqparamsquantizehandler
+            # TODO(before land): remove the mypy ignore and fix the bug
+            observer = qconfig.activation()  # type: ignore[union-attr]
+            new_obs = insert_observer_rewrite(node, observer, model, graph)
+            # set the type, so the next node can read it
+            new_obs.dtype = node.dtype
+            return new_obs
+
+    elif node.op == 'output':
+        prev_node = node.args[0]
+        assert isinstance(prev_node, Node)
+        should_insert_observer = (
+            prev_node.dtype == torch.float and
+            node.dtype != torch.float
+        )
+        if should_insert_observer:
+            # TODO(before land): handle fixedqparamsquantizehandler
+            # TODO(before land): remove the mypy ignore and fix the bug
+            observer = qconfig.activation()  # type: ignore[union-attr]
+            new_obs = insert_observer_rewrite(
+                prev_node, observer, model, graph)
+            # set the type, so the next node can read it
+            new_obs.dtype = node.dtype
+            return new_obs
+
+    return None
+
+
+# TODO(if RFC is accepted): handle special modules in RFC
 def maybe_insert_observer_for_special_module(
         quantize_handler: QuantizeHandler, modules: Dict[str, torch.nn.Module],
         prepare_custom_config_dict: Any, qconfig: Any, node: Node) -> Optional[List[int]]:
@@ -181,6 +371,7 @@ def maybe_insert_observer_for_special_module(
         modules[node.target] = observed_standalone_module  # type: ignore[index]
     return standalone_module_input_idxs
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def maybe_insert_observer_for_output_of_the_node(
         node: Node,
         quantize_handler: QuantizeHandler,
@@ -261,6 +452,7 @@ def maybe_insert_observer_for_output_of_the_node(
     if node.name in quants and inserted_observer:
         quants[node.name].pop(0)
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def maybe_insert_observer_for_input_arg_of_observed_node(
         node: Node, observed_node_names_set: Set[str],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
@@ -279,6 +471,7 @@ def maybe_insert_observer_for_input_arg_of_observed_node(
                     activation_post_process_indexes,
                     env, observed_graph, load_arg, observed_node_names_set)
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def maybe_insert_observer_for_output_of_model(
         node: Node,
         model: torch.nn.Module,
@@ -320,6 +513,7 @@ def maybe_insert_observer_for_output_of_model(
     else:
         raise Exception("hardcoding output to be quantized not supported: " + str(type(node)))
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def insert_observers_for_model(
         model: GraphModule,
         modules: Dict[str, torch.nn.Module],
@@ -406,6 +600,127 @@ def insert_observers_for_model(
 
     return result_node
 
+def insert_observers_for_model_rewrite(
+        model: GraphModule,
+        modules: Dict[str, torch.nn.Module],
+        matches: Dict[str, MatchResult],
+        qconfig_map: Dict[str, QConfigAny],
+        observed_graph: Graph,
+        prepare_custom_config_dict: Dict[str, Any],
+        input_quantized_idxs: List[int],
+        output_quantized_idxs: List[int]) -> Optional[Node]:
+    """
+    Inserts observers, using the following high level algorithm:
+
+
+    For each node in the graph:
+      1. determine the target dtype of this node in the quantized graph, and save
+           it for future steps
+      2. determine the target dtype or all args and kwargs of this node
+      3. if any arg or kwarg's target dtype does not match the current node's
+           dtype, insert an observer
+      4. if the current node needs an output observer, insert it
+
+    For example:
+
+    - starting graph:
+        x0 -> linear -> x1
+
+    - observed graph after processing x0:
+        x0(fp32)
+
+    - observed graph after processing linear:
+        x0(fp32) -> x0_obs0(int8) -> linear(int8) -> linear_obs0(int8)
+
+    - observed graph after processing x1:
+        x0(fp32) -> x0_obs0(int8) -> linear(int8) -> linear_obs0(int8) -> x1
+
+    After a node is processed, the naive observer placement is guaranteed to be
+    complete for that node and all of its predecessors. There can be future
+    passes which optimize the graph by deduplicating observers, etc.
+    """
+
+    env: Dict[Any, Any] = {}
+
+    def load_arg(a):
+        return map_arg(a, lambda node: env[node.name])
+
+    inputs_seen_counter = 0
+    outputs_seen_counter = 0
+    results_node = None
+
+    for node in model.graph.nodes:
+        # print('\nobs graph', observed_graph, '\n')
+        print('processing node', node.format_node())
+
+        # copy the current node as is
+        new_node = observed_graph.node_copy(node, load_arg)
+        env[node.name] = new_node
+
+        # check for matches
+        root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+            node.name, (None, None, None, None, None))
+        # print('match results', root_node, matched_nodes, pattern, qhandler, qconfig)
+
+        # assign a target dtype to the current node
+        new_node.dtype = get_target_dtype_for_node_rewrite(
+            node, qconfig_map, inputs_seen_counter, outputs_seen_counter,
+            input_quantized_idxs, output_quantized_idxs)
+        # print('dtype', new_node.dtype)
+
+        #
+        # After this point, the current node and all of its arguments
+        # have a dtype assigned. Now, we insert observers for inputs
+        # of this node (if needed for this node), and the output of this node
+        # (if needed for this node).
+        #
+
+        if new_node.op == 'placeholder':
+            # if a graph input is in fp32, it does not need observation
+            # if a graph input is in int8, we assume the observation happens
+            #   outside of the graph, and no additional observation is needed
+            pass
+
+        elif new_node.op in ('call_module', 'call_method', 'call_function', 'output'):
+            skip_inserting_observers = (
+                (qconfig is None) or
+                (qhandler is not None and (
+                    isinstance(qhandler, CopyNodeQuantizeHandler) or
+                    qhandler.num_tensor_args == 0
+                ))
+            )
+
+            if not skip_inserting_observers:
+                # this modifies new_node inplace
+                maybe_insert_input_observers_for_node_rewrite(
+                    new_node, qconfig, load_arg, model, observed_graph)
+                # this returns the new observer node if it was needed
+                maybe_output_obs = maybe_insert_output_observer_for_node_rewrite(
+                    new_node, model, observed_graph, matches)
+                if maybe_output_obs is not None:
+                    env[new_node.name] = maybe_output_obs
+            else:
+                # if we skipped observation and we have a copy node,
+                # assign the dtype to the dtype of the previous node
+                new_node.dtype = new_node.args[0].dtype
+
+        #
+        # After this point, the current node has input and output observers
+        # that it needs for itself inserted.
+        #
+
+        # increment the counters, so future inputs and outputs are assigned
+        # correct dtypes
+        if node.op == 'placeholder':
+            inputs_seen_counter += 1
+        elif node.op == 'output':
+            outputs_seen_counter += 1
+
+        if new_node.op == 'output':
+            results_node = env[new_node.name]
+
+    return results_node
+
 
 def in_nodes(a: Argument, nodes: Set[Node]) -> bool:
     """ Checks if argument `a` is in the nodes set
@@ -422,6 +737,7 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
     return node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
+# TODO(if RFC is accepted): handle all of this logic in the RFC
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         qconfig_map: Dict[str, QConfigAny],
@@ -779,6 +1095,11 @@ class Quantizer:
         matches, quants = self._match(
             model, model.graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
+        if False:
+            print('matches')
+            for k, v in matches.items():
+                print(k, v)
+            print('\n')
         self.activation_post_process_map = defaultdict(list)
         observed_graph = Graph()
         observed_node_names_set: Set[str] = set()
@@ -788,26 +1109,35 @@ class Quantizer:
         output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
-        result_node = insert_observers_for_model(
-            model, self.modules, matches, quants, observed_node_names_set,
-            self.qconfig_map, self.activation_post_process_map, self.activation_post_process_indexes,
-            observed_graph, prepare_custom_config_dict, input_quantized_idxs, output_quantized_idxs)
+        if True:
+            result_node = insert_observers_for_model_rewrite(
+                model, self.modules, matches, self.qconfig_map,
+                observed_graph, prepare_custom_config_dict,
+                input_quantized_idxs, output_quantized_idxs)
 
-        self.modules = dict(model.named_modules())
-        matches, quants = self._match(
-            model, observed_graph, standalone_module_names, standalone_module_classes,
-            custom_module_classes)
-        observed_graph = handle_copy_nodes(
-            observed_graph, matches, self.qconfig_map,
-            self.activation_post_process_map, self.modules)
+        # for now, gate the old logic out for easy review
+        # if the RFC goes forward, this will get deleted
+        if False:
+            result_node = insert_observers_for_model(
+                model, self.modules, matches, quants, observed_node_names_set,
+                self.qconfig_map, self.activation_post_process_map, self.activation_post_process_indexes,
+                observed_graph, prepare_custom_config_dict, input_quantized_idxs, output_quantized_idxs)
 
-        self.modules = dict(model.named_modules())
-        matches, quants = self._match(
-            model, observed_graph, standalone_module_names, standalone_module_classes,
-            custom_module_classes)
-        observed_graph = handle_cat_nodes(
-            model, observed_graph, matches, self.activation_post_process_map,
-            self.modules)
+            self.modules = dict(model.named_modules())
+            matches, quants = self._match(
+                model, observed_graph, standalone_module_names, standalone_module_classes,
+                custom_module_classes)
+            observed_graph = handle_copy_nodes(
+                observed_graph, matches, self.qconfig_map,
+                self.activation_post_process_map, self.modules)
+
+            self.modules = dict(model.named_modules())
+            matches, quants = self._match(
+                model, observed_graph, standalone_module_names, standalone_module_classes,
+                custom_module_classes)
+            observed_graph = handle_cat_nodes(
+                model, observed_graph, matches, self.activation_post_process_map,
+                self.modules)
 
         self.save_state(model)
         preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
@@ -1433,6 +1763,7 @@ class Quantizer:
 
         return match_map
 
+    # TODO(if RFC is accepted): delete this function and all dependencies
     def _find_quants(
             self, graph: Graph, modules: Dict[str, torch.nn.Module],
             matches: Dict[str, MatchResult]) -> Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]:
