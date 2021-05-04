@@ -16,13 +16,6 @@
 
 namespace at { namespace native {
 
-using unpack_pivots_fn = void(*)(
-  TensorIterator& iter,
-  int64_t dim_size
-);
-
-DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
-
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number

@@ -1,4 +1,4 @@
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
