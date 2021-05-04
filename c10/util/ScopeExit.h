@@ -8,7 +8,8 @@ namespace c10 {
 /**
  * Mostly copied from https://llvm.org/doxygen/ScopeExit_8h_source.html
  */
-template <typename Callable> class scope_exit {
+template <typename Callable>
+class scope_exit {
   Callable ExitFunction;
   bool Engaged = true; // False once moved-from or release()d.
 
@@ -24,8 +25,8 @@ template <typename Callable> class scope_exit {
     Rhs.release();
   }
   scope_exit(const scope_exit&) = delete;
-  scope_exit &operator=(scope_exit&&) = delete;
-  scope_exit &operator=(const scope_exit&) = delete;
+  scope_exit& operator=(scope_exit&&) = delete;
+  scope_exit& operator=(const scope_exit&) = delete;
 
   void release() {
     Engaged = false;
@@ -44,8 +45,7 @@ template <typename Callable> class scope_exit {
 //
 // Interface is specified by p0052r2.
 template <typename Callable>
-scope_exit<typename std::decay<Callable>::type> make_scope_exit(
-    Callable &&F) {
+scope_exit<typename std::decay<Callable>::type> make_scope_exit(Callable &&F) {
   return scope_exit<typename std::decay<Callable>::type>(
       std::forward<Callable>(F));
 }
