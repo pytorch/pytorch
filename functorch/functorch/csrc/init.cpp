@@ -6,6 +6,7 @@
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/VmapTransforms.h>
 #include <functorch/csrc/PythonKey.h>
+#include <functorch/csrc/BatchedFallback.h>
 
 namespace at {
 namespace functorch {
@@ -182,6 +183,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
   m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "add batch dim");
   m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "add batch dim");
+  m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
   m.def("dlevel", &at::functorch::dlevel, "add batch dim");
   m.def("dump_tensor", &at::functorch::dump_tensor, "add batch dim");
 
