@@ -77,6 +77,7 @@ c10::IValue MemoryPlan::serialize() const {
 
 void MemoryPlan::allocate(ExecutionState* state) const {
   auto& allocations = state->preallocations_;
+  allocations.clear();
   allocations.reserve(buffer_sizes_.size());
   for (int64_t buffer_size : buffer_sizes_) {
     at::DataPtr buffer = c10::GetCPUAllocator()->allocate(buffer_size);
@@ -111,21 +112,24 @@ c10::IValue Function::serialize() const {
 
   dict.insert("name", name_.qualifiedName());
   dict.insert("nnc_kernel_id", nnc_kernel_id_);
+  // TODO: should serialize parameters with Module instead of with each Method.
+  // And ideally the parameters should be shared between the compiled model
+  // and the original model if we can serialize both in the same model file.
   dict.insert("parameters", parameters_);
 
   // input_specs_
-  std::vector<c10::IValue> inputs;
+  std::vector<c10::IValue> input_specs;
   for (const auto& input_spec : input_specs_) {
-    inputs.emplace_back(input_spec.serialize());
+    input_specs.emplace_back(input_spec.serialize());
   }
-  dict.insert("input_specs", Tup(std::move(inputs)));
+  dict.insert("input_specs", Tup(std::move(input_specs)));
 
   // output_specs_
-  std::vector<c10::IValue> outputs;
+  std::vector<c10::IValue> output_specs;
   for (const auto& output_spec : output_specs_) {
-    outputs.emplace_back(output_spec.serialize());
+    output_specs.emplace_back(output_spec.serialize());
   }
-  dict.insert("output_specs", Tup(std::move(outputs)));
+  dict.insert("output_specs", Tup(std::move(output_specs)));
 
   // memory_plan_
   dict.insert("memory_plan", memory_plan_.serialize());
