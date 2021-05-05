@@ -82,8 +82,9 @@ void dropUnused(Block* b) {
     if (auto d = createDropIfUnused(n->outputs())) {
       d->insertAfter(n);
     }
-    for (auto b : n->blocks())
-      dropUnused(b);
+    for (auto block : n->blocks()) {
+      dropUnused(block);
+    }
   }
 }
 
@@ -106,7 +107,7 @@ void insertLastUses(Graph& g) {
     // when the If/Loop exits. These are created and inserted on demand.
     std::unordered_map<Node*, Node*> drop_for_node;
 
-    InsertLastUses(Graph& g) : graph(g) {
+    explicit InsertLastUses(Graph& g) : graph(g) {
       scanBlock(graph.block());
     }
     void scanBlock(Block* b) {
@@ -190,8 +191,9 @@ void insertLastUses(Graph& g) {
       }
       for (auto i : drop->inputs()) {
         // we already accounted for this use
-        if (i == v)
+        if (i == v) {
           return;
+        }
       }
       drop->addInput(v);
     }
@@ -207,7 +209,7 @@ PreprocessGraph::PreprocessGraph(Graph& g) : graph(g.copy()) {
   dropUnused(graph->block());
   // fill in move_flags by scanning blocks;
   insertLastUses(*graph);
-  can_emit_inline = std::move(CanEmitInline(graph).can_emit_inline_);
+  can_emit_inline = std::move(CanEmitInline(*graph.get()).can_emit_inline_);
 }
 } // namespace interpreter
 } // namespace jit
