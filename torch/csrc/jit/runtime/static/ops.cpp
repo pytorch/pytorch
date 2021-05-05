@@ -568,19 +568,24 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
-  c10::optional<float> clamp;
-  if (n->inputs().size() > 1) {
-    TORCH_CHECK(n->inputs().at(1)->node()->kind() == prim::Constant);
-    clamp = toIValue(n->inputs().at(1))->toDouble();
+  if (n->inputs().size() != 2) {
+    return nullptr;
   }
-  auto te = createLogit(clamp);
+  c10::optional<float> clamp = c10::nullopt;
+  if (n->inputs()[1]->node()->kind() == prim::Constant) {
+    auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
+    clamp = clamp_d
+        ? c10::make_optional<float>(static_cast<float>(clamp_d.value()))
+        : c10::nullopt;
+  }
+  auto te = clamp ? createLogit(clamp) : nullptr;
   return [te](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te || !te->supports(in0_t)) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
