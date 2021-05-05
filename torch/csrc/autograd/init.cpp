@@ -264,14 +264,15 @@ static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * set_autocast_dtype(PyObject* _unused, PyObject *arg) {
+static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!THPDtype_Check(arg)) {
-    throw TypeError("dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
   }
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_dtype(targetType);
-  Py_RETURN_NONE;;
+  at::autocast::set_autocast_cpu_dtype(targetType);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -287,9 +288,9 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
-static PyObject * get_autocast_dtype(PyObject* _unused, PyObject *arg){
+static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_dtype();
+  at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
   return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
   END_HANDLE_TH_ERRORS
 }
@@ -384,8 +385,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
   {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
-  {"set_autocast_dtype", set_autocast_dtype, METH_O, nullptr},
-  {"get_autocast_dtype", get_autocast_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
+  {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},

@@ -15,9 +15,9 @@ class autocast(object):
 
     def __enter__(self):
         self.prev = torch.is_autocast_cpu_enabled()
-        self.prev_dtype = torch.get_autocast_dtype()
+        self.prev_dtype = torch.get_autocast_cpu_dtype()
         torch.set_autocast_cpu_enabled(self._enabled)
-        torch.set_autocast_dtype(self._dtype)
+        torch.set_autocast_cpu_dtype(self._dtype)
         torch.autocast_increment_nesting()
 
     def __exit__(self, *args):
@@ -25,7 +25,7 @@ class autocast(object):
         if torch.autocast_decrement_nesting() == 0:
             torch.clear_autocast_cache()
         torch.set_autocast_cpu_enabled(self.prev)
-        torch.set_autocast_dtype(self.prev_dtype)
+        torch.set_autocast_cpu_dtype(self.prev_dtype)
         return False
 
     def __call__(self, func):

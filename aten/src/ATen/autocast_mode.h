@@ -5,7 +5,12 @@ namespace autocast {
 
 namespace {
   bool is_autocast_eligible(const Tensor& tensor) {
-    return (tensor.is_cuda() || tensor.is_xla() || tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
+    return (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point();
+  }
+  bool is_autocast_eligible(DeviceType device_type, const Tensor& tensor) {
+    return device_type == DeviceType::CUDA
+        ? (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point()
+        : (tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
   }
 } // namespace
 
@@ -16,8 +21,8 @@ TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
 TORCH_API bool is_cpu_enabled();
 TORCH_API void set_cpu_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_dtype();
-TORCH_API void set_autocast_dtype(at::ScalarType dtype);
+TORCH_API at::ScalarType get_autocast_cpu_dtype();
+TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
 
 /********************************************************************
 Logic to extract the promote type from any Tensor or TensorList args.
@@ -39,8 +44,6 @@ inline at::ScalarType prioritize(at::ScalarType current, const Tensor& nextArg) 
       return at::kFloat; // prioritizes float over half
     } else if (current == at::kHalf && next == at::kHalf) {
       return at::kHalf;
-    } else if (current == at::kBFloat16 && next == at::kBFloat16) {
-      return at::kBFloat16;
     } else {
       AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
       return current;
@@ -78,11 +81,86 @@ inline at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... ar
   return promote_type(new_current, args...);
 }
 
+// Overload prioritize with extra DeviceType parameter
+inline at::ScalarType prioritize(
+    DeviceType device_type,
+    at::ScalarType current,
+    const Tensor& nextArg) {
+  if (current == at::kDouble) {
+    AT_ERROR("promote type is double in at::autocast::prioritize");
+    return current;
+  }
+  if (is_autocast_eligible(device_type, nextArg)) {
+    auto next = nextArg.scalar_type();
+    if (next == at::kDouble) {
+      return current; // ignores double tensors
+    } else if (current == at::kFloat || next == at::kFloat) {
+      return at::kFloat; // prioritizes float over half
+    } else if (current == at::kHalf && next == at::kHalf) {
+      return at::kHalf;
+    } else if (current == at::kBFloat16 && next == at::kBFloat16) {
+      return at::kBFloat16;
+    } else {
+      AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
+      return current;
+    }
+  } else {
+    return current;
+  }
+}
+
+// Overload to catch TensorList args (for e.g. cat, stack).
+// Reuses the overload above to process each Tensor in the list.
+inline at::ScalarType prioritize(
+    DeviceType device_type,
+    at::ScalarType current,
+    const TensorList& list) {
+  for (const auto& tensor : list) {
+    current = prioritize(device_type, current, tensor);
+  }
+  return current;
+}
+
+// Template to catch non-Tensor args (no-op that returns current best guess)
+template <typename T>
+inline at::ScalarType prioritize(
+    DeviceType device_type,
+    at::ScalarType current,
+    T nextArg) {
+  return current;
+}
+
+// Overload prioritize with extra DeviceType parameter
+// Overload for the tail case.
+inline at::ScalarType promote_type(
+    DeviceType device_type,
+    at::ScalarType current) {
+  return current;
+}
+
+// Unpack args and determine if incoming float16 tensors need to be promoted to float32.
+// Non-Tensor arguments are ignored.
+template<typename Arg0, typename... Args>
+inline at::ScalarType promote_type(
+    DeviceType device_type,
+    at::ScalarType current,
+    Arg0 arg0, Args... args) {
+  auto new_current = prioritize(device_type, current, arg0);
+  return promote_type(device_type, new_current, args...);
+}
+
 /****************************************************
 Logic to apply cached casting to any Tensor argument.
 ****************************************************/
 inline bool is_eligible(const Tensor& arg) {
   return (arg.defined() && is_autocast_eligible(arg) && (arg.scalar_type() != at::kDouble));
+}
+
+inline bool is_eligible(DeviceType device_type, const Tensor& arg) {
+  return device_type == DeviceType::CUDA
+      ? is_eligible(arg)
+      : (arg.defined() && is_autocast_eligible(device_type, arg) &&
+         (arg.scalar_type() != at::kDouble));
 }
 
 // Overload to catch Tensor args
@@ -110,6 +188,40 @@ inline std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList&
 // Template to catch non-Tensor args.
 template<typename T>
 inline T cached_cast(at::ScalarType to_type, T arg) {
+  return arg;
+}
+
+// Overload to catch Tensor args
+TORCH_API Tensor cached_cast(DeviceType device_type, at::ScalarType to_type, const Tensor& arg);
+
+// Overload to process optional<Tensor>
+inline c10::optional<Tensor> cached_cast(
+    DeviceType device_type,
+    at::ScalarType to_type,
+    const c10::optional<Tensor>& arg) {
+  if (arg.has_value()) {
+    return cached_cast(device_type, to_type, *arg);
+  } else {
+    return c10::nullopt;
+  }
+}
+
+// Overload to process TensorLists
+inline std::vector<Tensor> cached_cast(
+    DeviceType device_type,
+    at::ScalarType to_type,
+    const TensorList& arg) {
+  std::vector<Tensor> vec;
+  vec.reserve(arg.size());
+  for (const auto& t : arg) {
+    vec.push_back(cached_cast(device_type, to_type, t));
+  }
+  return vec;
+}
+
+// Template to catch non-Tensor args.
+template <typename T>
+inline T cached_cast(DeviceType device_type, at::ScalarType to_type, T arg) {
   return arg;
 }
 
