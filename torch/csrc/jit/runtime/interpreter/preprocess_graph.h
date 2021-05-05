@@ -11,7 +11,7 @@ namespace interpreter {
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
-  PreprocessGraph(Graph& g);
+  explicit PreprocessGraph(Graph& g);
 
   // Outputs of the preprocessing:
   std::shared_ptr<Graph> graph;

@@ -9,6 +9,15 @@
 namespace torch {
 namespace jit {
 
+/**
+ * SourceRef does two things:
+ *   1. Owns a Source object.
+ *   2. Serves as lookup key to the owned Source in associative containers, for
+ *      runtime data aggregation.
+ * We don't want to use std::shared_ptr<Source> directly because we want to
+ * support heteogeneous lookup, and also shared_ptr is an implementation detail
+ * which should be encapsulated.
+ */
 class TORCH_API SourceRef {
  public:
   explicit SourceRef(std::shared_ptr<Source> source)
