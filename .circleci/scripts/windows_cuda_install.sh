@@ -56,7 +56,7 @@ fi
 cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
 
 curl --retry 3 -kLO $cuda_installer_link
-7z x ${cuda_installer_name}.exe -o ${cuda_installer_name}
+7z x ${cuda_installer_name}.exe -o${cuda_installer_name}
 cd ${cuda_installer_name}
 mkdir cuda_install_logs
 
