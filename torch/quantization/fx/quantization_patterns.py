@@ -23,6 +23,10 @@ from ..utils import (
     activation_dtype,
 )
 
+from ..quantize import (
+    is_activation_post_process,
+)
+
 from .pattern_utils import (
     register_quant_pattern,
     get_default_output_activation_post_process_map,
@@ -81,10 +85,7 @@ class QuantizeHandler(ABC):
         for maybe_obs_node, _ in self.last_node.users.items():
             if maybe_obs_node.op == 'call_module':
                 maybe_obs = quantizer.modules[maybe_obs_node.name]
-                if (
-                    isinstance(maybe_obs, torch.quantization.ObserverBase) or
-                    isinstance(maybe_obs, torch.quantization.FakeQuantizeBase)
-                ):
+                if is_activation_post_process(maybe_obs):
                     return maybe_obs
         return None
 
