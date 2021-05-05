@@ -303,10 +303,12 @@ bool isBlockListedSchema(const FunctionSchema& schema) {
   return false;
 }
 
-int calculateNecessaryArgs(
+size_t CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs) {
-  AT_ASSERT(schema_args.size() == actual_inputs.size());
+  if (schema_args.size() < actual_inputs.size()) {
+    return actual_inputs.size();
+  }
   // keeps track of trailing unnecessary args
   int schema_size = schema_args.size();
   for (int schema_idx = schema_size - 1; schema_idx > -1; schema_idx--) {

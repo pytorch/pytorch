@@ -488,7 +488,7 @@ struct CodeImpl {
   //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
   // op_to_num_specified_args_["aten::foo.str"] = 3
   // This is because for all usages, at most 3 args are used.
-  std::unordered_map<std::string, int> op_to_num_specified_args_;
+  std::unordered_map<std::string, size_t> op_to_num_specified_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
@@ -570,7 +570,8 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, int>& op_to_num_specified_args() const {
+  const std::unordered_map<std::string, size_t>& op_to_num_specified_args()
+      const {
     return op_to_num_specified_args_;
   }
 
@@ -1119,13 +1120,13 @@ struct MobileCodeImpl : CodeImpl {
         auto op_schema = node->getOperator().schema();
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
-          auto numInclude =
-              calculateNecessaryArgs(op_schema.arguments(), node->inputs());
+          size_t numInclude =
+              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
-              std::pair<std::string, int>(unique_name, 0));
+              std::pair<std::string, size_t>(unique_name, 0));
           auto prev_value = it.first->second;
           it.first->second = std::max(numInclude, prev_value);
         }
@@ -1898,7 +1899,7 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::unordered_map<std::string, int>& Code::op_to_num_specified_args()
+const std::unordered_map<std::string, size_t>& Code::op_to_num_specified_args()
     const {
   return pImpl->op_to_num_specified_args();
 }
