@@ -1982,13 +1982,17 @@
   variants: function, method
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lcm_out
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
+  structured_delegate: lcm.out
   variants: function, method
 
 - func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: lcm.out
   variants: function, method
 
 # NOTE [ grid_sampler Native Functions ]
