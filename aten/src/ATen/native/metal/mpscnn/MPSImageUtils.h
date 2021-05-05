@@ -35,6 +35,7 @@ MPSTemporaryImage* createTemporaryImage(
     MPSImage* image);
 
 void copyToHost(float* dst, MPSImage* image);
+void copyToMetalBuffer(MetalCommandBuffer* buffer, id<MTLBuffer> dst, MPSImage* image);
 
 std::vector<fp16_t> staticImageToFp16Array(MPSImage* image);
 at::Tensor staticImageToTensor(MPSImage* image);
@@ -55,8 +56,8 @@ tensor it’s converted from.
 2) 2D tensors (H, W) are always stored as MPSImage(N=1, C=1, H=H, W=W).
 3) 3D tensors (C, H, W) are always stored as MPSImage(N=1, C=C, H=H, W=W).
 4) 4D tensors (N, C, H, W) are always stored as MPSImage(N=N, C=C, H=H, W=W).
-5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H, W=W).
-6) ...
+5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H,
+W=W). 6) ...
  */
 static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
   std::vector<int64_t> imageSize(4, 1);
