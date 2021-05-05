@@ -464,7 +464,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(Future&)> callback) {
+  template <typename T>
+  void addCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -479,9 +485,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
+  template<typename T>
   c10::intrusive_ptr<Future> then(
-      std::function<IValue(Future&)> callback,
+      T callback,
       TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<IValue, T, Future&>::value,
+        "The callback must have signature IValue(Future&)");
+#endif
     auto childFut = createInstance(std::move(type));
     addCallback(
         [childFut, cb = std::move(callback)](Future& parentFut) {
@@ -494,9 +506,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return childFut;
   }
 
+  template<typename T>
   c10::intrusive_ptr<Future> thenAsync(
-      std::function<c10::intrusive_ptr<Future>(Future&)> callback,
+      T callback,
       TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
+        "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
+#endif
     auto childFut = createInstance(std::move(type));
     addCallback(
         [childFut, cb = std::move(callback)](Future& parentFut) {
@@ -566,7 +584,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(std::function<void(Future&)> callback) {
+  template<typename T>
+  void invokeCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
+
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
