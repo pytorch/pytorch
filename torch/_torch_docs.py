@@ -1868,13 +1868,19 @@ matrices.
 .. warning::
 
     :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
-    and will be removed in a future PyTorch release. If used with :attr:`upper`\ `= False`,
-    e(default), the two functions are equivalent. If :attr:`upper`\ `= True`, then
-    `torch.cholesky(A, True)` should be replaced with
+    and will be removed in a future PyTorch release.
+
+    ``L = torch.cholesky(A, upper=False)`` (default) should be replaced with
 
     .. code:: python
 
-        torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)
+        L = torch.linalg.cholesky(A)
+
+    ``U = torch.cholesky(A, upper=True)`` should be replaced with
+
+    .. code:: python
+
+        U = torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
@@ -3005,19 +3011,20 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
     :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
     and will be removed in a future PyTorch release.
-    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` and `cdouble`
-    rather than a pair of real tensors. It is strongly recommended to move to complex
-    arithmetic rather than working with pairs of real tensors. If this is not possible,
-    `L, _ = torch.eig(A, False)` (default) may be replaced by
+    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble`
+    rather than real tensors.
 
-    .. code:: python
+    ``L, _ = torch.eig(A, eigenvectors=False)`` (default) should be replaced with
+
+    .. code :: python
 
         L_complex = torch.linalg.eigvals(A)
-        L = torch.stack((L_complex.real, L_complex.imag), dim=1)
 
-    For the case `L, V = torch.eig(A, True)`, :func:`torch.linalg.eig` already returns
-    the eigenvalues `V` as complex vectors with separate real and imaginary part.
+    ``L, V = torch.eig(A, eigenvectors=True)`` should be replaced with
 
+    .. code :: python
+
+        L_complex, V_complex = torch.linalg.eig(A)
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
@@ -3642,6 +3649,19 @@ batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
 Supports real-valued and complex-valued inputs.
+
+.. warning::
+
+    :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve` has its arguments reversed and does not return the
+    LU factorization of the input.
+
+    ``X = torch.solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve(A, B)
 
 .. note::
 
@@ -4927,7 +4947,7 @@ Example::
 
 add_docstr(torch.lstsq,
            r"""
-lstsq(input, A, *, out=None) -> Tensor
+lstsq(input, A, *, out=None) -> (Tensor solution, Tensor QR)
 
 Computes the solution to the least squares and least norm problems for a full
 rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
@@ -4953,6 +4973,19 @@ Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :ma
 rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
 for the solution in each column is given by the sum of squares of elements in the
 remaining :math:`m - n` rows of that column.
+
+.. warning::
+
+    :func:`torch.lstsq` is deprecated in favor of :func:`torch.linalg.lstsq`
+    and will be removed in a future PyTorch release. :func:`torch.linalg.lstsq`
+    has reversed arguments and does not return the QR decomposition in the returned tuple,
+    (it returns other information about the problem).
+
+    ``X, _ = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.lstsq(A, B).solution
 
 .. note::
     The case when :math:`m < n` is not supported on the GPU.
@@ -5112,6 +5145,7 @@ singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``e
 is the epsilon value for the datatype of :attr:`input`.
 
 .. warning::
+
     :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
     and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
     renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
@@ -7029,18 +7063,18 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
-             instead.
+.. warning::
 
-             **Differences with** ``torch.linalg.qr``:
+    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
+    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
+    replaced with a string parameter :attr:`mode`.
 
-             * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
+    ``Q, R = torch.qr(A, some)`` should be replaced with
 
-               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
-                 default
+    .. code:: python
 
-               - ``some=False`` is equivalent of ``mode='complete'``.
-
+        mode = "reduced" if some else "complete"
+        Q, R = torch.linalg.qr(A, mode)
 
 .. warning::
           If you plan to backpropagate through QR, note that the current backward implementation
@@ -8543,13 +8577,15 @@ always be real-valued, even if :attr:`input` is complex.
 
     :func:`torch.svd` is deprecated in favor of :func:`torch.linalg.svd`
     and will be removed in a future PyTorch release.
-    `U, S, V = torch.svd(A, some=some, compute_uv=True)` (default) may be replaced by
+
+    ``U, S, V = torch.svd(A, some=some, compute_uv=True)`` (default) should be replaced with
 
     .. code:: python
 
-        U, S, V = torch.linalg.svd(A, full_matrices=not some)
+        U, S, Vh = torch.linalg.svd(A, full_matrices=not some)
+        V = Vh.transpose(-2, -1).conj()
 
-    `_, S, _ = torch.svd(A, some=some, compute_uv=False)` may be replaced by
+    ``_, S, _ = torch.svd(A, some=some, compute_uv=False)`` should be replaced with
 
     .. code:: python
 
@@ -8663,6 +8699,23 @@ Since the input matrix :attr:`input` is supposed to be symmetric or Hermitian,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
+
+.. warning::
+
+    :func:`torch.symeig` is deprecated in favor of :func:`torch.linalg.symeig`
+    and will be removed in a future PyTorch release.
+
+    ``L, _ = torch.symeig(A, eigenvectors=False)`` (default) should be replaced with
+
+    .. code :: python
+
+        L = torch.linalg.eigvalsh(A)
+
+    ``L, V = torch.symeig(A, eigenvectors=True)`` should be replaced with
+
+    .. code :: python
+
+        L, V = torch.linalg.eigh(A)
 
 .. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
           then the eigenvalues of each matrix in the batch is returned in ascending order.

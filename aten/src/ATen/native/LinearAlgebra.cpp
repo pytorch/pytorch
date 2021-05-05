@@ -410,7 +410,7 @@ Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermit
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
   TORCH_WARN_ONCE(
     "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
   return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
@@ -419,7 +419,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
   TORCH_WARN_ONCE(
     "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
   return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
@@ -678,7 +678,7 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
 Tensor chain_matmul(TensorList matrices) {
   TORCH_WARN_ONCE(
       "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead."
+      "Use torch.linalg.multi_dot instead which accepts a list of tensors rather than multiple parameters.."
   );
   checkAllSameDim(matrices, 2);
 
@@ -695,7 +695,7 @@ Tensor chain_matmul(TensorList matrices) {
 Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
   TORCH_WARN_ONCE(
       "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead."
+      "Use torch.linalg.multi_dot instead which accepts a list of tensors rather than multiple parameters.."
   );
   checkAllSameDim(matrices, 2);
 

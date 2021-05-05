@@ -733,6 +733,15 @@ std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
+
   TORCH_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
@@ -743,6 +752,14 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
   checkSameDevice("solve", solution, self, "solution");
   checkSameDevice("solve", lu, self, "lu");
   checkLinalgCompatibleDtype("solve", solution, self, "solution");
@@ -1153,11 +1170,16 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 DEFINE_DISPATCH(cholesky_stub);
 
 Tensor cholesky(const Tensor &self, bool upper) {
-  TORCH_WARN_ONCE(
-    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be "
-    "removed in a future PyTorch release. If used with upper=False (default), it may "
-    "be replaced with torch.linalg.cholesky. If used with upper=True, torch.cholesky(A, True) "
-    "may be replaced with torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)"
+   TORCH_WARN_ONCE(
+    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
+    "removed in a future PyTorch release.\n",
+    "L = torch.cholesky(A, upper=False) (default)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.cholesky(A)\n",
+    "and\n"
+    "U = torch.cholesky(A, upper=True)\n",
+    "should be replaced with\n",
+    "U = torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)"
   );
 
   if (self.numel() == 0) {
@@ -1187,6 +1209,17 @@ Tensor cholesky(const Tensor &self, bool upper) {
 }
 
 Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
+   TORCH_WARN_ONCE(
+    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
+    "removed in a future PyTorch release.\n",
+    "L = torch.cholesky(A, upper=False) (default)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.cholesky(A)\n",
+    "and\n"
+    "U = torch.cholesky(A, upper=True)\n",
+    "should be replaced with\n",
+    "U = torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)"
+  );
   checkSameDevice("cholesky", result, self);
   checkLinalgCompatibleDtype("cholesky", result, self);
   Tensor result_tmp = at::cholesky(self, upper);
@@ -1823,11 +1856,26 @@ std::tuple<Tensor&,Tensor&> linalg_qr_out(const Tensor& self, std::string mode, 
 }
 
 std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  TORCH_WARN_ONCE(
+    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
+    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
+    "Q, R = torch.qr(A, some)\n",
+    "should be replaced with\n",
+    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
+  );
+
   std::string mode = some ? "reduced" : "complete";
   return at::linalg_qr(self, mode);
 }
 
 std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Tensor& R) {
+  TORCH_WARN_ONCE(
+    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
+    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
+    "Q, R = torch.qr(A, some)\n",
+    "should be replaced with\n",
+    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
+  );
   std::string mode = some ? "reduced" : "complete";
   return at::linalg_qr_out(Q, R, self, mode);
 }
@@ -2212,6 +2260,17 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 }
 
 std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {
+  TORCH_WARN_ONCE(
+    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
+    "PyTorch release.\n",
+    "L, _ = torch.symeig(A, eigenvectors=False) (default)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.eigvalsh(A)\n",
+    "and\n",
+    "L, V = torch.symeig(A, eigenvectors=True)\n"
+    "should be replaced with\n",
+    "L, V = torch.linalg.eigh(A)"
+  );
   squareCheckInputs(self);
   return at::_symeig_helper(self, eigenvectors, upper);
 }
@@ -2581,14 +2640,14 @@ std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tens
   TORCH_WARN_ONCE(
     "torch.eig is deprecated in favor of torch.linalg.eig and will be removed in a future ",
     "PyTorch release.\n",
-    "torch.linalg.eig returns complex tensors of dtype cfloat and cdouble rather than a pair ",
-    "of real tensors. It is strongly recommended to use complex arithmetic rather ",
-    "than working with pairs of real tensors.\n",
-    "If this is not possible, `L, _ = torch.eig(A, False)` (default) may be replaced by\n",
-    "    L_complex = torch.linalg.eigvals(A)\n",
-    "    L = torch.stack((L_complex.real, L_complex.imag), dim=1)\n",
-    "For the case `L, V = torch.eig(A, True)`, torch.linalg.eig already returns",
-    "the eigenvalues V as complex vectors with separate real and imaginary part."
+    "torch.linalg.eig returns complex tensors of dtype cfloat or cdouble rather than real tensors.\n",
+    "L, _ = torch.eig(A, eigenvectors=False) (default)\n",
+    "should be replaced with\n",
+    "L_complex = torch.linalg.eigvals(A)\n",
+    "and\n",
+    "L, V = torch.eig(A, eigenvectors=True)\n",
+    "should be replaced with\n",
+    "L_complex, V_complex = torch.linalg.eig(A)"
   );
 
   TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
@@ -2742,12 +2801,13 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
     "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
     "removed in a future PyTorch release.\n",
     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
-    "should be replaced by\n",
-    "U, S, V = torch.linalg.svd(A, full_matrices=not some)\n",
-    "and\n"
+    "should be replaced with\n",
+    "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
+    "V = Vh.transpose(-2, -1).conj()\n",
+    "and\n",
     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
-    "should be replaced by\n",
-    "S = torch.svdvals(A)"
+    "should be replaced with\n",
+    "S = torch.linalg.svdvals(A)"
   );
 
   TORCH_CHECK(self.dim() >= 2,
@@ -2760,12 +2820,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
     "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
     "removed in a future PyTorch release.\n",
     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
-    "should be replaced by\n",
-    "U, S, V = torch.linalg.svd(A, full_matrices=not some)\n",
-    "and\n"
+    "should be replaced with\n",
+    "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
+    "V = Vh.transpose(-2, -1).conj()\n",
+    "and\n",
     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
-    "should be replaced by\n",
-    "S = torch.svdvals(A)"
+    "should be replaced with\n",
+    "S = torch.linalg.svdvals(A)"
   );
 
   checkSameDevice("svd", U, self, "U");
