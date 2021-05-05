@@ -135,9 +135,9 @@ TensorImpl::TensorImpl(
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude
-    // Autograd & InplaceOrView keys. Normally key_set only contains backend
+    // Autograd & ADInplaceOrView keys. Normally key_set only contains backend
     // keys but we do the substraction here to make sure.
-    key_set_ = key_set - c10::autograd_dispatch_keyset_with_InplaceOrView;
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
     // grad.
