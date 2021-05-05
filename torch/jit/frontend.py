@@ -1,4 +1,3 @@
-import os
 import torch
 import sys
 import ast
@@ -309,8 +308,8 @@ def is_torch_jit_ignore_context_manager(stmt):
         if isinstance(function, ast.Attribute):
             attr_name = function.attr
             attr_value = function.value
-            if attr_name == "ignore" and isinstance(attr_value, ast.Attribute):
-                # there should be at most two nested attributes (e.g torch.jit.ignore)
+            if attr_name == "ignore_experimental" and isinstance(attr_value, ast.Attribute):
+                # there should be at most two nested attributes (e.g torch.jit.ignore_experimental)
                 if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
                     if attr_value.value.id == "torch":
                         return True
@@ -400,8 +399,8 @@ def build_param(ctx, py_arg, self_name, kwarg_only, pdt_arg_type=None):
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 def build_ignore_context_manager(ctx, stmt):
-    InputType = namedtuple('InputType',['name','ann'])
-    OutputType = namedtuple('OutputType',['name','ann'])
+    InputType = namedtuple('InputType', ['name', 'ann'])
+    OutputType = namedtuple('OutputType', ['name', 'ann'])
 
     def process_ins_outs(args):
         # parse the context manager to figure out inputs and outputs

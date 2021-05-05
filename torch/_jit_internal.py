@@ -540,7 +540,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
-@contextlib.contextmanager
+# No op context manager from python side
+class ignore_experimental(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
