@@ -91,6 +91,7 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
@@ -105,15 +106,18 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 TORCH_API void checkDoubleInRange(double a);
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
 }
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t ceil(double a) {
   checkDoubleInRange(a);
   return std::ceil(a);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t r = a % b;
@@ -137,6 +141,7 @@ double degrees(double x);
 double radians(double x);
 
 // reference function THPVariable_to in python_variable_methods.cpp
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static at::Tensor to_dispatch(
     at::Tensor self,
     c10::optional<at::Device> device,
@@ -370,6 +375,7 @@ template <typename T>
 void listContains(Stack* stack) {
   auto key = pop(stack).to<T>();
   auto list = pop(stack).to<c10::List<T>>();
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const T& item : list) {
     if (item == key) {
       push(stack, true);
@@ -652,6 +658,53 @@ void listSetItem(Stack* stack);
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+#define DEFINE_UNARY_COMPLEX_OP(aten_op, op, result)                      \
+  OperatorGenerator(                                                      \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".complex(complex a) -> " #result), \
+      [](Stack* stack) {                                                  \
+        c10::complex<double> a;                                           \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+      },                                                                  \
+      aliasAnalysisFromSchema())
+
+// Some complex unary ops (like abs, angle) return real valued output, but most
+// other unary ops return complex valued output. So, this macro is used in the
+// former case where we can explicitly pass complex_result_cast argument, which
+// is set to c10::complex<float> in the macro `DEFINE_UNARY_OP_WITH_COMPLEX`
+// defined below.
+#define DEFINE_UNARY_OP_WITH_COMPLEX_CAST(                                \
+    aten_op,                                                              \
+    op,                                                                   \
+    int_result,                                                           \
+    float_result,                                                         \
+    complex_result,                                                       \
+    complex_result_cast)                                                  \
+  DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
+      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
+      DEFINE_UNARY_COMPLEX_OP(aten_op, op, complex_result),               \
+      OperatorGenerator(                                                  \
+          TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
+          [](Stack* stack) {                                              \
+            IValue x;                                                     \
+            pop(stack, x);                                                \
+            if (x.isDouble()) {                                           \
+              double a = x.toDouble();                                    \
+              push(stack, static_cast<float_result>(op));                 \
+            } else if (x.isComplexDouble()) {                             \
+              c10::complex<double> a = x.toComplexDouble();               \
+              push(stack, static_cast<complex_result_cast>(op));          \
+            } else {                                                      \
+              int64_t a = x.toInt();                                      \
+              push(stack, static_cast<int_result>(op));                   \
+            }                                                             \
+          },                                                              \
+          aliasAnalysisFromSchema())
+
+#define DEFINE_UNARY_OP_WITH_COMPLEX(aten_op, op, int_result, float_result) \
+  DEFINE_UNARY_OP_WITH_COMPLEX_CAST(                                        \
+      aten_op, op, int_result, float_result, complex, c10::complex<double>)
+
 #define DEFINE_GENERIC_OP_WITH_COMPLEX(                                       \
     aten_op,                                                                  \
     int_op,                                                                   \

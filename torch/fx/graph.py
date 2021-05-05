@@ -3,6 +3,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
 from contextlib import contextmanager
+import copy
 import torch
 import keyword
 import re
@@ -12,7 +13,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule  # noqa
+    from .graph_module import GraphModule
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -119,13 +120,20 @@ class _Namespace:
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
+        match = self._name_suffix_regex.match(candidate)
+        if match is None:
+            base = candidate
+            num = None
+        else:
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
+
+        candidate = base if num is None else f'{base}_{num}'
+        num = num if num else 0
+
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = self._name_suffix_regex.match(candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+            num += 1
+            candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate)
         if obj is None:
@@ -569,8 +577,8 @@ class Graph:
         """
         if (self.owning_module and
                 self.owning_module.get_submodule(module_name) is not None):
-            warnings.warn("Attempted to insert a get_attr Node with no "
-                          "underlying reference in the owning "
+            warnings.warn("Attempted to insert a call_module Node with "
+                          "no underlying reference in the owning "
                           "GraphModule! Call "
                           "GraphModule.add_submodule to add the "
                           "necessary submodule")
@@ -671,7 +679,9 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
@@ -1000,16 +1010,29 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
-                        m_itr = getattr(m_itr, atom, None)
-                        if m_itr is None:
-                            seen_qualname = '.'.join(target_atoms[:i])
+                        new_m_itr = getattr(m_itr, atom, None)
+                        seen_qualname = '.'.join(target_atoms[:i])
+                        if new_m_itr is None:
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+                        if (node.op == "call_module"
+                                and not isinstance(new_m_itr, torch.nn.Module)):
+                            raise RuntimeError(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                               'not reference an nn.Module')
+                        elif (node.op == "get_attr"
+                              and not isinstance(new_m_itr, torch.nn.Module)
+                              and not isinstance(new_m_itr, torch.nn.Parameter)
+                              and atom not in m_itr._buffers):
+                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                          'what \'get_attr\' Nodes typically target')
+                        else:
+                            m_itr = new_m_itr
 
     def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
-        users, and whether the nodes have any side effects The graph must be
+        users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
 
         Returns:

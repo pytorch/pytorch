@@ -1,12 +1,22 @@
 #include <ATen/ATen.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 
+// Snippets for checking assembly.
+c10::IValue inspectTupleConstruction() {
+  std::tuple<std::string, std::string> s = std::make_tuple(
+      "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  return c10::IValue(s);
+}
+
 namespace c10 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Basic) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::List<int64_t> foo({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
   IValue bar{foo};
@@ -16,7 +26,9 @@ TEST(IValueTest, Basic) {
   auto foo2 = std::move(bar);
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(foo2.isIntList());
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar.isNone());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   foo2 = IValue(4.0);
   ASSERT_TRUE(foo2.isDouble());
   ASSERT_EQ(foo2.toDouble(), 4.0);
@@ -25,18 +37,23 @@ TEST(IValueTest, Basic) {
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   ASSERT_TRUE(baz.isNone());
   IValue i(4);
   ASSERT_TRUE(i.isInt());
   ASSERT_EQ(i.toInt(), 4);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue dlist(c10::List<double>({3.5}));
   ASSERT_TRUE(dlist.isDoubleList());
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.5}));
   std::move(dlist).toDoubleList();
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   ASSERT_TRUE(dlist.isNone());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dlist = IValue(c10::List<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.4}));
   IValue the_list(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
@@ -53,6 +70,7 @@ TEST(IValueTest, Basic) {
 
   auto elem1 = c10::complex<double>(3, 4);
   auto elem2 = c10::complex<double>(3, -4);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto elem3 = c10::complex<double>(5, 0);
   c10::List<c10::complex<double>> foo1({elem1, elem2, elem3});
   ASSERT_EQ(foo1.use_count(), 1);
@@ -65,6 +83,7 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(foo12.isComplexDoubleList());
   ASSERT_EQ(foo12.toComplexDoubleList(), foo1);
 
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar1.isNone());
   auto foo3 = IValue(c10::complex<double>(3, 4));
   ASSERT_TRUE(foo3.isComplexDouble());
@@ -72,12 +91,14 @@ TEST(IValueTest, Basic) {
 
   ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({elem1, elem2, elem3}));
   IValue complex_tuple(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
   ASSERT_TRUE(complex_tuple.isTuple());
   ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, BasicStorage) {
   at::Storage emptyStorage;
   at::Storage nonemptyStorage(at::rand({3, 4}).storage());
@@ -90,10 +111,13 @@ TEST(IValueTest, BasicStorage) {
   ASSERT_EQ(nonemptyStorage.unsafeGetStorageImpl(), ivNonempty.toStorage().unsafeGetStorageImpl());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ComplexDict) {
   typedef c10::complex<double> c_type;
   c10::Dict<c_type, c_type> m;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto num1 = c_type(2.3, -3.5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto num2 = c_type(0, 5);
   m.insert(num1, 2 * num1);
   m.insert(num2, 2 * num2);
@@ -103,18 +127,26 @@ TEST(IValueTest, ComplexDict) {
   ASSERT_EQ(m_.at(num2), 2 * num2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static std::array<IValue, 16> makeSampleIValues() {
   return {
     IValue(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::rand({3, 4}),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::rand({3, 4}).storage(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     1.5,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::complex<double>(2.5, -0.5),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     42,
     true,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::make_tuple(23, "hello"),
     "hello",
     c10::make_intrusive<caffe2::Blob>(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::List<int64_t>({1, 2, 3}),
     c10::Dict<std::string, std::string>(),
     c10::make_intrusive<ivalue::Future>(FloatType::get()),
@@ -124,18 +156,25 @@ static std::array<IValue, 16> makeSampleIValues() {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static std::array<IValue, 16> makeMoreSampleIValues() {
   return {
     IValue(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::rand({3, 4}),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::rand({3, 4}).storage(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     2.5,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::complex<double>(2.7, -0.3),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     43,
     false,
     std::make_tuple(1, "goodbye"),
-    "goodbyee",
+    "goodbye",
     c10::make_intrusive<caffe2::Blob>(),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::List<int64_t>({4, 5, 6}),
     c10::Dict<std::string, std::string>(),
     c10::make_intrusive<ivalue::Future>(IntType::get()),
@@ -153,6 +192,7 @@ static std::array<IValue, 16> makeMoreSampleIValues() {
     EXPECT_EQ((a), (b));                                \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Swap) {
   // swap() has the following 3 cases: tensor, intrusive_ptr, or
   // neither. Exercise all pairs of the three.
@@ -172,6 +212,7 @@ TEST(IValueTest, Swap) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, CopyConstruct) {
   auto sampleInputs = makeSampleIValues();
   for (const IValue& v: sampleInputs) {
@@ -180,16 +221,19 @@ TEST(IValueTest, CopyConstruct) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, MoveConstruct) {
   auto sampleInputs = makeSampleIValues();
   for (const IValue& v: sampleInputs) {
     IValue source(v);
     IValue target(std::move(source));
     EXPECT_IVALUE_EQ(target, v);
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     EXPECT_TRUE(source.isNone());
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, CopyAssign) {
   auto sampleInputs = makeSampleIValues();
   auto sampleTargets = makeMoreSampleIValues();
@@ -206,6 +250,7 @@ TEST(IValueTest, CopyAssign) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, MoveAssign) {
   auto sampleInputs = makeSampleIValues();
   auto sampleTargets = makeMoreSampleIValues();
@@ -216,12 +261,15 @@ TEST(IValueTest, MoveAssign) {
       IValue moveFrom(input);
       moveTo = std::move(moveFrom);
       EXPECT_IVALUE_EQ(moveTo, input);
+      // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
       EXPECT_TRUE(moveFrom.isNone());
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Tuple) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::tuple<int64_t, at::Tensor> t = std::make_tuple(123, at::randn({1}));
   auto iv = IValue(t);
   auto t_ = iv.to<std::tuple<int64_t, at::Tensor>>();
@@ -230,6 +278,7 @@ TEST(IValueTest, Tuple) {
       std::get<1>(t_).item().to<float>(), std::get<1>(t).item().to<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, unsafeRemoveAttr) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
@@ -244,6 +293,7 @@ TEST(IValueTest, unsafeRemoveAttr) {
   ASSERT_TRUE(obj->slots().size() == 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, TuplePrint) {
   {
     IValue tp = std::make_tuple(3);
@@ -261,6 +311,7 @@ TEST(IValueTest, TuplePrint) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ComplexIValuePrint) {
   {
     IValue complex(c10::complex<double>(2, -3));
@@ -284,6 +335,7 @@ TEST(IValueTest, ComplexIValuePrint) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Complex) {
   auto c = c10::complex<double>(2, 3);
   auto c_ = c10::complex<double>(2, -3);
@@ -300,10 +352,12 @@ TEST(IValueTest, Complex) {
   ASSERT_TRUE(c2.toScalar().equal(c_));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, BasicFuture) {
   auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(IValue(42));
   ASSERT_TRUE(f1->completed());
   ASSERT_EQ(42, f1->value().toInt());
@@ -311,6 +365,7 @@ TEST(IValueTest, BasicFuture) {
   ASSERT_EQ(42, iv.toFuture()->value().toInt());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, FutureCallbacks) {
   auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimesA = 0;
@@ -320,6 +375,7 @@ TEST(IValueTest, FutureCallbacks) {
     ASSERT_EQ(f2->value().toInt(), 43);
     ++calledTimesA;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f2->markCompleted(IValue(43));
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 0);
@@ -334,6 +390,7 @@ TEST(IValueTest, FutureCallbacks) {
   ASSERT_FALSE(f2->hasError());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, FutureExceptions) {
   auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimes = 0;
@@ -354,6 +411,22 @@ TEST(IValueTest, FutureExceptions) {
   ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IValueTest, FutureSetError) {
+  auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
+  f1->setError(std::make_exception_ptr(std::runtime_error("foo")));
+  try {
+    f1->setError(std::make_exception_ptr(std::runtime_error("bar")));
+    FAIL() << "Expected to throw";
+  } catch (std::exception& e) {
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("Error already set"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("foo"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("bar"));
+  }
+}
+
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
   EXPECT_NE(IValue("asdf"), IValue("ASDF"));
@@ -370,6 +443,7 @@ TEST(IValueTest, ValueEquality) {
   EXPECT_FALSE(res.toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, TensorEquality) {
   auto rawTensor = torch::zeros({2, 3});
   auto rawTensorCopy = rawTensor.clone();
@@ -381,6 +455,7 @@ TEST(IValueTest, TensorEquality) {
   auto testEquality = []() {
     return IValue(torch::ones({2, 3})) == IValue(torch::rand({2, 3}));
   };
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_ANY_THROW(testEquality());
 
   // equals() should return a tensor of all `true`.
@@ -392,10 +467,12 @@ TEST(IValueTest, TensorEquality) {
   // Test identity checking
   EXPECT_TRUE(t.is(t));
   EXPECT_FALSE(t.is(tCopy));
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   IValue tReference = t;
   EXPECT_TRUE(t.is(tReference));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ListEquality) {
   IValue c1 = std::vector<int64_t>{0, 1, 2, 3};
   IValue c2 = std::vector<int64_t>{0, 1, 2, 3};
@@ -407,6 +484,7 @@ TEST(IValueTest, ListEquality) {
   EXPECT_NE(c2, c3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, DictEquality) {
   auto innerDict = c10::Dict<std::string, std::string>();
   innerDict.insert("foo", "bar");
@@ -447,6 +525,7 @@ TEST(IValueTest, DictEquality) {
   EXPECT_NE(c2, c4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, DictEqualityDifferentOrder) {
   auto d1 = c10::Dict<std::string, int64_t>();
   d1.insert("one", 1);
@@ -458,6 +537,7 @@ TEST(IValueTest, DictEqualityDifferentOrder) {
   EXPECT_EQ(d1, d2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ListNestedEquality) {
   IValue c1 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
   IValue c2 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
@@ -468,6 +548,7 @@ TEST(IValueTest, ListNestedEquality) {
   EXPECT_NE(c2, c3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, StreamEquality) {
   at::Device device1 =  at::Device(kCUDA, 0);
   at::Device device2 = at::Device(kCUDA, 1);
@@ -480,6 +561,7 @@ TEST(IValueTest, StreamEquality) {
   EXPECT_TRUE(lhs.equals(rhs_same).toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, EnumEquality) {
   auto cu = std::make_shared<CompilationUnit>();
   IValue int_ivalue_1(1);
@@ -527,9 +609,11 @@ TEST(IValueTest, EnumEquality) {
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, isPtrType) {
   IValue tensor(at::rand({3, 4}));
   IValue undefinedTensor((at::Tensor()));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue integer(42);
   IValue str("hello");
 
@@ -539,6 +623,7 @@ TEST(IValueTest, isPtrType) {
   EXPECT_TRUE(str.isPtrType());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, isAliasOf) {
   auto sampleIValues = makeSampleIValues();
   for (auto& iv: sampleIValues) {
@@ -552,6 +637,7 @@ TEST(IValueTest, isAliasOf) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, internalToPointer) {
   IValue tensor(at::rand({3, 4}));
   IValue str("hello");
@@ -564,6 +650,7 @@ TEST(IValueTest, internalToPointer) {
   EXPECT_EQ(nullStr.internalToPointer(), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, IdentityComparisonAndHashing) {
   at::Tensor t1 = at::rand({3, 4});
   at::Tensor t2 = at::rand({3, 4});
@@ -624,8 +711,10 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue integer(42), float_(1.5), complex(c10::complex<double>(2, 3));
 
   IValue::HashAliasedIValues subvalues;
@@ -650,9 +739,9 @@ TEST(IValueTest, getSubValues) {
   IValue list(std::vector<at::Tensor>{t1, t2});
   IValue tuple(ivalue::Tuple::create({tv1, tv2}));
 
-  std::unordered_map<int64_t, at::Tensor> m;
-  m[1] = t1;
-  m[2] = t2;
+  c10::Dict<int64_t, at::Tensor> m;
+  m.insert(1, t1);
+  m.insert(2, t2);
 
   IValue dict(std::move(m));
 
@@ -682,6 +771,16 @@ TEST(IValueTest, getSubValues) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IValueTest, ScalarBool) {
+  Scalar expected(true);
+  IValue v(expected);
+  Scalar actual = v.toScalar();
+  EXPECT_TRUE(actual.isBoolean());
+  EXPECT_TRUE(actual.toBool());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ToWeakAndBack) {
   auto sampleInputs = makeSampleIValues();
   for (const auto& sample: sampleInputs) {

@@ -27,7 +27,8 @@ class Vec256<int32_t> {
   using value_type = int32_t;
   using vec_internal_type = vint32;
   using vec_internal_mask_type = vbool32;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}

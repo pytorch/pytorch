@@ -14,8 +14,11 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu6_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu_leaky_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -107,8 +110,8 @@ Tensor& relu_quantized_cpu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
-                                 const Scalar& negval) {
+Tensor& leaky_relu_out_quantized_cpu(const Tensor& self,
+                                 const Scalar& negval, Tensor& result) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
@@ -145,6 +148,7 @@ Tensor quantized_relu6_(Tensor& qx) {
     scalar_t six = at::native::quantize_val<scalar_t>(
         qx.q_scale(),
         qx.q_zero_point(),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         /*value=*/6.0);
     auto six_vec = Vec(six);
     cpu_kernel_vec(

@@ -80,12 +80,25 @@ void slot_named_params_recurse(
     std::string name =
         parent_name.size() == 0 ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
-    if (slot.isTensor()) {
+    // TODO: Fix this filter. Requires_grad is not the appropriate
+    // filter of a parameter, but is a temporary hack to help probable
+    // users of this api. The correct behavior is to filter by the
+    // obj->type->is_parameter() but this currently always returns
+    // false on mobile.
+    if (slot.isTensor() && slot.toTensor().requires_grad()) {
       (*params)[name] = slot.toTensor();
     } else if (slot.isObject()) {
       slot_named_params_recurse(slot.toObject(), params, name);
     }
   }
+}
+
+std::string getTopModuleTypeName(const Module& m) {
+  std::string name;
+  if (m._ivalue()->type() && m._ivalue()->type()->name()) {
+    name = m._ivalue()->type()->name().value().name();
+  }
+  return name;
 }
 } // namespace
 
@@ -95,6 +108,10 @@ const std::vector<at::Tensor> Module::parameters() const {
   return params;
 }
 
+// Returns a mapping for all attributes that requires_grad=True in a module.
+// This behavior differs from full torch script modules. This is a bug,
+// but currently there is no way to correctly label parameters in the
+// loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
   const std::string name = "";
@@ -102,8 +119,19 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
+// We will continue to support this API for now as this is being relied upon
+// for profiling.
+// We really need to change this part, so in the next step for profiling support
+// for delegates, the first thing will be to rewrite how profiling is done
+// for lite interpreter.
 std::string Module::get_forward_method_debug_info(size_t pc) const {
-  return find_method("forward")->get_module_debug_info(pc);
+  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getModuleHierarchyInfo(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
 }
 
 void Module::train(bool on) {
@@ -130,6 +158,7 @@ Method::Method(const Module* owner, Function* function)
 
 void Method::run(Stack& stack) const {
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
@@ -156,6 +185,11 @@ void Method::run(Stack& stack) const {
       observer->onExitRunMethod(instance_key);
     }
   } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
+        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+    error.add_context(debug_string);
+#endif
     if (observer) {
       observer->onFailRunMethod(instance_key, error.what());
     }
@@ -173,6 +207,11 @@ void Method::run(Stack& stack) const {
         }
       }
     } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+      auto debug_string = owner_->getDebugTable().getSourceDebugString(
+          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+      error.add_context(debug_string);
+#endif
       if (observer) {
         observer->onFailRunMethod(instance_key, error.what());
       }
