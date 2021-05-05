@@ -174,21 +174,23 @@ class ImageHandler(Handler):
             if atype == "pil":
                 return img
             elif atype == "numpy":
-                result = self.np.asarray(img)
-                assert result.dtype == self.np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                result = self.np.asarray(img)  # type: ignore[misc]
+                if result.dtype != self.np.uint8:  # type: ignore[misc]
+                    raise TypeError("numpy image array should be type uint8, but got {}".format(result.dtype))
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
-                result = self.np.asarray(img)
-                assert result.dtype == self.np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                result = self.np.asarray(img)  # type: ignore[misc]
+                if result.dtype != self.np.uint8:  # type: ignore[misc]
+                    raise TypeError("numpy image array should be type uint8, but got {}".format(result.dtype))
 
                 if etype == "uint8":
-                    result = self.np.array(result.transpose(2, 0, 1))
+                    result = self.np.array(result.transpose(2, 0, 1))  # type: ignore[misc]
                     return torch.tensor(result)
                 else:
-                    result = self.np.array(result.transpose(2, 0, 1))
+                    result = self.np.array(result.transpose(2, 0, 1))  # type: ignore[misc]
                     return torch.tensor(result) / 255.0
             return None
 
