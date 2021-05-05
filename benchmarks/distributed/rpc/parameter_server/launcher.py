@@ -214,18 +214,6 @@ def run_benchmark(rank, model, data, configurations, trainer_configurations, ps_
     rpc.shutdown()
 
 
-def load_configurations(args):
-    benchmark_config_file = "configurations/benchmark_configurations.json"
-    benchmark_config = json.load(
-        open(
-            os.path.join(Path(__file__).parent, benchmark_config_file),
-            "r"
-        )
-    )[args.bconfig_id]
-    configurations = BenchmarkConfigurations(**benchmark_config)
-    return configurations
-
-
 def get_json_config(file_name, id):
     f = open(
         os.path.join(
@@ -234,6 +222,12 @@ def get_json_config(file_name, id):
         "r"
     )
     return json.load(f)[id]
+
+
+def load_configurations(args):
+    benchmark_config_file = "configurations/benchmark_configurations.json"
+    benchmark_config = get_json_config(benchmark_config_file, args.bconfig_id)
+    return BenchmarkConfigurations(**benchmark_config)
 
 
 def get_data(data_class, data_config):
