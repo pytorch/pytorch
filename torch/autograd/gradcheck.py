@@ -954,19 +954,17 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
 
         for i, (n_per_out, a_per_out) in enumerate(zip(numerical, analytical_forward)):
             for j, (n, a) in enumerate(zip(n_per_out, a_per_out)):
-                if a.numel() != 0 or n.numel() != 0:
-                    if not torch.allclose(a, n, rtol, atol):
-                        raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag,
-                                                                  is_forward_ad=True))
+                if not torch.allclose(a, n, rtol, atol):
+                    raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag,
+                                                              is_forward_ad=True))
     else:
         for i, o in enumerate(outputs):
             analytical = _check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, check_grad_dtypes)
             inp_tensors = _iter_tensors(tupled_inputs, True)
 
             for j, (a, n, inp) in enumerate(zip(analytical, numerical[i], inp_tensors)):
-                if a.numel() != 0 or n.numel() != 0:
-                    if not torch.allclose(a, n, rtol, atol):
-                        raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag))
+                if not torch.allclose(a, n, rtol, atol):
+                    raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag))
 
     return True
 
