@@ -1113,15 +1113,14 @@ Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
   addmm_impl_cpu_(result, result, self, mat2, 0, 1);
+  auto names = at::namedinference::propagate_names_for_addmm(self, mat2, result);
+  at::namedinference::propagate_names_if_nonempty(result, names);
   return result;
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
-  return result;
+  return native::mm_cpu_out(self, mat2, result);
 }
 
 template <typename scalar_t, bool is_bmm>

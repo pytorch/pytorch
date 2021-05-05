@@ -7810,7 +7810,7 @@ class TestAutogradDeviceType(TestCase):
                     param.grad = None
                 inp.grad = None
 
-    @skipMeta  #  LSTM cell reuses output which was resized
+    @skipMeta  # LSTM cell reuses output which was resized
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
