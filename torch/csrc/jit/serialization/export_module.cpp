@@ -542,7 +542,7 @@ class ScriptModuleSerializer {
     moduleMethodsTuple(
         module, elements, debug_info_elements, debug_handle_manager);
     auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements, false);
+    writeArchive("bytecode", telements, true);
     auto debug_info_telements = Tup(std::move(debug_info_elements));
 
     // At the moment keeping this feature experimental
