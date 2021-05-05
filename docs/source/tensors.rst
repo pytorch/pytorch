@@ -279,7 +279,6 @@ Tensor class reference
     Tensor.conj_physical
     Tensor.conj_physical_
     Tensor.resolve_conj
-    Tensor.resolve_conj_
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
@@ -326,6 +325,7 @@ Tensor class reference
     Tensor.divide_
     Tensor.dot
     Tensor.double
+    Tensor.dsplit
     Tensor.eig
     Tensor.element_size
     Tensor.eq
@@ -382,6 +382,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
     Tensor.i0
@@ -667,6 +668,7 @@ Tensor class reference
     Tensor.vdot
     Tensor.view
     Tensor.view_as
+    Tensor.vsplit
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_

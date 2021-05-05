@@ -23,7 +23,7 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _amp_foreach_non_finite_check_and_unscale_) \
-_(aten, _amp_update_scale) \
+_(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
@@ -240,7 +240,6 @@ _(aten, conj) \
 _(aten, conj_physical) \
 _(aten, conj_physical_) \
 _(aten, resolve_conj) \
-_(aten, resolve_conj_) \
 _(aten, resolve_neg) \
 _(aten, complex) \
 _(aten, copysign) \
@@ -446,6 +445,7 @@ _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
+_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -763,7 +763,7 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
-_(aten, view_as_real_physical) \
+_(aten, _view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 

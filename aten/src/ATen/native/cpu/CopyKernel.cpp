@@ -111,6 +111,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
+    iter.tensor(0).conj_physical_();
   }
 }
 

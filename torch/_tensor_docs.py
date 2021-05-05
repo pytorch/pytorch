@@ -812,26 +812,26 @@ See :func:`torch.cholesky_inverse`
 
 add_docstr_all('clamp',
                r"""
-clamp(min, max) -> Tensor
+clamp(min=None, max=None) -> Tensor
 
 See :func:`torch.clamp`
 """)
 
 add_docstr_all('clamp_',
                r"""
-clamp_(min, max) -> Tensor
+clamp_(min=None, max=None) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
 """)
 
 add_docstr_all('clip', r"""
-clip(min, max) -> Tensor
+clip(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp`.
 """)
 
 add_docstr_all('clip_', r"""
-clip_(min, max) -> Tensor
+clip_(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp_`.
 """)
@@ -914,25 +914,11 @@ resolve_conj() -> Tensor
 See :func:`torch.resolve_conj`
 """)
 
-add_docstr_all('resolve_conj_',
-               r"""
-resolve_conj_() -> Tensor
-
-In-place version of :meth:`~Tensor.resolve_conj`
-""")
-
 add_docstr_all('resolve_neg',
                r"""
 conj() -> Tensor
 
 See :func:`torch.resolve_neg`
-""")
-
-add_docstr_all('resolve_neg_',
-               r"""
-conj() -> Tensor
-
-In-place version of :meth:`~Tensor.resolve_neg`
 """)
 
 add_docstr_all('copysign',
@@ -4469,6 +4455,27 @@ add_docstr_all('tensor_split',
 tensor_split(indices_or_sections, dim=0) -> List of Tensors
 
 See :func:`torch.tensor_split`
+""")
+
+add_docstr_all('hsplit',
+               r"""
+hsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.hsplit`
+""")
+
+add_docstr_all('vsplit',
+               r"""
+vsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.vsplit`
+""")
+
+add_docstr_all('dsplit',
+               r"""
+dsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.dsplit`
 """)
 
 add_docstr_all('stft',

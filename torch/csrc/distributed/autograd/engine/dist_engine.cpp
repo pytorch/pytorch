@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
@@ -133,6 +134,7 @@ DistEngine::DistEngine()
 
 DistEngine::~DistEngine() {
   // Ensure we shutdown the CPU thread.
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   global_cpu_ready_queue_->pushShutdownTask();
   global_cpu_thread_.join();
 }
@@ -390,7 +392,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   // execute after the original future is completed). This ensures we return a
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture =
-      std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+      std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
   futureGrads->addCallback(
       [autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
@@ -469,7 +471,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture =
-        std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+        std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
     accumulateGradFuture->addCallback([autogradContext,
                                        callbackFuture,
@@ -519,7 +521,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
-    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted(c10::IValue());
     return fut;
   }
