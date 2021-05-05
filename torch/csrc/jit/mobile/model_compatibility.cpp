@@ -25,6 +25,9 @@ c10::IValue readArchive(
   c10::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
+
+  // TODO (T90180710): Simplify type_resolver and obj_loader when getting
+  // bytecode version from model
   auto type_resolver = [&](const c10::QualifiedName& qn) {
     return typeResolverGeneral(qn, compilation_unit);
   };
