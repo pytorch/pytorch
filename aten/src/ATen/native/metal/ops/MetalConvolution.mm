@@ -45,7 +45,7 @@ Tensor conv2d(
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y];
   auto output = makeTensor(std::move(mt), input.options());
@@ -80,7 +80,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
   // fuse hardtanh with convolution
@@ -91,10 +91,16 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     MPSCNNClampOp* clampOp =
         [MPSCNNClampOp newWithTextures:@[ Y1, Y2 ] Args:@[ @(min), @(max) ]];
     [clampOp encode:commandBuffer.buffer];
-    mt.texture()->setTexture(Y2);
+    mt.texture()->setImage(Y2);
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;
+}
+
+Tensor conv2d_prepack_run(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
+  return conv2d(input, *op_context);
 }
 
 } // namespace prepack
@@ -102,6 +108,10 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("conv2d", TORCH_FN(conv2d));
 };
+
+TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
+  m.impl("conv2d_run", prepack::conv2d_prepack_run);
+}
 
 }
 }

@@ -1065,7 +1065,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*tail, tail);
+    LoopNest::normalize(*tail);
   }
 }
 void LoopNest::sliceHead(For* f, int factor) {
@@ -1111,7 +1111,7 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*head, head);
+    LoopNest::normalize(*head);
   }
 }
 void LoopNest::sliceTail(For* f, int factor) {
@@ -1313,12 +1313,104 @@ std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   return distributeLoop(loop, loopsSet);
 }
 
-For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
+bool areEqual(const Expr* expr1, const Expr* expr2) {
+  auto diff = IRSimplifier::simplify(new Sub(expr1, expr2));
+  return diff->isConstant() && (immediateAs<int>(diff) == 0);
+};
+
+bool areEqual(
+    const std::vector<const Expr*>& expr_list1,
+    const std::vector<const Expr*>& expr_list2) {
+  if (expr_list1.size() != expr_list2.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < expr_list1.size(); ++i) {
+    if (!areEqual(expr_list1[i], expr_list2[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LoopNest::hasLoopCarriedDependence(For* loop) {
+  analysis::MemDependencyChecker analyzer;
+  loop->accept(&analyzer);
+  // High-level algorithm to check if two accesses to a buffer, A and B, one of
+  // which is a Store, result in a loop-carried dependence:
+  //   1. If the index expressions are equal in A and B, then that is a
+  //      loop-independent dependence.
+  //   2. If the index expressions are not equal in A and B:
+  //       a) if the bounds on the accesses overlap, then this is a
+  //          loop-carried dependence.
+  //       b) if the bounds on the accesses do not overlap, then there is no
+  //          dependence.
+  //
+  // Implementation:
+  // For every pair of statements, S1 and S2, in the loop:
+  //  * Get the loads and stores in S1 and S2.
+  //  * For every store in S1 and load in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
+  //  * For every load in S1 and store in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
+  //  * For every store in S1 and store in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
+  for (auto it1 = loop->body()->begin(); it1 != loop->body()->end(); ++it1) {
+    for (auto it2 = std::next(it1); it2 != loop->body()->end(); ++it2) {
+      auto aStores = NodeFinder<Store>::find(*it1);
+      auto aLoads = NodeFinder<Load>::find(*it1);
+      auto bStores = NodeFinder<Store>::find(*it2);
+      auto bLoads = NodeFinder<Load>::find(*it2);
+      // ReadAfterWrite
+      for (auto& aStore : aStores) {
+        for (auto& bLoad : bLoads) {
+          if (aStore->buf() == bLoad->buf()) {
+            if (!areEqual(aStore->indices(), bLoad->indices())) {
+              if (isOverlapping(analyzer, aStore, bLoad)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      // WriteAfterRead
+      for (auto& bStore : bStores) {
+        for (auto& aLoad : aLoads) {
+          if (bStore->buf() == aLoad->buf()) {
+            if (!areEqual(bStore->indices(), aLoad->indices())) {
+              if (isOverlapping(analyzer, bStore, aLoad)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      // WriteAfterWrite
+      for (auto& aStore : aStores) {
+        for (auto& bStore : bStores) {
+          if (aStore->buf() == bStore->buf()) {
+            if (!areEqual(aStore->indices(), bStore->indices())) {
+              if (isOverlapping(analyzer, aStore, bStore)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   if (loops.empty()) {
-    return nullptr;
+    return false;
   }
   if (loops.size() == 1) {
-    return loops.front();
+    *fused = loops.front();
+    return true;
   }
 
   // Check if all the loops have the same parent.
@@ -1326,16 +1418,15 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
   for (auto l : loops) {
     auto par = l->get_parent();
     if (par == nullptr) {
-      throw malformed_input("Loop without parent: ", l);
+      return false;
     }
     if (par != root) {
-      throw malformed_input("Can't fuse loops with different parents: ", l);
+      return false;
     }
   }
   auto root_block = dynamic_cast<Block*>(root);
   if (root_block == nullptr) {
-    throw malformed_input(
-        "Loops' parent must be a Block, instead found ", root);
+    return false;
   }
 
   // Currently, we only handle cases where there are no statements between
@@ -1351,67 +1442,62 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
   TORCH_INTERNAL_ASSERT(it != root_block->end());
   for (auto l : loops) {
     if (*it != l) {
-      throw malformed_input(
-          "Only contiguous loops can be fused, found another stmt before", l);
+      return false;
     }
     ++it;
   }
 
-  auto first_loop = loops.front();
-
   // Check if bounds are the same for all the loops.
-  // TODO: The following check does not consider different expressions that
-  // evaluate to the same value as the same. Improve this by performing
-  // expression equality.
-  auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
-    if (bound1->isConstant() && bound2->isConstant()) {
-      return immediateAs<int>(bound1) == immediateAs<int>(bound2);
-    }
-    return bound1 == bound2;
-  };
+  auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
   for (size_t i = 1; i < loops.size(); ++i) {
     auto curr_loop = loops[i];
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
-    if (!are_bounds_equal(curr_loop_start, first_loop_start)) {
-      throw malformed_input(
-          "Loops with different start bounds cannot be fused");
+    if (!areEqual(curr_loop_start, first_loop_start)) {
+      return false;
     }
-    if (!are_bounds_equal(curr_loop_stop, first_loop_stop)) {
-      throw malformed_input("Loops with different stop bounds cannot be fused");
+    if (!areEqual(curr_loop_stop, first_loop_stop)) {
+      return false;
     }
   }
 
-  // Now, we fuse the incoming loops. This is done by taking all the statements
-  // from the second loops onwards and moving them into the first loop's body.
-  // This way the final fused loop will be the same as the first loop.
+  // A lambda to fuse all the given loops.
+  auto fuse_all_loops = [](const std::vector<For*>& loops) {
+    auto first_loop = loops.front();
+    // Fuse the loops by taking all the statements from the second loops
+    // onwards and moving them into the first loop's body.
+    // This way the final fused loop will be the same as the first loop.
+    for (size_t i = 1; i < loops.size(); ++i) {
+      auto body = dynamic_cast<Block*>(Substitute(
+          Stmt::clone(loops[i]->body()),
+          {{loops[i]->var(), first_loop->var()}}));
+      first_loop->body()->splice(first_loop->body()->end(), body);
+    }
+  };
+
+  // We need to check if fusing the loops results in a loop-carried dependence.
+  // This check can be done only after the loops are fused into one. But if the
+  // check is violated, we need to return the given loops in the original form.
+  // So, we create a clone of all the loops, fuse them and check for this.
+  std::vector<For*> loops_copy;
+  loops_copy.reserve(loops.size());
+  for (const auto& l : loops) {
+    loops_copy.push_back(dynamic_cast<For*>(Stmt::clone(l)));
+  }
+  fuse_all_loops(loops_copy);
+  if (hasLoopCarriedDependence(loops_copy.front())) {
+    return false;
+  }
+
+  // Now that all conditions are satisfied, we fuse the given loops.
+  fuse_all_loops(loops);
+  *fused = loops.front();
   for (size_t i = 1; i < loops.size(); ++i) {
-    auto body = dynamic_cast<Block*>(Substitute(
-        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
-    first_loop->body()->splice(first_loop->body()->end(), body);
     root_block->remove_stmt(loops[i]);
   }
-
-  analysis::MemDependencyChecker analyzer;
-  first_loop->accept(&analyzer);
-  for (auto it1 = first_loop->body()->begin(); it1 != first_loop->body()->end();
-       ++it1) {
-    for (auto it2 = std::next(it1); it2 != first_loop->body()->end(); ++it2) {
-      if (hasPartialOverlap(analyzer, *it2, *it1)) {
-        // Whenever there is a partial overlap between accesses in 2 statements
-        // in a loop, it results in a loop-carried dependence. NOTE: In
-        // general, this may not be true. But the semantics of TE IR is that all
-        // iterations of the loop can run in parallel, so there should be no
-        // loop-carried dependence in either direction (forward or backward).
-        throw malformed_input(
-            "Fusing given loops is not valid since it results in a loop carried dependence");
-      }
-    }
-  }
-
-  return first_loop;
+  return true;
 }
 
 For* findOuterFor(For* a, For* b) {
@@ -1476,6 +1562,19 @@ void LoopNest::reorderAxis(For* a, For* b) {
   For* after{nullptr};
   For* last = internal_axes.front();
   Stmt* newInner = body;
+
+  s = inner;
+  while (s != outer) {
+    if (auto cond = dynamic_cast<Cond*>(s->get_parent())) {
+      if (s == cond->true_stmt()) {
+        newInner = cond->cloneWithNewBody(newInner);
+      } else {
+        // s is the false branch of Cond
+        newInner = cond->cloneWithNewBodies(new Block({}), newInner);
+      }
+    }
+    s = s->get_parent();
+  }
 
   // This is the major complexity in loop reordering: handling statements not in
   // the straight line of the reorder. To handle this we partition the tree into
@@ -1663,35 +1762,32 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::normalize(For* f, For** normalized) {
+void LoopNest::unroll(For* f) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Stmt* unrolled;
+  unroll(f, &unrolled);
+}
+
+bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
-  }
-  Block* p = dynamic_cast<Block*>(f->get_parent());
-  if (!p) {
-    throw malformed_input("normalize attempted on loop with no parent");
   }
 
   if (f->start()->isConstant()) {
     int start_idx = immediateAs<int>(f->start());
     if (start_idx == 0) {
       // No need to normalize in this case.
-      *normalized = f;
-      return;
+      return false;
     }
   }
 
   auto for_body_normalized = Substitute(
-      Stmt::clone(f->body()),
+      f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  *normalized = For::make(
-      VarHandle(f->var()),
-      ExprHandle(0),
-      ExprHandle(f->stop()) - ExprHandle(f->start()),
-      for_body_normalized,
-      f->loop_options());
-
-  p->replace_stmt(f, *normalized);
+  f->setBody(for_body_normalized);
+  f->setStop(new Sub(f->stop(), f->start()));
+  f->setStart(new IntImm(0));
+  return true;
 }
 
 // This function expects that there are 'num' loops perfectly nested within
@@ -1731,7 +1827,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   for (size_t i = 0; i < loops.size() - 1; ++i) {
     if ((loops[i]->body()->nstmts() != 1) ||
         (loops[i]->body()->front() != loops[i + 1])) {
-      *flattened = loops[0];
       return false;
     }
   }
@@ -1742,16 +1837,15 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   // For the same reason, we can't store the normalized inner loops until after
   // the outer-most loop is normalized.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* normalized;
   for (size_t i = 0; i < loops.size(); ++i) {
     size_t idx = loops.size() - i - 1;
-    LoopNest::normalize(loops[idx], &normalized);
+    LoopNest::normalize(loops[idx]);
   }
 
   // 'normalized' points to the outer-most loop in the normalized loopnest.
   // Collect all the normalized loops.
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
+  auto normalized_loops = getLoopStmtsInLoopNest(loops.front(), loops.size());
 
   auto flat_var = new Var(
       normalized_loops[0]->var()->name_hint() + "_flat",
@@ -1767,16 +1861,146 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
     stop = new Mul(curr_loop->stop(), stop);
   }
   auto flattened_body =
-      Substitute(Stmt::clone(normalized_loops.back()->body()), var_mapping);
+      Substitute(normalized_loops.back()->removeBody(), var_mapping);
 
-  *flattened = new For(
-      flat_var,
-      new IntImm(0),
-      stop,
-      flattened_body,
-      normalized_loops[0]->loop_options());
-  p->replace_stmt(normalized_loops[0], *flattened);
+  normalized_loops.front()->setVar(flat_var);
+  normalized_loops.front()->setStart(new IntImm(0));
+  normalized_loops.front()->setStop(stop);
+  normalized_loops.front()->setBody(flattened_body);
+  *flattened = normalized_loops.front();
   return true;
+}
+
+bool LoopNest::flatten(const std::vector<For*>& loops) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* flattened;
+  return flatten(loops, &flattened);
+}
+
+void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
+  if (buf->initializer()) {
+    throw malformed_input("Can't compress buffer whose initializer is set");
+  }
+
+  // Loop iterations in NNC IR do not follow sequential semantics by default.
+  // In other words, the iterations of the loops could be executed in any
+  // random order without affecting correctness. This constraint in turn
+  // implies that there can’t be any *inter-iteration* dependences
+  // (or *loop-carried* dependences) in NNC loops. So, any NNC IR with such
+  // dependences is considered invalid.
+  //
+  // Given the constraint above, for any pair of accesses to a buffer (where
+  // at least one of the access is a write), the accesses must be
+  // loop-independent on the innermost loop containing the accesses as well as
+  // all the loops above it. So, any dimension that uses only those loop
+  // variables to access the given buffer could be optimized away.
+  //
+  // Algorithm:
+  //   * Find all the accesses to the given buf. (A)
+  //   * Find the parent common to all accesses in A. (P)
+  //   * Collect all the loops above P. (L)
+  //   * Collect all the loop variables corresponding to L. (LV)
+  //   * For every access a in A:
+  //      * For the index I in every dimension of a:
+  //          * If the variables in I are all in LV, mark this dimension
+  //            for deletion.
+  //   * For every dimension that is marked for deletion in ALL accesses in A:
+  //      * Update the buffer to set the size of that dimension to 1.
+  //      * Update all accesses in A to set the index in that dimension to 0.
+
+  auto writes = WritesToBuf::find(stmt, buf);
+  auto reads = StmtsReadingBuf::find(stmt, buf);
+
+  // All buffers must be read and written at least once.
+  // Is this a valid assumption? TODO
+  TORCH_INTERNAL_ASSERT(!writes.empty());
+  TORCH_INTERNAL_ASSERT(!reads.empty());
+
+  // Find the parent common to all the buffer accesses.
+  const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
+  TORCH_INTERNAL_ASSERT(parent);
+  for (auto w : writes) {
+    parent = Block::getSharedParent(parent, w);
+  }
+  for (auto r : reads) {
+    parent = Block::getSharedParent(parent, r);
+  }
+
+  // Collect all the loops that are above the common parent.
+  auto loops = LoopNest::getEnclosingLoopNest(parent);
+  std::unordered_set<const Var*> loop_vars;
+  for (auto l : loops) {
+    loop_vars.insert(l->var());
+  }
+
+  // TODO: Need to handle other Stmts / Exprs that read / write buffers.
+  auto stores = NodeFinder<Store>::find(stmt);
+  auto loads = NodeFinder<Load>::find(stmt);
+
+  // Vector to indicate which dimensions could be compressed away.
+  std::vector<bool> dims(buf->dims().size(), true);
+  auto check_indices = [&](const std::vector<const Expr*>& indices) {
+    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+      auto index_vars = NodeFinder<Var>::find(indices[i]);
+      for (auto iv : index_vars) {
+        if (loop_vars.count(iv) == 0) {
+          // A variable in this index is not in loop_vars.
+          // This implies that this dimension cannot be optimized away.
+          dims[i] = false;
+          break;
+        }
+      }
+    }
+  };
+  for (auto s : stores) {
+    if (s->buf() == buf) {
+      check_indices(s->indices());
+    }
+  }
+  for (auto l : loads) {
+    if (l->buf() == buf) {
+      check_indices(l->indices());
+    }
+  }
+  bool any_dim_to_compress = false;
+  for (auto d : dims) {
+    any_dim_to_compress |= d;
+  }
+  if (!any_dim_to_compress) {
+    return;
+  }
+
+  // Compress buffer by removing the marked dims.
+  std::vector<const Expr*> new_dims(buf->dims());
+  for (size_t i = 0; i < dims.size(); ++i) {
+    if (dims[i]) {
+      new_dims[i] = new IntImm(1);
+    }
+  }
+  buf->set_dims(new_dims);
+
+  // Modify all access to reflect the removed dims.
+  auto get_new_indices = [&](const std::vector<const Expr*>& indices) {
+    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    std::vector<const Expr*> new_indices(indices);
+    for (size_t i = 0; i < dims.size(); ++i) {
+      if (dims[i]) {
+        new_indices[i] = new IntImm(0);
+      }
+    }
+    return new_indices;
+  };
+  for (auto s : stores) {
+    if (s->buf() == buf) {
+      s->set_indices(get_new_indices(s->indices()));
+    }
+  }
+  for (auto l : loads) {
+    if (l->buf() == buf) {
+      l->set_indices(get_new_indices(l->indices()));
+    }
+  }
 }
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
