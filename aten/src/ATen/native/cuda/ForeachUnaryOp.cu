@@ -249,8 +249,9 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
     bool has_complex_or_integer = false;
     for (const auto& t : tensors) {
-        if (at::isComplexType(t.scalar_type()) || at::isIntegralType(t.scalar_type(), /* includeBool= */true)) {
+        if (at::isComplexType(t.scalar_type())) {
             has_complex_or_integer = true;
+            break;
         }
     }
 
@@ -265,8 +266,9 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
     bool has_complex_or_integer = false;
     for (const auto& t : tensors) {
-        if (at::isComplexType(t.scalar_type()) || at::isIntegralType(t.scalar_type(), /* includeBool= */true)) {
+        if (at::isComplexType(t.scalar_type())) {
             has_complex_or_integer = true;
+            break;
         }
     }
 
