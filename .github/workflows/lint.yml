@@ -374,6 +374,8 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install mypy==0.812
+          # Needed to check tools/render_junit.py
+          pip install junitparser rich
       - name: Run autogen
         run: |
           set -eux

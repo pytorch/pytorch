@@ -788,7 +788,7 @@ class TestCommon(JitCommonTestCase):
             tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
             if inplace_variant is not None and not sample.broadcasts_input:
                 if (isinstance(expected_forward, torch.Tensor) and
-                    expected_forward.dtype is tensor.dtype):
+                        expected_forward.dtype is tensor.dtype):
                     inplace_forward = inplace_variant(cloned2, *sample.args, **sample.kwargs)
                     self.assertTrue(inplace_forward.is_conj())
                     self.assertEqual(inplace_forward, expected_forward)
