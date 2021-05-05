@@ -4297,6 +4297,29 @@ class TestAutograd(TestCase):
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_forward_ad(self):
+        def fn(x, y):
+            return x + y, x
+
+        # Test for all inputs and outputs being real
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
+
+        # Test for one input and one output being complex
+        x = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
+
+        # Test for all inputs and outputs being complex
+        y = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
+        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
