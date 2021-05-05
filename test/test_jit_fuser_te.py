@@ -1422,6 +1422,7 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardswish,
             torch.sqrt,
             torch.rsqrt,
             torch.abs,
