@@ -40,7 +40,7 @@ class MetricsLogger:
         A method that processes the metrics recorded during the benchmark.
 
         Returns::
-            It returns a dictionary containing keys as the metrics 
+            It returns a dictionary containing keys as the metrics
                 and values list of elapsed times.
 
         Examples::
