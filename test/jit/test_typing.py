@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple

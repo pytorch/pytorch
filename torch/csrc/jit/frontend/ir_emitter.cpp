@@ -3753,8 +3753,7 @@ struct to_ir {
 
         for (size_t i = 0, N = values.size(); i < N; ++i) {
           std::stringstream ss;
-          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss) &&
-              !key_type->isSubtypeOfExt(keys[i]->type(), &ss)) {
+          if (!unifyTypes(keys[i]->type(), key_type, /*default_to_any=*/false)) {
             throw ErrorReport(key_trees[i])
                 << "Dict keys must contain "
                 << "only a single type, expected: " << key_type->repr_str()
@@ -3763,10 +3762,12 @@ struct to_ir {
           }
         }
 
-        value_type = std::accumulate(
-            values.begin(), values.end(), values[0], [&](TypePtr a, TypePtr b) {
-              return unifyTypes(a, b, /*default_to_any*/ = true);
-            });
+        if (!values.empty()) {
+          value_type = std::accumulate(
+              values.begin(), values.end(), value_type, [&](TypePtr a, Value* b) {
+                return *(unifyTypes(a, b->type(), /*default_to_any=*/true));
+              });
+        }
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
