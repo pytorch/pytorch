@@ -4,6 +4,7 @@ namespace dnnlowp {
 
 using namespace std;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 Sigmoid<T>::Sigmoid(double max_abs_err) : tanh_(max_abs_err) {
   float x_sq = tanh_.GetSaturationRegionBegin();
@@ -13,6 +14,7 @@ Sigmoid<T>::Sigmoid(double max_abs_err) : tanh_(max_abs_err) {
   in_qparams_.precision = num_in_bits_;
   // -2 x_sq is mapped to -127, 0 is mapped to 0, 2 x_sq is mapped to 127
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   out_qparams_.scale = 0.5 / ((1 << (num_out_bits_ - 1)) - 1);
   out_qparams_.zero_point = 0;
   out_qparams_.precision = num_out_bits_;

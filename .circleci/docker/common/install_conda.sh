@@ -91,8 +91,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda110 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.1* ]]; then
     conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.2* ]]; then
-    conda_install magma-cuda112 -c pytorch
+  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
+    conda_install magma-cuda113 -c pytorch
   fi
 
   # TODO: This isn't working atm
@@ -102,6 +102,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # TODO: Why is scipy pinned
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  # Pin coverage so we can use COVERAGE_RCFILE
   as_jenkins pip install --progress-bar off pytest \
     scipy==1.1.0 \
     scikit-image \
@@ -111,9 +112,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     llvmlite \
     unittest-xml-reporting \
     boto3==1.16.34 \
-    coverage \
+    coverage==5.5 \
     hypothesis==4.53.2 \
-    mypy==0.770 \
+    mypy==0.812 \
     tb-nightly
 
   # Update scikit-learn to a python-3.8 compatible version

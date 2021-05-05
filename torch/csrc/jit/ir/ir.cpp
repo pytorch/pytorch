@@ -294,6 +294,7 @@ std::ostream& Node::print(
     }
     if (auto file_line_col = r.file_line_col()) {
       std::string filename;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
@@ -489,6 +490,7 @@ void Graph::lint() const {
       AT_ASSERT(!contains(n));
       nodes.insert(n);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::unique_ptr<LintScope> parent;
 
    private:
@@ -1104,6 +1106,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:
@@ -1288,6 +1291,7 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
     v->replaceAllUsesWith(new_out);
   }
   replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
   TORCH_INTERNAL_ASSERT(
       (replace_node->maybeOperator() != nullptr) == had_operator,
       "invalid symbol replacement:",
