@@ -1257,5 +1257,36 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, RunFast) {
+#ifdef TORCH_ENABLE_LLVM
+  // TODO: Implement call_raw in IREval and remove the ifdef
+  KernelScope kernel_scope;
+
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+
+  k.runFast({a.data_ptr(), b.data_ptr()}, {o.data_ptr()});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
 } // namespace jit
 } // namespace torch
