@@ -738,10 +738,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
         // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22,
         // %26) return (%30)
-        TORCH_INTERNAL_ASSERT(
-            prev->input(1)->node()->input(0)->node()->kind() == onnx::Gather);
-        TORCH_INTERNAL_ASSERT(
-            prev->input(1)->node()->input(1)->node()->kind() == onnx::Gather);
         origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
         TORCH_INTERNAL_ASSERT(transpose->kind() == onnx::Transpose);
