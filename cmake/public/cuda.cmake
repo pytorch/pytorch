@@ -194,7 +194,7 @@ if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
   else()
     set(_python_exe "${PYTHON_EXECUTABLE}")
   endif()
- execute_process(
+  execute_process(
     COMMAND "${_python_exe}" -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
     RESULT_VARIABLE _retval
