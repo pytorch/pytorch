@@ -22,10 +22,11 @@
   dispatch_once(&onceToken, ^{
     instance = [[MPSCNNContext alloc] init];
     instance->_device = MTLCreateSystemDefaultDevice();
+    NSError* compileError = nil;
     instance->_library = [instance.device
         newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
                      options:nil
-                       error:nil];
+                       error:&compileError];
     instance->_commandQueue = [instance.device newCommandQueue];
     instance->_pipelineCache =
         [NSMutableDictionary<NSString*, id<MTLComputePipelineState>> new];

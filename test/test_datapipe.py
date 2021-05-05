@@ -272,7 +272,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
-            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
@@ -281,11 +281,11 @@ class TestFunctionalIterDataPipe(TestCase):
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
-                    p = pickle.dumps(datapipe)  # type: ignore
+                    p = pickle.dumps(datapipe)
 
     def test_concat_datapipe(self):
         input_dp1 = IDP(range(10))
@@ -295,7 +295,7 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Concat()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())  # type: ignore
+            dp.iter.Concat(input_dp1, ())  # type: ignore[arg-type]
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -467,13 +467,13 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
         # Default SequentialSampler
-        sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
+        sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore[var-annotated]
         self.assertEqual(len(sampled_dp), 10)
         for i, x in enumerate(sampled_dp):
             self.assertEqual(x, i)
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore[var-annotated] # noqa: B950
 
         # Requires `__len__` to build SamplerDataPipe
         input_dp_nolen = IDP_NoLen(range(10))
@@ -540,7 +540,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
 
         # Single transform
-        input_dp = IDP_NoLen(inputs)  # type: ignore
+        input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
         with self.assertRaises(NotImplementedError):
@@ -550,9 +550,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore
+            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
         with self.assertRaises(NotImplementedError):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
@@ -585,7 +585,7 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar('T', int, str)
-        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])  # type: ignore
+        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])  # type: ignore[valid-type]
         types = ((int, Optional[int]),
                  (List, Union[int, list]),
                  (Tuple[int, str], S),
@@ -606,8 +606,8 @@ class TestTyping(TestCase):
         for subscript_type, n in subscriptable_types.items():
             for ts in itertools.combinations(types, n):
                 subs, pars = zip(*ts)
-                sub = subscript_type[subs]  # type: ignore
-                par = subscript_type[pars]  # type: ignore
+                sub = subscript_type[subs]  # type: ignore[index]
+                par = subscript_type[pars]  # type: ignore[index]
                 self.assertTrue(issubtype(sub, par))
                 self.assertFalse(issubtype(par, sub))
                 # Non-recursive check
@@ -635,8 +635,8 @@ class TestTyping(TestCase):
         dt = (([1, '1', 2], List), (set({1, '1', 2}), Set))
         for d, t in dt:
             self.assertTrue(issubinstance(d, t))
-            self.assertTrue(issubinstance(d, t[T_co]))  # type: ignore
-            self.assertFalse(issubinstance(d, t[int]))  # type: ignore
+            self.assertTrue(issubinstance(d, t[T_co]))  # type: ignore[index]
+            self.assertFalse(issubinstance(d, t[int]))  # type: ignore[index]
 
         # dict
         d = dict({'1': 1, '2': 2.})
@@ -655,17 +655,17 @@ class TestTyping(TestCase):
     def test_compile_time(self):
         with self.assertRaisesRegex(TypeError, r"Expected 'Iterator' as the return"):
             class InvalidDP1(IterDataPipe[int]):
-                def __iter__(self) -> str:  # type: ignore
+                def __iter__(self) -> str:  # type: ignore[misc, override]
                     yield 0
 
         with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
             class InvalidDP2(IterDataPipe[Tuple]):
-                def __iter__(self) -> Iterator[int]:  # type: ignore
+                def __iter__(self) -> Iterator[int]:  # type: ignore[override]
                     yield 0
 
         with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
             class InvalidDP3(IterDataPipe[Tuple[int, str]]):
-                def __iter__(self) -> Iterator[tuple]:  # type: ignore
+                def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
         class DP1(IterDataPipe[Tuple[int, str]]):
@@ -683,19 +683,19 @@ class TestTyping(TestCase):
         self.assertEqual(dp1.type, dp2.type)
 
         with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
-            class InvalidDP4(DP1[tuple]):  # type: ignore
-                def __iter__(self) -> Iterator[tuple]:  # type: ignore
+            class InvalidDP4(DP1[tuple]):  # type: ignore[type-arg]
+                def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
         class DP2(IterDataPipe[T_co]):
             def __iter__(self) -> Iterator[T_co]:
                 for d in range(10):
-                    yield d  # type: ignore
+                    yield d  # type: ignore[misc]
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
-        dp1 = DP2()  # type: ignore
+        dp1 = DP2()  # type: ignore[assignment]
         self.assertTrue(DP2.type.issubtype(dp1.type) and dp1.type.issubtype(DP2.type))
-        dp2 = DP2()  # type: ignore
+        dp2 = DP2()  # type: ignore[assignment]
         self.assertEqual(dp1.type, dp2.type)
 
         class DP3(IterDataPipe[Tuple[T_co, str]]):
@@ -708,9 +708,9 @@ class TestTyping(TestCase):
                     yield d, str(d)
 
         self.assertTrue(issubclass(DP3, IterDataPipe))
-        dp1 = DP3(range(10))  # type: ignore
+        dp1 = DP3(range(10))  # type: ignore[assignment]
         self.assertTrue(DP3.type.issubtype(dp1.type) and dp1.type.issubtype(DP3.type))
-        dp2 = DP3(5)  # type: ignore
+        dp2 = DP3(5)  # type: ignore[assignment]
         self.assertEqual(dp1.type, dp2.type)
 
         class DP4(IterDataPipe[tuple]):
@@ -728,7 +728,7 @@ class TestTyping(TestCase):
                 raise NotImplementedError
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
-        dp = DP5()  # type: ignore
+        dp = DP5()  # type: ignore[assignment]
         self.assertTrue(dp.type.param == Any)
 
         class DP6(IterDataPipe[int]):
@@ -737,7 +737,7 @@ class TestTyping(TestCase):
                 raise NotImplementedError
 
         self.assertTrue(issubclass(DP6, IterDataPipe))
-        dp = DP6()  # type: ignore
+        dp = DP6()  # type: ignore[assignment]
         self.assertTrue(dp.type.param == int)
 
     def test_construct_time(self):
@@ -787,13 +787,13 @@ class TestTyping(TestCase):
         dss = ([(1, '1'), (2, '2')],
                [(1, 1), (2, '2')])
         for ds in dss:
-            dp = DP(ds)  # type: ignore
+            dp = DP(ds)  # type: ignore[var-annotated]
             self.assertEqual(list(d for d in dp), ds)
             # Reset __iter__
             self.assertEqual(list(d for d in dp), ds)
 
-        dss = ([(1, 1), ('2', 2)],  # type: ignore
-               [[1, '1'], [2, '2']],  # type: ignore
+        dss = ([(1, 1), ('2', 2)],  # type: ignore[assignment, list-item]
+               [[1, '1'], [2, '2']],  # type: ignore[list-item]
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)

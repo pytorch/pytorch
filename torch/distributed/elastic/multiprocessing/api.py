@@ -28,6 +28,9 @@ from torch.distributed.elastic.multiprocessing.redirects import (
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
 
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
+
 
 log = logging.getLogger(__name__)
 
@@ -264,6 +267,13 @@ class _nullcontext(AbstractContextManager):
         pass
 
 
+def get_std_cm(std_rd: str, redirect_fn):
+    if IS_WINDOWS or IS_MACOS or not std_rd:
+        return _nullcontext()
+    else:
+        return redirect_fn(std_rd)
+
+
 def _wrap(
     local_rank: int,
     fn: Callable,
@@ -282,8 +292,8 @@ def _wrap(
     stdout_rd = stdout_redirects[local_rank]
     stderr_rd = stderr_redirects[local_rank]
 
-    stdout_cm = redirect_stdout(stdout_rd) if stdout_rd else _nullcontext()
-    stderr_cm = redirect_stderr(stderr_rd) if stderr_rd else _nullcontext()
+    stdout_cm = get_std_cm(stdout_rd, redirect_stdout)
+    stderr_cm = get_std_cm(stderr_rd, redirect_stderr)
 
     for k, v in env_.items():
         os.environ[k] = v

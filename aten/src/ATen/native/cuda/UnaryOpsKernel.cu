@@ -174,9 +174,6 @@ REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 

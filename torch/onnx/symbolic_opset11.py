@@ -41,17 +41,38 @@ def clamp(g, self, min, max):
     if dtype is not None:
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
-    return g.op("Clip", self, min, max)
+
+    if sym_help._is_none(min):
+        return clamp_max(g, self, max)
+    elif sym_help._is_none(max):
+        return clamp_min(g, self, min)
+    else:
+        if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
+            return g.op("Clip", self, min, max)
+        else:
+            return clamp_max(g, clamp_min(g, self, min), max)
 
 
+@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    max = unused(g)
-    return clamp(g, self, min, max)
+    dtype = self.type().scalarType()
+    min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    if sym_help._get_tensor_rank(min) == 0:
+        max = unused(g)
+        return g.op("Clip", self, min, max)
+    else:
+        return g.op("Max", self, min)
 
 
+@parse_args('v', 'v')
 def clamp_max(g, self, max):
-    min = unused(g)
-    return clamp(g, self, min, max)
+    dtype = self.type().scalarType()
+    max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    if sym_help._get_tensor_rank(max) == 0:
+        min = unused(g)
+        return g.op("Clip", self, min, max)
+    else:
+        return g.op("Min", self, max)
 
 
 # Opset 11 gather accepts negative indices
@@ -256,6 +277,9 @@ def __getitem_(g, self, i):
         from torch.onnx.symbolic_opset9 import __getitem_ as getitem
         return getitem(g, self, i)
 
+def _set_item(g, tensor_list, i, v):
+    tensor_list = g.op("SequenceErase", tensor_list, i)
+    return g.op("SequenceInsert", tensor_list, v, i)
 
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
@@ -840,3 +864,106 @@ def prim_ConstantChunk(g, self, chunks, dim):
         res.append(g.op("Slice", self, start, end, axis))
         start = end
     return res
+
+def repeat_interleave(g, self, repeats, dim=None):
+    from torch.onnx.symbolic_opset9 import reshape
+    input = self
+    final_dim = dim
+    # if dim is None flatten
+    # By default, use the flattened input array, and return a flat output array
+    if sym_help._is_none(dim):
+        input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
+        dim = 0
+    else:
+        dim = sym_help._maybe_get_scalar(dim)
+
+    repeats_dim = sym_help._get_tensor_rank(repeats)
+    repeats_sizes = sym_help._get_tensor_sizes(repeats)
+    input_sizes = sym_help._get_tensor_sizes(input)
+    if repeats_dim is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'repeats rank.')
+    if repeats_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'repeats size.')
+    if input_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'input size.')
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)
+
+    output_sizes = input_sizes.copy()
+    perm_i = [0]
+    for idx, input_size in enumerate(input_sizes):
+        perm_i.append(idx + 1)
+        if input_size is None:
+            output_sizes[idx], input_sizes[idx] = 0, -1
+    perm_i[0], perm_i[dim] = perm_i[dim], perm_i[0]
+
+    # Cases when repeats is a single value tensor and dim has unknown input size
+    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and output_sizes[dim] == 0:
+        if not sym_help._is_tensor(repeats):
+            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+        reps = sym_help._size_helper(g, input, dim)
+        reps = unsqueeze(g, reps, 0)
+        repeats = g.op("Expand", repeats, reps)
+    # There are cases when the repeats are 1-d tensor with multiple repeats, but dim
+    # provided along one of the dynamic axes provided. A simple example would be
+    # input.shape -> [1, 1, *] where * represents the dynamic axes, and dim = 2
+    # Now, repeat interleaving can be performed in pytorch when the value of * matches
+    # with the number of elements in repeat, for example if * -> 2, number of repeats
+    # should be 2 as well.
+    else:
+        return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
+
+    reps_like = g.op("ConstantOfShape", g.op("Shape", repeats),
+                     value_t=torch.tensor([1], dtype=torch.long))
+    r_splits = split(g, repeats, reps_like, 0)
+    i_splits = split(g, input, reps_like, dim)
+
+    output_sizes[dim], input_sizes[dim] = -1, 1
+
+    # Create a loop to iterate over each value along the dimension
+    # and perform individual interleaving using the repeats tensor
+    # Loop is of the following pattern
+    # input (trip_count, cond)
+    #   int trip_count = ...;
+    #   bool cond = ...;
+    #   for (int i=0; i < trip_count && cond; ++i) {
+    #     cond = ...;
+    #   }
+
+    # Loop conditions
+    loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    loop_condition = g.op("Cast", loop_condition, to_i=9)
+    loop_len = reps
+    loop = g.op("Loop", loop_len, loop_condition)
+
+    # Loop inputs
+    loop_block = _add_block(loop.node())
+    block_input_iter = _add_input_to_block(loop_block)
+    cond = _add_input_to_block(loop_block)
+
+    r_split = loop_block.op("SequenceAt", r_splits, block_input_iter)
+    i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
+
+    i_split = unsqueeze(loop_block, i_split, dim + 1)
+    r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[:dim + 1])),
+                r_split,
+                loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
+    r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
+    i_split = expand(loop_block, i_split, r_concat, None)
+    i_split = reshape(loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+
+    # Loop outputs
+    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+    _add_output_to_block(loop_block, cond_out)
+    _add_output_to_block(loop_block, i_split)
+    loop_out = loop.node().output()
+
+    # In this loop, the outputs are scan outputs and are concatenated along
+    # the zero'th dimension (by default). In order to avoid this and concatenate
+    # along the dimension provided, some post-processing is required
+    loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
+    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
