@@ -1263,7 +1263,7 @@ class _NnapiSerializer(object):
         size_ctype, size_arg = self.get_constant_value(size_jit)
         scale_ctype, scale_arg = self.get_constant_value(scale_jit)
 
-        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(image)
+        image_id, image_oper = self.get_tensor_operand_by_jitval(image)
         assert len(image_oper.shape) == 4
 
         if size_ctype.kind() != "NoneType" and scale_ctype.kind() != "NoneType":
@@ -1303,6 +1303,20 @@ class _NnapiSerializer(object):
 
         out_shape = (image_oper.shape[0], image_oper.shape[1], out_h, out_w)
         use_nchw = image_oper.use_nchw()
+        out_id = self.add_tensor_operand(node.outputsAt(0), image_oper._replace(shape=out_shape))
+
+        if image_oper.shape[0] == 0 or image_oper.shape[1] == 0:
+            raise Exception("Flexible batch or channels not supported")
+
+        # Handle variable input size
+        for dim in (2, 3):   # h, w indices
+            if image_oper.shape[dim] == 0:
+                if size_ctype.kind() != "NoneType":
+                    self.compute_operand_shape(out_id, dim, size_arg[dim - 2])
+                elif scale_ctype.kind() != "NoneType":
+                    self.compute_operand_shape(out_id, dim, f"int({scale_arg[dim - 2]} * {flex_name(image_id, dim)})")
+                else:
+                    raise Exception("Size and scale cannot both be None.")
 
         inputs = [None] * 4
         inputs[0] = image_id
@@ -1311,7 +1325,7 @@ class _NnapiSerializer(object):
         inputs[3] = self.add_immediate_bool_scalar(use_nchw)
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), image_oper._replace(shape=out_shape))
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.RESIZE_NEAREST_NEIGHBOR, inputs, outputs)
 

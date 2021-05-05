@@ -259,6 +259,7 @@ class TestNNAPI(TestCase):
                     self.check(torch.nn.AdaptiveAvgPool2d((2, 2)), inp)
 
     def test_upsample_nearest2d(self):
+        convert_args = dict(self.float_and_quant_and_nhwc(torch.randn(2, 3, 0, 0), 0.3, 128))
         for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.UpsamplingNearest2d(size=(16, 20)), inp)
@@ -267,6 +268,15 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(1.5, 1.5)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(3.0, 3.0)), inp)
+
+                self.check(
+                    torch.nn.UpsamplingNearest2d(size=(24, 32)), inp,
+                    convert_args=[convert_args[name]]
+                )
+                self.check(
+                    torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp,
+                    convert_args=[convert_args[name]]
+                )
 
     def test_linear(self):
         torch.manual_seed(29)
