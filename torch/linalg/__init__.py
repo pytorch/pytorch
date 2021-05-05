@@ -502,8 +502,8 @@ The eigenvalues are returned in ascending order.
 
 .. seealso::
 
-        :func:`torch.linalg.eigvalsh` computes only the eigenvalues.
-        However, that function is not differentiable.
+        :func:`torch.linalg.eigvalsh` computes only the eigenvalues,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.cholesky` for a different decomposition of a Hermitian matrix.
         The Cholesky decomposition gives less information about the matrix but is much faster
@@ -586,8 +586,9 @@ The eigenvalues are returned in ascending order.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.eigh` instead, which also computes the eigenvectors.
+.. seealso::
+
+        :func:`torch.linalg.eigh` computes the full eigenvalue decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
