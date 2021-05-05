@@ -994,16 +994,16 @@ void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
       "SimpleIREvaluator::call_raw is not implemented yet");
 }
 
-void SimpleIREvaluator::bindArg(const BufferArg& buf, const CallArg& data) {
-  if (!buf.isVar()) {
-    impl_->bindBuf(buf.var(), data.data());
+void SimpleIREvaluator::bindArg(const BufferArg& bufArg, const CallArg& data) {
+  if (!bufArg.isVar()) {
+    impl_->bindBuf(bufArg.var(), data.data());
     return;
   }
 
-  switch (buf.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                     \
-  case ScalarType::Name:                          \
-    impl_->bindVar(buf.var(), *data.Name##Ptr()); \
+  switch (bufArg.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                        \
+  case ScalarType::Name:                             \
+    impl_->bindVar(bufArg.var(), *data.Name##Ptr()); \
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
