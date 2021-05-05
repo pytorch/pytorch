@@ -1483,12 +1483,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/optimizer)
-  add_library(onnx_optimizer STATIC
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/optimize.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_registry.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_manager.cc"
-  )
+  add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/onnx_optimizer"
+                   "${CONFU_DEPENDENCIES_BINARY_DIR}/onnx_optimizer")
   caffe2_interface_library(onnx_optimizer optimizer_library)
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader onnx_optimizer)
   # Recover the build shared libs option.
