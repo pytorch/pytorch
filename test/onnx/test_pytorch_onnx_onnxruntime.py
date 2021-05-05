@@ -8455,6 +8455,22 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_to_device(self):
+        class M_ToDevice(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device), y
+
+        class M_ToDeviceDtype(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device, dtype=torch.long), y
+
+        x = torch.randn(6)
+        y = torch.randn(6)
+
+        self.run_test(M_ToDevice(), (x, y))
+        self.run_test(M_ToDeviceDtype(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()
     def test_fill(self):
         class FillModule(torch.nn.Module):
