@@ -32,7 +32,7 @@ using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
  * which module's callstack ptr maps are stored and can be queried during
  * serialization.
  */
-NodeToDebugHandle generate_debug_handles(const std::shared_ptr<Graph>& graph);
+NodeToDebugHandle TORCH_API generate_debug_handles(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

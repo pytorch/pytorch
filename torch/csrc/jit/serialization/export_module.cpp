@@ -286,18 +286,15 @@ void setstateTuple(
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
-DelegateDebugInfoMapType getBackendDebugInfoMap(const Module& m) {
-  DelegateDebugInfoMapType debug_map;
+void getBackendDebugInfoMap(const Module& m, DelegateDebugInfoMapType& debug_map) {
   const auto& map =
       getStaticBackendModuleDebugInfoMapPtr()->getDebugInfoMap(m._ivalue());
   if (map) {
     debug_map.insert(map.value().begin(), map.value().end());
   }
   for (const auto& c : m.children()) {
-    const auto& child_debug_map = getBackendDebugInfoMap(c);
-    debug_map.insert(child_debug_map.begin(), child_debug_map.end());
+    getBackendDebugInfoMap(c, debug_map);
   }
-  return debug_map;
 }
 
 SourceRangeRecords getBackendSourceRanges(const Module& m) {
@@ -601,7 +598,8 @@ class ScriptModuleSerializer {
       // For delegated backends get debug_info_map
       // This is merged with other debug_info_map of other modules
       // which were not delegated.
-      auto backend_debug_info_map = getBackendDebugInfoMap(module);
+      DelegateDebugInfoMapType backend_debug_info_map;
+      getBackendDebugInfoMap(module, backend_debug_info_map);
       // Now get the debug-handles-to-inlined-cs-ptr-map
       // And serialize that in a separate archive
       auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
@@ -618,6 +616,13 @@ class ScriptModuleSerializer {
           cs_data.size(),
           cs_data.size() > kMinToCompress /*compress*/);
     }
+    // This introduces a strange behavior where if you do
+    // module._save_for_mobile(..., debug_info=true)
+    // module._save_for_mobile(..., debug_info=true)
+    // Meaning if you try to save the model twice the second time
+    // you would lose the information.
+    // This should probably be fixed by having cleanup step perhaps
+    // inside the module dtor
     cleanupBackendModuleDebugInfoMap(module);
   }
 

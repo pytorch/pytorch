@@ -113,13 +113,15 @@ struct TORCH_API LegacyEvent {
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      int node_id = -1)
+      int node_id = -1,
+      bool is_async = false)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
         shapes_(shapes),
-        node_id_(node_id) {
+        node_id_(node_id),
+        is_async_(is_async) {
     record(record_cuda);
   }
 
@@ -318,6 +320,10 @@ struct TORCH_API LegacyEvent {
     return flops_;
   }
 
+  bool isAsync() {
+    return is_async_;
+  }
+
   void setFlops(uint64_t flops) {
     flops_ = flops;
   }
@@ -339,6 +345,7 @@ struct TORCH_API LegacyEvent {
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
   int64_t sequence_nr_ = -1;
+  bool is_async_ = false;
 
   std::vector<std::string> stack_;
   uint8_t scope_;
