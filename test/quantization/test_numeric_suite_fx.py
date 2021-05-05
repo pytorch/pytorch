@@ -1201,10 +1201,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         """
         For user defined modules,
         1. weight extraction should not crash
-        2. unshadowed activations should have loggers, loggers will only log if
-             the output dtype is in the allowlist
-        3. shadowed activations should not have loggers
-             (since I/O dtype is unknown)
+        2. unshadowed activations should only have loggers for known types
+        3. shadowed activations should only have loggers for known types with
+             known dtypes
         """
         class UserModule(nn.Module):
             def forward(self, x):
@@ -1241,10 +1240,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             'fp32_prepared', copy.deepcopy(mp), 'int8',
             convert_fx(copy.deepcopy(mp)), OutputLogger,
             should_log_inputs=True)
-        # both fp32 and int8 models should have 4 loggers each, 2 for I/O
-        # of linear, and 2 for I/O of user_module
+        # both fp32 and int8 models should have 2 loggers each, 2 for I/O
+        # of linear, and 0 for I/O of user_module
         unshadowed_expected_occurrence = {
-            ns.call_module(OutputLogger): 4,
+            ns.call_module(OutputLogger): 2,
         }
         self.checkGraphModuleNodes(
             mp_ns, expected_node_occurrence=unshadowed_expected_occurrence)
@@ -1258,12 +1257,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mp_shadows_mq_ns = _add_shadow_loggers_impl(
             'fp32_prepared', mp, 'int8', mq, OutputLogger,
             should_log_inputs=True)
-        # 2 loggers for I/O of linear, 0 loggers for I/O of user_module
+        # 4 loggers for I/O of linear, 0 loggers for I/O of user_module
         shadowed_expected_occurrence = {
-            ns.call_module(OutputLogger): 2,
+            ns.call_module(OutputLogger): 4,
         }
         self.checkGraphModuleNodes(
-            mp_shadows_mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+            mp_shadows_mq_ns, expected_node_occurrence=shadowed_expected_occurrence)
 
     def test_op_io_dtype_coverage(self):
         """
