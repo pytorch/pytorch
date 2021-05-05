@@ -1170,6 +1170,60 @@ void SpecialPostProcess(Node* n) {
       }
       break;
     }
+    case ::c10::onnx::Cast: {
+      // ONNX shape inference is not able to assign output tensor shape,
+      // when input to onnx::Cast has incomplete tensor shape, for example
+      // missing shape, rank, dtype, etc. This postprocess sets the correct
+      // dtype for output tensor, since the dtype info is stored in Cast
+      // attribute.
+      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
+      if (nullptr != t_type && !t_type->scalarType().has_value()) {
+        auto onnx_dtype = n->i(attr::to);
+        auto aten_dtype = ONNXTypeToATenType(onnx_dtype);
+        n->output()->setType(t_type->withScalarType(aten_dtype));
+      }
+      break;
+    }
+    case ::c10::onnx::ConstantOfShape: {
+      // ONNX shape inference is not able to propagate output tensor shape
+      // for onnx::ConstantOfShape if input `shape` is not constant.
+      // This is a temporary solution when some partial information is
+      // available, for example, knowing rank of output tensor, or knowing
+      // symbolic shape. This solution won't be needed once we have proper
+      // symbolic propagation.
+      auto shape_node = n->input(0)->node();
+      if (shape_node->kind() == ::c10::onnx::Shape) {
+        // Shape -> ConstantOfShape
+        auto orig_type = shape_node->input()->type()->cast<TensorType>();
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          if (orig_type && orig_type->dim()) {
+            // Assign symbolic shape of original input of onnx::Shape.
+            v_type = v_type->withSymbolicShapes(orig_type->symbolic_sizes());
+            n->output()->setType(v_type);
+          } else if (
+              shape_node->input()->node()->kind() ==
+              ::c10::prim::ListConstruct) {
+            // Assign rank of original input of onnx::Shape.
+            v_type = v_type->withSizes({static_cast<int64_t>(
+                shape_node->input()->node()->inputs().size())});
+            n->output()->setType(v_type);
+          }
+        }
+      } else if (shape_node->kind() == ::c10::prim::ListConstruct) {
+        // ListConstruct -> ConstantOfShape
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          auto value = n->t(attr::value);
+          v_type = v_type->withScalarType(value.scalar_type());
+          std::vector<c10::ShapeSymbol> sizes(
+              shape_node->inputs().size(), c10::ShapeSymbol::newSymbol());
+          v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+          n->output()->setType(v_type);
+        }
+      }
+      break;
+    }
   }
 }
 
