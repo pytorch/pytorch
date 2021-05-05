@@ -543,12 +543,36 @@ void GraphTask::exec_post_processing() {
   // added in between callback calls, so iterators may become invalidated.
   // NOLINTNEXTLINE(modernize-loop-convert)
 
-  // Syncs leaf streams with current and default streams of the thread that called execute().
-  // See Note [Streaming backwards]. leaf_streams is an unordered_set so it should only
-  // hold a small number of streams to sync with.
+  // See Note [Streaming backwards].
+  // Syncs this thread's current stream with leaf streams, so final_callbacks may use
+  // any grad on its device's current stream.
   if (leaf_streams.size() > 0) {
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     for (const auto& leaf_stream : leaf_streams) {
+      const auto current_stream = guard.getStream({c10::DeviceType::CUDA, leaf_stream.device_index()});
+      if (current_stream != leaf_stream) {
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(leaf_stream);
+        current_stream.wait(event);
+      }
+    }
+  }
+
+  // final_callbacks may now use any grad on its device's current stream.
+  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+    cb_lock.unlock();
+    final_callbacks_[i]();
+    cb_lock.lock();
+  }
+
+  // Syncs user-facing current and default streams with the current stream
+  // (on their respective devices) so user-facing streams can safely use the
+  // callback's results.
+  if (leaf_streams.size() > 0) {
+    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    for (const auto& leaf_stream : leaf_streams) {
+      const auto current_stream = guard.getStream({c10::DeviceType::CUDA, leaf_stream.device_index()});
+
       // stash_current_streams stashed streams for all device IDs that already had a
       // CUDA context before the GraphTask executed. For inactive devices, it stashed
       // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
@@ -558,38 +582,18 @@ void GraphTask::exec_post_processing() {
       const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
       const auto caller_default_stream = *caller_default_streams_[leaf_stream.device_index()];
 
-      // final_callbacks are about to run in this thread. But this thread is not the thread that
-      // called execute, so this thread's current streams might not be the same as caller_current_streams.
-      // To ensure final_callbacks can access any grad safely on its device's current stream,
-      // we should also sync this thread's current streams with the leaf streams.
-      const auto current_stream = guard.getStream({c10::DeviceType::CUDA, leaf_stream.device_index()});
-
-      if (leaf_stream != caller_current_stream ||
-          leaf_stream != caller_default_stream ||
-          leaf_stream != current_stream) {
+      if (current_stream != caller_current_stream ||
+          current_stream != caller_default_stream) {
         auto event = c10::Event{c10::DeviceType::CUDA};
-        event.record(leaf_stream);
-        if (caller_current_stream != leaf_stream) {
+        event.record(current_stream);
+        if (caller_current_stream != current_stream) {
           caller_current_stream.wait(event);
         }
-        if (caller_default_stream != leaf_stream &&
-            caller_default_stream != caller_current_stream) {
+        if (caller_default_stream != current_stream) {
           caller_default_stream.wait(event);
-        }
-        if (current_stream != leaf_stream &&
-            current_stream != caller_current_stream &&
-            current_stream != caller_default_stream) {
-          current_stream.wait(event);
         }
       }
     }
-  }
-
-  // final_callbacks may now use any grad on its device's current or default stream.
-  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
-    cb_lock.unlock();
-    final_callbacks_[i]();
-    cb_lock.lock();
   }
 }
 

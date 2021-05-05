@@ -652,17 +652,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (next_bucket_ == buckets_.size()) {
     all_reduce_local_used_map();
 
-    // The autograd engine uses the default stream when running callbacks, so we
-    // pass in the current CUDA stream in case it is not the default.
-    c10::DeviceType deviceType = replica.contents.device().type();
-    const c10::impl::VirtualGuardImpl guard =
-        c10::impl::VirtualGuardImpl{deviceType};
-    const c10::Stream currentStream =
-        guard.getStream(replica.contents.device());
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
-      // Run callback with the current stream
-      c10::OptionalStreamGuard currentStreamGuard{currentStream};
       if (should_collect_runtime_stats()) {
         record_backward_compute_end_time();
       }
