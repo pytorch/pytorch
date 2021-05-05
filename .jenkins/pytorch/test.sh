@@ -475,9 +475,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test || "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc5_4_test ]]; then
-  test_python_gloo_with_tls
-fi
 else
   install_torchvision
   install_monkeytype
@@ -491,6 +488,9 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test || "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc5_4_test ]]; then
+    test_python_gloo_with_tls
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
