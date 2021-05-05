@@ -377,7 +377,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 .. seealso::
 
         :func:`torch.linalg.eigvals` computes only the eigenvalues.
-        Unlike :func:`torch.linalg.eig`, the gradients of this function are always stable.
+        Unlike :func:`torch.linalg.eig`, the gradients of this function are always numerically stable.
 
         :func:`torch.linalg.eigh` for a (faster) function that computes the eigenvalue decomposition
         for Hermitian and symmetric matrices.
