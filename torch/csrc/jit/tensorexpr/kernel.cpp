@@ -1160,7 +1160,6 @@ std::vector<VarHandle> squeezeIndices(
 Tensor* computeSoftmax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
     bool log_softmax) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
@@ -1308,7 +1307,7 @@ Tensor* computeSoftmax(
 }
 
 Tensor* computeSum(
-    const std::vector<ArgValue> inputs,
+    const std::vector<ArgValue> &inputs,
     const c10::optional<ScalarType>& outputType) {
   std::vector<size_t> axes;
   bool keepdim = false;
@@ -2294,11 +2293,11 @@ Tensor* tensorexpr::computeOperandValue(
       return computeSum(inputs, outputType);
     }
     case aten::softmax: {
-      return computeSoftmax(inputs, outputShape, outputType, false);
+      return computeSoftmax(inputs, outputShape, false);
     }
 
     case aten::log_softmax: {
-      return computeSoftmax(inputs, outputShape, outputType, true);
+      return computeSoftmax(inputs, outputShape, true);
     }
     default: {
       throw std::runtime_error("Unhandled node kind");
