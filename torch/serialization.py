@@ -465,9 +465,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            if obj._cdata not in persistent_id.id_map:
-                persistent_id.id_map[obj._cdata] = str(len(persistent_id.id_map))
-            obj_key = persistent_id.id_map[obj._cdata]
+            obj_key = persistent_id.id_map.setdefault(obj._cdata, str(len(persistent_id.id_map)))
             location = location_tag(obj)
             serialized_storages[obj_key] = obj
 
