@@ -339,6 +339,41 @@ class TestGradTransform(TestCase):
         expected = torch.zeros(N, M, M, device=device)
         self.assertEqual(result, expected)
 
+    def test_vjp_pytree_input(self, device):
+        def f(x):
+            return x[0] * x[1][0]
+
+        x = torch.randn([], device=device)
+        v = torch.randn([], device=device)
+        out, vjp_fn = vjp(f, (x, (x, x)))
+        self.assertEqual(out, x * x)
+        result = vjp_fn(v)
+        self.assertEqual(result, ((x * v, (x * v, 0.)),))
+
+    def test_vjp_pytree_output(self, device):
+        def f(x):
+            return x, (x, x)
+
+        x = torch.randn([], device=device)
+        v1 = torch.randn([], device=device)
+        v2 = torch.randn([], device=device)
+        v3 = torch.randn([], device=device)
+        _, vjp_fn = vjp(f, x)
+        result, = vjp_fn(v1, (v2, v3))
+        self.assertEqual(result, v1 + v2 + v3)
+
+    def test_vjp_pytree_error(self, device):
+        def f(x):
+            return x, (x, x)
+
+        x = torch.randn([], device=device)
+        v1 = torch.randn([], device=device)
+        v2 = torch.randn([], device=device)
+        v3 = torch.randn([], device=device)
+        _, vjp_fn = vjp(f, x)
+        with self.assertRaisesRegex(RuntimeError, 'Expected pytree structure'):
+            result, = vjp_fn((v1, (v2, v3)))
+
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
