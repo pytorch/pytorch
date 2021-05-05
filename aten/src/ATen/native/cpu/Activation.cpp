@@ -199,7 +199,7 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 #endif // AT_MKL_ENABLED()
 
-void elu_kernel(TensorIterator& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
+void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();

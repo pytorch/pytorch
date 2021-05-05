@@ -13,7 +13,18 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(elu) (
+  const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+} // namespace meta
+
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
@@ -56,6 +67,12 @@ DEFINE_DISPATCH(leaky_relu_backward_stub);
 DEFINE_DISPATCH(silu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
+
+TORCH_IMPL_FUNC(elu_out) (
+  const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
+) {
+  elu_stub(device_type(), *this, alpha, scale, input_scale);
+}
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp(self, min, max);
@@ -107,35 +124,6 @@ Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardsigmoid_backward_stub(iter.device_type(), iter);
   return iter.output();
-}
-
-Tensor& elu_out(const Tensor& self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale,
-    Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return result;
-}
-
-Tensor elu(
-    const Tensor& self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return iter.output();
-}
-
-Tensor & elu_(
-    Tensor & self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale) {
-  return at::elu_out(self, self, alpha, scale, input_scale);
 }
 
 Tensor elu_backward(

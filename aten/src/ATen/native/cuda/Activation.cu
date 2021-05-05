@@ -317,7 +317,7 @@ static void threshold_kernel(TensorIterator& iter, const Scalar& threshold, cons
   });
 }
 
-void elu_kernel(TensorIterator& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
+void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
