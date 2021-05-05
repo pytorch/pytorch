@@ -370,7 +370,7 @@ def owner_create_rref_my_script_class(a):
 
 
 def owner_create_rref_my_script_module(a):
-    return rpc.RRef(MyScriptModule(a), MyModuleInterface)
+    return rpc.RRef(MyScriptModule(a), type_hint=MyModuleInterface)
 
 
 @torch.jit.script
@@ -428,7 +428,7 @@ class LocalRRefTest:
 
         def use_rref_on_owner(rref: RRef[MyScriptClass]) -> int:
             args = (rref,)
-            kwargs: Dict[str, Any] = {}  # noqa
+            kwargs: Dict[str, Any] = {}
             fut = rpc.rpc_async(
                 rref.owner(), script_rref_get_value_my_script_class, args, kwargs
             )

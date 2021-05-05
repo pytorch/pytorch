@@ -230,6 +230,33 @@ struct BoxedKernelWrapper<
 };
 
 //
+// 3.5. In-process migration to make in-place ops take and return
+// const references instead.
+template <class... OtherArgs>
+struct BoxedKernelWrapper<
+  const at::Tensor&(const at::Tensor&, OtherArgs...),
+  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
+> {
+  static const at::Tensor& call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
+    const at::Tensor& outArg, OtherArgs... otherArgs
+  ) {
+    torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
+    );
+
+    return outArg;
+  }
+};
+
+//
 // 4. out of place ops that take a single non-const Tensor reference as their
 // final argument, and also return it.
 //
