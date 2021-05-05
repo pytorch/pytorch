@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -107,7 +108,7 @@ std::string operator_str(
   return result;
 }
 
-TypePtr resolveTypeNameGeneral(
+TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
   // HACK: first we check whether the name starts with special prefix to
@@ -130,14 +131,14 @@ TypePtr resolveTypeNameGeneral(
   }
 }
 
-c10::StrongTypePtr typeResolverGeneral(
+c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
   return c10::StrongTypePtr(
-      compilation_unit, resolveTypeNameGeneral(qn, compilation_unit));
+      compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
 }
 
-c10::intrusive_ptr<c10::ivalue::Object> objLoaderGeneral(
+c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     at::StrongTypePtr type,
     IValue input,
     std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
@@ -269,7 +270,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
 }
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  return resolveTypeNameGeneral(qn, compilation_unit_);
+  return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
 void BytecodeDeserializer::parseMethods(
@@ -537,11 +538,11 @@ c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
   auto type_resolver = [this](const c10::QualifiedName& qn) {
-    return typeResolverGeneral(qn, compilation_unit_);
+    return typeResolverMobile(qn, compilation_unit_);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderGeneral(type, input, mcu);
+    return objLoaderMobile(type, input, mcu);
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
@@ -632,6 +633,18 @@ mobile::Module _load_for_mobile_impl(
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+  std::string error_message;
+  auto guard = c10::make_scope_exit([&]() {
+    if (!observer) {
+      return;
+    }
+
+    observer->onFailLoadModel(
+        instance_key,
+        error_message.empty() ? "Unknown exception" : error_message.c_str(),
+        deserializer.deserializeMetadata(device));
+  });
+
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
@@ -643,38 +656,11 @@ mobile::Module _load_for_mobile_impl(
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
+    guard.release();
     return result;
   } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailLoadModel(
-          instance_key,
-          error.what(),
-          // NOLINTNEXTLINE(performance-move-const-arg)
-          deserializer.deserializeMetadata(std::move(device)));
-    }
+    error_message = error.what();
     TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailLoadModel(
-            instance_key,
-            error.what(),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            deserializer.deserializeMetadata(std::move(device)));
-      }
-      TORCH_RETHROW(error);
-    }
   }
 }
 
