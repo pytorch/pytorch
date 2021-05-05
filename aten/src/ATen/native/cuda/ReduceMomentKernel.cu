@@ -13,7 +13,9 @@ void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
   using acc_t = at::acc_type<scalar_t, true>;
-  gpu_reduce_kernel<scalar_t, out_t, 2>(iter, WelfordOps<scalar_t, acc_t, int32_t, float, thrust::pair<out_t, out_t>> { unbiased, take_sqrt }, WelfordData<acc_t, int32_t, float> {});
+  using ops_t = WelfordOps<scalar_t, acc_t, int32_t, float, thrust::pair<out_t, out_t>>;
+  gpu_reduce_kernel<scalar_t, out_t, 2>(
+      iter, ops_t{unbiased, take_sqrt}, typename ops_t::acc_t{});
 }
 
 static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
