@@ -36,8 +36,8 @@ these traversal line up we know it is safe to emit the tree in this way. We
 ignore constant nodes, which do not have side effects.
 */
 struct CanEmitInline {
-  CanEmitInline(const std::shared_ptr<Graph>& graph) {
-    scanBlock(graph->block());
+  explicit CanEmitInline(Graph& graph) {
+    scanBlock(graph.block());
   }
   bool canInline(Value* v) {
     return v->node()->kind() != prim::Param &&
