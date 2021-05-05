@@ -277,10 +277,8 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-# If USE_GLOO then try to build Gloo with OpenSSL(currently available only on Linux).
-# set USE_GLOO_WITH_OPENSSL=OFF if you don't have OpenSSL or don't want to use it in Gloo
 cmake_dependent_option(
-    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." ON
+    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
@@ -333,12 +331,7 @@ if(WIN32)
 endif()
 
 if(USE_GLOO_WITH_OPENSSL)
-  find_package(OpenSSL 1.1 REQUIRED EXACT)
-  if(OPENSSL_FOUND)
-    set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
-  else()
-    message(WARNING "USE_GLOO_WITH_OPENSSL is set, but OpenSSL not found")
-  endif()
+  set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
