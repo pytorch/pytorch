@@ -1915,17 +1915,21 @@ void LoopNest::unroll(For* f) {
   unroll(f, &unrolled);
 }
 
+bool LoopNest::isNormalized(For* f) {
+  if (f->start()->isConstant()) {
+    return immediateAs<int>(f->start()) == 0;
+  }
+  return false;
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
   }
 
-  if (f->start()->isConstant()) {
-    int start_idx = immediateAs<int>(f->start());
-    if (start_idx == 0) {
-      // No need to normalize in this case.
-      return false;
-    }
+  if (isNormalized(f)) {
+    // No need to normalize anymore here.
+    return false;
   }
 
   auto for_body_normalized = Substitute(

@@ -3078,6 +3078,30 @@ TEST(LoopNest, UnrollWithLet) {
   }
 }
 
+TEST(LoopNest, IsNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 50; i < 100; i++) {
+  //     A[i] = B[i];
+  //   }
+  BufHandle a_buf("A", {ExprHandle(100)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto for_stmt =
+      For::make(i, 50, 100, Store::make(a_buf, {i}, Load::make(b_buf, {i})));
+  Block::make({for_stmt});
+  ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
+
+  for_stmt->setStart(new IntImm(0));
+  ASSERT_TRUE(LoopNest::isNormalized(for_stmt));
+
+  VarHandle N("N", kInt);
+  for_stmt->setStart(N.node());
+  ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeStartPositive) {
   KernelScope kernel_scope;
