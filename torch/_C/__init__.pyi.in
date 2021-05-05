@@ -358,6 +358,7 @@ def import_ir_module_from_buffer(
 def _import_ir_module_from_package(
     cu: CompilationUnit,
     reader: PyTorchFileReader,
+    storage_tracker: StorageContextTracker,
     map_location: Union[_device, str, None],
     ts_id: str
 ) -> ScriptModule: ...

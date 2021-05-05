@@ -487,6 +487,7 @@ void ScriptModuleSerializer::updateSourceRangeTags(
   }
 }
 
+
 void ScriptModuleSerializer::convertTypes(const at::NamedTypePtr& root_type) {
   class_deps_.add(root_type);
   for (size_t i = 0; i < class_deps_.size(); ++i) {
