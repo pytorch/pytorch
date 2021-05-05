@@ -8,6 +8,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor, nn
 from torch._jit_internal import Future
 from torch.distributed.nn import RemoteModule
+from torch.distributed.nn.api.remote_module import _REMOTE_MODULE_PICKLED_ATTRIBUTES
 from torch.distributed.nn.api.remote_module import _RemoteModule
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -22,6 +23,11 @@ _PARAM_VAL = torch.nn.Parameter(torch.ones(1))
 def remote_device(module_rref):
     for param in module_rref.local_value().parameters():
         return param.device
+
+
+# RPC handler for querying __dict__ on the destination worker.
+def remote_module_attributes(remote_module):
+    return remote_module.__dict__
 
 
 class ModuleCreationMode(enum.Enum):
@@ -385,6 +391,31 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             ):
                 remote_module.extra_repr()
 
+    @dist_utils.dist_init
+    def test_send_remote_module_over_the_wire(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # (not inherited from the superclass) and two installed methods.
+        expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
+        expected_unpickled_attrs.append("forward_async")
+        expected_unpickled_attrs.append("forward")
+
+        # Only test Python nn.Module, because script module methods cannot be deepcopied using copy.deepcopy.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            attrs = rpc.rpc_sync(
+                dst_worker_name, remote_module_attributes, (remote_module,)
+            )
+            self.assertListEqual(list(attrs.keys()), expected_unpickled_attrs)
+            self.assertEqual(attrs["on"], "worker1")
+            self.assertEqual(attrs["device"], "cpu")
+            self.assertFalse(attrs["is_device_map_set"])
+            self.assertFalse(attrs["is_scriptable"])
+
 
 class CudaRemoteModuleTest(CommonRemoteModuleTest):
     @skip_if_lt_x_gpu(1)
@@ -519,7 +550,8 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         scripted_remote_module = next(
             self._create_remote_module_iter(
-                "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+                "{}/cuda:0".format(dst_worker_name),
+                modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE],
             )
         )
 

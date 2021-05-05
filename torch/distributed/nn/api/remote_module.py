@@ -33,6 +33,14 @@ _NON_SCRIPTABLE_REMOTE_MODULE_MODULE = (
     instantiator.instantiate_non_scriptable_remote_module_template()
 )
 
+_REMOTE_MODULE_PICKLED_ATTRIBUTES = (
+    "on",
+    "device",
+    "is_device_map_set",
+    "is_scriptable",
+    "generated_methods",
+    "module_rref",
+)
 
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
@@ -158,6 +166,9 @@ class _RemoteModule(nn.Module):
         """
         super().__init__()
 
+        # NOTE: if a new attribute is added to this class, also need to add it
+        # to `_REMOTE_MODULE_PICKLED_ATTRIBUTES` for pickling/Unpickling.
+
         # Sanity checks.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
@@ -195,13 +206,13 @@ class _RemoteModule(nn.Module):
                     _module_interface_cls, enable_moving_cpu_tensors_to_cuda
                 )
             )
-            generated_methods = generated_module._generated_methods
+            self.generated_methods = generated_module._generated_methods
 
             # Create the module on the remote side.
             fut.wait()  # Ensure remote_module_cls is available on remote side.
         else:
             self.is_scriptable = False
-            generated_methods = _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
+            self.generated_methods = _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
@@ -211,7 +222,7 @@ class _RemoteModule(nn.Module):
         )
 
         # Install generated methods.
-        for method in generated_methods:
+        for method in self.generated_methods:
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
@@ -240,6 +251,21 @@ class _RemoteModule(nn.Module):
         pointing to the remote module.
         """
         return self.module_rref
+
+    def __getstate__(self):
+        attrs = {}
+        for attr in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
+            attrs[attr] = self.__dict__[attr]
+        return attrs
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+        # Install generated methods when unpickled.
+        for method in self.generated_methods:
+            method_name = method.__name__
+            method = torch.jit.export(method)
+            setattr(self, method_name, types.MethodType(method, self))
 
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
