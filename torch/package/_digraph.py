@@ -1,5 +1,5 @@
 class DiGraph:
-    """Really simple unweighted direct graph data structure to track dependencies.
+    """Really simple unweighted directed graph data structure to track dependencies.
 
     The API is pretty much the same as networkx so if you add something just
     copy their API.
@@ -17,7 +17,7 @@ class DiGraph:
 
         Args:
             n: the node. Can we any object that is a valid dict key.
-            **kwargs: any metadata you want to attach to the node.
+            **kwargs: any attributes you want to attach to the node.
         """
         if n not in self._node:
             self._node[n] = kwargs
@@ -26,6 +26,10 @@ class DiGraph:
             self._node[n].update(kwargs)
 
     def add_edge(self, u, v):
+        """Add an edge to graph between nodes ``u`` and ``v``
+
+        ``u`` and ``v`` will be created if they do not already exist.
+        """
         # add nodes
         if u not in self._node:
             self._node[u] = {}
@@ -46,18 +50,14 @@ class DiGraph:
 
     @property
     def edges(self):
-        for n, successors in self._succ.items():
-            for succ in successors:
-                yield n, succ
-
-    @property
-    def edges(self):
+        """Returns an iterator over all edges (u, v) in the graph"""
         for n, successors in self._succ.items():
             for succ in successors:
                 yield n, succ
 
     @property
     def nodes(self):
+        """Returns a dictionary of all nodes to their attributes."""
         return self._node
 
     def __iter__(self):

@@ -172,7 +172,6 @@ class PackageExporter:
                             _read_file(str(filename)),
                             is_package,
                             dependencies,
-                            str(filename),
                         )
                     )
 
@@ -185,7 +184,6 @@ class PackageExporter:
                 _read_file(file_or_directory),
                 is_package,
                 dependencies,
-                file_or_directory,
             )
 
     def file_structure(
@@ -253,6 +251,11 @@ class PackageExporter:
                     continue
             if self._module_exists(dep_module_name):
                 dependencies[dep_module_name] = True
+
+        if self.verbose:
+            dep_str = "".join(f"  {dep}\n" for dep in dependencies)
+            print(f"{module_name} depends on:\n{dep_str}\n")
+
         return list(dependencies.keys())
 
     def save_source_string(
@@ -261,7 +264,6 @@ class PackageExporter:
         src: str,
         is_package: bool = False,
         dependencies: bool = True,
-        orig_file_name: str = None,
     ):
         """Adds `src` as the source code for `module_name` in the exported package.
 
@@ -271,8 +273,6 @@ class PackageExporter:
             is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
                 (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
             dependencies (bool, optional): If True, we scan the source for dependencies.
-            orig_file_name (str, optional): If present, used in logging to identifying where the source came from.
-                Defaults to ``None``.
         """
         self.provided[module_name] = True
         extension = "/__init__.py" if is_package else ".py"
@@ -282,15 +282,6 @@ class PackageExporter:
             deps = self._get_dependencies(src, module_name, is_package)
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-
-            if self.verbose:
-                dep_str = "".join(f"  {dep}\n" for dep in deps)
-                file_info = (
-                    f"(from file {orig_file_name}) "
-                    if orig_file_name is not None
-                    else ""
-                )
-                print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
 
             for dep in deps:
                 self.require_module_if_not_provided(dep)
@@ -398,7 +389,6 @@ node [shape=box];
             source,
             hasattr(module_obj, "__path__"),
             dependencies,
-            module_obj.__file__,
         )
 
     def save_pickle(
