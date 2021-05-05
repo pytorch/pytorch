@@ -26,7 +26,9 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       dst.is_contiguous(),
       "copy_from_metal is implemented only for contiguous output tensor");
-
+    if(dst.size(0) == 0){
+        return dst;
+    }
   MetalTensorImplStorage& tensorImplStorage = getTensorImplStorage(src);
   tensorImplStorage.copy_data_to_host(dst.data_ptr<float>());
   return dst;

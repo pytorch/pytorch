@@ -10,7 +10,7 @@
 #include <ATen/Tensor.h>
 #include <torch/csrc/api/include/torch/types.h>
 #include <torch/library.h>
-
+//#include <caffe2/fb/custom_ops/maskrcnn/roi_align.h>
 namespace torch {
 namespace fb {
 namespace metal {
@@ -27,11 +27,21 @@ torch::Tensor RoIAlign(
     int64_t sampling_ratio,
     bool aligned,
     c10::optional<std::vector<torch::Tensor>>) {
+    
   TORCH_CHECK(features.is_metal());
   TORCH_CHECK(features.size(0) == 1);
   TORCH_CHECK(rois.is_cpu());
   TORCH_CHECK(rois.dim() == 2);
   TORCH_CHECK(rois.size(1) == 4 || rois.size(1) == 5);
+  
+  std::vector<int64_t> outputSize{rois.size(0), features.size(1), aligned_height, aligned_width};
+  MetalTensorImplStorage mt{outputSize};
+
+  const int64_t N = rois.size(0);
+  if(N == 0){
+    // if there is RoIs, simply return an empty metal tensor
+    return makeTensor(std::move(mt), features.options());
+  }
   const auto roiBytes = rois.size(0) * 4 * sizeof(fp16_t);
   id<MTLBuffer> roiBuffer = makeMTLBuffer(roiBytes);
   fp16_t* roiBufferPtr = (fp16_t*)roiBuffer.contents;
@@ -44,19 +54,15 @@ torch::Tensor RoIAlign(
     roiBufferPtr[i * 4 + 2] = rois.data_ptr<float>()[i * Rdim + off + 2];
     roiBufferPtr[i * 4 + 3] = rois.data_ptr<float>()[i * Rdim + off + 3];
   }
-  MPSImage* X = imageFromTensor(features);
-  std::vector<int64_t> outputSize{
-      rois.size(0), features.size(1), aligned_height, aligned_width};
-  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(features);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
+  MPSImage* X = imageFromTensor(features);
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
-
   NSUInteger scale = (NSUInteger)(spatial_scale * 10000);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:@"roi_align"
+      specializedPipelineState:"roi_align"
                      Constants:@[
                        @(scale),
                        @((NSUInteger)sampling_ratio),

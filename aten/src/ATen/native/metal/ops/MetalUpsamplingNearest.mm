@@ -43,8 +43,11 @@ Tensor upsample_nearest2d_vec(
       nbatch, channels, output_height, output_width};
   MPSImage* X = imageFromTensor(input);
   MetalTensorImplStorage mt{outputSizes};
+    if(outputSizes[0] == 0){
+        return makeTensor(std::move(mt), input.options());
+    }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   if (@available(iOS 11.0, *)) {
     MPSCNNUpsamplingNearest* kernel = [[MPSCNNUpsamplingNearest alloc]
@@ -60,8 +63,8 @@ Tensor upsample_nearest2d_vec(
     id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
         specializedPipelineState:mpscnn::kernelFor(
                                      Y,
-                                     @"resize_nearest",
-                                     @"resize_nearest_nonarray")
+                                     "resize_nearest",
+                                     "resize_nearest_nonarray")
                        Constants:@[
                          @(output_height),
                          @(output_width),

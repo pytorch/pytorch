@@ -8,8 +8,8 @@ if [[ "$cuda_major_version" == "10" ]]; then
 elif [[ "$cuda_major_version" == "11" ]]; then
     if [[ "${CUDA_VERSION}" == "11.1" ]]; then
         cudnn_installer_name="cudnn-${CUDA_VERSION}-windows-x64-v8.0.5.39"
-    elif [[ "${CUDA_VERSION}" == "11.2" ]]; then
-        cudnn_installer_name="cudnn-${CUDA_VERSION}-windows-x64-v8.1.0.77"
+    elif [[ "${CUDA_VERSION}" == "11.3" ]]; then
+        cudnn_installer_name="cudnn-${CUDA_VERSION}-windows-x64-v8.2.0.53"
     else
         echo "This should not happen! ABORT."
         exit 1

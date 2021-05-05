@@ -155,6 +155,9 @@
 - (void)encode:(id<MTLCommandBuffer>)cb
          sourceImage:(MPSImage*)src
     destinationImage:(MPSImage*)dst {
+  if(!src || !dst) {
+        return;
+  }
   [_kernel encodeToCommandBuffer:cb sourceImage:src destinationImage:dst];
 }
 
