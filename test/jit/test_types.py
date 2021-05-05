@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
 class TestTypesAndAnnotation(JitTestCase):
     def test_pep585_type(self):
-        def fn(x: torch.Tensor) -> tuple[tuple[torch.Tensor], dict[str, int]]:
+        def fn(x: torch.Tensor) -> Tuple[Tuple[torch.Tensor], Dict[str, int]]:
             xl: list[tuple[torch.Tensor]] = []
             xd: dict[str, int] = {}
             xl.append((x,))
