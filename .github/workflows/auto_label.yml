@@ -25,7 +25,7 @@ jobs:
           ISSUE_NUMBER="${PR_NUMBER}"
         else
           TITLE="${ISSUE_TITLE}"
-          ISSUE_NUMBER="${ISSUE_NUMBER}"
+          # ISSUE_NUMBER is already set
         fi
         echo ::set-output name=TITLE::"${TITLE}"
         echo ::set-output name=ISSUE_NUMBER::"${ISSUE_NUMBER}"
