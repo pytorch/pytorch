@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-NodeToDebugHandle TORCH_API
+NodeToDebugHandle
 generate_debug_handles(const std::shared_ptr<Graph>& graph) {
   NodeToDebugHandle node_to_debug_handles;
   BackendDebugHandleManager* dbg_handle_manager_ptr =
@@ -18,6 +18,9 @@ generate_debug_handles(const std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
       dbg_handle_manager_ptr, "Valid debug handle manager must be available.");
   std::stack<Block*> blocks_to_visit;
+  // TODO: Look into using DepthFirstGraphNodeIterator
+  // At the moment it takes non-const graph but maybe we can make it
+  // general such that it can work with both.
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();

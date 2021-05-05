@@ -41,10 +41,13 @@ std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
     std::string substr;
     getline(s_stream, substr, ',');
     auto debug_handle_pos = substr.find(debug_handle_token);
-    TORCH_CHECK(debug_handle_pos != std::string::npos);
-    auto instruction = substr.substr(0, debug_handle_pos);
-    int64_t debug_handle = stoi(substr.substr(debug_handle_pos + 14));
-    result.push_back({instruction, debug_handle});
+    int64_t debug_handle{-1};
+    auto instruction = substr.substr(0);
+    if (debug_handle_pos != std::string::npos) {
+      instruction = substr.substr(0, debug_handle_pos);
+      debug_handle = stoi(substr.substr(debug_handle_pos + 14));
+    }
+    result.push_back(std::make_tuple(instruction, debug_handle));
   }
   return result;
 }
