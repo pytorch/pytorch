@@ -11,7 +11,7 @@
 
 namespace at { namespace native {
 
-void logical_not_kernel_cuda(TensorIterator& iter) {
+void logical_not_kernel_cuda(TensorIteratorBase& iter) {
   // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND_COMPLEX_AND3(...)
   // so we don't have to maintain a separate list or to do double dispatch.
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(0), "logical_not_cuda", [&]() {});
@@ -21,7 +21,7 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void neg_kernel_cuda(TensorIterator& iter) {
+void neg_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "neg_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return -a;
@@ -29,7 +29,7 @@ void neg_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void sign_kernel_cuda(TensorIterator& iter){
+void sign_kernel_cuda(TensorIteratorBase& iter){
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a){
       return a;
@@ -44,7 +44,7 @@ void sign_kernel_cuda(TensorIterator& iter){
   }
 }
 
-void signbit_kernel_cuda(TensorIterator& iter){
+void signbit_kernel_cuda(TensorIteratorBase& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return !std::is_unsigned<scalar_t>::value && a < 0; });
   });
@@ -59,7 +59,7 @@ __host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> z)
   }
 }
 
-void sgn_kernel_cuda(TensorIterator& iter){
+void sgn_kernel_cuda(TensorIteratorBase& iter){
   AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return sgn_wrapper(a);

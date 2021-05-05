@@ -274,6 +274,8 @@ dispatch:
     CompositeImplicitAutograd: func
 
 # overload is ignored, but out functions get suffixed with _out in their name
+# (NB: no out functions in PyTorch today actually support autograd, but if they
+# did, you could call them here and autograd would be inferred)
 func: func.out_overload(...) -> ...
 dispatch:
     CompositeImplicitAutograd: func_out
@@ -363,45 +365,20 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
-### `matches_jit_signature`
+### `device_check`
 
 ```
-matches_jit_signature: False
+device_check: NoCheck
 ```
 
-This will indicate that the func syntax does not follow the JIT signature schema.
-If you are a triggering an assert related to JIT signature compliance
-try adding this field and setting it to False. In general, this serves as a means
-of tracking an ongoing schema unification with the goal of aligning func syntax
-with other components of PyTorch in order to reduce overall complexity.
-If you find yourself having to set this field to False add @gchanan to your PR's
-set of reviewers.
+By default, ATen code generation will generate device check,
+which will ensure all the tensor parameters passed to kernel are
+on the same device.
 
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-```
-
-This will indicate that the operator implementation is still using a legacy operator signature.
-For any new ops, please don't set this.
-The new, non-legacy operator signature requires the operator function signature to be aligned with the
-function schema in native_functions.yaml, i.e.
-- out arguments have to be in the end of the argument list instead of in the beginning
-- TensorOptions are taken as separate arguments
-```
-  const c10::optional<ScalarType>& dtype,
-  const c10::optional<Layout>& layout,
-  const c10::optional<Device>& device,
-  const c10::optional<bool>& pin_memory
-```
-  instead of one `TensorOptions` argument
-- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
-Some of our kernels are still written in a legacy way, not doing those things,
-and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
-adapter around them in the operator registration call. Over time, we will migrate all
-those kernels to the new calling convention and hacky_wrapper will die.
+However, in some cases, checking the device is unncessary, becuase,
+e.g., you call a function allows to work on multiple devices.
+In that case, code generation of the device check can e disabled by adding
+`device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
 
@@ -416,6 +393,19 @@ You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.
 Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
 (It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
 This field should only be used rarely.
+
+### `use_const_ref_for_mutable_tensors`
+
+```
+use_const_ref_for_mutable_tensors: True
+```
+
+With this flag set, we will generate arguments for Tensors whose underlying data may change as
+`const Tensor&` (or similar), just like we would for other Tensors. Previously, we generated these
+as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
+was not necessary to allow the underlying data to change. (This was like using `T * const` when we
+wanted `const T*`.)
+
 
 ## Writing an implementation in C++
 
@@ -485,7 +475,7 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -505,7 +495,7 @@ Here're steps to follow to decide the right dispatch keyword:
       For `sign` and `sign_`, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -529,8 +519,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > CompositeImplicitAutograd`,
-    e.g. adding both `CompositeImplicitAutograd` and `DefaultBackend` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 

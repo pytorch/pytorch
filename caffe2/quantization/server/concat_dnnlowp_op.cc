@@ -120,7 +120,9 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
     {
       int nthreads = dnnlowp_get_num_threads();
       int tid = dnnlowp_get_thread_num();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int before_begin, before_end;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int after_begin, after_end;
 
       Get1DPartitionOf2D(
@@ -189,7 +191,9 @@ void ConcatDNNLowPOp<T>::GetQuantizationParameters_() {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Concat, DNNLOWP, ConcatDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Concat,
     DNNLOWP,

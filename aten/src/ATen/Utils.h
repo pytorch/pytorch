@@ -124,6 +124,20 @@ TORCH_API
 Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
 
+TORCH_API
+Tensor empty_generic(
+  IntArrayRef size,
+  c10::Allocator* allocator,
+  // technically this can be inferred from the device, but usually the
+  // correct setting is obvious from the call site so just make callers
+  // pass it in
+  c10::DispatchKey dispatch_key,
+  ScalarType dtype,
+  Device device,
+  c10::optional<c10::MemoryFormat> memory_format
+);
+
+
 template <typename T>
 TORCH_API
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options);

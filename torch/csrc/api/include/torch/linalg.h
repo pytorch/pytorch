@@ -28,6 +28,22 @@ inline std::tuple<Tensor&, Tensor&> slogdet_out(Tensor& sign, Tensor& logabsdet,
   return torch::linalg_slogdet_out(sign, logabsdet, input);
 }
 
+inline std::tuple<Tensor, Tensor> eig(const Tensor& self) {
+  return torch::linalg_eig(self);
+}
+
+inline std::tuple<Tensor&, Tensor&> eig_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self) {
+  return torch::linalg_eig_out(eigvals, eigvecs, self);
+}
+
+inline Tensor eigvals(const Tensor& self) {
+  return torch::linalg_eigvals(self);
+}
+
+inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
+  return torch::linalg_eigvals_out(result, self);
+}
+
 inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
   return torch::linalg_eigh(self, uplo);
 }
@@ -96,6 +112,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor multi_dot(TensorList tensors) {
+  return torch::linalg_multi_dot(tensors);
+}
+
+inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+  return torch::linalg_multi_dot_out(result, tensors);
+}
+
 inline Tensor pinv(const Tensor& input, double rcond, bool hermitian) {
   return torch::linalg_pinv(input, rcond, hermitian);
 }
@@ -110,6 +134,22 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return torch::linalg_solve_out(result, input, other);
+}
+
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, bool compute_uv) {
+  return torch::linalg_svd(input, full_matrices, compute_uv);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, bool compute_uv) {
+  return torch::linalg_svd_out(U, S, Vh, input, full_matrices, compute_uv);
+}
+
+inline Tensor svdvals(const Tensor& input) {
+  return torch::linalg_svdvals(input);
+}
+
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
+  return torch::linalg_svdvals_out(result, input);
 }
 
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
@@ -172,6 +212,28 @@ inline std::tuple<Tensor, Tensor> slogdet(const Tensor& input) {
 
 inline std::tuple<Tensor&, Tensor&> slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
   return detail::slogdet_out(sign, logabsdet, input);
+}
+
+/// Computes eigenvalues and eigenvectors of non-symmetric/non-hermitian matrices
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eig
+inline std::tuple<Tensor, Tensor> eig(const Tensor& self) {
+  return detail::eig(self);
+}
+
+inline std::tuple<Tensor&, Tensor&> eig_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self) {
+  return detail::eig_out(eigvals, eigvecs, self);
+}
+
+/// Computes eigenvalues of non-symmetric/non-hermitian matrices
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvals
+inline Tensor eigvals(const Tensor& self) {
+  return detail::eigvals(self);
+}
+
+inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
+  return detail::eigvals_out(result, self);
 }
 
 /// Computes eigenvalues and eigenvectors
@@ -245,13 +307,24 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return detail::matrix_rank_out(result, input, tol, hermitian);
 }
 
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
+inline Tensor multi_dot(TensorList tensors) {
+  return torch::linalg_multi_dot(tensors);
+}
+
+inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+  return torch::linalg_multi_dot_out(result, tensors);
+}
+
 /// Computes pseudo-inverse
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv(input, rcond, hermitian);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv_out(result, input, rcond, hermitian);
 }
@@ -265,6 +338,28 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return detail::solve_out(result, input, other);
+}
+
+/// Computes the singular values and singular vectors
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, bool compute_uv) {
+  return detail::svd(input, full_matrices, compute_uv);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, bool compute_uv) {
+  return detail::svd_out(U, S, Vh, input, full_matrices, compute_uv);
+}
+
+/// Computes the singular values
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svdvals
+inline Tensor svdvals(const Tensor& input) {
+  return detail::svdvals(input);
+}
+
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
+  return detail::svdvals_out(result, input);
 }
 
 /// Computes the inverse of a tensor

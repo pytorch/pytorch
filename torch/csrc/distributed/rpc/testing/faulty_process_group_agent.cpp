@@ -62,7 +62,7 @@ std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
