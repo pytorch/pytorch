@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eux -o pipefail
 
-source maps.sh
+source ./maps.sh
 
 cuda_major_version=${CUDA_VERSION%.*}
 

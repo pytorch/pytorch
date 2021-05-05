@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eux -o pipefail
 
-source maps.sh
+source ./maps.sh
 
 # cuda_installer_name
 declare -a installers=(
