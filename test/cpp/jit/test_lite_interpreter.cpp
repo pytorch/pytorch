@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
@@ -491,7 +493,8 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -500,7 +503,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  std::unordered_set<std::string> expected_result({"top(M).forward"});
+  std::unordered_set<std::string> expected_result({"top(M)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -520,7 +523,9 @@ TEST(LiteInterpreterTest, NotSaveModuleInfo) {
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      AT_ASSERT(module_info.empty() || module_info == "<no module info>");
+      AT_ASSERT(
+          module_info.empty() ||
+          (module_info.find("debug_handle") != std::string::npos));
       ++pc;
     } catch (const std::exception& e) {
       break;
@@ -546,12 +551,13 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   b._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
 
-  std::unordered_set<std::string> module_debug_info_set;
+  std::set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -560,8 +566,7 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A0(A).forward"});
+  std::set<std::string> expected_result({"top(B)", "top(B).A0(A)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -589,12 +594,14 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   c._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
 
-  std::unordered_set<std::string> module_debug_info_set;
+  std::set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
+        std::cout << "Module info:" << module_info << std::endl;
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -603,9 +610,25 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
+  std::set<std::string> expected_result(
+      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
   AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
+  auto runtime_bytecode_version = _get_runtime_bytecode_version();
+  AT_ASSERT(
+      runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
+}
+
+TEST(LiteInterpreterTest, GetByteCodeVersion) {
+  std::string filePath(__FILE__);
+  auto test_model_file_v4 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v4.append("script_module_v4.ptl");
+
+  auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
+  AT_ASSERT(version_v4 == 4);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -632,12 +655,13 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   c._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
 
-  std::unordered_set<std::string> module_debug_info_set;
+  std::set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -669,8 +693,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  std::unordered_set<std::string> expected_result(
-      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+  std::set<std::string> expected_result(
+      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -698,12 +722,13 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   c._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
 
-  std::unordered_set<std::string> module_debug_info_set;
+  std::set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -716,10 +741,8 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  std::unordered_set<std::string> expected_result(
-      {"top(C).forward",
-       "top(C).B0(B).forward",
-       "top(C).B0(B).forward.A0(A).forward"});
+  std::set<std::string> expected_result(
+      {"top(C)", "top(C).B0(B)", "top(C).B0(B).A0(A)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -742,12 +765,13 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   b._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
 
-  std::unordered_set<std::string> module_debug_info_set;
+  std::set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() && module_info != "<no module info>") {
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -777,8 +801,8 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
+  std::set<std::string> expected_result(
+      {"top(B)", "top(B).A0(A)", "top(B).A1(A)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
