@@ -67,11 +67,13 @@ void dropUnused(Block* b) {
   auto createDropIfUnused = [&](ArrayRef<Value*> values) -> Node* {
     std::vector<Value*> to_drop;
     for (auto v : values) {
-      if (v->uses().size() == 0 && v->node()->kind() != prim::Constant)
+      if (v->uses().size() == 0 && v->node()->kind() != prim::Constant) {
         to_drop.push_back(v);
+      }
     }
-    if (to_drop.size() == 0)
+    if (to_drop.size() == 0) {
       return nullptr;
+    }
     return b->owningGraph()->create(prim::Drop, to_drop, 0);
   };
 
