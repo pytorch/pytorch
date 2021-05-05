@@ -1451,7 +1451,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  include_directories(../third_party/optimizer)
+  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer)
 
   set(ONNX_OPTIMIZER_SRCS
     "../third_party/optimizer/onnxoptimizer/optimize.cc"
