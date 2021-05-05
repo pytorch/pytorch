@@ -71,7 +71,7 @@ BackendModuleDebugInfoMap* getStaticBackendModuleDebugInfoMapPtr() {
 void BackendModuleDebugInfoMap::addDebugInfoMap(
     const ObjectPtr& ptr,
     DelegateDebugInfoMapType&& debug_map) {
-  std::unique_lock<std::mutex> lock(debug_info_mutex_);
+  std::lock_guard<std::mutex> lock(debug_info_mutex_);
   TORCH_CHECK(
       debug_info_map_.count(ptr) == 0,
       "Debug info map already exists for the said module.");
@@ -79,7 +79,7 @@ void BackendModuleDebugInfoMap::addDebugInfoMap(
 }
 
 void BackendModuleDebugInfoMap::removeDebugInfoMap(const ObjectPtr& ptr) {
-  std::unique_lock<std::mutex> lock(debug_info_mutex_);
+  std::lock_guard<std::mutex> lock(debug_info_mutex_);
   debug_info_map_.erase(ptr);
 }
 
