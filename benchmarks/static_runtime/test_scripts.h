@@ -304,3 +304,8 @@ const auto aten_matmul = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.matmul(a, b)
 )JIT";
+
+const std::string repeat = R"JIT(
+  def forward(self, a: Tensor, repeats: List[int]):
+      return torch.repeat(a, repeats)
+)JIT";

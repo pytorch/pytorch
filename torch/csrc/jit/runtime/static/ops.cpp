@@ -21,6 +21,46 @@
 
 namespace at {
 namespace native {
+
+void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
+  TORCH_CHECK(
+      repeats.size() >= static_cast<size_t>(self.dim()),
+      "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+
+  // Add new leading dimensions to the tensor if the
+  // number of target dimensions is larger than the
+  // number of source dimensions.
+  int64_t num_new_dimensions = repeats.size() - self.dim();
+  DimVector padded_size(num_new_dimensions, 1);
+  padded_size.insert(
+      padded_size.end(), self.sizes().begin(), self.sizes().end());
+  DimVector target_size(repeats.size());
+  bool zero_tensor = false;
+  for (const auto idx : c10::irange(repeats.size())) {
+    if (repeats[idx] == 0) {
+      zero_tensor = true;
+    }
+    target_size[idx] = padded_size[idx] * repeats[idx];
+  }
+
+  // return an empty tensor if one of the repeat dimensions is zero
+  at::native::resize_(result, target_size, c10::nullopt);
+  if (zero_tensor) {
+    return;
+  }
+
+  Tensor xtensor = at::native::expand(self, padded_size);
+  Tensor urtensor = at::native::alias(result);
+  for (const auto i : c10::irange(xtensor.dim())) {
+    // can't unfold with step 0, so make sure step is at least 1
+    // (it doesn't matter what it is in that case, because the size is 0).
+    urtensor = urtensor.unfold(
+        i, xtensor.size(i), std::max<int64_t>(xtensor.size(i), 1));
+  }
+
+  at::native::copy_(urtensor, xtensor.expand_as(urtensor));
+}
+
 // copy version of view ops
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
@@ -1161,6 +1201,28 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& self = p_node->Input(0).toTensor();
+    const auto repeats = p_node->Input(1).toIntVector();
+
+    if (p_node->Output(0).isNone()) {
+      int64_t num_new_dimensions = repeats.size() - self.dim();
+      std::vector<int64_t> padded_size(num_new_dimensions, 1);
+      padded_size.insert(
+          padded_size.end(), self.sizes().begin(), self.sizes().end());
+      std::vector<int64_t> target_size(repeats.size());
+      for (const auto idx : c10::irange(repeats.size())) {
+        target_size[idx] = padded_size[idx] * repeats[idx];
+      }
+      TORCH_CHECK(!self.is_quantized(), "Quantized tensors is not supported.")
+      p_node->Output(0) = create_empty_from(self);
+    }
+    at::Tensor& output = p_node->Output(0).toTensor();
+    at::native::repeat_out(output, self, repeats);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();

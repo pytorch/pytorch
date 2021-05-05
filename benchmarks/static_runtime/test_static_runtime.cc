@@ -257,6 +257,17 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_incontiguous_script, args);
 }
 
+TEST(StaticRuntime, IndividualOps_Repeat) {
+  auto a = at::randn({2, 3});
+  auto b = std::vector<int64_t>({1, 2});
+  auto c = std::vector<int64_t>({2, 3});
+  std::vector<IValue> args1{a, b};
+  std::vector<IValue> args2{a, c};
+
+  testStaticRuntime(repeat, args1);
+  testStaticRuntime(repeat, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_flatten) {
   auto test_flatten =
       [](std::vector<int64_t> shape, int64_t start_dim, int64_t end_dim) {
