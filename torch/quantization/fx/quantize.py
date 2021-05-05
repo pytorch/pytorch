@@ -905,8 +905,6 @@ def insert_observers_for_model_rewrite(
                 is_like_copy_node
             ) and (not new_node.op == 'output')
 
-            is_last_node_of_pattern = root_node is node
-
             if not skip_inserting_observers:
                 if new_node.op != 'output':
                     # this modifies new_node inplace
@@ -915,26 +913,7 @@ def insert_observers_for_model_rewrite(
                         node_name_to_target_dtype, cache_for_no_tensor_check,
                         qhandler, prepare_custom_config_dict)
 
-                    # TODO(before land): move this out of insert observers,
-                    # since this is not actually inserting observers
-                    if isinstance(qhandler, StandaloneModuleQuantizeHandler):
-                        sm_qconfig_dict, sm_prepare_config_dict = \
-                            get_standalone_module_configs_rewrite(
-                                node, modules, prepare_custom_config_dict, qconfig)
-                        standalone_module = modules[node.target]  # type: ignore[index]
-                        prepare = \
-                            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
-                        observed_standalone_module = \
-                            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
-                        preserved_attributes = \
-                            set(sm_prepare_config_dict.get("preserved_attributes", []))
-                        observed_standalone_module = ObservedStandaloneGraphModule(
-                            observed_standalone_module, observed_standalone_module.graph, preserved_attributes)
-                        parent_name, name = _parent_name(node.target)
-                        setattr(modules[parent_name], name,
-                                observed_standalone_module)
-                        modules[node.target] = observed_standalone_module  # type: ignore[index]
-
+                    is_last_node_of_pattern = root_node is node
                     if is_last_node_of_pattern:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node_rewrite(
@@ -968,7 +947,8 @@ def insert_observers_for_model_rewrite(
                         prev_node_qconfig = qconfig_map.get(prev_node.name, None)
                         # this modifies new_node inplace
                         maybe_insert_input_observers_for_node_rewrite(
-                            new_node, prev_node_qconfig, load_arg, model, modules, observed_graph,
+                            new_node, prev_node_qconfig, load_arg, model,
+                            modules, observed_graph,
                             node_name_to_target_dtype, cache_for_no_tensor_check,
                             qhandler, prepare_custom_config_dict)
             else:
@@ -1000,6 +980,43 @@ def insert_observers_for_model_rewrite(
             results_node = env[new_node.name]
 
     return results_node
+
+def run_prepare_fx_on_standalone_modules_rewrite(
+    model: torch.nn.Module,
+    modules: Dict[str, torch.nn.Module],
+    matches: Any,
+    prepare_custom_config_dict: Dict[str, Any],
+) -> None:
+    """
+    Runs prepare_fx on each standalone module. Note: this does
+    not modify the graph, it just replaces the unobserved modules with
+    their observed versions.
+    """
+
+    for node_name, (root_node, matched_nodes, pattern, qhandler, qconfig) in matches.items():
+        if qhandler is None:
+            continue
+        if not isinstance(qhandler, StandaloneModuleQuantizeHandler):
+            continue
+
+        sm_qconfig_dict, sm_prepare_config_dict = \
+            get_standalone_module_configs_rewrite(
+                root_node, modules, prepare_custom_config_dict, qconfig)
+
+        standalone_module = modules[root_node.target]  # type: ignore[index]
+        prepare = \
+            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
+        observed_standalone_module = \
+            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
+        preserved_attributes = \
+            set(sm_prepare_config_dict.get("preserved_attributes", []))
+        observed_standalone_module = ObservedStandaloneGraphModule(
+            observed_standalone_module, observed_standalone_module.graph,
+            preserved_attributes)
+        parent_name, name = _parent_name(root_node.target)
+        setattr(modules[parent_name], name,
+                observed_standalone_module)
+        modules[root_node.target] = observed_standalone_module  # type: ignore[index]
 
 
 def in_nodes(a: Argument, nodes: Set[Node]) -> bool:
@@ -1375,11 +1392,6 @@ class Quantizer:
         matches, quants = self._match(
             model, model.graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
-        if False:
-            print('matches')
-            for k, v in matches.items():
-                print(k, v)
-            print('\n')
         self.activation_post_process_map = defaultdict(list)
         observed_graph = Graph()
         observed_node_names_set: Set[str] = set()
@@ -1392,6 +1404,10 @@ class Quantizer:
         use_new = True
         # use_new = False
         if use_new:
+
+            run_prepare_fx_on_standalone_modules_rewrite(
+                model, self.modules, matches, prepare_custom_config_dict)
+
             result_node = insert_observers_for_model_rewrite(
                 model, self.modules, matches, self.qconfig_map,
                 observed_graph, prepare_custom_config_dict,
