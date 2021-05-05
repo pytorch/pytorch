@@ -293,7 +293,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   Tensor cond;
   if (exponent.is_complex()) {
-    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
+    auto is_real_exp = at::logical_and(at::imag(exponent.resolve_conj()) == 0, at::real(exponent) >= 0);
     cond = at::logical_and(self == 0, is_real_exp);
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
@@ -309,7 +309,7 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
-        return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
+        return at::logical_and(at::imag(exp.resolve_conj()) == 0, at::real(exp) >= 0);
       } else {
         return exp >=0;
       }
@@ -656,14 +656,58 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
 Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max && min) {
-    return grad * ((self >= *min) * (self <= *max)).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where((self >= *min).logical_and_(self <= *max), grad, zero);
   } else if (min) {
-    return grad * (self >= *min).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self >= *min, grad, zero);
   } else if (max) {
-    return grad * (self <= *max).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self <= *max, grad, zero);
   } else {
     return grad;
   }
+}
+
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min, const Tensor& max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (max.defined() && min.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where((self >= min).logical_and_(self <= max), grad, zero);
+  } else if (min.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self >= min, grad, zero);
+  } else if (max.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self <= max, grad, zero);
+  } else {
+    return grad;
+  }
+}
+
+std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
+    const Tensor& grad, const Tensor& self, const Tensor& min, const Tensor& max,
+    const std::array<bool, 2>& grad_input_mask) {
+  // If min > max, min has no gradient
+  std::tuple<at::Tensor, at::Tensor> ret;
+  if (!grad.defined()) {
+    return ret;
+  }
+
+  auto zero = at::scalar_tensor(0., grad.options());
+  if (max.defined() && min.defined()) {
+    if (grad_input_mask[0]) {
+      std::get<0>(ret) = where((self < min).logical_and_(min < max) , grad, zero);
+    }
+    if (grad_input_mask[1]) {
+      std::get<1>(ret) = where((self > max).logical_or_(max < min), grad, zero);
+    }
+  } else if (min.defined() && grad_input_mask[0]) {
+    std::get<0>(ret) = where(self < min, grad, zero);
+  } else if (max.defined() && grad_input_mask[1]) {
+    std::get<1>(ret) = where(self > max, grad, zero);
+  }
+  return ret;
 }
 
 // This function is used by load_derivatives.py to replace tensor.strides()
@@ -2138,7 +2182,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (self.is_complex() && gu.defined()) {
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
     at::real(L).zero_();
-    at::imag(L).mul_(sigma_inv);
+    at::imag(L.resolve_conj()).mul_(sigma_inv);
     Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
@@ -2179,7 +2223,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D.resolve_conj()) == 0.0).min().item<bool>();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for

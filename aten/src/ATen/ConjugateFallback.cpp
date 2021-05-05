@@ -55,58 +55,55 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
 
   // Mutable inputs to be tracked separately
   std::vector<Tensor> mutable_inputs;
-  {
-    at::NoGradGuard no_grad;
-    for (int64_t i = 0; i < num_arguments; ++i) {
-      auto& ivalue = (*stack)[stack_start + i];
-      if (!(ivalue.isTensor() || ivalue.isTensorList())) {
+
+  for (int64_t i = 0; i < num_arguments; ++i) {
+    auto& ivalue = (*stack)[stack_start + i];
+    if (!(ivalue.isTensor() || ivalue.isTensorList())) {
+      continue;
+    }
+    const auto& argument = arguments[i];
+    bool mut_arg = false;
+    if (argument.alias_info()) {
+      // Was already tested by is_write loop above
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
+      mut_arg = true;
+    }
+    if (ivalue.isTensor()) {
+      auto* impl = ivalue.unsafeToTensorImpl();
+      if (!impl->is_conj()) {
         continue;
       }
-      const auto& argument = arguments[i];
-      bool mut_arg = false;
-      if (argument.alias_info()) {
-        // Was already tested by is_write loop above
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
-        mut_arg = true;
-      }
-      if (ivalue.isTensor()) {
-        auto* impl = ivalue.unsafeToTensorImpl();
-        if (!impl->is_conj()) {
-          continue;
-        }
 
-        auto tensor = std::move(ivalue).toTensor();
-        TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), "Conjugate Fallback does not support meta tensors.");
-        if (mut_arg) {
-          // TODO: This is a waste if the argument is write only
-          at::resolve_conj_(tensor);
-          mutable_inputs.emplace_back(tensor);
-        } else {
-          tensor = at::resolve_conj(tensor);
-        }
-        (*stack)[stack_start + i] = std::move(tensor);
-      } else if (ivalue.isTensorList()) {
-        auto tensors = std::move(ivalue).toTensorList();
-        for(const auto j : c10::irange(tensors.size())) {
-          // At the time of writing this, no operators use tensorlists with mutable tensors.
-          // We could add additional code logic in the future if this changes.
-          TORCH_CHECK(!mut_arg, "Conjugate fallback doesn't work for mutable TensorLists.");
-          tensors[j] = at::resolve_conj(tensors[j]);
-        }
-        (*stack)[stack_start + i] = std::move(tensors);
+      auto tensor = std::move(ivalue).toTensor();
+      TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), "Conjugate Fallback does not support meta tensors.");
+      if (mut_arg) {
+        // TODO: This is a waste if the argument is write only
+        tensor.set_conj(false);
+        at::conj_physical_(tensor);
+        mutable_inputs.emplace_back(tensor);
+      } else {
+        tensor = at::resolve_conj(tensor);
       }
+      (*stack)[stack_start + i] = std::move(tensor);
+    } else if (ivalue.isTensorList()) {
+      auto tensors = std::move(ivalue).toTensorList();
+      for(const auto j : c10::irange(tensors.size())) {
+        // At the time of writing this, no operators use tensorlists with mutable tensors.
+        // We could add additional code logic in the future if this changes.
+        TORCH_CHECK(!mut_arg, "Conjugate fallback doesn't work for mutable TensorLists.");
+        tensors[j] = at::resolve_conj(tensors[j]);
+      }
+      (*stack)[stack_start + i] = std::move(tensors);
     }
   }
 
+
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
 
-  {
-    at::NoGradGuard no_grad;
     for (auto& mutable_input : mutable_inputs) {
       at::conj_physical_(mutable_input);
       mutable_input.set_conj(true);
     }
-  }
 }
 
 TORCH_LIBRARY_IMPL(_, Conjugate, m) {
@@ -114,6 +111,10 @@ TORCH_LIBRARY_IMPL(_, Conjugate, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
+  m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
+  m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
+  m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("set_", torch::CppFunction::makeFallthrough());
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj", torch::CppFunction::makeFallthrough());
@@ -121,7 +122,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("conj_physical", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
-  m.impl("resolve_conj_", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
   m.impl("empty.memory_format", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());
@@ -132,7 +132,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("size.int", torch::CppFunction::makeFallthrough());
   m.impl("size.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("is_complex", torch::CppFunction::makeFallthrough());
-  m.impl("view_as_real_physical", torch::CppFunction::makeFallthrough());
+  m.impl("_view_as_real_physical", torch::CppFunction::makeFallthrough());
   m.impl("view_as_real", torch::CppFunction::makeFallthrough());
   m.impl("imag", torch::CppFunction::makeFallthrough());
   m.impl("real", torch::CppFunction::makeFallthrough());

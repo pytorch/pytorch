@@ -67,8 +67,10 @@ const char* toString(DispatchKey t) {
       return "Conjugate";
     case DispatchKey::Meta:
       return "Meta";
-    case DispatchKey::InplaceOrView:
-      return "InplaceOrView";
+
+    case DispatchKey::ADInplaceOrView:
+      return "ADInplaceOrView";
+
     case DispatchKey::Autograd:
       return "Autograd";
     case DispatchKey::AutogradCPU:
