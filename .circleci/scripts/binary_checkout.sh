@@ -62,7 +62,7 @@ popd
 
 # Clone the Builder master repo
 #retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
-retry git clone -q https://github.com/jeffdaily/builder.git -b rocm_libtorch "$BUILDER_ROOT"
+retry git clone -q https://github.com/jeffdaily/builder.git -b rocm_libtorch_minimal "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
