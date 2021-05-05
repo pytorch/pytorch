@@ -16,7 +16,8 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
-  auto packedWeight = at::native::contiguous(weight, MemoryFormat::ChannelsLast);
+  auto packedWeight =
+      at::native::contiguous(weight, MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
       std::move(bias),
@@ -26,6 +27,20 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
       groups,
       output_min,
       output_max);
+}
+
+c10::intrusive_ptr<LinearOpContext> unpack(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  TORCH_CHECK(weight.dim() == 2);
+  // Don't need to do `weight.t()`
+  auto packedWeight = at::native::contiguous(
+      weight.view({weight.size(0), weight.size(1), 1, 1}),
+      MemoryFormat::ChannelsLast);
+  return c10::make_intrusive<LinearOpContext>(
+      std::move(packedWeight), std::move(bias), output_min, output_max);
 }
 
 TORCH_LIBRARY(metal, m) {
@@ -47,6 +62,20 @@ TORCH_LIBRARY(metal, m) {
                 std::move(std::get<6>(state)),
                 std::move(std::get<7>(state)));
           });
+  m.class_<LinearOpContext>("LinearOpContext")
+      .def_pickle(
+          [](const c10::intrusive_ptr<LinearOpContext>& op_context)
+              -> SerializationTypeLinearPrePack { // __getstate__
+            return op_context->pack();
+          },
+          [](SerializationTypeLinearPrePack state)
+              -> c10::intrusive_ptr<LinearOpContext> { // __setstate__
+            return unpack(
+                std::move(std::get<0>(state)),
+                std::move(std::get<1>(state)),
+                std::get<2>(state),
+                std::get<3>(state));
+          });
   m.def("copy_to_host(Tensor X) -> Tensor Y");
 }
 
@@ -59,6 +88,12 @@ TORCH_LIBRARY(metal_prepack, m) {
   m.def(
       "conv2d_run(Tensor X, "
       "__torch__.torch.classes.metal.Conv2dOpContext W_prepack) -> Tensor Y");
+
+  m.def(
+      "linear_prepack(Tensor W, Tensor? B, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.metal.LinearOpContext");
+
+  m.def(
+      "linear_run(Tensor X, __torch__.torch.classes.metal.LinearOpContext W_prepack) -> Tensor Y");
 }
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
@@ -82,8 +117,18 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
+c10::intrusive_ptr<LinearOpContext> linear_prepack(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<LinearOpContext>(
+      std::move(weight), std::move(bias), output_min, output_max);
+}
+
 TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
   m.impl("conv2d_prepack", TORCH_FN(conv2d_prepack));
+  m.impl("linear_prepack", TORCH_FN(linear_prepack));
 }
 
 } // namespace metal
