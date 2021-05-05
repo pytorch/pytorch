@@ -124,6 +124,10 @@ class ModelData extends Component {
       // TODO: Maybe show simple lists and tuples on one line.
       return true;
     }
+    if (data.__is_dict__) {
+      // TODO: Maybe show simple (empty?) dicts on one line.
+      return true;
+    }
     if (data.__module_type__) {
       return true;
     }
@@ -133,7 +137,7 @@ class ModelData extends Component {
     if (data.__qtensor__) {
       return false;
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
   }
 
   renderHeadline(data) {
@@ -159,6 +163,9 @@ class ModelData extends Component {
     if (data.__tuple_values__) {
       return "tuple((";
     }
+    if (data.__is_dict__) {
+      return "dict({";
+    }
     if (data.__module_type__) {
       return data.__module_type__ + "()";
     }
@@ -181,7 +188,7 @@ class ModelData extends Component {
       return this.renderTensor(
         "qtensor", dtype, key, device, numel, offset, size, stride, grad, extra_parts);
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
   }
 
   renderTensor(
@@ -237,6 +244,18 @@ class ModelData extends Component {
       // Handled the same as lists.
       return this.renderBody(indent, data.__tuple_values__);
     }
+    if (data.__is_dict__) {
+      let new_indent = indent + "\u00A0\u00A0";
+      let parts = [];
+      for (let idx = 0; idx < data.keys.length; idx++) {
+        if (typeof(data.keys[idx]) != "string") {
+          parts.push(html`<br/>${new_indent}Non-string key`);
+        } else {
+          parts.push(html`<br/><${ModelData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
+        }
+      }
+      return parts;
+    }
     if (data.__module_type__) {
       const mstate = data.state;
       if (mstate === null || typeof(mstate) != "object") {
@@ -245,6 +264,7 @@ class ModelData extends Component {
       let new_indent = indent + "\u00A0\u00A0";
       let parts = [];
       if (mstate.__is_dict__) {
+        // TODO: Less copy/paste between this and normal dicts.
         for (let idx = 0; idx < mstate.keys.length; idx++) {
           if (typeof(mstate.keys[idx]) != "string") {
             parts.push(html`<br/>${new_indent}Non-string key`);
@@ -267,7 +287,7 @@ class ModelData extends Component {
     if (data.__qtensor__) {
       throw "Should not reach here."
     }
-    throw new Error("TODO: handle dict, etc.");
+    throw new Error("Can't handle data type.", data);
   }
 
   render({data, indent, prefix}, {shown}) {
