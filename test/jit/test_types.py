@@ -122,7 +122,7 @@ class TestTypesAndAnnotation(JitTestCase):
             wrong : List[int] = [0.5]
             return wrong
 
-        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+        with self.assertRaisesRegex(RuntimeError, "Expected a list element that subtypes"):
             torch.jit.script(wrong_type)
 
     def test_optional_no_element_type_annotation(self):

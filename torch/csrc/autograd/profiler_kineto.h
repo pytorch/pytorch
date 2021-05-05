@@ -11,7 +11,7 @@
 
 #ifdef USE_KINETO
 namespace libkineto {
-class TraceActivity;
+struct TraceActivity;
 class ActivityTraceInterface;
 }
 #endif
@@ -28,6 +28,7 @@ enum class C10_API_ENUM ActivityType {
 
 #ifdef USE_KINETO
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KinetoObserverContext : public at::ObserverContext {
   int64_t startUs;
   uint64_t correlationId;
@@ -143,12 +144,21 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& setAsync(bool is_async) {
+    is_async_ = is_async;
+    return *this;
+  }
+
   // Kineto fields
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
+  }
+
+  bool isAsync() const {
+    return is_async_;
   }
 
   uint64_t deviceIndex() const {
@@ -201,6 +211,7 @@ struct TORCH_API KinetoEvent {
   uint64_t correlation_id_ = 0;
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
+  bool is_async_{false};
 };
 
 // Consolidating events returned directly from Kineto

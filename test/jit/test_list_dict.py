@@ -247,7 +247,7 @@ class TestList(JitTestCase):
         # TODO: This fails during function schema matching, so the error
         # message is not very informative to the user. Change logic so
         # that the error is thrown at a different time?
-        err_msg = "Arguments for call are not valid"
+        err_msg = "Dict type annotation did not match the types of the actual dict items"
         highlight_msg = "dict([(\"foo\", 1), (\"bar\", 2), (\"baz\", 3"
         with self.assertRaisesRegexWithHighlight(RuntimeError, err_msg, highlight_msg):
             @torch.jit.script

@@ -232,11 +232,16 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Function& method;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -1315,13 +1320,41 @@ struct to_ir {
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
-      auto comprehension_out = emitExpr(lc.elt());
+      Value* out = emitExpr(lc.elt());
+
+      // Make sure that any element types are subtypes of the annotated
+      // type
+      if (type_hint && !out->type()->isSubtypeOf(out->type())) {
+        throw ErrorReport(loc) << "List type annotation did not match "
+                               << "the types of the actual list items";
+      }
+
+      // If we didn't have a type annotation, let the type begin as the
+      // first element in the list
       if (!type_set) {
-        list_value->setType(ListType::create(comprehension_out->type()));
+        list_value->setType(ListType::create(out->type()));
         type_set = true;
       }
+
+      ListTypePtr lt = list_value->type()->expect<ListType>();
+
+      // Is the current element type the same type or a supertype of the
+      // old element type?
+      bool use_new = lt->getElementType()->isSubtypeOf(out->type());
+      // Is the old element type the same type or a supertype of the
+      // current element type?
+      bool use_old = out->type()->isSubtypeOf(lt->getElementType());
+
+      // If we have `use_old && use_new`, we just keep the old element
+      // type. Otherwise...
+      if (!use_old && use_new) {
+        list_value->setType(ListType::create(out->type()));
+      } else if (!use_old && !use_new) {
+        list_value->setType(ListType::create(AnyType::get()));
+      }
+
       NamedValue self = NamedValue(loc, "self", list_value);
-      NamedValue input = NamedValue(loc, "", comprehension_out);
+      NamedValue input = NamedValue(loc, "", out);
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
@@ -1360,10 +1393,42 @@ struct to_ir {
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
+
+      // Make sure that any key and value types are subtypes of the
+      // annotatated key/value types
+      if (type_hint) {
+        DictTypePtr dict_type_hint = type_hint->expect<DictType>();
+        if (!k->type()->isSubtypeOf(dict_type_hint->getKeyType()) ||
+            !v->type()->isSubtypeOf(dict_type_hint->getValueType())) {
+          throw ErrorReport(loc) << "Dict type annotation did not match "
+                                 << "the types of the actual dict items";
+        }
+      }
+
+      // If we didn't have a type annotation, let the type begin as the
+      // first key/value pair in the dict
       if (!type_set) {
         dict_value->setType(DictType::create(k->type(), v->type()));
         type_set = true;
       }
+
+      DictTypePtr dt = dict_value->type()->expect<DictType>();
+
+      // Is the current value type the same type or a supertype of the
+      // old value type?
+      bool use_new = dt->getValueType()->isSubtypeOf(v->type());
+      // Is the old value type the same type or a supertype of the
+      // current value type?
+      bool use_old = v->type()->isSubtypeOf(dt->getValueType());
+
+      // If we have `use_old && use_new`, we just keep the old value
+      // type. Otherwise...
+      if (!use_old && use_new) {
+        dict_value->setType(DictType::create(k->type(), v->type()));
+      } else if (!use_old && !use_new) {
+        dict_value->setType(DictType::create(k->type(), AnyType::get()));
+      }
+
       NamedValue self = NamedValue(loc, "self", dict_value);
       NamedValue input_k = NamedValue(loc, "", k);
       NamedValue input_v = NamedValue(loc, "", v);
@@ -1409,6 +1474,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
     c10::optional<RefinementSet> refinements;
     c10::optional<bool> static_if;
@@ -1474,6 +1540,7 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1596,7 +1663,9 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
 
       {
@@ -1791,6 +1860,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
@@ -2078,6 +2148,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
@@ -2252,6 +2323,7 @@ struct to_ir {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
@@ -2336,6 +2408,7 @@ struct to_ir {
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
@@ -3328,6 +3401,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* fork_node;
     TypePtr out_type;
 
@@ -3519,6 +3593,47 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
+  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint) {
+    auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // determine the element type of the list
+    // if we have a type hint of List[T], use T
+    // if the list is non-empty use type_of(list[0])
+    // otherwise assume it is List[Tensor]
+    TypePtr elem_type = TensorType::get();
+    if (type_hint) {
+      if (type_hint->kind() == TypeKind::ListType) {
+        elem_type = type_hint->expectRef<ListType>().getElementType();
+      } else {
+        // If the type hint was not a List[T] throw an error
+        throw ErrorReport(ll) << "Expected a List type hint but instead got "
+                              << type_hint->repr_str();
+      }
+    } else if (!values.empty()) {
+      std::stringstream ss;
+      auto types = fmap(values, [](const Value* v) { return v->type(); });
+      auto maybe_elem_type = unifyTypeList(types, ss, /*default_to_any=*/true);
+      if (!maybe_elem_type) {
+        throw ErrorReport(ll) << ss.str();
+      }
+      // TODO: Can we delay this warning until first use of an
+      // unrefined value?
+      if (maybe_elem_type.value() == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement");
+      }
+      elem_type = maybe_elem_type.value();
+    }
+
+    Value* result =
+        graph->insertNode(graph->createList(elem_type, values))->output();
+    return result;
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3601,46 +3716,7 @@ struct to_ir {
       } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-
-        // determine the element type of the list
-        // if we have a type hint of List[T], use T
-        // if the list is non-empty use type_of(list[0])
-        // otherwise assume it is List[Tensor]
-        TypePtr elem_type = TensorType::get();
-        if (type_hint) {
-          if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expectRef<ListType>().getElementType();
-          } else {
-            // If the type hint was not a List[T] throw an error
-            throw ErrorReport(tree)
-                << "Expected a List type hint but instead got "
-                << type_hint->repr_str();
-          }
-        } else if (!values.empty()) {
-          std::stringstream ss;
-          auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(types, ss);
-          if (!maybe_elem_type) {
-            throw ErrorReport(tree) << "Lists must contain only a single type\n"
-                                    << ss.str();
-          }
-          elem_type = maybe_elem_type.value();
-        }
-
-        for (auto v : values) {
-          std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
-            throw ErrorReport(tree)
-                << "Lists must contain only a single type, expected: "
-                << elem_type->repr_str() << " but found "
-                << v->type()->repr_str() << " instead.\n"
-                << ss.str();
-          }
-        }
-        Value* result =
-            graph->insertNode(graph->createList(elem_type, values))->output();
-        return result;
+        return emitListLiteral(ll, type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -3679,7 +3755,7 @@ struct to_ir {
           std::stringstream ss;
           if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss) &&
               !key_type->isSubtypeOfExt(keys[i]->type(), &ss)) {
-            throw ErrorReport(trees[i])
+            throw ErrorReport(key_trees[i])
                 << "Dict keys must contain "
                 << "only a single type, expected: " << key_type->repr_str()
                 << " but found " << keys[i]->type()->repr_str() << " instead.\n"
@@ -3687,13 +3763,10 @@ struct to_ir {
           }
         }
 
-        for (size_t i = 0, N = values.size(); i < N; ++i) {
-          std::stringstream ss;
-          if (!values[i]->type()->isSubtypeOfExt(value_type, &ss) &&
-              !value_type->isSubtypeOfExt(values[i]->type(), &ss)) {
-            value_type = AnyType::get();
-          }
-        }
+        value_type = std::accumulate(
+            values.begin(), values.end(), values[0], [&](TypePtr a, TypePtr b) {
+              return unifyTypes(a, b, /*default_to_any*/ = true);
+            });
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))

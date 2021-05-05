@@ -73,7 +73,72 @@ class TestTyping(JitTestCase):
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
-    def test_dict_value_type_refinement_defaults_to_Any(self):
+    def test_list_value_type_refinement_defaults_to_Any_list_creation(self):
+        def fn(x):
+            tup1 = ("foo", torch.tensor(2))
+            tup2 = ("bar", {"23": torch.tensor(3)})
+            tup3 = ("baz", x)
+            l = list((tup1, tup2))
+            l.append(tup3)
+            tup4 = l[0]
+            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
+                t = tup4[1]
+                if isinstance(t, torch.Tensor):
+                    l[0] = (tup4[0], torch.add(t, t))
+            return l
+
+        self.checkScript(fn, (torch.rand(2, 3),))
+
+        FileCheck().check("Any[]").run(fn)
+
+    def test_list_value_type_refinement_defaults_to_Any_list_comprehension(self):
+        def fn(x):
+            tup1 = ("foo", torch.tensor(2))
+            tup2 = ("bar", {"23": torch.tensor(3)})
+            tup3 = ("baz", x)
+            l_ = [tup1, tup2]
+            l = [t for t in l_]
+            l.append(tup3)
+            tup4 = l[0]
+            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
+                t = tup4[1]
+                if isinstance(t, torch.Tensor):
+                    l[0] = (tup4[0], torch.add(t, t))
+            return l
+
+        self.checkScript(fn, (torch.rand(2, 3),))
+
+        FileCheck().check("Any[]").run(fn)
+
+    # TODO: @gmagogsfm: Should we allow this?
+    #def test_list_value_type_refinement_defaults_to_Any_list_append(self):
+    #    def fn(x):
+    #        tup1 = ("foo", torch.tensor(2))
+    #        tup2 = ("bar", {"23": torch.tensor(3)})
+    #        l = [tup1]
+    #        l.append(tup2)
+    #        t = l[0][1]
+    #        if isinstance(t, torch.Tensor):
+    #            l[0][1] = torch.add(t, t)
+    #        return l
+
+    #    self.checkScript(fn, (torch.rand(2, 3),))
+
+    def test_dict_value_type_refinement_defaults_to_Any_dict_creation(self):
+        def fn(x):
+            d = dict(foo=torch.tensor(2),
+                 bar={"23": torch.tensor(3)})
+            d["baz"] = x
+            t = d["foo"]
+            if isinstance(t, torch.Tensor):
+                d["bar"] = torch.add(t, t)
+            return d
+
+        self.checkScript(fn, (torch.rand(2, 3),))
+
+        FileCheck().check("Dict(str, Any)").run(fn)
+
+    def test_dict_value_type_refinement_defaults_to_Any_dict_comprehension(self):
         def fn(x):
             d = {"foo": torch.tensor(2),
                  "bar": {"23": torch.tensor(3)}}
@@ -84,6 +149,20 @@ class TestTyping(JitTestCase):
             return d
 
         self.checkScript(fn, (torch.rand(2, 3),))
+
+        FileCheck().check("Dict(str, Any)").run(fn)
+
+    # TODO: @gmagogsfm: Should we allow this?
+    #def test_dict_value_type_refinement_defaults_to_Any_dict_append(self):
+    #    def fn(x):
+    #        d = {"foo": torch.tensor(2)}
+    #        d["bar"] = {"23": torch.tensor(3)}
+    #        t = d["foo"]
+    #        if isinstance(t, torch.Tensor):
+    #            d["bar"] = torch.add(t, t)
+    #        return d
+
+    #    self.checkScript(fn, (torch.rand(2, 3),))
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
@@ -205,16 +284,6 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, [])
         self.checkScript(fn2, (torch.ones(2, 2),))
-
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
-            @torch.jit.script
-            def fn():
-                return [1, 1.2]
-
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
-            @torch.jit.script
-            def fn():
-                return [1, torch.ones(1, 2)]
 
     # to avoid defining sum_list in multiple tests
     def get_sum_list_fn(self):
