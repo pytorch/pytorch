@@ -100,7 +100,6 @@ class TestUtilityFuns(TestCase):
         model = torch.jit.script(PaddingLayer())
         example_output = model(input_t)
 
-        print([example_output])
         with self.assertRaises(RuntimeError):
             torch.onnx.export(model,
                               (input_t, ),
