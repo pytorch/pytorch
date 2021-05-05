@@ -899,7 +899,7 @@ def _real_and_imag_input(fn):
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
                          atol, check_grad_dtypes, check_forward_ad, nondet_tol):
-    complex_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
+    complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
     if has_any_complex_output:
         real_fn, imag_fn = _real_and_imag_output(func)
@@ -908,19 +908,19 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         imag_outputs = _differentiable_outputs(imag_func_out)
         gradcheck_fn(imag_fn, imag_func_out, tupled_inputs, imag_outputs, eps,
                      rtol, atol, check_grad_dtypes, nondet_tol,
-                     complex_indices=complex_indices, test_imag=True)
+                     complex_indices=complex_out_indices, test_imag=True)
 
         real_func_out = real_fn(*tupled_inputs)
         real_outputs = _differentiable_outputs(real_func_out)
         gradcheck_fn(real_fn, real_func_out, tupled_inputs, real_outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_indices)
+                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_out_indices)
     else:
         gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                      rtol, atol, check_grad_dtypes, nondet_tol)
 
-    complex_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
+    complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
     if check_forward_ad:
-        if complex_indices:
+        if complex_inp_indices:
             real_fn, imag_fn = _real_and_imag_input(func)
 
             imag_inputs = [inp.imag if inp.is_complex() else inp for inp in tupled_inputs]
@@ -928,13 +928,13 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
             diff_imag_func_out = _differentiable_outputs(imag_func_out)
             gradcheck_fn(imag_fn, imag_func_out, imag_inputs, diff_imag_func_out, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol,
-                         complex_indices=complex_indices, test_imag=True, use_forward_ad=True)
+                         complex_indices=complex_inp_indices, test_imag=True, use_forward_ad=True)
 
             real_inputs = [inp.real if inp.is_complex() else inp for inp in tupled_inputs]
             real_func_out = real_fn(*real_inputs)
             diff_real_func_out = _differentiable_outputs(real_func_out)
             gradcheck_fn(real_fn, real_func_out, real_inputs, diff_real_func_out, eps,
-                         rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_indices,
+                         rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_inp_indices,
                          use_forward_ad=True)
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
@@ -949,7 +949,6 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
 
     if use_forward_ad:
-        complex_indices = [i for i, inp in enumerate(tupled_inputs) if inp.is_complex()]
         analytical_forward = _get_analytical_jacobian_forward_ad(func, tupled_inputs, outputs)
 
         for i, (n_per_out, a_per_out) in enumerate(zip(numerical, analytical_forward)):
