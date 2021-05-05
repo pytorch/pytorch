@@ -38,13 +38,13 @@ class ModelTest(PackageTestCase):
             # put the pickled resnet in the package, by default
             # this will also save all the code files references by
             # the objects in the pickle
+            e.intern("**")
             e.save_pickle("model", "model.pkl", resnet)
 
             # check th debug graph has something reasonable:
             buf = StringIO()
             debug_graph = e._write_dep_graph(failing_module="torch")
             self.assertIn("torchvision.models.resnet", debug_graph)
-            e.intern("**")
 
         # we can now load the saved model
         i = PackageImporter(f1)
@@ -78,8 +78,8 @@ class ModelTest(PackageTestCase):
             # we suggest reconstructing the model objects using code from a single package
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
-            e.save_pickle("model", "model.pkl", r2)
             e.intern("**")
+            e.save_pickle("model", "model.pkl", r2)
 
         f2.seek(0)
 
@@ -121,6 +121,7 @@ class ModelTest(PackageTestCase):
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
+            e.intern("**")
             e.save_pickle("model", "pickled", resnet)
             # note that this source is the same for all models in this approach
             # so it can be made part of an API that just takes the model and
@@ -137,13 +138,13 @@ class ModelTest(PackageTestCase):
                 """
             )
             e.save_source_string("model", src, is_package=True)
-            e.intern("**")
 
         f2 = BytesIO()
         # Option 2: save with state dict
         # - more code to write to save/load the model
         # + but this code can be edited later to adjust adapt the model later
         with PackageExporter(f2, verbose=False) as e:
+            e.intern("**")
             e.save_pickle("model", "state_dict", resnet.state_dict())
             src = dedent(
                 """\
@@ -162,7 +163,6 @@ class ModelTest(PackageTestCase):
                 """
             )
             e.save_source_string("model", src, is_package=True)
-            e.intern("**")
 
         # regardless of how we chose to package, we can now use the model in a server in the same way
         input = torch.rand(1, 3, 224, 224)
@@ -185,8 +185,8 @@ class ModelTest(PackageTestCase):
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
-            e.save_pickle("model", "pickled", resnet)
             e.intern("**")
+            e.save_pickle("model", "pickled", resnet)
 
         f1.seek(0)
 

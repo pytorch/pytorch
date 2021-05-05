@@ -44,8 +44,8 @@ class TestPackageFX(PackageTestCase):
         model = SimpleTest()
         f = BytesIO()
         with PackageExporter(f, verbose=False) as pe:
-            pe.save_pickle("model", "model.pkl", model)
             pe.intern("**")
+            pe.save_pickle("model", "model.pkl", model)
 
         f.seek(0)
         pi = PackageImporter(f)
@@ -60,8 +60,8 @@ class TestPackageFX(PackageTestCase):
         model = SimpleTest()
         f = BytesIO()
         with PackageExporter(f, verbose=False) as pe:
-            pe.save_pickle("model", "model.pkl", model)
             pe.intern("**")
+            pe.save_pickle("model", "model.pkl", model)
 
         f.seek(0)
         pi = PackageImporter(f)
@@ -74,14 +74,14 @@ class TestPackageFX(PackageTestCase):
         # only in the package.
         with self.assertRaises(ObjMismatchError):
             with PackageExporter(f2, verbose=False) as pe:
-                pe.save_pickle("model", "model.pkl", traced)
                 pe.intern("**")
+                pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
         with PackageExporter(f2, importer=(pi, sys_importer), verbose=False) as pe:
             # Make the package available to the exporter's environment.
-            pe.save_pickle("model", "model.pkl", traced)
             pe.intern("**")
+            pe.save_pickle("model", "model.pkl", traced)
         f2.seek(0)
         pi2 = PackageImporter(f2)
         loaded2 = pi2.load_pickle("model", "model.pkl")
@@ -103,8 +103,8 @@ class TestPackageFX(PackageTestCase):
 
         f = BytesIO()
         with PackageExporter(f, verbose=False) as pe:
-            pe.save_pickle("model", "model.pkl", gm)
             pe.intern("**")
+            pe.save_pickle("model", "model.pkl", gm)
         f.seek(0)
 
         pi = PackageImporter(f)

@@ -61,8 +61,8 @@ class TestSaveLoad(PackageTestCase):
         with PackageExporter(buffer, verbose=False) as he:
             import package_b
             obj = package_b.PackageBObject
-            he.save_pickle("res", "obj.pkl", obj)
             he.intern("**")
+            he.save_pickle("res", "obj.pkl", obj)
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
@@ -112,8 +112,8 @@ class TestSaveLoad(PackageTestCase):
 
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            he.save_pickle("obj", "obj.pkl", obj2)
             he.intern("**")
+            he.save_pickle("obj", "obj.pkl", obj2)
         hi = PackageImporter(filename)
 
         # check we got dependencies
@@ -140,16 +140,14 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
-            pe.save_pickle("obj", "obj.pkl", obj)
             pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", obj)
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
             pe.save_module(loaded1.__module__)
 
@@ -166,8 +164,8 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
-            pe.save_pickle("obj", "obj.pkl", obj2)
             pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", obj2)
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")

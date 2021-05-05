@@ -194,8 +194,8 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.mock(include="package_a.subpackage")
-            he.save_pickle("obj", "obj.pkl", obj2)
             he.intern("**")
+            he.save_pickle("obj", "obj.pkl", obj2)
 
         buffer.seek(0)
 
