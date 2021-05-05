@@ -6435,18 +6435,22 @@
 
 - func: sign(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sign
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sign_out
 
