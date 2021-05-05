@@ -95,8 +95,8 @@ class ScriptModuleDeserializer final {
         reader_(std::move(reader)),
         storage_tracker_(std::move(storage_tracker)),
         code_prefix_(".data/ts_code/code/"),
-        pickle_dir_prefix_(pickle_dir_prefix),
-        tensor_dir_prefix_(tensor_dir_prefix),
+        pickle_dir_prefix_(std::move(pickle_dir_prefix)),
+        tensor_dir_prefix_(std::move(tensor_dir_prefix)),
         source_importer_(
             compilation_unit_,
             &constants_table_,
@@ -167,7 +167,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   return readArchiveAndTensors(
       /*archive_name=*/archive_name,
       /*pickle_prefix=*/pickle_dir_prefix_,
-      /*tensor_prefi =*/tensor_dir_prefix_,
+      /*tensor_prefix=*/tensor_dir_prefix_,
       type_resolver,
       obj_loader,
       device_,
