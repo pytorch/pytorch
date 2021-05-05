@@ -2895,8 +2895,7 @@ class TestNN(NNTestCase):
         # the calculation should be this:
         expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(expected_mask, computed_mask)
+        self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning
         q = prune.LnStructured(amount=1, n=2, dim=0)
@@ -2906,8 +2905,7 @@ class TestNN(NNTestCase):
         # outcome of the calculation should be this:
         expected_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(expected_mask, computed_mask)
+        self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning, along another axis
         r = prune.LnStructured(amount=1, n=2, dim=1)
@@ -2917,8 +2915,24 @@ class TestNN(NNTestCase):
         # outcome of the calculation should be this:
         expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(expected_mask, computed_mask)
+        self.assertEqual(expected_mask, computed_mask)
+
+    def test_pruning_uses_mask_dtype(self):
+        """Test that all compute_mask methods uses the dtype of
+        default_mask."""
+        pruning_methods = [
+            prune.Identity(),
+            prune.RandomUnstructured(amount=0.6),
+            prune.RandomStructured(amount=0.6),
+            prune.L1Unstructured(amount=2),
+            prune.LnStructured(amount=1, n=2)]
+
+        # create tensor to be pruned
+        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=torch.float32)
+        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]], dtype=torch.int32)
+        for pruning_method in pruning_methods:
+            computed_mask = pruning_method.compute_mask(t, default_mask)
+            self.assertEqual(computed_mask.dtype, default_mask.dtype)
 
     def test_l1_unstructured_pruning(self):
         r"""Test that l1 unstructured pruning actually removes the lowest
@@ -3195,12 +3209,8 @@ class TestNN(NNTestCase):
         p = prune.CustomFromMask(mask=mask)
 
         computed_mask = p.compute_mask(t, default_mask)
-        expected_mask = torch.tensor([[0, 0, 0, 0], [0, 0, 1, 1]]).to(
-            dtype=t.dtype
-        )
-
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(computed_mask, expected_mask)
+        expected_mask = torch.tensor([[0, 0, 0, 0], [0, 0, 1, 1]])
+        self.assertEqual(computed_mask, expected_mask)
 
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,

@@ -360,8 +360,7 @@ class PruningContainer(BasePruningMethod):
                     of the old mask and the new mask from the current
                     pruning method (of same dimensions as mask and t).
             """
-            new_mask = mask  # start off from existing mask
-            new_mask = new_mask.to(dtype=t.dtype)
+            new_mask = mask.clone()  # start off from existing mask
 
             # compute a slice of t onto which the new pruning method will operate
             if method.PRUNING_TYPE == "unstructured":
@@ -631,7 +630,7 @@ class RandomStructured(BasePruningMethod):
             threshold = torch.kthvalue(prob, k=nchannels_toprune).values
             channel_mask = prob > threshold
 
-            mask = torch.zeros_like(t)
+            mask = torch.zeros_like(default_mask)
             slc = [slice(None)] * len(t.shape)
             slc[dim] = channel_mask
             mask[slc] = 1
@@ -740,7 +739,7 @@ class LnStructured(BasePruningMethod):
         # mask has the same shape as tensor t
         def make_mask(t, dim, indices):
             # init mask to 0
-            mask = torch.zeros_like(t)
+            mask = torch.zeros_like(default_mask)
             # e.g.: slc = [None, None, None], if len(t.shape) = 3
             slc = [slice(None)] * len(t.shape)
             # replace a None at position=dim with indices
