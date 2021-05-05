@@ -153,6 +153,7 @@ class DDPUnevenTestInput(NamedTuple):
     model: nn.Module
     inp: Union[torch.tensor, tuple]
     sync_interval: int
+    throw_on_early_termination: bool = False
 
 
 class _FC2(nn.Module):
@@ -4376,7 +4377,8 @@ class DistributedTest:
             model = nn.Linear(dim, dim, bias=False)
             inp = torch.rand(batch, dim, device=self.rank)
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
             )
             profiler_ctx_copy = copy.deepcopy(profiler_ctx)
 
@@ -4404,7 +4406,9 @@ class DistributedTest:
             # for a single pass, and ensure it is recorded. This tests that the
             # thread local state is correctly updated.
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True
             )
             for i in range(3):
                 loss = net(inp).sum()
@@ -4415,9 +4419,12 @@ class DistributedTest:
                 loss.backward()
 
             events = get_profiling_event(all_reduce_event_name, prof)
-            self.assertEqual(1, len(events))
-            self.assertEqual(1, events[0].count)
+            self.assertGreaterEqual(len(events), 1)
+            self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
+            # Ensure searching unused parameters was profiled
+            events = get_profiling_event("search_unused_parameters", prof)
+            self.assertEqual(len(events), 1)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4498,6 +4505,7 @@ class DistributedTest:
             inp = test_case.inp
             rank = self.rank
             sync_interval = test_case.sync_interval
+            torch.cuda.set_device(rank)
             # Ensure all outsanding GPU work is comlete so this test runs independently.
             dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
@@ -4511,44 +4519,135 @@ class DistributedTest:
 
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
-            with net.join():
-                for i in range(num_iters):
-                    # Use model.no_sync() to disable grad synchronization every
-                    # sync_interval.
-                    if i % sync_interval != 0:
-                        context = net.no_sync()
-                    else:
-                        context = suppress()
-                    with context:
-                        if isinstance(inp, tuple):
-                            loss = net(*inp).sum()
+            # If we throw when earliest rank terminates, we should ensure
+            # that we iterate for that minimum number of times.
+            num_iters_tensor = torch.tensor([num_iters], device=torch.cuda.current_device())
+            dist.all_reduce(num_iters_tensor, op=dist.ReduceOp.MIN)
+            min_num_iters = num_iters_tensor.item()
+            total_iters = 0
+            if test_case.throw_on_early_termination:
+                if min_num_iters == num_iters:
+                    # Early termination rank(s)
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
+                    )
+                else:
+                    # Non early termination rank
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError,
+                        "Detected at least one rank that exhausted inputs."
+                    )
+            else:
+                exception_ctx = suppress()
+            with exception_ctx:
+                with net.join(throw_on_early_termination=test_case.throw_on_early_termination):
+                    for i in range(num_iters):
+                        # Use model.no_sync() to disable grad synchronization every
+                        # sync_interval.
+                        if i % sync_interval != 0:
+                            context = net.no_sync()
                         else:
-                            loss = net(inp).sum()
-                        loss.backward()
-                        self._model_step(net)
-                        # Ensure completion of GPU kernels (including allreduce). If the
-                        # join API is not properly implemented, then this should hang
-                        # since the allreduce will hang.
-                        torch.cuda.synchronize(device=rank)
+                            context = suppress()
+                        with context:
+                            if isinstance(inp, tuple):
+                                loss = net(*inp).sum()
+                            else:
+                                loss = net(inp).sum()
+                            loss.backward()
+                            self._model_step(net)
+                            # Ensure completion of GPU kernels (including allreduce). If the
+                            # join API is not properly implemented, then this should hang
+                            # since the allreduce will hang.
+                            torch.cuda.synchronize(device=rank)
+                        total_iters += 1
+            if test_case.throw_on_early_termination:
+                # Ensure we iterated min_num_iters times.
+                self.assertEqual(total_iters, min_num_iters)
+            else:
+                # Ensure we iterated at least min_num_iters times.
+                self.assertGreaterEqual(total_iters, min_num_iters)
 
             # Ensure completion of all GPU kernels.
             torch.cuda.synchronize(device=rank)
-            self.assertTrue(net._authoritative_rank)
-            # All ranks should have agreed on the same authoritative_rank!
-            final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
-            tensor_list = [
-                torch.zeros_like(final_rank_tensor)
-                for _ in range(dist.get_world_size())
-            ]
-            dist.all_gather(tensor_list, final_rank_tensor)
-            max_rank = dist.get_world_size() - 1
-            self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
-            # Ensure that all models are the same across ranks after all have joined.
-            self.validate_net_equivalence(net)
-            # Ensure that running with DDP uneven inputs was logged.
-            ddp_logging_data = net.get_ddp_logging_data()
-            self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
-            dist.barrier()
+            # When throwing on early rank termination, we do not
+            # broadcast model state from an authoritative rank. All models
+            # should already be in sync.
+            if not test_case.throw_on_early_termination:
+                self.assertTrue(net._authoritative_rank)
+                # All ranks should have agreed on the same authoritative_rank!
+                final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
+                tensor_list = [
+                    torch.zeros_like(final_rank_tensor)
+                    for _ in range(dist.get_world_size())
+                ]
+                dist.all_gather(tensor_list, final_rank_tensor)
+                max_rank = dist.get_world_size() - 1
+                self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
+                # Ensure that all models are the same across ranks after all have joined.
+                self.validate_net_equivalence(net)
+                # Ensure that running with DDP uneven inputs was logged.
+                ddp_logging_data = net.get_ddp_logging_data()
+                self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
+                dist.barrier()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        def test_ddp_uneven_inputs_stop_iteration_sync_bn(self):
+            # Tests that uneven inputs join handler correctly throws StopIteration
+            # for models with SyncBN or general collective comm when
+            # throw_on_early_termination=True.
+            class ModelWithComm(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lin = nn.Linear(2, 40, bias=False)
+
+                def forward(self, x):
+                    x = self.lin(x)
+                    dist.all_reduce(x)
+                    return x
+
+            torch.cuda.set_device(self.rank)
+            model_bn = BN_NET
+            model_bn = nn.SyncBatchNorm.convert_sync_batchnorm(
+                copy.deepcopy(model_bn)
+            ).cuda(self.rank)
+            comm_model = ModelWithComm().cuda(self.rank)
+            model_input = torch.randn(10, 2).cuda(torch.cuda.current_device())
+
+            for model in [model_bn, comm_model]:
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                )
+                min_num_iters = 5
+                if self.rank != 0:
+                    # Early termination rank(s)
+                    num_iters = min_num_iters
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
+                    )
+                else:
+                    # Non early termination rank
+                    num_iters = min_num_iters * 2
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError,
+                        "Detected at least one rank that exhausted inputs."
+                    )
+                n = 0
+                with exception_ctx:
+                    with model.join(throw_on_early_termination=True):
+                        for i in range(num_iters):
+                            loss = model(model_input).sum()
+                            loss.backward()
+                            self._model_step(model)
+                            n += 1
+
+                self.assertEqual(n, min_num_iters)
+                # Verify model equivalence
+                self.validate_net_equivalence(model)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
@@ -4651,7 +4750,20 @@ class DistributedTest:
                     )
                 )
 
+            throw_on_early_term_tests = []
+            for test_input in models_to_test:
+                throw_on_early_term_tests.append(
+                    DDPUnevenTestInput(
+                        name=test_input.name,
+                        model=test_input.model,
+                        inp=test_input.inp,
+                        sync_interval=test_input.sync_interval,
+                        throw_on_early_termination=True,
+                    )
+                )
+
             models_to_test.extend(models_with_sync)
+            models_to_test.extend(throw_on_early_term_tests)
 
             # 0 iteration tests for when one process does not train model at all, so
             # we must shadow the broadcast calls made when rebuilding buckets.
