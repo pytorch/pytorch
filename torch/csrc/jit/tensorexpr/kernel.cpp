@@ -230,7 +230,6 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
-  // std::cout<"221"<<std::endl;
   return conv2dIsSupported(
       *input,
       *weight,
