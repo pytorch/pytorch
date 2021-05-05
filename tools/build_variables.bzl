@@ -60,6 +60,7 @@ jit_core_headers = [
     "torch/csrc/utils/memory.h",
     "torch/csrc/WindowsTorchApiMacro.h",
     "torch/csrc/jit/frontend/source_range.h",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
     "torch/csrc/jit/serialization/source_range_serialization.h",
     "torch/csrc/jit/frontend/lexer.h",
     "torch/csrc/jit/frontend/strtod.h",
@@ -96,6 +97,7 @@ core_sources_common = [
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/mobile/runtime_compatibility.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
@@ -135,6 +137,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
+    "torch/csrc/jit/backends/backend_debug_handler.cpp",
     "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
@@ -243,6 +246,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -349,10 +353,24 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
+]
+
+libtorch_lite_eager_symbolication = [
+    "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/jit/ir/scope.cpp",
+    "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
+    "torch/csrc/jit/serialization/source_range_serialization.cpp",
+    # Later we can split serialization and deserialization logic
+    # to have better separation within build and only build relevant parts.
+    "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler.cpp",
+    "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
@@ -367,10 +385,14 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/mobile/export_data.cpp",
+    # To be included for eager symbolication in lite interpreter
+    # when it is built in libtorch
+    "torch/csrc/jit/mobile/debug_info.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/optim/sgd.cpp",
