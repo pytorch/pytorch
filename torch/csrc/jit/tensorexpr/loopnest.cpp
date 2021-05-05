@@ -1069,7 +1069,13 @@ bool LoopNest::optimizeConditionals() {
       // contains.
       continue;
     }
+
     auto for_to_split = fors.back();
+    if (!LoopNest::isNormalized(for_to_split)) {
+      // Do not optimize this conditional since the condition variable
+      // refers to a loop that is not normalized.
+      continue;
+    }
     comp_values.push_back(for_to_split->stop());
 
     // The comp_values gathered from the if-then-else expressions are

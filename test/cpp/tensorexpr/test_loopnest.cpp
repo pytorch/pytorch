@@ -4740,6 +4740,41 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
   ASSERT_EQ(hash_before, hash_after);
 }
 
+TEST(LoopNest, OptimizeConditionalsNotNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {15}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 2, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
 static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
     int M,
     int N) {
