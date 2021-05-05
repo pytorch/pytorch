@@ -1126,7 +1126,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // future blocks the stream this callback runs on the corresponding
     // cudaEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
-      work->future_->addCallback([work]() {
+      work->future_->addCallback([work](at::ivalue::Future& /* unused */) {
         work->recordFunctionEndCallback_();
       });
     }

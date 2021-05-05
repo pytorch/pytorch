@@ -1503,7 +1503,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   dist_autograd_context_id_ = getDistAutogradContextId();
                   state_ = InterpreterState(stateImpl_);
                 }
-                void operator()() {
+                void operator()(c10::ivalue::Future& /* unused */) {
                   stateImpl_->taskLauncher_(InterpreterContinuation(
                       state_,
                       std::move(stack_),
