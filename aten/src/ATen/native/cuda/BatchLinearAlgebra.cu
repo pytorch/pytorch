@@ -1890,6 +1890,10 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
   if (compute_pivots) {
     auto pivots_data = pivots.data_ptr<magma_int_t>();
     auto pivots_stride = pivots.size(-1);
+    // fill pivots with ones to avoid memory access violations inside magma kernels
+    // magmaLuBatched might not set the values for it
+    // see https://github.com/pytorch/pytorch/pull/53064
+    pivots.fill_(1);
     magma_int_t** pivots_array;
     ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
     for (int64_t i = 0; i < batch_size; i++) {
