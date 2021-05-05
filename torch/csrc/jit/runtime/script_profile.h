@@ -18,23 +18,18 @@ struct Datapoint {
   Timepoint start;
   Timepoint end;
 
- private:
-  friend class InstructionSpan;
   Datapoint(SourceRange sr)
       : sourceRange(std::move(sr)), start(std::chrono::steady_clock::now()) {}
 };
 
 class TORCH_API InstructionSpan {
  public:
-  C10_NODISCARD static c10::optional<InstructionSpan> tryMake(Node&);
-  InstructionSpan(InstructionSpan&&);
+  InstructionSpan(Node&);
   ~InstructionSpan();
+  InstructionSpan(InstructionSpan&&) = delete;
 
  private:
-  InstructionSpan(Node&);
-
-  bool empty_{false};
-  Datapoint datapoint_;
+  std::unique_ptr<Datapoint> datapoint_;
 };
 
 } // namespace profiling
@@ -44,6 +39,24 @@ struct TORCH_API InstructionStats {
   std::chrono::nanoseconds duration{0};
 };
 
+/**
+ * ScriptProfile is an underlying C++ implementation for TorchScript profiling.
+ * The profiling section is specified by calling enable() and disable():
+ *
+ * ...
+ * scriptProfile.enable();
+ * ...
+ * (scripts)
+ * ...
+ * scriptProfile.disable();
+ * ...
+ *
+ * To retrieve collected runtime data, users may call dumpStats() and do
+ * arbitrary filtering on the data they want. Note that dumpStats() should
+ * not be called inside a profiling section.
+ * In general, stats are aggregated per source function body, and then by line
+ * number.
+ */
 class TORCH_API ScriptProfile {
   // Aggregates datapoints by function source id, then by line number.
   using LineMap = std::map<size_t, InstructionStats>;
@@ -53,12 +66,12 @@ class TORCH_API ScriptProfile {
   void enable();
   void disable();
   const Stats& dumpStats();
-  void addDatapoint(profiling::Datapoint);
+  void addDatapoint(std::shared_ptr<profiling::Datapoint>);
   ~ScriptProfile();
 
  private:
   bool enabled_{false};
-  std::vector<profiling::Datapoint> datapoints_;
+  std::vector<std::shared_ptr<profiling::Datapoint>> datapoints_;
   Stats stats_;
 };
 
