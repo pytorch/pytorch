@@ -8229,6 +8229,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_unpack(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                elem = torch.matmul(x[0], y)
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                a, b, c = res
+                return a, b
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(3, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_inplace_ops(self):
         @torch.jit.script
         def check_init(input_data, hidden_size):

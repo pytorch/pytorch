@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
@@ -627,6 +628,47 @@ static void eraseListConstruct(Block* block, int opset_version) {
   eraseListConstruct(block->return_node(), opset_version);
 }
 
+static void eraseListUnpack(Block* block, int opset_version);
+
+static void eraseListUnpack(Node* n, int opset_version) {
+  for (auto b : n->blocks()) {
+    eraseListUnpack(b, opset_version);
+  }
+
+  if (n->kind() == prim::ListUnpack) {
+    if (opset_version < OPSET_VERSION_11) {
+      // onnx::SequenceAt was introduced in onnx opset version 11
+      throw std::runtime_error(
+          "Unsupported: ONNX export of prim::ListUnpack in opset " +
+          c10::to_string(opset_version) + ". Please try opset version 11.");
+    }
+
+    auto g = n->owningGraph();
+    for (size_t i = 0; i < n->outputs().size(); ++i) {
+      auto seq_idx_n = g->create(onnx::Constant, 1);
+      seq_idx_n->t_(attr::value, at::scalar_to_tensor(at::Scalar(int64_t(i))));
+      seq_idx_n->insertBefore(n);
+
+      auto seq_at_n = g->create(onnx::SequenceAt, 1);
+      seq_at_n->addInput(n->input());
+      seq_at_n->addInput(seq_idx_n->output());
+      seq_at_n->output()->setType(n->output(i)->type());
+      seq_at_n->insertBefore(n);
+      n->output(i)->replaceAllUsesWith(seq_at_n->output());
+    }
+  }
+}
+
+static void eraseListUnpack(Block* block, int opset_version) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    Node* n = *it;
+    ++it;
+
+    eraseListUnpack(n, opset_version);
+  }
+}
+
 // For ops such as meshgrid where output is a list of Tensors
 // (returns prim::ListConstruct), we need to unpack the list
 // before the pass which deletes ListConstruct.
@@ -915,6 +957,11 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
+  EliminateDeadCode(
+      graph->block(),
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  eraseListUnpack(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
   insertIdentityForInputUsedAsOutput(graph->block());
