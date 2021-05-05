@@ -1272,8 +1272,8 @@ Differences with `numpy.linalg.svd`:
 
 .. seealso::
 
-        :func:`torch.linalg.svdvals` computes only the singular values.
-        However, that function is not differentiable.
+        :func:`torch.linalg.svdvals` computes only the singular values,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.eig` for a function that computes another type of spectral
         decomposition of a matrix. The eigendecomposition works just on on square matrices.
@@ -1350,12 +1350,13 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 The singular values are returned in descending order.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.svd` instead, which also computes the singular vectors.
-
 .. note:: This function is equivalent to NumPy's `linalg.svd(A, compute_uv=False)`.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
+
+.. seealso::
+
+        :func:`torch.linalg.svd` computes the full singular value decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
