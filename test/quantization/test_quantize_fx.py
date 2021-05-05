@@ -1132,7 +1132,6 @@ class TestQuantizeFx(QuantizationTestCase):
             m = M().eval()
             m = prepare_fx(m, qconfig_dict)
             m(torch.randn(2, 1, 3, 3))
-            print(m)
             m = convert_fx(m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
             # make sure it runs
@@ -2486,8 +2485,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 is_reference=is_reference,
                 custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
-                expected_node_occurrence=convert_node_occurrence,
-                print_debug_info=True)
+                expected_node_occurrence=convert_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
