@@ -1,18 +1,12 @@
-import re
-
 from io import BufferedIOBase
 from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
 from torch.utils.data import IterDataPipe, functional_datapipe
 from torch.utils.data.datapipes.utils.decoder import (
-    Decoder,
+    Handler, Decoder,
     basichandlers as decoder_basichandlers,
-    imagehandler as decoder_imagehandler)
-
-
-# Extract extension from pathname
-def _default_key_fn(pathname):
-    return re.sub(r".*[.]", "", pathname)
+    imagehandler as decoder_imagehandler,
+    _default_key_fn)
 
 
 @functional_datapipe('decode')
@@ -26,23 +20,21 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         handlers: Optional user defined decoder handlers. If None, basic and image decoder
             handlers will be set as default. If multiple handles are provided, the priority
             order follows the order of handlers (the first handler has the top priority)
-        key_fn: Optional function for decoder to extract key from pathname to dispatch handlers.
-            Default is set to extract extension from pathname
+        key_fn: Function for decoder to extract key from pathname to dispatch handlers.
+            Default is set to extract file extension from pathname
     """
 
     def __init__(self,
                  datapipe: Iterable[Tuple[str, BufferedIOBase]],
-                 *handler: Callable,
+                 *handler: Handler,
                  key_fn: Callable = _default_key_fn) -> None:
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
-        if len(handler) > 0:
-            self.decoder = Decoder(*handler, key_fn=key_fn)
-        else:
-            self.decoder = Decoder(*decoder_basichandlers, decoder_imagehandler('torch'),
-                                   key_fn=key_fn)
+        if not handler:
+            handler = (*decoder_basichandlers, decoder_imagehandler('torch'))
+        self.decoder = Decoder(*handler, key_fn=key_fn)
 
-    def add_handler(self, *handler: Callable) -> None:
+    def add_handler(self, *handler: Handler) -> None:
         self.decoder.add_handler(*handler)
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
@@ -52,6 +44,6 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
             yield (pathname, result[pathname])
 
     def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise NotImplementedError
