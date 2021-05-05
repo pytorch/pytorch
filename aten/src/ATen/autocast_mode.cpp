@@ -179,7 +179,7 @@ struct WrapFunction_<DeviceType::CUDA, CastPolicy::fp16, Redispatch, F, Ret, gut
   }
 };
 
-// DeviceType::CUDA CastPolicy::fp32 DeviceType::CUDA
+// DeviceType::CUDA CastPolicy::fp32
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<DeviceType::CUDA, CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
