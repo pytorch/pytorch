@@ -1,22 +1,21 @@
 #!/bin/bash
 set -eux -o pipefail
 
+source maps.sh
+
 cuda_major_version=${CUDA_VERSION%.*}
 
 # cuda_installer_name
 declare -a installers=(
-    "10.1 cuda_10.1.243_426.00_win10"
-    "11.1 cuda_11.1.0_456.43_win10"
-    "11.2 cuda_11.2.2_461.33_win10"
+    "10.1: cuda_10.1.243_426.00_win10"
+    "11.1: cuda_11.1.0_456.43_win10"
+    "11.2: cuda_11.2.2_461.33_win10"
+    "11.3: cuda_11.3.0_465.89_win10"
 )
 
-for elem in "${installers[@]}"; do
-    read -a pair <<< "$elem"  # uses default whitespace IFS
-    if [[ "$CUDA_VERSION" == "${pair[0]}" ]]; then
-        cuda_installer_name=${pair[1]}
-        break
-    fi
-done
+map_get_value $CUDA_VERSION "${installers[@]}"
+cuda_installer_name=$map_return_value
+
 if [ -z $cuda_installer_name ]; then
     echo "CUDA_VERSION $CUDA_VERSION is not supported yet"
     exit 1
@@ -28,13 +27,8 @@ declare -a build_dirs=(
     "11 visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
 )
 
-for elem in "${build_dirs[@]}"; do
-    read -a pair <<< "$elem" # uses default whitespace IFS
-    if [[ "$cuda_major_version" == "${pair[0]}" ]]; then
-        msbuild_project_dir=${pair[1]}
-        break
-    fi
-done
+map_get_value $cuda_major_version "${build_dirs[@]}"
+msbuild_project_dir=$map_return_value
 
 # cuda_install_packages
 # https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html#install-cuda-software
@@ -43,20 +37,15 @@ cuda10_packages_template="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cubla
 cuda11_packages_template="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
 
 declare -a install_packages=(
-    "10.1, ${cuda10_packages_template}"
-    "11.1, ${cuda11_packages_template}"
-    "11.2, ${cuda11_packages_template}"
-    "11.3, ${cuda11_packages_template} thrust_11.3"
+    "10.1: ${cuda10_packages_template}"
+    "11.1: ${cuda11_packages_template}"
+    "11.2: ${cuda11_packages_template}"
+    "11.3: ${cuda11_packages_template} thrust_11.3"
 )
-for elem in "${install_packages[@]}"; do
-    IFS="," read -a pair <<< "$elem" # use comma as delimiter because packages includes whitespace
-    if [[ "$CUDA_VERSION" == "${pair[0]}" ]]; then
-        packages_template="${pair[1]}"
-        cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
-        break
-    fi
-done
 
+map_get_value $CUDA_VERSION "${install_packages[@]}"
+packages_template=$map_return_value
+cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
 
 if [[ "$cuda_major_version" == "11" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
     cuda_install_packages="${cuda_install_packages} Display.Driver"
