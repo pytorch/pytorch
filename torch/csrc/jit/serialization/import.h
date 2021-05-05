@@ -42,7 +42,7 @@ TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     c10::optional<at::Device> device,
-    std::string ts_id /* torchscript identifier inside packge */);
+    std::string ts_id /* torchscript identifier inside package */);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
