@@ -276,6 +276,11 @@ class ModelData extends Component {
         }
       } else if (mstate.__tuple_values__) {
         parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+      } else if (mstate.__module_type__) {
+        // We normally wouldn't have the state of a module be another module,
+        // but we use "modules" to encode special values (like Unicode decode
+        // errors) that might be valid states.  Just go with it.
+        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else {
         throw new Error("Bad module state");
       }
