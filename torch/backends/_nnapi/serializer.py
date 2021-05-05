@@ -774,6 +774,8 @@ class _NnapiSerializer(object):
             self.add_conv_underscore(node),
         "aten::conv2d": lambda self, node:
             self.add_conv2d(node),
+        "aten::flatten": lambda self, node:
+            self.add_flatten(node),
         "quantized::linear": lambda self, node:
             self.add_qlinear(node),
         "quantized::conv2d": lambda self, node:
@@ -884,6 +886,36 @@ class _NnapiSerializer(object):
         if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_reshape:
             raise Exception(
                 "Currently, reshape is only supported on NHWC tensors if the target size is [X, -1].")
+
+        # Bit of a hack here.  Use a real tensor to infer the output shape.
+        out_shape = torch.zeros(1).expand(in_oper.shape).reshape(shape).shape
+        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
+
+        inputs = [None] * 2
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector(shape)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
+
+    def add_flatten(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+
+        start_dim_ctype, start_dim = self.get_constant_value(node.inputsAt(1))
+        assert start_dim_ctype.kind() == "IntType"
+        end_dim_ctype, end_dim = self.get_constant_value(node.inputsAt(2))
+        assert end_dim_ctype.kind() == "IntType"
+        shape = (start_dim, end_dim)
+        is_trivial_reshape = shape[1] == -1
+
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_reshape:
+            raise Exception(
+                "Currently, flatten is only supported on NHWC tensors if the target size is [X, -1].")
 
         # Bit of a hack here.  Use a real tensor to infer the output shape.
         out_shape = torch.zeros(1).expand(in_oper.shape).reshape(shape).shape
