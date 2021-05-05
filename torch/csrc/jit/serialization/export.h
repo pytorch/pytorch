@@ -60,7 +60,7 @@ class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
-      : writer_(export_writer) {}
+      : writer_(export_writer), current_source_range_tag_(0) {}
 
   void writeFiles(const std::string& code_dir);
   void serialize(
