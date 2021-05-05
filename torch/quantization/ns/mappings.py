@@ -81,6 +81,32 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             toq.linear,
             toq.linear_relu,
         ]),
+        # average pool
+        'torch.nn.AvgPool1d': set([
+            nn.AvgPool1d,
+            torch.avg_pool1d,
+        ]),
+        'torch.nn.AvgPool2d': set([
+            nn.AvgPool2d,
+            torch._C._nn.avg_pool2d,
+        ]),
+        'torch.nn.AvgPool3d': set([
+            nn.AvgPool3d,
+            torch._C._nn.avg_pool3d,
+        ]),
+        # adaptive average pool
+        'torch.nn.AdaptiveAvgPool1d': set([
+            nn.AdaptiveAvgPool1d,
+            F.adaptive_avg_pool1d,
+        ]),
+        'torch.nn.AdaptiveAvgPool2d': set([
+            nn.AdaptiveAvgPool2d,
+            F.adaptive_avg_pool2d,
+        ]),
+        'torch.nn.AdaptiveAvgPool3d': set([
+            nn.AdaptiveAvgPool3d,
+            F.adaptive_avg_pool3d,
+        ]),
         # LSTM
         'torch.nn.LSTM': set([
             nn.LSTM,
@@ -108,15 +134,34 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # relu
         'torch.relu': set([
             F.relu,
+            nn.ReLU,
+            'relu',
+            'relu_',
+            torch.relu,
         ]),
-        # maxpool2d
+        # relu6
+        'torch.nn.functional.relu6': set([
+            F.relu6,
+        ]),
+        # maxpool
+        'torch.nn.MaxPool1d': set([
+            nn.MaxPool1d,
+            F.max_pool1d,
+        ]),
         'torch.nn.MaxPool2d': set([
             nn.MaxPool2d,
+            F.max_pool2d,
+        ]),
+        'torch.nn.MaxPool3d': set([
+            nn.MaxPool3d,
+            F.max_pool3d,
         ]),
         # sigmoid
         'torch.sigmoid': set([
             torch.sigmoid,
             'sigmoid',
+            'sigmoid_',
+            nn.Sigmoid,
         ]),
         # BatchNorm
         'torch.nn.BatchNorm2d': set([
@@ -222,6 +267,93 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         'torch.nn.functional.leaky_relu': set([
             F.leaky_relu,
             toq.leaky_relu,
+        ]),
+        # F.silu
+        'torch.nn.SiLU': set([
+            nn.SiLU,
+            F.silu,
+        ]),
+        # F.tanh
+        'torch.nn.Tanh': set([
+            nn.Tanh,
+            F.tanh,
+            torch.tanh,
+            'tanh_',
+            'tanh',
+        ]),
+        # F.hardsigmoid
+        'torch.nn.Hardsigmoid': set([
+            'hardsigmoid_',
+            'hardsigmoid',
+            F.hardsigmoid,
+            nn.Hardsigmoid,
+        ]),
+        # F.hardtanh
+        'torch.nn.Hardtanh': set([
+            nn.Hardtanh,
+            F.hardtanh,
+            F.hardtanh_,
+        ]),
+        # floordiv
+        'operator.floordiv': set([
+            operator.floordiv,
+        ]),
+        # unsqueeze
+        'torch.unsqueeze': set([
+            torch.unsqueeze,
+        ]),
+        # stack
+        'torch.stack': set([
+            torch.stack,
+        ]),
+        # squeeze
+        'torch.squeeze': set([
+            torch.squeeze,
+        ]),
+        # sort
+        'torch.sort': set([
+            torch.sort,
+        ]),
+        # repeat_interleave
+        'torch.repeat_interleave': set([
+            torch.repeat_interleave,
+        ]),
+        # min
+        'torch.min': set([
+            torch.min,
+        ]),
+        # mean
+        'torch.mean': set([
+            torch.mean,
+        ]),
+        # max
+        'torch.max': set([
+            torch.max,
+        ]),
+        # transpose
+        'torch.transpose': set([
+            torch.transpose,
+        ]),
+        # flatten
+        'torch.flatten': set([
+            torch.flatten,
+        ]),
+        # clamp
+        'torch.clamp': set([
+            torch.clamp,
+        ]),
+        # chunk
+        'torch.chunk': set([
+            torch.chunk,
+        ]),
+        # interpolate
+        'torch.nn.functional.interpolate': set([
+            torch.nn.functional.interpolate,
+        ]),
+        # dropout
+        'torch.nn.Dropout': set([
+            nn.Dropout,
+            F.dropout,
         ]),
     }
     return base_name_to_sets_of_related_ops
@@ -435,6 +567,7 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
     MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
         torch.quantization.ObserverBase,
         torch.quantization.FakeQuantizeBase,
+        nn.Identity,
     ])
 
     METHS_UNMATCHABLE: Set[NSNodeTargetType] = set([
