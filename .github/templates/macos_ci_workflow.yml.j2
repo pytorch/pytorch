@@ -13,6 +13,10 @@ jobs:
   build:
     runs-on: !{{ runner_type }}
     steps:
+      - name: my thing
+        uses: driazati/test-action@master
+        with:
+          who-to-greet: 'myself'
       - name: env test build
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
