@@ -99,6 +99,9 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+  void runFast(
+      const std::vector<void*>& inputs,
+      const std::vector<void*>& outputs);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
@@ -114,6 +117,14 @@ class TORCH_API TensorExprKernel {
     return graph_;
   }
 
+  const std::vector<ConstantDescr>& getConstantDescriptors() const {
+    return constants_;
+  }
+
+  const std::vector<CodeGen::BufferArg>& getBufferArgs() const {
+    return bufferArgs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -125,7 +136,6 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-
   void runKernel(Stack& stack);
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
@@ -233,6 +243,12 @@ TORCH_API bool& getCatWoConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
+
+TORCH_API void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit
