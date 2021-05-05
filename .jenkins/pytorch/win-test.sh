@@ -42,12 +42,16 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# GITHUB_HEAD_REF comes from Github Actions
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-if [[ "${CIRCLE_JOB}" == *11* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
@@ -66,7 +70,10 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        export PYTORCH_COLLECT_COVERAGE=1
+        if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+          export PYTORCH_COLLECT_COVERAGE=1
+          export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
+        fi
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
@@ -85,9 +92,10 @@ run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
   pushd "$TEST_DIR"
-  python -mpip install coverage
+  python -mpip install coverage==5.5
+  python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"
   echo "Generating XML coverage report"
   time python -mcoverage xml
   popd

@@ -186,7 +186,7 @@ at::Tensor inferAndAlloc(
   } else {
     c10::IntArrayRef isizes(sizes);
     // Non Variable type guard for empty_cuda call
-    at::AutoNonVariableTypeMode non_variable_type_mode;
+    at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     return at::native::empty_cuda(
         isizes, at_type, c10::nullopt, options.device, c10::nullopt);
   }
@@ -410,7 +410,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (executor_entry && executor_entry->init) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later;
-      at::AutoNonVariableTypeMode non_variable_type_mode;
+      at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again;
       launch_params = executor_entry->launch_params;
       for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {

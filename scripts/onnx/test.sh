@@ -29,6 +29,7 @@ fi
 
 pip install pytest scipy hypothesis # these may not be necessary
 pip install pytest-cov # installing since `coverage run -m pytest ..` doesn't work
+pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
