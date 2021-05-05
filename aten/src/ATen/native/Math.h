@@ -236,7 +236,7 @@ static inline float polevlf(float x, float *A, size_t len) {
   return result;
 }
 
-static inline double trigamma(double x) {
+static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -254,7 +254,7 @@ static inline double trigamma(double x) {
   return sign * result;
 }
 
-static inline float trigamma(float x) {
+static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
