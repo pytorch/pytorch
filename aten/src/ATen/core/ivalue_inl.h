@@ -578,6 +578,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Future>(std::move(type), devices_);
   }
 
+  ~Future() {
+    // If there are no more references to this future (and thus the refcount
+    // drops to zero and the destructor is called) while some callbacks are
+    // installed, those callbacks will never be called, and this could lead to
+    // deadlocks. We consider this an error, thus we invoke the callbacks with
+    // an error (to unblock them) and we throw an exception so that it's easier
+    // to find the callsite where this happened.
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!completed_ && !callbacks_.empty()) {
+      setErrorInternal(std::make_exception_ptr(std::runtime_error(
+          "The Future was destructed while still incomplete")), lock);
+    }
+    TORCH_INTERNAL_ASSERT(
+        false, "The Future was destructed while still incomplete");
+  }
+
  private:
 
   // This method should always be used when invoking a callback (regardless of
