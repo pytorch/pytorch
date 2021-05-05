@@ -33,6 +33,7 @@ static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = false; // NOLINT
+static bool opt_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -99,6 +100,10 @@ bool& getTEMustUseLLVMOnCPU() {
 
 bool& getCatWoConditionals() {
   return cat_wo_conditionals;
+}
+
+bool& getOptConditionals() {
+  return opt_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -2395,6 +2400,9 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   }
 
   l.prepareForCodegen();
+  if (getOptConditionals()) {
+    l.optimizeConditionals();
+  }
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
     l.vectorizeInnerLoops();
