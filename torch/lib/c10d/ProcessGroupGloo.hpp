@@ -74,7 +74,7 @@ class ProcessGroupGloo : public ProcessGroup {
   class AsyncWork : public ProcessGroup::Work {
    public:
     AsyncWork(
-        std::vector<at::Tensor> outputTensors,
+        std::vector<std::vector<at::Tensor>> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
         : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
@@ -99,7 +99,7 @@ class ProcessGroupGloo : public ProcessGroup {
     friend class ProcessGroupGloo;
 
    private:
-    std::vector<at::Tensor> outputTensors_;
+    std::vector<std::vector<at::Tensor>> outputTensors_;
   };
 
   // Wrap c10d store as Gloo store
