@@ -155,7 +155,7 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
 
     .. note::
         We are actively developing a different and improved vmap prototype
-        `here. <https://github.com/zou3519/functorch>`. The improved
+        `here. <https://github.com/zou3519/functorch>`_ The improved
         prototype is able to arbitrarily compose with gradient computation.
         Please give that a try if that is what you're looking for.
 
