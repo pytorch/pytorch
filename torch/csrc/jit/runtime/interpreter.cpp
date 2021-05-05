@@ -230,7 +230,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // std::cout << "RUNNING ";
         // frames.back().function->dump(std::cout, frame.pc);
         Instruction inst = frame.function->instructions_[frame.pc];
-        profiling::InstructionSpan g{
+        profiling::InstructionSpan instSpan{
             *frame.function->instructions_source()[frame.pc]};
         switch (inst.op) {
           case ENTER: {

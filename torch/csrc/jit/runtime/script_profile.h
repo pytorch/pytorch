@@ -18,15 +18,16 @@ struct Datapoint {
   Timepoint start;
   Timepoint end;
 
-  Datapoint(SourceRange sr)
+  explicit Datapoint(SourceRange sr)
       : sourceRange(std::move(sr)), start(std::chrono::steady_clock::now()) {}
 };
 
 class TORCH_API InstructionSpan {
  public:
-  InstructionSpan(Node&);
+  explicit InstructionSpan(Node&);
   ~InstructionSpan();
   InstructionSpan(InstructionSpan&&) = delete;
+  InstructionSpan& operator=(InstructionSpan&&) = delete;
 
  private:
   std::unique_ptr<Datapoint> datapoint_;

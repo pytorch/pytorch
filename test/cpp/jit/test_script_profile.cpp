@@ -48,5 +48,15 @@ TEST(ScriptProfileTest, Basic) {
   const auto& stat = lines.at(source->lineno_for_offset(begin));
   EXPECT_EQ(stat.count, 3);
 }
+
+TEST(ScriptProfileTest, CallingOrder) {
+  ScriptProfile p;
+  p.enable();
+  EXPECT_THROW(p.dumpStats(), c10::Error);
+  p.disable();
+  auto dp = std::make_shared<profiling::Datapoint>(SourceRange{});
+  EXPECT_THROW(p.addDatapoint(std::move(dp)), c10::Error);
+}
+
 } // namespace jit
 } // namespace torch
