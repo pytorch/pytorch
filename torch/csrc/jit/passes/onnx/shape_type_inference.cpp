@@ -1555,6 +1555,11 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
+  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+    // For cases with tracing, simply ignore NoneType outputs
+    // For cases with scripting, TODO: Add logic to handle NoneType outputs
+    // when such output types are supported. For now test cases with NoneType
+    // outputs have been disabled.
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
