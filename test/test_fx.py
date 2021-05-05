@@ -2303,8 +2303,23 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
-                           'polygamma', 'cdist', 'einsum', '__radd__', '__rsub__', '__rmul__', '__rdiv__',
+        # Sorted and one entry on each line to minimize merge conflicts.
+        known_no_schema = {'cdist',
+                           'dstack',
+                           'einsum',
+                           'hstack',
+                           'linalg.multi_dot',
+                           'polygamma',
+                           'repeat',
+                           'stack',
+                           'view',
+                           'view_as',
+                           'vstack',
+                           '__getitem__',
+                           '__radd__',
+                           '__rsub__',
+                           '__rmul__',
+                           '__rdiv__',
                            '__rpow__'}
 
         try:

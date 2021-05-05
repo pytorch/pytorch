@@ -14,6 +14,8 @@ jobs:
     # Only run the job when the body contains magic word "RUN_TORCHBENCH:"
     if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.body, 'RUN_TORCHBENCH:') }}
     runs-on: [self-hosted, bm-runner]
+    # Set to 12 hours
+    timeout-minutes: 720
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2

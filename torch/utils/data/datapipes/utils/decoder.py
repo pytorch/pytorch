@@ -2,7 +2,8 @@
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 
 import io
-import os
+import json
+import os.path
 import pickle
 import tempfile
 
@@ -26,7 +27,6 @@ def basichandlers(extension, data):
             return None
 
     if extension in "json jsn":
-        import json
         return json.loads(data)
 
     if extension in "pyd pickle".split():
@@ -246,6 +246,15 @@ class MatHandler:
 ################################################################
 # a sample decoder
 ################################################################
+# Extract extension from pathname
+def _default_key_fn(pathname):
+    ext = os.path.splitext(pathname)[1]
+    # Remove dot
+    if ext:
+        ext = ext[1:]
+    return ext
+
+
 class Decoder:
     """
     Decode key/data sets using a list of handlers.
@@ -253,16 +262,16 @@ class Decoder:
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, handlers, key_fn):
-        self.handlers = list(handlers) if len(handlers) > 0 else []
+    def __init__(self, *handler, key_fn=_default_key_fn):
+        self.handlers = list(handler) if handler else []
         self.key_fn = key_fn
 
-    # Add from the beginning of the handlers to make sure the added
-    # handler having highest priority
-    def add_handler(self, handler):
+    # Insert new handler from the beginning of handlers list to make sure the new
+    # handler having the highest priority
+    def add_handler(self, *handler):
         if not handler:
             return
-        self.handlers = [handler] + self.handlers
+        self.handlers[0: 0] = list(handler)
 
     def decode1(self, key, data):
         if not data:
