@@ -465,7 +465,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_shard1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  test_python_gloo_with_tls
   install_torchvision
   test_python_shard2
   test_libtorch
@@ -476,6 +475,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test ]]; then
+  test_python_gloo_with_tls
+fi
 else
   install_torchvision
   install_monkeytype
