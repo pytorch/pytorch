@@ -16,12 +16,7 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
-  const Tensor weightContig = weight.contiguous();
-  const auto ws = weightContig.sizes();
-  auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
-  auto packedWeight = at::empty(ws);
-  int64_t size_bytes = c10::multiply_integers(ws) * sizeof(float);
-  memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
+  auto packedWeight = at::native::contiguous(weight, MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
       std::move(bias),
@@ -48,11 +43,8 @@ TORCH_LIBRARY(metal, m) {
                 std::move(std::get<2>(state)),
                 std::move(std::get<3>(state)),
                 std::move(std::get<4>(state)),
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<5>(state)),
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<6>(state)),
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<7>(state)));
           });
   m.def("copy_to_host(Tensor X) -> Tensor Y");
