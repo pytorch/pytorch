@@ -75,7 +75,7 @@ Tensor addmm(
   std::vector<int64_t> textureSize = {N, oC, 1, 1};
   MetalTensorImplStorage mt{{N, oC}};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [fc encodeToCommandBuffer:commandBuffer.buffer
                 sourceImage:X
