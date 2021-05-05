@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
 #include <memory>
@@ -584,9 +585,11 @@ TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
 TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
 
 struct TORCH_API RecordFunctionTLS {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
   // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
   // must be sorted in increasing handles order
   RecordFunctionCallbacks sorted_tls_callbacks_;
+#endif
 
   bool tls_record_function_enabled_ = true;
 

@@ -412,4 +412,11 @@ __host__ __device__
 #endif
 #endif
 
+#if defined(__ANDROID__) && !defined(_LIBCPP_VERSION)
+// The thread_local on Android with old libgnustl was broken. It can run
+// thread_local object's destructor after it frees the memory. So it's unsafe
+// to have thread_local objects with non-trivial destructor.
+#define C10_BROKEN_THREAD_LOCAL
+#endif
+
 #endif // C10_MACROS_MACROS_H_

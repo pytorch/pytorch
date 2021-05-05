@@ -71,6 +71,7 @@ void set_record_function_tls_(const RecordFunctionTLS& tls) {
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
       at::bumpRecordAllFunctions();
@@ -81,6 +82,9 @@ class CallbackManager {
     // NOLINTNEXTLINE(performance-move-const-arg)
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
+#else
+    return 0;
+#endif
   }
 
   CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
@@ -95,6 +99,7 @@ class CallbackManager {
   }
 
   void removeCallback(CallbackHandle handle) {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     auto find_and_remove = [handle](RecordFunctionCallbacks& cbs) {
       auto it = std::find_if(
         cbs.begin(), cbs.end(),
@@ -122,6 +127,7 @@ class CallbackManager {
     if (!found) {
       LOG(WARNING) << "Requested callback is not found";
     }
+#endif
   }
 
   void clearGlobalCallbacks() {
@@ -129,7 +135,9 @@ class CallbackManager {
   }
 
   void clearThreadLocalCallbacks() {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     rf_tls_.sorted_tls_callbacks_.clear();
+#endif
   }
 
   inline bool hasGlobalCallbacks() const {
@@ -137,7 +145,11 @@ class CallbackManager {
   }
 
   inline bool hasThreadLocalCallbacks() const {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     return !rf_tls_.sorted_tls_callbacks_.empty();
+#else
+    return false;
+#endif
   }
 
   // We need this function to be inlined: init() is a hot path and
@@ -199,6 +211,7 @@ class CallbackManager {
     bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
@@ -216,6 +229,7 @@ class CallbackManager {
         rec_fn.state_->sorted_active_tls_handles_.push_back(cb.second);
       }
     }
+#endif
 
     for (const auto& cb: sorted_global_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
@@ -257,12 +271,14 @@ class CallbackManager {
         rf.state_->global_ctx_,
         /* is_start */ true,
         rf);
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     mergeRunCallbacks(
         rf_tls_.sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ true,
         rf);
+#endif
     rf.state_->called_start_callbacks_ = true;
   }
 
@@ -273,12 +289,14 @@ class CallbackManager {
         rf.state_->global_ctx_,
         /* is_start */ false,
         rf);
+#if !defined(C10_BROKEN_THREAD_LOCAL)
     mergeRunCallbacks(
         rf_tls_.sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ false,
         rf);
+#endif
   }
 
   // Global callbacks; must be sorted in increasing handle order
@@ -351,10 +369,15 @@ namespace {
 } // namespace
 
 RecordFunctionCallbacks _getTLSCallbacks() {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
   return rf_tls_.sorted_tls_callbacks_;
+#else
+  return {};
+#endif
 }
 
 void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
+#if !defined(C10_BROKEN_THREAD_LOCAL)
   // keep the original handles
   rf_tls_.sorted_tls_callbacks_ = callbacks;
   std::sort(
@@ -364,6 +387,7 @@ void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
           const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
         return l.second < r.second;
   });
+#endif
 }
 
 bool hasCallbacks() {
@@ -421,7 +445,11 @@ RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
   if (rf_tls_ptr->tls_record_function_enabled_) {
     auto& m = manager();
-    if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
+    if (!m.sorted_global_callbacks_.empty()
+#if !defined(C10_BROKEN_THREAD_LOCAL)
+        || !rf_tls_ptr->sorted_tls_callbacks_.empty()
+#endif
+    ) {
       m.init(*this, scope, pre_sampled);
     }
   }
@@ -518,7 +546,11 @@ bool checkRecordAllFunctions() {
 
 bool shouldRunRecordFunction(bool* pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
-  if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
+  if (
+#if !defined(C10_BROKEN_THREAD_LOCAL)
+      rf_tls_ptr->sorted_tls_callbacks_.empty() &&
+#endif
+      !manager().hasGlobalCallbacks()) {
     *pre_sampled = false;
     return false;
   }
