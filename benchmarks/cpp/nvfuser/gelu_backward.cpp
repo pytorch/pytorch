@@ -101,7 +101,7 @@ static void GeluBackward_AutoSchedule(benchmark::State& benchmark_state) {
     benchmark_state.ResumeTiming();
 
     // Auto-schedule
-    scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+    schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
   }
 }
 
@@ -121,7 +121,7 @@ static void GeluBackward_Lower(benchmark::State& benchmark_state) {
   // inputs
   std::vector<c10::IValue> inputs = setupInputs();
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   for (auto _ : benchmark_state) {
     GpuLower gpu_lower(&fusion);
@@ -141,7 +141,7 @@ static void GeluBackward_Compile(benchmark::State& benchmark_state) {
   // inputs
   std::vector<c10::IValue> inputs = setupInputs();
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   for (auto _ : benchmark_state) {
     FusionExecutor executor;
@@ -165,7 +165,7 @@ static void GeluBackward_RunFusion(benchmark::State& benchmark_state) {
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.compileFusion(&fusion);
@@ -194,7 +194,7 @@ static void GeluBackward_RunFusion_GpuOnly(benchmark::State& benchmark_state) {
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setMeasureKernelTimeFlag(true);
@@ -227,7 +227,7 @@ static void GeluBackward_RunFusion_CpuOnly(benchmark::State& benchmark_state) {
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setExecuteKernelFlag(false);

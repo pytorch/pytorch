@@ -388,7 +388,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, z)
         self.assertEqual(o, jit_o)
         subgraph = self._getSubgraphInFusion(t_jit.graph_for(x, y, z))
-        self.assertGraphContainsExactly(subgraph, 'aten::add', 2, consider_subgraphs=False)
+        self.assertGraphContainsExactly(subgraph, 'aten::add', 4, consider_subgraphs=False)
 
     @unittest.skipIf(True, "Broadcast with different output not supported yet")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1143,7 +1143,7 @@ class TestCudaFuser(JitTestCase):
         for idx in range(rnds):
             for offset in range(1, dims):
                 for affine in (True, False):
-                    input_shape = [random.randint(30, 100) for idx in range(dims)]
+                    input_shape = [random.randint(10, 30) for idx in range(dims)]
                     norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
                     self._native_layer_norm_helper(input_shape, norm_shape, torch.float32, "cuda", 1e-4, affine)
 
@@ -1155,7 +1155,7 @@ class TestCudaFuser(JitTestCase):
         rnds = 3
         for idx in range(rnds):
             for offset in range(1, dims):
-                input_shape = [random.randint(30, 100) for idx in range(dims)]
+                input_shape = [random.randint(10, 30) for idx in range(dims)]
                 norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
                 self._native_layer_norm_helper(input_shape, norm_shape, torch.float16, "cuda", 5e-3)
 
@@ -1440,7 +1440,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_pw_single_reduction_partition(self):
-        sizes = [8, 8, 8]
+        sizes = [2, 2, 2]
         dtype = torch.float
         device = "cuda"
         x = torch.randn(sizes, dtype=dtype, device=device)
@@ -1459,6 +1459,43 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_permutation_preservation(self):
+        sizes = [2, 2, 2, 2]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+
+        def t(x: torch.Tensor):
+            o = torch.relu(x)
+            o = torch.sum(o, dim=[0])
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+        # we should preserve permutation to inputs
+        self.assertEqual(jit_o.stride(), (1, 4, 2))
+
+        def t(x: torch.Tensor):
+            o = torch.relu(x)
+            o = torch.add(o, 1.0)
+            return o
+
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+        self.assertTrue(jit_o.is_contiguous(memory_format=torch.channels_last))
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

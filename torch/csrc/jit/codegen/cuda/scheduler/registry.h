@@ -37,35 +37,49 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   //! Heuristic comparison
   bool sameAs(const SchedulerEntry* other);
 
-  bool hasParam() const {
-    return has_param_;
+  bool hasReductionParam() const {
+    return has_reduction_param_;
   }
 
   ScheduleHeuristic heuristc() const {
     return heuristc_;
   }
 
-  const ReductionParams& params() const {
+  const ReductionParams& reductionParams() const {
+    TORCH_INTERNAL_ASSERT(
+        has_reduction_param_, "This schedule heuristic is not reduction.");
     return rparams_;
   }
 
+  const PointwiseParams& pointwiseParams() const {
+    TORCH_INTERNAL_ASSERT(
+        !has_reduction_param_, "This schedule heuristic is not pointwise.");
+    return pparams_;
+  }
+
   void updateLaunchConstraint(const LaunchParams& launch_params) {
-    TORCH_INTERNAL_ASSERT(hasParam());
-    rparams_.lparams = launch_params;
+    if (hasReductionParam()) {
+      rparams_.lparams = launch_params;
+    } else {
+      pparams_.lparams = launch_params;
+    }
   }
 
  protected:
-  explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_param)
-      : heuristc_(heuristic), has_param_(has_param) {}
+  explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_reduction_param)
+      : heuristc_(heuristic), has_reduction_param_(has_reduction_param) {}
 
   //! What kind of heuristics does this entry have?
   const ScheduleHeuristic heuristc_;
 
-  //! Does this entry have any parameter?
-  const bool has_param_;
+  //! Has reduction params if true, else has pointwise params
+  const bool has_reduction_param_;
 
-  //! What are the schedule parameters, if any?
+  //! Reduction parameters if applicable
   ReductionParams rparams_;
+
+  //! Pointwise parameters if applicable
+  PointwiseParams pparams_;
 };
 
 //! Hash function for a scheduler entry

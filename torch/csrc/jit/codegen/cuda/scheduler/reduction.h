@@ -12,19 +12,15 @@ class ExpressionEvaluator;
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& fusion_inputs,
-    TensorView* red_tv);
+    const at::ArrayRef<c10::IValue>& fusion_inputs);
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator,
-    TensorView* red_tv);
+    ExpressionEvaluator& evaluator);
 
 TORCH_CUDA_CU_API void scheduleReduction(
     Fusion* fusion,
-    const ReductionParams& rparams,
-    TensorView* red_tv,
-    const std::vector<TensorView*>& outs_of_red);
+    const ReductionParams& rparams);
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

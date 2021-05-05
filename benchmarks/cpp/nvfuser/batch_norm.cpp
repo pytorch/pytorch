@@ -81,11 +81,6 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
 
   auto output =
       setupBatchNorm(&fusion, input, weight, bias, input_shape.size());
-  fusion.addOutput(output);
-
-  std::vector<TensorView*> reduction_tensors;
-  std::vector<TensorView*> other_tensors;
-  analyzeFusion(&fusion, reduction_tensors, other_tensors);
 
   // inputs
   at::manual_seed(0);
@@ -99,11 +94,11 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
   std::vector<at::Tensor> outputs;
 
   auto reduction_params =
-      getNormalizationHeuristics(&fusion, inputs, reduction_tensors);
+      getNormalizationHeuristics(&fusion, inputs);
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
   scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+      &fusion, reduction_params.value());
 
   FusionExecutor executor;
   executor.setMeasureKernelTimeFlag(true);

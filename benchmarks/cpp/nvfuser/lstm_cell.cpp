@@ -104,7 +104,7 @@ static void LstmCell_AutoSchedule(benchmark::State& benchmark_state) {
     benchmark_state.ResumeTiming();
 
     // Auto-schedule
-    scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+    schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
   }
 }
 
@@ -124,7 +124,7 @@ static void LstmCell_Lower(benchmark::State& benchmark_state) {
   // inputs
   std::vector<c10::IValue> inputs = setupInputs(kHiddenFeatures, kBatchSize);
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   for (auto _ : benchmark_state) {
     GpuLower gpu_lower(&fusion);
@@ -147,7 +147,7 @@ static void LstmCell_Compile(benchmark::State& benchmark_state) {
   // inputs
   std::vector<c10::IValue> inputs = setupInputs(kHiddenFeatures, kBatchSize);
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   for (auto _ : benchmark_state) {
     FusionExecutor executor;
@@ -174,7 +174,7 @@ static void LstmCell_RunFusion(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.compileFusion(&fusion);
@@ -210,7 +210,7 @@ static void LstmCell_RunFusion_GpuOnly(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setMeasureKernelTimeFlag(true);
@@ -250,7 +250,7 @@ static void LstmCell_RunFusion_CpuOnly(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setExecuteKernelFlag(false);

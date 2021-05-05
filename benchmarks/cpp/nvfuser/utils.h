@@ -14,21 +14,6 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void analyzeFusion(
-    Fusion* fusion,
-    std::vector<TensorView*>& reduction_tv,
-    std::vector<TensorView*>& other_tv) {
-  auto all_values = DependencyCheck::getAllValsBetween(
-      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
-
-  for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
-    if (tv->hasReduction()) {
-      reduction_tv.push_back(tv);
-    } else if (!fusion->hasInput(tv)) {
-      other_tv.push_back(tv);
-    }
-  }
-}
 
 class CudaKernelTimer {
  public:

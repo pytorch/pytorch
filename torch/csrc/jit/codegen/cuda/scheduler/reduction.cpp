@@ -534,22 +534,36 @@ ReductionParams reductionHeuristic(
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& fusion_inputs,
-    TensorView* red_tv) {
+    const at::ArrayRef<c10::IValue>& fusion_inputs) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
   auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
 
-  return getReductionHeuristics(fusion, evaluator, red_tv);
+  return getReductionHeuristics(fusion, evaluator);
 }
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator,
-    TensorView* red_tv) {
+    ExpressionEvaluator& evaluator) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
   FusionGuard fg(fusion);
+  auto tvs = scheduler_utils::allTvs(fusion);
+  TensorView* red_tv = nullptr;
+  for (auto tv : tvs) {
+    if (tv->hasReduction()) {
+      if (red_tv == nullptr) {
+        red_tv = tv;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            red_tv->definition() == tv->definition(),
+            "Found multiple reductions sent to reduction heuristics",
+            " (and reductions are not from a multi-output expr).");
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(red_tv != nullptr);
 
   auto red_root_dom = red_tv->getRootDomain();
   bool fastest_dim_reduction = true;
@@ -615,13 +629,26 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
 }
 
 // fusion is the input IR that will be modified by this function
-void scheduleReduction(
-    Fusion* fusion,
-    const ReductionParams& rparams,
-    TensorView* red_tv,
-    const std::vector<TensorView*>& outs_of_red) {
+void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("scheduleReduction");
   FusionGuard fg(fusion);
+
+  auto tvs = scheduler_utils::allTvs(fusion);
+  TensorView* red_tv = nullptr;
+  for (auto tv : tvs) {
+    if (tv->hasReduction()) {
+      if (red_tv == nullptr) {
+        red_tv = tv;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            red_tv->definition() == tv->definition(),
+            "Found multiple reductions sent to reduction heuristics",
+            " (and reductions are not from a multi-output expr).");
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(red_tv != nullptr);
 
   // If either of these are nullptr at the end of this function don't do
   // anything. Otherwise Transform and parallize entire fusion based on

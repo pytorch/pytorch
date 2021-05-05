@@ -11,19 +11,15 @@ class ExpressionEvaluator;
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& fusion_inputs,
-    const std::vector<TensorView*>& reduction_tv);
+    const at::ArrayRef<c10::IValue>& fusion_inputs);
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator,
-    const std::vector<TensorView*>& reduction_tv);
+    ExpressionEvaluator& evaluator);
 
 TORCH_CUDA_CU_API void scheduleNormalization(
     Fusion* fusion,
-    const ReductionParams& rparams,
-    const std::vector<TensorView*>& reduction_tv,
-    std::vector<TensorView*>& other_tv);
+    const ReductionParams& rparams);
 
 } // namespace cuda
 } // namespace fuser

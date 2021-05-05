@@ -85,6 +85,15 @@ void validateIr(Fusion* fusion) {
 
   fusion->validateInputs();
 
+  // Convert all input broadcast iterdomains to strided
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      if (id->isBroadcast()) {
+        id->toStridedBroadcast();
+      }
+    }
+  }
+
   // Convert all output broadcast iterdomains to strided
   for (auto tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
     for (auto id : tv->getMaybeRFactorDomain()) {

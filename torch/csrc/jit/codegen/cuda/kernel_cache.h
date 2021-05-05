@@ -24,6 +24,7 @@ class FusionHeuristics;
 // Utilities for benchmarking and profiling
 struct ExecutorLog {
   c10::optional<ReductionParams> reduction_params = c10::nullopt;
+  c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
   c10::optional<LaunchParams> launch_constraints = c10::nullopt;
   FusionExecutor* fusion_executor = nullptr;
 };

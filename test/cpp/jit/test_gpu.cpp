@@ -1140,24 +1140,27 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   auto fusion = parseJitIR(g);
   FusionGuard fg(fusion.get());
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  // Avoid vectorization here as those kernels can't be lowered twice at the
+  // moment
   at::Tensor input1 = at::randn({16}, options);
   at::Tensor input2 = at::randn({16}, options);
-  scheduleFusion(fusion.get(), {input1, input2});
+  schedulePointwise(fusion.get(), {input1, input2});
 
   // CONSIDER:
   // 1. this can be moved to a dedicated "golden" file
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  float T2[1];
-  if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
-    constexpr int64_t ki60 = 0;
-    T2[ki60]
-      = T0[(((((blockIdx.x * 1) + ki60) * 128) + threadIdx.x) * 1)]
-      * T1[(((((blockIdx.x * 1) + ki60) * 128) + threadIdx.x) * 1)];
-    T3[(((((blockIdx.x * 1) + ki60) * 128) + threadIdx.x) * 1)]
-      = T2[ki60]
-      * T0[(((((blockIdx.x * 1) + ki60) * 128) + threadIdx.x) * 1)];
+  if ((((((((blockIdx.x * 1) + (1 - 1)) * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
+    constexpr int64_t ki81 = 0;
+    constexpr int64_t ki83 = 0;
+    float T2[1];
+    T2[0]
+      = T0[(((((((blockIdx.x * 1) + ki81) * 1) + ki83) * 128) + threadIdx.x) * 1)]
+      * T1[(((((((blockIdx.x * 1) + ki81) * 1) + ki83) * 128) + threadIdx.x) * 1)];
+    T3[(((((((blockIdx.x * 1) + ki81) * 1) + ki83) * 128) + threadIdx.x) * 1)]
+      = T2[0]
+      * T0[(((((((blockIdx.x * 1) + ki81) * 1) + ki83) * 128) + threadIdx.x) * 1)];
   }
 }
 )";
@@ -5240,7 +5243,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
 
   std::vector<IValue> aten_inputs = {t0, t1};
 
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -5343,10 +5346,9 @@ TEST(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
   at::Tensor input1 = at::randn(tensor1_shape, options);
 
   std::vector<int64_t> reduction_axes{0, 1};
-  auto reduction_params =
-      getReductionHeuristics(&fusion, {input0, input1}, tv3);
+  auto reduction_params = getReductionHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv3, {});
+  scheduleReduction(&fusion, reduction_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -5459,6 +5461,48 @@ TEST(NVFuserTest, FusionAdvancedIndexing8_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {at_t0, at_t1}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionAdvancedIndexing9_CUDA) {
+  // Same as 7 but with outer splits instead of inner
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {false, true});
+
+  auto tv2 = mul(tv1, new Double(2));
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeSymbolicTensor(3);
+  fusion.addInput(tv3);
+
+  auto tv4 = add(tv3, tv2);
+  fusion.addOutput(tv4);
+
+  const int numel_x = 200;
+  const int numel_y = 300;
+  const int numel_z = 400;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_t0 = at::randn({numel_y}, options);
+  auto at_t3 = at::randn({numel_x, numel_y, numel_z}, options);
+  std::vector<IValue> aten_inputs = {at_t0, at_t3};
+
+  schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto at_t1 = at_t0.unsqueeze(-1);
+  auto at_t2 = at_t1.mul(2.0);
+
+  auto at_t4 = at_t3.add(at_t2);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
 // Intended to stress the lowering of our code generator
@@ -6876,8 +6920,6 @@ TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
   TensorView* tv1 = reductionOp(
       BinaryOpType::Add, {red_dim}, new Double(0), tv0, /*keep_dim=*/true);
 
-  TensorView* red_tv = tv1->definition()->inputs()[0]->as<TensorView>();
-
   fusion.addOutput(tv1);
 
   const auto options =
@@ -6888,9 +6930,9 @@ TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
       aten_input.to(at::kDouble).sum({red_dim}, /*keepdim=*/true);
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, red_tv);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), red_tv, {tv1});
+  scheduleReduction(&fusion, reduction_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -7020,9 +7062,9 @@ TEST(NVFuserTest, FusionReductionScheduler_CUDA) {
   auto aten_output = aten_input.to(at::kDouble).sum({red_dim});
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv1);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv1, {});
+  scheduleReduction(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
 
@@ -7126,9 +7168,9 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
   at::Tensor cg_output = at::empty(tensor_dims_out, options);
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv1);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv1, {});
+  scheduleReduction(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   FusionExecutor fe;
@@ -7169,9 +7211,9 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
   at::Tensor aten_input = at::randn(tensor_dims_in, options);
   auto aten_output = aten_input.to(at::kDouble).sum(red_dims64);
 
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv1);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv1, {});
+  scheduleReduction(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   FusionExecutor fe;
@@ -7230,15 +7272,9 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
       at::Tensor aten_input = at::randn({rdim}, options);
       auto aten_output = aten_input.to(at::kDouble).sum({0});
 
-      std::vector<TensorView*> outputs_of_red;
-      if (is_fp16) {
-        outputs_of_red.push_back(tv1_cast);
-      }
-
-      auto reduction_params =
-          getReductionHeuristics(&fusion, {aten_input}, tv1);
+      auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
       TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-      scheduleReduction(&fusion, reduction_params.value(), tv1, outputs_of_red);
+      scheduleReduction(&fusion, reduction_params.value());
       auto lparams = reduction_params.value().lparams;
 
       FusionExecutor fe;
@@ -7306,16 +7342,9 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
               (axis ? at::randn({odim, rdim}, options)
                     : at::randn({rdim, odim}, options));
 
-          std::vector<TensorView*> outputs_of_red;
-          if (is_fp16) {
-            outputs_of_red.push_back(tv1_cast);
-          }
-
-          auto reduction_params =
-              getReductionHeuristics(&fusion, {aten_input}, tv1);
+          auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
           TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-          scheduleReduction(
-              &fusion, reduction_params.value(), tv1, outputs_of_red);
+          scheduleReduction(&fusion, reduction_params.value());
           auto lparams = reduction_params.value().lparams;
 
           FusionExecutor fe;
@@ -7973,21 +8002,15 @@ TEST(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
   fusion.addInput(input);
   fusion.addOutput(output);
 
-  std::vector<TensorView*> reduction_tensors({max_val, sum_exp});
-  std::vector<TensorView*> other_tensors(
-      {bcast_max, x_max_sub, exp, bcast_sum, output});
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn(input_shape, options);
   auto aten_output =
       at::_softmax(aten_input.to(at::kDouble), kReductionAxis, false);
 
-  auto reduction_params =
-      getNormalizationHeuristics(&fusion, {aten_input}, reduction_tensors);
+  auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+  scheduleNormalization(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
 
@@ -8084,20 +8107,6 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   auto* grad_in = mul(mul(reciprocal_size, rstd), inner);
   fusion.addOutput(grad_in);
 
-  std::vector<TensorView*> reduction_tensors;
-  std::vector<TensorView*> other_tensors;
-
-  auto all_values = DependencyCheck::getAllValsBetween(
-      {fusion.inputs().begin(), fusion.inputs().end()}, fusion.outputs());
-
-  for (auto tensor : ir_utils::filterByType<TensorView>(all_values)) {
-    if (tensor->hasReduction()) {
-      reduction_tensors.push_back(tensor);
-    } else if (!fusion.hasInput(tensor)) {
-      other_tensors.push_back(tensor);
-    }
-  }
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_grad_out = at::randn(shape, options);
   at::Tensor aten_input = at::randn(shape, options);
@@ -8115,13 +8124,10 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   // Check reduction axis is same for all reductions
   // Generate Launch Parameters
   auto reduction_params = getNormalizationHeuristics(
-      &fusion,
-      {aten_grad_out, aten_input, aten_mean, aten_rstd, aten_weight},
-      reduction_tensors);
+      &fusion, {aten_grad_out, aten_input, aten_mean, aten_rstd, aten_weight});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+  scheduleNormalization(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -8194,30 +8200,16 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   auto output = mul(x_mean_sub, rvar);
   fusion.addOutput(output);
 
-  std::vector<TensorView*> reduction_tensors({x_sum, var_sum});
-  std::vector<TensorView*> other_tensors(
-      {x_mean,
-       x_sum_bcast,
-       x_mean_sub,
-       x_mean_sub_pow,
-       var_sum_bcast,
-       var,
-       var_eps,
-       rvar,
-       output});
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn(input_shape, options);
   auto aten_output = at::layer_norm(aten_input.to(at::kDouble), norm_shape);
 
   // Check reduction axis is same for all reductions
   // Generate Launch Parameters
-  auto reduction_params =
-      getNormalizationHeuristics(&fusion, {aten_input}, reduction_tensors);
+  auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+  scheduleNormalization(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -8300,22 +8292,6 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   // fusion.addOutput(new_running_mean);
   // fusion.addOutput(new_running_var);
 
-  std::vector<TensorView*> reduction_tensors({x_sum, var_sum});
-  std::vector<TensorView*> other_tensors(
-      {x_mean,
-       x_sum_bcast,
-       x_mean_sub,
-       x_mean_sub_pow,
-       var_sum_bcast,
-       var,
-       var_eps,
-       rvar,
-       weight_bcast,
-       bias_bcast,
-       norm,
-       norm_gamma,
-       norm_gamma_bias});
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn(input_shape, options);
   at::Tensor tweight = at::ones({input_shape[1]}, options);
@@ -8343,13 +8319,11 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
 
   // Check reduction axis is same for all reductions
   // Generate Launch Parameters
-  auto reduction_params =
-      getNormalizationHeuristics(&fusion, aten_inputs, reduction_tensors);
+  auto reduction_params = getNormalizationHeuristics(&fusion, aten_inputs);
 
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+  scheduleNormalization(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -9794,7 +9768,7 @@ TEST(NVFuserTest, FusionLSTMCell_CUDA) {
   auto at_cy = at_forgetgate.mul(at_cx).add(at_ingate.mul(at_cellgate));
   auto at_hy = at_outgate.mul(at_cy.tanh());
 
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -9844,19 +9818,9 @@ TEST(NVFuserTest, FusionReductionHalf_CUDA) {
 
   auto reduction_tv = tv3;
 
-  auto outputsOfReduction = DependencyCheck::getAllOutputsOf({reduction_tv});
-
-  // Grab only tensor views, though there shouldn't be any other type
-  auto tv_entries = ir_utils::filterByType<TensorView>(outputsOfReduction);
-
-  std::vector<TensorView*> tvOutputsOfReduction(
-      tv_entries.begin(), tv_entries.end());
-
-  auto reduction_params =
-      getReductionHeuristics(&fusion, {aten_input}, reduction_tv);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(
-      &fusion, reduction_params.value(), reduction_tv, tvOutputsOfReduction);
+  scheduleReduction(&fusion, reduction_params.value());
 
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
@@ -9926,9 +9890,9 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
   at::Tensor aten_input = at::randn({bid_x, tid_x, 1}, options);
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv1);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv1, {});
+  scheduleReduction(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   FusionExecutor fe;
@@ -9971,10 +9935,10 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
   at::Tensor aten_input = at::randn({bid_x, tid_x, 1}, options);
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv2);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleReduction(&fusion, reduction_params.value(), tv2, {});
+  scheduleReduction(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   FusionExecutor fe;
@@ -10017,9 +9981,9 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   at::Tensor aten_input = at::randn({bid_x, tid_x, 1}, options);
 
   // Apply reduction heuristic
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv1);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value(), tv1, {tv2});
+  scheduleReduction(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   FusionExecutor fe;
@@ -10088,7 +10052,7 @@ TEST(NVFuserTest, FusionTrivialReduction2_CUDA) {
 
   std::vector<IValue> aten_inputs = {t0, t1};
 
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -10121,7 +10085,7 @@ TEST(NVFuserTest, FusionTrivialReduction3_CUDA) {
 
   std::vector<IValue> aten_inputs = {t0, t1};
 
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -10528,7 +10492,7 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
   auto aten_output = aten_output_float.to(c10::ScalarType::Half);
 
   std::vector<IValue> aten_inputs = {at_bias, at_input};
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -10605,7 +10569,7 @@ TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
   std::vector<IValue> aten_inputs = {at_grad, at_bias, at_input};
   std::vector<at::Tensor> aten_outputs = {at_out, at_out_half};
 
-  scheduleFusion(&fusion, aten_inputs);
+  schedulePointwise(&fusion, aten_inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -11943,27 +11907,13 @@ TEST(NVFuserTest, FusionWelfordSchedule_CUDA) {
   auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({M, N}, options);
-  auto red_params = getReductionHeuristics(&fusion, {t0}, tv_avg);
-
-  tv_avg->split(1, 4);
-  tv_avg->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
-  tv_avg->split(0, NamedScalar::getParallelDim(ParallelType::TIDy));
-
-  auto rtvs = tvs.rFactor({-3, -1});
-
-  rtvs.avg->computeAt(tv_avg, -1);
-
-  rtvs.avg->axis(-1)->parallelize(ParallelType::Unroll);
-
-  tv_avg->axis(0)->parallelize(ParallelType::BIDx);
-  tv_avg->axis(1)->parallelize(ParallelType::TIDy);
-  tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
-
-  tv1->computeAt(rtvs.avg, -1, ComputeAtMode::BestEffort);
+  // TODO: Why do we use launch params from here, but not scheduling???
+  auto reduction_params = getReductionHeuristics(&fusion, {t0});
+  scheduleReduction(&fusion, reduction_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
-  auto outputs = fe.runFusion({t0}, red_params.value().lparams);
+  auto outputs = fe.runFusion({t0}, reduction_params.value().lparams);
 
   // by default Welford outputs sum of square diff so need to divide to get var
   outputs[0] /= N;
@@ -11980,7 +11930,7 @@ TEST(NVFuserTest, FusionWelfordSchedule_CUDA) {
       __LINE__,
       __FILE__,
       "validate welford",
-      red_params.value().lparams);
+      reduction_params.value().lparams);
 }
 
 namespace {
@@ -12028,8 +11978,8 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
     outputs_of_red.push_back(M2_cast);
   }
 
-  auto reduction_params = getReductionHeuristics(&fusion, {aten_input}, tv_avg);
-  scheduleReduction(&fusion, reduction_params.value(), tv_avg, outputs_of_red);
+  auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
+  scheduleReduction(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
 
@@ -14607,6 +14557,67 @@ TEST(NVFuserTest, FusionSegmentMixReduction_CUDA) {
   TORCH_CHECK(segmented_fusion->groups().size() <= 2);
 }
 
+TEST(NVFuserTest, FusionSBAR_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // N, H, W, C format
+  std::vector<int64_t> input_shape{656, 7, 7, 64};
+
+  auto x = makeContigTensor(4);
+  auto y = makeContigTensor(4);
+  auto weight = makeContigTensor(1);
+  auto bias = makeContigTensor(1);
+
+  fusion.addInput(x);
+  fusion.addInput(y);
+  fusion.addInput(weight);
+  fusion.addInput(bias);
+
+  const size_t kNumberOfDims = x->nDims();
+  std::vector<bool> broadcast_mask(kNumberOfDims, false);
+  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
+    broadcast_mask[axis] = true;
+  }
+
+  auto weight_bcast = broadcast(weight, broadcast_mask);
+  auto scale = mul(x, weight_bcast);
+  auto bias_bcast = broadcast(bias, broadcast_mask);
+  auto scale_bias = add(scale, bias_bcast);
+  auto scale_bias_add = add(scale_bias, y);
+  auto scale_bias_add_relu = unaryOp(UnaryOpType::Relu, scale_bias_add);
+
+  fusion.addOutput(scale_bias_add_relu);
+
+  // inputs
+  at::manual_seed(0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_y = at::randn(input_shape, options);
+  at::Tensor at_weight = at::ones({input_shape[3]}, options);
+  at::Tensor at_bias = at::zeros({input_shape[3]}, options);
+
+  // inputs
+  std::vector<c10::IValue> inputs = {at_x, at_y, at_weight, at_bias};
+
+  // outputs
+  std::vector<at::Tensor> outputs;
+
+  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+
+  FusionExecutor executor;
+  executor.compileFusion(&fusion);
+
+  outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+
+  auto at_scale = at::mul(at_x, at_weight);
+  auto at_scale_bias = at::add(at_scale, at_bias);
+  auto pwise_add = at::add(at_scale_bias, at_y);
+  auto output = at::relu(pwise_add);
+
+  testValidate(&fusion, outputs, inputs, {output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionSingleElement_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -14624,7 +14635,7 @@ TEST(NVFuserTest, FusionSingleElement_CUDA) {
 
   at::Tensor cg_output = at::empty({}, options);
 
-  scheduleFusion(&fusion, {input});
+  schedulePointwise(&fusion, {input});
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -14634,6 +14645,321 @@ TEST(NVFuserTest, FusionSingleElement_CUDA) {
 
   testValidate(
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBNBackwardRepro_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int batch = 4;
+  int c = 4;
+  int h = 4;
+  int w = 4;
+  int numDims = 4;
+
+  auto input = makeSymbolicTensor(numDims);
+  fusion.addInput(input);
+  auto weight = makeSymbolicTensor(1);
+  fusion.addInput(weight);
+  auto running_mean = makeSymbolicTensor(1);
+  fusion.addInput(running_mean);
+  auto running_var = makeSymbolicTensor(1);
+  fusion.addInput(running_var);
+  auto save_mean = makeSymbolicTensor(1);
+  fusion.addInput(save_mean);
+  auto save_invstd = makeSymbolicTensor(1);
+  fusion.addInput(save_invstd);
+
+  auto grad_out_prev = makeSymbolicTensor(numDims);
+  fusion.addInput(grad_out_prev);
+  auto gt_0 =
+      makeSymbolicTensor(numDims); // single tensor broadcasted is dangerous.
+  fusion.addInput(gt_0);
+
+  auto gt_bool = binaryOp(BinaryOpType::GT, gt_0, new Int(1));
+  auto gt_float = castOp(DataType::Float, gt_bool);
+
+  auto grad_out = mul(grad_out_prev, gt_float);
+
+  Val* eps_ptr = new Double(1e-5);
+
+  std::vector<int> outer_reduction_axes;
+  std::vector<bool> outer_broadcast_mask(numDims, false);
+  Val* N = new Double(1);
+  for (size_t axis = 0; axis < numDims; ++axis) {
+    if (axis != 1) {
+      outer_reduction_axes.push_back(axis);
+      outer_broadcast_mask[axis] = true;
+      N = mul(N, input->domain()->domain()[axis]->extent());
+    }
+  }
+
+  Val* bcast_weight = broadcast(weight, outer_broadcast_mask);
+
+  auto bcast_rstd = broadcast(save_invstd, outer_broadcast_mask);
+  auto bcast_mean = broadcast(save_mean, outer_broadcast_mask);
+  auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
+  auto grad_x_hat = mul(grad_out, bcast_weight);
+
+  auto a = mul(N, grad_x_hat);
+
+  auto b = sum(grad_x_hat, outer_reduction_axes);
+  auto bcast_b = broadcast(b, outer_broadcast_mask);
+
+  auto c1 = mul(grad_x_hat, x_hat);
+  auto c2 = sum(c1, outer_reduction_axes);
+  auto bcast_c2 = broadcast(c2, outer_broadcast_mask);
+  auto c3 = mul(x_hat, bcast_c2);
+
+  auto inner = sub(sub(a, bcast_b), c3);
+
+  auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, N);
+  auto grad_in = mul(mul(reciprocal_size, bcast_rstd), inner);
+  fusion.addOutput(grad_in);
+
+  auto grad_weight = sum(mul(grad_out, x_hat), outer_reduction_axes);
+  fusion.addOutput(grad_weight);
+
+  auto grad_bias = sum(grad_out, outer_reduction_axes);
+  fusion.addOutput(grad_bias);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::randn({batch, c, h, w}, options);
+  at::Tensor input1 = at::randn({c}, options);
+  at::Tensor input2 = at::randn_like(input1);
+  at::Tensor input3 = at::randn_like(input1);
+  at::Tensor input4 = at::randn_like(input1);
+  at::Tensor input5 = at::randn_like(input1);
+  at::Tensor input6 = at::randn_like(input0);
+  at::Tensor input7 = at::randn_like(input0);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> inputs = {
+      input0, input1, input2, input3, input4, input5, input6, input7};
+  auto outputs = fec.runFusionWithInputs(inputs);
+}
+
+// TODO: We only changed inputs, merge this with the test above.
+// TODO: Enable test
+#if 0
+TEST(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int batch = 2;
+  int c = 81;
+  int h = 1;
+  int w = 1;
+  int numDims = 4;
+
+  // auto input = makeSymbolicTensor(numDims);
+  auto input = makeConcreteTensor({-1, -1, 1, 1});
+  fusion.addInput(input);
+  auto weight = makeSymbolicTensor(1);
+  fusion.addInput(weight);
+  auto running_mean = makeSymbolicTensor(1);
+  fusion.addInput(running_mean);
+  auto running_var = makeSymbolicTensor(1);
+  fusion.addInput(running_var);
+  auto save_mean = makeSymbolicTensor(1);
+  fusion.addInput(save_mean);
+  auto save_invstd = makeSymbolicTensor(1);
+  fusion.addInput(save_invstd);
+
+  // auto grad_out_prev = makeSymbolicTensor(numDims);
+  auto grad_out_prev = makeConcreteTensor({-1, -1, 1, 1});
+  fusion.addInput(grad_out_prev);
+  // auto gt_0 =
+  //     makeSymbolicTensor(numDims); // single tensor broadcasted is dangerous.
+  auto gt_0 = makeConcreteTensor({-1, -1, 1, 1});
+  fusion.addInput(gt_0);
+
+  auto gt_bool = binaryOp(BinaryOpType::GT, gt_0, new Int(1));
+  auto gt_float = castOp(DataType::Float, gt_bool);
+
+  auto grad_out = mul(grad_out_prev, gt_float);
+
+  Val* eps_ptr = new Double(1e-5);
+
+  std::vector<int> outer_reduction_axes;
+  std::vector<bool> outer_broadcast_mask(numDims, false);
+  Val* N = new Double(1);
+  for (size_t axis = 0; axis < numDims; ++axis) {
+    if (axis != 1) {
+      outer_reduction_axes.push_back(axis);
+      outer_broadcast_mask[axis] = true;
+      N = mul(N, input->domain()->domain()[axis]->extent());
+    }
+  }
+
+  Val* bcast_weight = broadcast(weight, outer_broadcast_mask);
+
+  auto bcast_rstd = broadcast(save_invstd, outer_broadcast_mask);
+  auto bcast_mean = broadcast(save_mean, outer_broadcast_mask);
+  auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
+  auto grad_x_hat = mul(grad_out, bcast_weight);
+
+  auto a = mul(N, grad_x_hat);
+
+  auto b = sum(grad_x_hat, outer_reduction_axes);
+  auto bcast_b = broadcast(b, outer_broadcast_mask);
+
+  auto c1 = mul(grad_x_hat, x_hat);
+  auto c2 = sum(c1, outer_reduction_axes);
+  auto bcast_c2 = broadcast(c2, outer_broadcast_mask);
+  auto c3 = mul(x_hat, bcast_c2);
+
+  auto inner = sub(sub(a, bcast_b), c3);
+
+  auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, N);
+  auto grad_in = mul(mul(reciprocal_size, bcast_rstd), inner);
+  fusion.addOutput(grad_in);
+
+  auto grad_weight = sum(mul(grad_out, x_hat), outer_reduction_axes);
+  fusion.addOutput(grad_weight);
+
+  auto grad_bias = sum(grad_out, outer_reduction_axes);
+  fusion.addOutput(grad_bias);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::randn({batch, c, h, w}, options);
+  at::Tensor input1 = at::randn({c}, options);
+  at::Tensor input2 = at::randn_like(input1);
+  at::Tensor input3 = at::randn_like(input1);
+  at::Tensor input4 = at::randn_like(input1);
+  at::Tensor input5 = at::randn_like(input1);
+  at::Tensor input6 = at::randn_like(input0);
+  at::Tensor input7 = at::randn_like(input0);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> inputs = {
+      input0, input1, input2, input3, input4, input5, input6, input7};
+  auto outputs = fec.runFusionWithInputs(inputs);
+}
+#endif
+
+TEST(NVFuserTest, FusionBNRepro_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int batch = 14;
+  int c = 65;
+  int h = 7;
+  int w = 7;
+  int numDims = 4;
+
+  auto input = makeSymbolicTensor(numDims);
+  fusion.addInput(input);
+  auto weight = makeSymbolicTensor(1);
+  fusion.addInput(weight);
+  auto bias = makeSymbolicTensor(1);
+  fusion.addInput(bias);
+  auto running_mean = makeSymbolicTensor(1);
+  fusion.addInput(running_mean);
+  auto running_var = makeSymbolicTensor(1);
+  fusion.addInput(running_var);
+
+  // TODO: error set 1, runtime momentum;
+  Val* momentum_ptr = new Double(0.1);
+  Val* rev_momentum_ptr = new Double(1.0 - 0.1);
+  Val* eps_ptr = new Double(1e-5);
+
+  std::vector<int> reduction_axes;
+  std::vector<bool> broadcast_mask(numDims, false);
+  Val* num_features = new Double(1);
+  for (size_t axis = 0; axis < numDims; ++axis) {
+    if (axis != 1) {
+      reduction_axes.push_back(axis);
+      broadcast_mask[axis] = true;
+      num_features =
+          mul(num_features, input->domain()->domain()[axis]->extent());
+    }
+  }
+
+  // Algorithm
+  auto x_sum = sum(input, reduction_axes);
+  auto x_mean = div(x_sum, num_features);
+  auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
+  auto x_mean_bcast = div(x_sum_bcast, num_features);
+
+  // updating running mean
+  auto current_mean_hat = mul(x_mean, momentum_ptr);
+  auto mean_hat = mul(running_mean, rev_momentum_ptr);
+  auto new_mean_hat = add(mean_hat, current_mean_hat);
+  fusion.addOutput(new_mean_hat);
+
+  auto x_mean_sub = sub(input, x_mean_bcast);
+  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
+  auto var_sum = sum(x_mean_sub_pow, reduction_axes);
+
+  // updating running var
+  auto num_feature_decrement = sub(num_features, new Int(1));
+  auto unbiased_var = div(var_sum, num_feature_decrement);
+  auto current_var_hat = mul(unbiased_var, momentum_ptr);
+  auto var_hat = mul(running_var, rev_momentum_ptr);
+  auto new_var_hat = add(var_hat, current_var_hat);
+  fusion.addOutput(new_var_hat);
+
+  auto var = div(var_sum, num_features);
+  auto var_eps = add(var, eps_ptr);
+  auto invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+  auto invstd_bcast = broadcast(invstd, broadcast_mask);
+  auto output = mul(x_mean_sub, invstd_bcast);
+
+  // Optional: norm * weight
+  if (weight) {
+    auto weight_bcast = broadcast(weight, broadcast_mask);
+    output = mul(output, weight_bcast);
+  }
+  if (bias) {
+    auto bias_bcast = broadcast(bias, broadcast_mask);
+    output = add(output, bias_bcast);
+  }
+  fusion.addOutput(output);
+  auto save_mean = x_mean;
+  fusion.addOutput(save_mean);
+  auto save_invstd = invstd;
+  fusion.addOutput(save_invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({batch, c, h, w}, options);
+  at::Tensor input2 = at::randn({c}, options);
+  at::Tensor input3 = at::randn_like(input2);
+  at::Tensor input4 = at::randn_like(input2);
+  at::Tensor input5 = at::randn_like(input2);
+
+  auto input1_ref = input1.clone();
+  auto input2_ref = input2.clone();
+  auto input3_ref = input3.clone();
+  auto input4_ref = input4.clone();
+  auto input5_ref = input5.clone();
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> aten_inputs = {input1, input2, input3, input4, input5};
+  auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto at_results = at::native_batch_norm(
+      input1_ref,
+      input2_ref,
+      input3_ref,
+      input4_ref,
+      input5_ref,
+      true,
+      0.1,
+      1e-5);
+
+  auto at_output = std::get<0>(at_results);
+  auto at_mean = std::get<1>(at_results);
+  auto at_invstd = std::get<2>(at_results);
+
+  std::vector<at::Tensor> aten_outputs = {
+      input4_ref, input5_ref, at_output, at_mean, at_invstd};
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
@@ -14659,7 +14985,7 @@ TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
   at::Tensor cg_output2 = at::empty({2}, options);
   at::Tensor cg_output3 = at::empty({0}, options);
 
-  scheduleFusion(&fusion, {input0, input1});
+  schedulePointwise(&fusion, {input0, input1});
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -14700,16 +15026,9 @@ TEST(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
   at::Tensor cg_output2 = at::empty({2}, options);
   at::Tensor cg_output3 = at::empty({0}, options);
 
-  auto reduction_tv = tv2;
-  auto outputsOfReduction = DependencyCheck::getAllOutputsOf({reduction_tv});
-  auto tv_entries = ir_utils::filterByType<TensorView>(outputsOfReduction);
-  std::vector<TensorView*> tvOutputsOfReduction(
-      tv_entries.begin(), tv_entries.end());
-  auto reduction_params =
-      getReductionHeuristics(&fusion, {input0, input1}, reduction_tv);
+  auto reduction_params = getReductionHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(
-      &fusion, reduction_params.value(), reduction_tv, tvOutputsOfReduction);
+  scheduleReduction(&fusion, reduction_params.value());
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
   auto lparams = reduction_params.value().lparams;
@@ -14755,14 +15074,9 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
   at::Tensor cg_output2 = at::empty({2, 4}, options);
   at::Tensor cg_output3 = at::empty({0}, options);
 
-  std::vector<TensorView*> reduction_tensors({tv2});
-  std::vector<TensorView*> other_tensors({tv4});
-
-  auto reduction_params =
-      getNormalizationHeuristics(&fusion, {input0, input1}, reduction_tensors);
+  auto reduction_params = getNormalizationHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleNormalization(
-      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+  scheduleNormalization(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
   FusionExecutor fe;

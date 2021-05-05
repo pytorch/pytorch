@@ -13,7 +13,8 @@ namespace cuda {
 // schedule. Warning: equal operator is intended for use in caching the kernel
 // associated with these reduction parameters. It does not check if the launch
 // parameters are equivelent!
-struct ReductionParams {
+class ReductionParams {
+ public:
   // Reducing inner most dimension?
   bool fastest_dim = true;
   // Reduce across the block?
@@ -36,8 +37,11 @@ struct ReductionParams {
   // Split grid dim in case it's too large for cuda
   bool split_grid_dim = false;
 
+  std::string tag = "";
+
   LaunchParams lparams;
 
+ public:
   // Warning: Does not check launch parameters!
   bool operator==(const ReductionParams& other) const {
     bool attr_equal = other.fastest_dim == fastest_dim &&
@@ -52,15 +56,16 @@ struct ReductionParams {
     return attr_equal;
   }
 
-  std::string toString() {
+  std::string toString() const {
     std::stringstream ss;
     ss << "\n===== Reduction Parameters ========\n"
+       << (tag == "" ? "" : "Tag: ") << tag
        << (fastest_dim ? "Red On Fastest Dim\n" : "Red On Slow Dim\n")
        << "Reduction Characteristics:\n"
        << (multiple_reds_per_blk ? "Multiple Reds Per Block\n" : "")
        << (cross_block ? "Cross block reduction\n" : "")
-       << (cross_grid ? "Cross grid reduction\n" : "") << "Blocking:"
-       << "\n"
+       << (cross_grid ? "Cross grid reduction\n" : "")
+       << (persistent_kernel ? "Persistent Kernel\n" : "") << "Blocking:\n"
        << " GridY: " << lparams.gdimy() << " BlckY: " << lparams.bdimy()
        << " BlckX: " << lparams.bdimx() << "\n";
     if (loop_unroll > 1) {

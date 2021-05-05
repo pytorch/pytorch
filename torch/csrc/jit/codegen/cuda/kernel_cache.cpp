@@ -397,15 +397,21 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   }
 
   // Load launch params for reduction and normalization kernels
-  if (scheduler_entry->hasParam()) {
-    launch_params = scheduler_entry->params().lparams;
+  if (scheduler_entry->hasReductionParam()) {
+    launch_params = scheduler_entry->reductionParams().lparams;
+  } else {
+    launch_params = scheduler_entry->pointwiseParams().lparams;
   }
 
   if (profiling_) {
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
     most_recent_executor_log_.launch_constraints = launch_params;
-    if (scheduler_entry->hasParam()) {
-      most_recent_executor_log_.reduction_params = scheduler_entry->params();
+    if (scheduler_entry->hasReductionParam()) {
+      most_recent_executor_log_.reduction_params =
+          scheduler_entry->reductionParams();
+    } else {
+      most_recent_executor_log_.pointwise_params =
+          scheduler_entry->pointwiseParams();
     }
   }
 
@@ -542,9 +548,12 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
       update_heuristics->heuristicsList().size() == scheduler_list_length);
   for (size_t i = 0; i < scheduler_list_length; i++) {
     auto& schedulerPtr = heuristics_->heuristicsList()[i];
-    if (schedulerPtr->hasParam()) {
+    if (schedulerPtr->hasReductionParam()) {
       schedulerPtr->updateLaunchConstraint(
-          update_heuristics->heuristicsList()[i]->params().lparams);
+          update_heuristics->heuristicsList()[i]->reductionParams().lparams);
+    } else {
+      schedulerPtr->updateLaunchConstraint(
+          update_heuristics->heuristicsList()[i]->pointwiseParams().lparams);
     }
   }
 }
@@ -662,10 +671,6 @@ FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
     //  will be re-computed/updated again if evicted, so it is safe to overwrite
     //  the launchparams here.
     rt->updateHeuristicsLaunchParams(heuristics.get());
-  }
-
-  if (profiling_) {
-    rt->profile(true);
   }
 
   // Cache this new id
