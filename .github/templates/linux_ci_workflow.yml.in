@@ -216,4 +216,6 @@ jobs:
         run: |
           python tools/render_junit.py .
       - name: Display and upload test statistics (Click Me)
-        run: python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+        run: |
+          export PYTHONPATH=$PWD
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test-reports
