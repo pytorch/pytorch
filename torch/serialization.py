@@ -456,7 +456,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
     serialized_storages = {}
-    id_map = {}
+    id_map: Dict[int, str] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
