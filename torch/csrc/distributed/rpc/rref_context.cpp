@@ -312,7 +312,8 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
-    const TypePtr& type) {
+    const TypePtr& type,
+    std::vector<c10::DeviceIndex> devices) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
@@ -320,7 +321,8 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
-    auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
+    auto rref = c10::make_intrusive<OwnerRRef>(
+        getWorkerId(), rrefId, type, std::move(devices));
     owners_[rref->rrefId()] = rref;
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter != pendingOwners_.end()) {
@@ -366,13 +368,14 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
 }
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
-    const TypePtr& type) {
+    const TypePtr& type,
+    std::vector<c10::DeviceIndex> devices) {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
   return c10::make_intrusive<OwnerRRef>(
-      getWorkerId(), genGloballyUniqueId(), type);
+      getWorkerId(), genGloballyUniqueId(), type, std::move(devices));
 }
 
 c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
