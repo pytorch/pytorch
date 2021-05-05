@@ -32,19 +32,6 @@ class TestSparseCSR(TestCase):
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
                                           include_bfloat16=False, include_complex=False))
     def test_sparse_csr_constructor(self, device, dtype):
-        # construction from lists
-        sparse = torch.sparse_csr_tensor([0, 2, 4],
-                                         [0, 1, 0, 1],
-                                         [1, 2, 3, 4],
-                                         dtype=dtype,
-                                         device=device)
-
-        self.assertEqual((2, 2), sparse.shape)
-        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
-        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
-
-        # construction from tensors
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
@@ -59,6 +46,34 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(crow_indices, dtype=index_dtype), sparse.crow_indices())
             self.assertEqual(torch.tensor(col_indices, dtype=index_dtype), sparse.col_indices())
             self.assertEqual(torch.tensor(values, dtype=dtype), sparse.values())
+
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                          include_bfloat16=False, include_complex=False))
+    def test_sparse_csr_constructor_from_lists(self, device, dtype):
+        # without size
+        sparse = torch.sparse_csr_tensor([0, 2, 4],
+                                         [0, 1, 0, 1],
+                                         [1, 2, 3, 4],
+                                         dtype=dtype,
+                                         device=device)
+
+        self.assertEqual((2, 2), sparse.shape)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+        # with size
+        sparse = torch.sparse_csr_tensor([0, 2, 4],
+                                         [0, 1, 0, 1],
+                                         [1, 2, 3, 4],
+                                         size=(2, 10),
+                                         dtype=dtype,
+                                         device=device)
+
+        self.assertEqual((2, 10), sparse.shape)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
     @dtypes(torch.double)
     def test_factory_size_check(self, device, dtype):
