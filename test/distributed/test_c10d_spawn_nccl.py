@@ -1,5 +1,6 @@
 import unittest
 
+import sys
 import test_c10d_spawn
 import torch
 import torch.distributed as c10d
