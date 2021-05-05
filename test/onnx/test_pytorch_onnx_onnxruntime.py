@@ -8278,6 +8278,48 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"random_data": [0, 1, 2, 3]})
         self.run_test(model, (random_data), remained_onnx_input_idx=[])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_input_mask_model(self):
+        class InputMaskModel(torch.nn.Module):
+            def __init__(self, output_size):
+                super(InputMaskModel, self).__init__()
+                self.bias = torch.nn.Parameter(torch.empty(
+                    output_size,
+                    dtype=torch.float))
+                with torch.no_grad():
+                    self.bias.zero_()
+
+            def forward(self, model_input, y):
+                input_mask = (model_input <= 0) | (model_input > 25)
+                y[input_mask, :] = 0.0
+                output = y + self.bias
+                return output
+
+        output_size = 4
+        m = InputMaskModel(output_size)
+        x = torch.tensor([0, 4, 24, 25], dtype=torch.int64)
+        y = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4],
+                         [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.float)
+        self.run_test(m, (x, y))
+
+        class InputMaskModel(torch.nn.Module):
+            def __init__(self, output_size):
+                super(InputMaskModel, self).__init__()
+
+            def forward(self, model_input_1, model_input_2, y):
+                input_mask_1 = (model_input_1 <= 0) | (model_input_1 > 25)
+                input_mask_2 = (model_input_2 < 1) | (model_input_2 >= 12)
+                y[input_mask_1, input_mask_2] = 0.0
+                return y
+
+        output_size = 4
+        m = InputMaskModel(output_size)
+        x1 = torch.tensor([0, 4, 24, 25], dtype=torch.int64)
+        x2 = torch.tensor([0, 3, 12, 15], dtype=torch.int64)
+        y = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4],
+                         [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.float)
+        self.run_test(m, (x1, x2, y))
+
     @disableScriptTest()
     def test_unsafe_chunk(self):
         class ChunkModel(torch.nn.Module):
