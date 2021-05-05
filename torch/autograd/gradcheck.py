@@ -286,7 +286,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
     return _combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` with respect
+    """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
     to `target`. Returns M * N Jacobians where N is the number of tensors in target that require grad and
     M is the number of non-integral outputs.
     Contrary to other functions here, this function requires "inputs" to actually be used by the function.
@@ -300,7 +300,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> T
         all_u (optional): if provided, the Jacobian will be right multiplied with this vector
 
     Returns:
-        A list of M N-tuples of tensors
+        A tuple of M N-tuples of tensors
     """
     # To avoid early import issues
     fwAD = torch.autograd.forward_ad
@@ -316,24 +316,24 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> T
 
     with fwAD.dual_level():
         fw_grads = []
-        new_inputs = []
+        dual_inputs = []
         for i, inp in enumerate(inputs):
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
                 inp = fwAD.make_dual(inp, torch.zeros_like(inp))
-                # If inp is a differentiable view, the dual might no be the tangent given to
+                # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
-            new_inputs.append(inp)
+            dual_inputs.append(inp)
 
         if all_u:
             # Do the full reduction in one pass
             # To be consistent with numerical evaluation, we actually compute one reduction per input
             for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
                 fw_grad.copy_(u)
-                dual_outputs = _as_tuple(fn(*new_inputs))
+                dual_outputs = _as_tuple(fn(*dual_inputs))
                 for index_o, d_o in enumerate(dual_outputs):
                     _, res = fwAD.unpack_dual(d_o)
 
@@ -349,7 +349,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> T
             for i, fw_grad in enumerate(fw_grads):
                 for lin_idx, grad_idx in enumerate(product(*[range(m) for m in fw_grad.size()])):
                     fw_grad[grad_idx] = 1.
-                    dual_outputs = _as_tuple(fn(*new_inputs))
+                    dual_outputs = _as_tuple(fn(*dual_inputs))
                     for index_o, d_o in enumerate(dual_outputs):
                         _, res = fwAD.unpack_dual(d_o)
                         if res is None:
@@ -1224,7 +1224,7 @@ def gradcheck(
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
-        except GradcheckError:
+        except GradcheckError as e:
             return False
     else:
         return _gradcheck_helper(**args)
@@ -1241,7 +1241,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
 
     gradcheck_fn = _fast_gradcheck if fast_mode else _slow_gradcheck
     _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
-                         rtol, atol, check_grad_dtypes, check_forward_ad, nondet_tol)
+                         rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad, nondet_tol=nondet_tol)
 
     for i, o in enumerate(outputs):
         if check_batched_grad:
