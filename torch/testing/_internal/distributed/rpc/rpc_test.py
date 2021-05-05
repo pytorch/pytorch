@@ -5893,15 +5893,23 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
             tik = torch.cuda.Event(enable_timing=True)
             tok = torch.cuda.Event(enable_timing=True)
-            x_rref = RRef(torch.zeros(5000, 1000).cuda(0), devices=[0])
-            tik.record()
-            for _ in range(10):
-                for net in nets:
-                    x_rref = net.remote().forward(x_rref)
-                x_rref.to_here()
-            tok.record()
-            torch.cuda.current_stream(0).synchronize()
-            print(f"=== total forward time {tik.elapsed_time(tok)}")
+
+            def run():
+                for scale in [1, 2, 4, 8]:
+                    size = 1000 * scale
+                    x_rref = RRef(torch.zeros(size, size).cuda(0), devices=[0])
+                    tik.record()
+                    for _ in range(10):
+                        for net in nets:
+                            x_rref = net.remote().forward(x_rref)
+                        x_rref.to_here()
+                    tok.record()
+                    torch.cuda.current_stream(0).synchronize()
+                    print(f"scale = {scale}, total forward time {tik.elapsed_time(tok)}")
+
+            run()
+            print("====== warm up done =====")
+            run()
 
         rpc.shutdown()
 
@@ -5933,14 +5941,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
             tik = torch.cuda.Event(enable_timing=True)
             tok = torch.cuda.Event(enable_timing=True)
-            x = torch.zeros(5000, 1000).cuda(0)
-            tik.record()
-            for _ in range(10):
-                for net in nets:
-                    x = net.rpc_sync().forward(x)
-            tok.record()
-            torch.cuda.current_stream(0).synchronize()
-            print(f"=== total forward time {tik.elapsed_time(tok)}")
+
+            def run():
+                for scale in [1, 2, 4, 8]:
+                    size = 1000 * scale
+                    x = torch.zeros(size, size).cuda(0)
+                    tik.record()
+                    for _ in range(10):
+                        for net in nets:
+                            x = net.rpc_sync().forward(x)
+                    tok.record()
+                    torch.cuda.current_stream(0).synchronize()
+                    print(f"scale = {scale}, total forward time {tik.elapsed_time(tok)}")
+
+            run()
+            print("====== warm up done =====")
+            run()
 
         rpc.shutdown()
 
