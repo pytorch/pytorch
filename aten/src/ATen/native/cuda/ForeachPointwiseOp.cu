@@ -145,10 +145,20 @@ FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 
+
+bool has_bool_tensor(TensorList tensors) {
+  for (const auto & tensor : tensors) {
+    if (tensor.scalar_type() == ScalarType::Bool) {
+      return true;
+    }
+  }
+  return false;
+}
+
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
     check_foreach_api_restrictions(tensors1, tensors2);                                                    \
-    if (!can_use_fast_route({tensors1, tensors2})) {                                                       \
+    if (!can_use_fast_route({tensors1, tensors2}) || has_bool_tensor(tensors1)) {                          \
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
     }                                                                                                      \
                                                                                                            \

@@ -183,7 +183,7 @@ class TestForeach(TestCase):
         self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False))
     def test_min_max(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
