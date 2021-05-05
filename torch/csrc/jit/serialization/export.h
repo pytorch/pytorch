@@ -80,6 +80,7 @@ class ScriptModuleSerializer {
       const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
   void writeArchive(const IValue& value, const std::string& archive_name);
+  void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
@@ -89,6 +90,32 @@ class ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
+
+  // Uniquely identifies a SourceRange in a model.
+  // SourceRanges are associated with Nodes of Graphs.
+  // However for mobile deployment we dont intend to ship
+  // full JIT with capabilities of reading code and constructing
+  // graphs.
+  // Instead we serialize the Code generated from graph of the methods.
+  // Code is serialized in bytecode format that contains instructions
+  // corresponding to the nodes of the graph. Since original graph is gone, the
+  // question is how do we identify where the ops, in serialized bytecode, come
+  // from in original model code. We do this in two parts.
+  // 1. Associate a unique tag to SourceRange.
+  // 2. Serialize this unique_tag.
+  //  2.1 Meaning save <byte_offset, source_range_tag, source range> instead of
+  //      <byte_offset, source range>
+  // 3. During serializing model for mobile, i.e. bytecode generation,
+  //    save unique tag of SourceRange corresponding to the Node.
+  // 4. During deserialization, read all the debug_pkl, to construct a map
+  //    of <unique_tag, SourceRange> and use tag saved with OPs in bytecode
+  //    to lookup the source range.
+  // Strictly speaking we will serialize InlinedCallStack directly, which
+  // contains SourceRange. This way we have access to entire callstack and not
+  // just source information about where the node is, since bytecode inlines the
+  // graph before saving it.
+  SourceRangeTagMap source_range_tags_;
+  int64_t current_source_range_tag_;
 };
 
 // For testing purposes
