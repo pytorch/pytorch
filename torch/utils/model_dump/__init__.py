@@ -246,8 +246,7 @@ def get_model_info(
 
             code_parts = []
             for di, di_next in zip(debug_info, debug_info[1:]):
-                # accounting for source range serialization format change
-                start, source_range, _ = di
+                start, source_range, *_ = di
                 end = di_next[0]
                 assert end > start
                 source, s_start, s_end = source_range
