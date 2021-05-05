@@ -1968,13 +1968,17 @@
     CPU: from_file
 
 - func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: gcd_out
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
+  structured_delegate: gcd.out
   variants: function, method
 
 - func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: gcd.out
   variants: function, method
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)

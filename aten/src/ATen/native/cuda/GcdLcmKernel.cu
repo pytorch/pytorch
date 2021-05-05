@@ -10,7 +10,7 @@
 
 namespace at { namespace native {
 
-void gcd_kernel_cuda(TensorIterator& iter) {
+void gcd_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       return calc_gcd(a, b);

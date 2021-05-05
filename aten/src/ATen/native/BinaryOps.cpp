@@ -67,6 +67,14 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
+// These are normal binary ops that preserve dtype
+#define CREATE_BINARY_META_FUNC(func)                                 \
+  TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
+    build_binary_op(maybe_get_output(), self, other);                 \
+  }
+
+CREATE_BINARY_META_FUNC(gcd);
+
 } // namespace meta
 
 
@@ -197,6 +205,13 @@ TORCH_IMPL_FUNC(div_out_mode) (
 TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   xlog1py_stub(device_type(), *this);
 }
+
+#define CREATE_BINARY_TORCH_IMPL_FUNC(func)                                                    \
+TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
+  func##_stub(device_type(), *this);                                                           \
+}
+
+CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -1060,21 +1075,6 @@ Tensor& logaddexp2_out(const Tensor& self, const Tensor& other, Tensor& result) 
 Tensor logaddexp2(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::logaddexp2_out(result, self, other);
-}
-
-Tensor& gcd_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  gcd_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor gcd(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::gcd_out(result, self, other);
-}
-
-Tensor& gcd_(Tensor& self, const Tensor& other) {
-  return at::gcd_out(self, self, other);
 }
 
 Tensor& lcm_out(const Tensor& self, const Tensor& other, Tensor& result) {
