@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 temp_dir = mkdtemp()
 print(temp_dir)
 
+
 def genrsa(path):
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -22,9 +23,10 @@ def genrsa(path):
         ))
     return key
 
+
 def create_cert(path, C, ST, L, O, key):
     subject = issuer = x509.Name([
-	x509.NameAttribute(NameOID.COUNTRY_NAME, C),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, C),
         x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, ST),
         x509.NameAttribute(NameOID.LOCALITY_NAME, L),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, O),
@@ -50,6 +52,7 @@ def create_cert(path, C, ST, L, O, key):
         f.write(cert.public_bytes(serialization.Encoding.PEM))
     return cert
 
+
 def create_req(path, C, ST, L, O, key):
     csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
         # Provide various details about who we are.
@@ -61,6 +64,7 @@ def create_req(path, C, ST, L, O, key):
     with open(path, "wb") as f:
         f.write(csr.public_bytes(serialization.Encoding.PEM))
     return csr
+
 
 def sign_certificate_request(path, csr_cert, ca_cert, private_ca_key):
     cert = x509.CertificateBuilder().subject_name(
@@ -76,11 +80,12 @@ def sign_certificate_request(path, csr_cert, ca_cert, private_ca_key):
     ).not_valid_after(
         # Our certificate will be valid for 10 days
         datetime.utcnow() + timedelta(days=10)
-    # Sign our certificate with our private key
+        # Sign our certificate with our private key
     ).sign(private_ca_key, hashes.SHA256())
     with open(path, "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
     return cert
+
 
 ca_key = genrsa(temp_dir + "/ca.key")
 ca_cert = create_cert(temp_dir + "/ca.pem", u"US", u"New York", u"New York", u"Gloo Certificate Authority", ca_key)
@@ -89,4 +94,3 @@ pkey = genrsa(temp_dir + "/pkey.key")
 csr = create_req(temp_dir + "/csr.csr", u"US", u"California", u"San Francisco", u"Gloo Testing Company", pkey)
 
 cert = sign_certificate_request(temp_dir + "/cert.pem", csr, ca_cert, ca_key)
-
