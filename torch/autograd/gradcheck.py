@@ -8,7 +8,6 @@ import warnings
 from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
 from torch._vmap_internals import vmap
 import functools
-import torch.autograd.forward_ad as fwAD
 
 
 class GradcheckError(RuntimeError):
@@ -286,7 +285,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
         jacobian_cols[d_idx] = _compute_numerical_jvps_wrt_specific_input(jvp_fn, eps, x.is_complex())
     return _combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
-def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> Tuple[Tuple[torch.Tensor, ...]]:
+def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> Tuple[Tuple[torch.Tensor, ...], ...]:
     """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` with respect
     to `target`. Returns M * N Jacobians where N is the number of tensors in target that require grad and
     M is the number of non-integral outputs.
@@ -303,21 +302,14 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> T
     Returns:
         A list of M N-tuples of tensors
     """
-
-    if any(o.is_sparse for o in outputs):
-        raise ValueError("Sparse output is not supported for forward AD gradcheck. Please call to_dense() "
-                         "on the output of fn for gradcheck.")
-    if any(o.layout == torch._mkldnn for o in outputs):
-        raise ValueError("MKLDNN output is not supported for forward AD gradcheck. Please call to_dense() "
-                         "on the output of fn for gradcheck.")
-
+    # To avoid early import issues
+    fwAD = torch.autograd.forward_ad
 
     if any(i.is_complex() for i in inputs):
         raise ValueError("Expected inputs to be non-complex for _get_analytical_jacobian_forward_ad.")
 
-
     if all_u:
-        dummy_reduced_inputs = [torch.tensor(1., requires_grad=i.requires_grad) for i in inputs]
+        dummy_reduced_inputs = tuple(torch.tensor(1., requires_grad=i.requires_grad) for i in inputs)
         jacobians = tuple(_allocate_jacobians_with_inputs(dummy_reduced_inputs, o.numel()) for o in outputs)
     else:
         jacobians = tuple(_allocate_jacobians_with_inputs(inputs, o.numel()) for o in outputs)
@@ -327,7 +319,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, all_u=None) -> T
         new_inputs = []
         for i, inp in enumerate(inputs):
             if is_tensor_like(inp) and inp.requires_grad:
-                if inp.layout == torch._mkldnn:
+                if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
                 inp = fwAD.make_dual(inp, torch.zeros_like(inp))
@@ -434,7 +426,7 @@ def _get_numerical_vJu(fn, inputs, inp_indices, outputs, all_u, all_v, eps):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
         all_Ju = _get_numerical_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps)
-        if all_v:
+        if all_v is not None:
             jacobian_scalars: List[torch.Tensor] = []
             for v, Ju in zip(all_v, all_Ju):
                 jacobian_scalars.append(_dot_with_type_promotion(v, Ju))
@@ -908,7 +900,8 @@ def _real_and_imag_input(fn):
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
                          atol, check_grad_dtypes, check_forward_ad, nondet_tol):
     complex_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
-    if complex_indices:
+    has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
+    if has_any_complex_output:
         real_fn, imag_fn = _real_and_imag_output(func)
 
         imag_func_out = imag_fn(*tupled_inputs)
@@ -946,7 +939,6 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol, use_forward_ad=True)
-
 
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
