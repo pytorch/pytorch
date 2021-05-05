@@ -38,6 +38,18 @@ TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+static inline void softshrink_check(const Scalar& lambd) {
+  double lamb = lambd.to<double>();
+  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
+}
+
+TORCH_META_FUNC(softshrink) (
+  const Tensor & self, const Scalar& lambd
+) {
+  softshrink_check(lambd);
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -106,6 +118,12 @@ TORCH_IMPL_FUNC(hardsigmoid_out) (
   const Tensor& self, const Tensor& result
 ) {
   hardsigmoid_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(softshrink_out) (
+  const Tensor & self, const Scalar& lambd, const Tensor& result
+) {
+  softshrink_stub(device_type(), *this, lambd);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -711,25 +729,6 @@ Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, const Scala
   return out_tensor;
 }
 
-static inline void softshrink_check(const Scalar& lambd) {
-  double lamb = lambd.to<double>();
-  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
-}
-
-Tensor& softshrink_out(const Tensor & self, const Scalar& lambd, Tensor& result) {
-  softshrink_check(lambd);
-  auto iter = TensorIterator::unary_op(result, self);
-  softshrink_stub(iter.device_type(), iter, lambd);
-  return result;
-}
-
-Tensor softshrink(const Tensor & self, const Scalar& lambd) {
-  softshrink_check(lambd);
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  softshrink_stub(iter.device_type(), iter, lambd);
-  return iter.output();
-}
 
 Tensor& softshrink_backward_out(const Tensor & grad, const Tensor & self, const Scalar& lambd, Tensor& grad_input) {
   auto iter = TensorIterator::binary_op(grad_input, grad, self);

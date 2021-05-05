@@ -8127,16 +8127,17 @@
     CPU, CUDA: softplus_backward
 
 - func: softshrink.out(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_out
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  structured_delegate: softshrink.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
-  dispatch:
-    CPU, CUDA: softshrink
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
