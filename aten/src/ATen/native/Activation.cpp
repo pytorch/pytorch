@@ -34,6 +34,10 @@ TORCH_META_FUNC(leaky_relu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -98,6 +102,12 @@ TORCH_IMPL_FUNC(leaky_relu_out) (
   leaky_relu_stub(device_type(), *this, negval);
 }
 
+TORCH_IMPL_FUNC(hardsigmoid_out) (
+  const Tensor& self, const Tensor& result
+) {
+  hardsigmoid_stub(device_type(), *this);
+}
+
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp(self, min, max);
 }
@@ -121,26 +131,6 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
   return iter.output();
-}
-
-Tensor hardsigmoid(const Tensor& self) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& hardsigmoid_out(const Tensor& self, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor& hardsigmoid_(Tensor& self) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(self, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return self;
 }
 
 Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {

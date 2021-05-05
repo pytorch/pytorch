@@ -7940,23 +7940,24 @@
     CUDA: legacy::cuda::_thnn_glu_backward
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
 
 - func: hardsigmoid(Tensor self) -> Tensor
+  structured_delegate: hardsigmoid.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid
     QuantizedCPU: hardsigmoid_quantized_cpu
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: hardsigmoid.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
-  dispatch:
-    CPU, CUDA: hardsigmoid_
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
