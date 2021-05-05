@@ -460,9 +460,8 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_function.body.append(return_stmt)
 
     # registers the custom function in the global context
-    ignore_func_str = ast.unparse(ignore_function)
+    ignore_func_str = "@torch.jit.ignore\n" + ast.unparse(ignore_function)
     ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
-    ignore_func_str += "\nglobals()[\"{}\"]._torchscript_modifier = FunctionModifiers.IGNORE".format(ignore_function_name)
     exec(ignore_func_str)  # noqa: P204
 
     # build the statements as:
