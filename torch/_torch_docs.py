@@ -2253,8 +2253,7 @@ add_docstr(torch.resolve_neg,
            r"""
 conj(input) -> Tensor
 
-Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
-else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+Returns a new tensor with a flipped negueucekhgbcctkebrvddurlegjtdlebtk bit. The output tensor will always have its negative bit set to `False`.
 
 Args:
     {input}

@@ -79,15 +79,15 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
                 [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a.neg().conj(); });
             });
         }
-    } else {
-      AT_DISPATCH_ALL_TYPES_AND2(
-          ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-            cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -a; },
-                [=](Vec256<scalar_t> a) { return a.neg(); });
-          });
-    }
+      } else {
+          AT_DISPATCH_ALL_TYPES_AND2(
+            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
+              cpu_kernel_vec(
+                  iter,
+                  [=](scalar_t a) -> scalar_t { return -a; },
+                  [=](Vec256<scalar_t> a) { return a.neg(); });
+            });
+      }
     }
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
@@ -111,7 +111,9 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
-    iter.tensor(0).conj_physical_();
+    if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
+      iter.tensor(0).conj_physical_();
+    }
   }
 }
 
