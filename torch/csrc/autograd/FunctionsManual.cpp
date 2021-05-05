@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
