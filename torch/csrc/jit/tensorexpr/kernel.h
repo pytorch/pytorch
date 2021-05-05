@@ -70,6 +70,9 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+  void runFast(
+      const std::vector<void*>& inputs,
+      const std::vector<void*>& outputs);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
@@ -85,6 +88,14 @@ class TORCH_API TensorExprKernel {
     return graph_;
   }
 
+  const std::vector<ConstantDescr>& getConstantDescriptors() const {
+    return constants_;
+  }
+
+  const std::vector<CodeGen::BufferArg>& getBufferArgs() const {
+    return bufferArgs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -96,7 +107,6 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-
   void runKernel(Stack& stack);
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
