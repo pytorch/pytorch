@@ -41,10 +41,6 @@ inline std::vector<char> make_filename(std::string name_prefix) {
     }
   }
 
-  if (tmp_directory.back() == '/') {
-    tmp_directory.pop_back();
-  }
-
   std::vector<char> filename;
   filename.reserve(
       tmp_directory.size() + name_prefix.size() + kRandomPattern.size() + 2);
