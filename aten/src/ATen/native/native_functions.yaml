@@ -2877,15 +2877,15 @@
     CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
+  structured_delegate: mm.out
   variants: function, method
   dispatch:
-    CPU: mm_cpu
-    CUDA: mm_cuda
     SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: mm_cpu_out
+    CPU: mm_out_cpu
     CUDA: mm_out_cuda
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU: _sparse_csr_mm_out

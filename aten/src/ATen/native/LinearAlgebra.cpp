@@ -32,11 +32,24 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
-  set_output(0, IntArrayRef({mat1.sizes()[0], mat2.sizes()[1]}), {}, self.options(), names);
+  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
   auto result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == mat1.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
   "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
+  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
+}
+
+TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
+  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+
+  auto names = at::namedinference::compute_matmul_outnames(self, mat2);
+  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  auto result = maybe_get_output(0);
+  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
+  TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == self.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", self.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
   "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
 }
 } // namespace meta
@@ -1108,19 +1121,11 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
   }
 }
 
-Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
-  auto names = at::namedinference::propagate_names_for_addmm(self, mat2, result);
-  at::namedinference::propagate_names_if_nonempty(result, names);
-  return result;
-}
-
-Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
-  Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return native::mm_cpu_out(self, mat2, result);
+TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
+  {
+    at::NoNamesGuard guard;
+    addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
+  }
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -1254,7 +1259,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        native::mm_cpu_out(batch1.select(0, b), batch2.select(0, b), r);
+        addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
