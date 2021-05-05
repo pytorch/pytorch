@@ -16,7 +16,7 @@ jobs:
       - name: my 2thing
         uses: driazati/test-action@master
         with:
-          who-to-greet: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+          who-to-greet: ${{ secrets.A_COOL_SECRET }}
       - name: env test build
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
