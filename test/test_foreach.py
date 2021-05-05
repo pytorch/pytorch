@@ -1,9 +1,8 @@
-import itertools
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, deviceCountAtLeast, dtypes, skipCUDAIfRocm, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, skipMeta, ops)
 from torch._six import inf, nan
 from torch.testing._internal.common_methods_invocations import foreach_unary_op_db
 
@@ -843,99 +842,105 @@ class TestForeach(TestCase):
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
 
-    # Below three methods are test to check whether foreach ops works or not
-    # when tensors are on different devices
-    # but tensors with the same index are on the same device.
-    @skipMeta
-    @deviceCountAtLeast(2)
+    # note: Below three tests (postfixed with `_tensors_on_different_devices`)
+    # checks whether foreach works with lists of tensors on different devices
+    # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
     @ops(foreach_unary_op_db)
-    def test_unary_op_tensors_on_different_devices(self, devices, dtype, op):
-        if 'abs' in op.ref.__name__ and dtype == torch.bool:
-            return
-        for dev_list in itertools.combinations(['cpu'] + devices, 2):
-            if 'cpu' in dev_list and dtype == torch.float16:
-                continue
-            # devices of `tensors` are: [dev_list[0], dev_list[0], dev_list[1]]
-            tensors = self._get_test_data(dev_list[0], dtype, 3)
-            tensors = [t.to(dev_list[i - 1]) if i > 0 else t for i, t in enumerate(tensors)]
-            expected = [op.ref(t) for t in tensors]
+    def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
+        if self.device_type != 'cuda':
+            self.skipTest('CUDA is necessary for tests with tensors on different devices')
+        # tensors: ['cuda', 'cpu]
+        tensors = op.sample_inputs(device, dtype, 2)
+        tensors[1] = tensors[1].to('cpu')
+        try:
             actual = op.get_method()(tensors)
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), str(e)):
+                [op.ref(t) for t in tensors]
+        else:
+            expected = [op.ref(t) for t in tensors]
             self.assertEqual(expected, actual)
-            if 'abs' in op.ref.__name__ and dtype in torch.testing.get_all_complex_dtypes():
-                continue
-            if dtype not in torch.testing.get_all_int_dtypes():
-                op.get_inplace()(tensors)
-                self.assertEqual(expected, tensors)
 
-    # Test that if foreach ops works or not
-    # when tensors are on different devices
-    # but tensors with the same index are on the same device.
-    @skipMeta
-    @deviceCountAtLeast(2)
+        try:
+            op.get_inplace()(tensors)
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), str(e)):
+                [getattr(t, op.ref.__name__ + '_')() for t in tensors]
+        else:
+            self.assertEqual(expected, tensors)
+
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=True))
-    def test_bin_op_tensors_on_different_devices(self, devices, dtype):
+    def test_binary_op_tensors_on_different_devices(self, device, dtype):
+        if self.device_type != 'cuda':
+            self.skipTest('CUDA is necessary for tests with tensors on different devices')
         for foreach_op, foreach_op_, native_op in self.bin_ops:
-            if dtype == torch.bool and "sub" in native_op.__name__:
-                self.skipTest("Subtraction does not work with bool")
-            for dev0, dev1 in itertools.combinations(['cpu'] + devices, 2):
-                # devices of `tensors` are
-                # `tensors1`: [dev0, dev1]
-                # `tensors2`: [dev0, dev1]
-                tensors1 = self._get_test_data(dev0, dtype, 2)
-                tensors2 = self._get_test_data(dev1, dtype, 2)
-                tmp1, tmp2 = tensors2[0], tensors1[1]
-                tensors2[0] = tmp2
-                tensors1[1] = tmp1
+            # `tensors1`: ['cuda', 'cpu']
+            # `tensors2`: ['cuda', 'cpu']
+            _cuda_tensors = self._get_test_data(device, dtype, 2)
+            _cpu_tensors = self._get_test_data('cpu', dtype, 2)
+            tensors1, tensors2 = [[_cuda_tensors[i], _cpu_tensors[i]] for i in range(2)]
 
-                expected = [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
-                actual = foreach_op(tensors1, tensors2)
-                self.assertEqual(expected, actual)
-                if not (dtype in torch.testing.get_all_int_dtypes() and "div" in native_op.__name__):
+            if dtype == torch.bool and native_op == torch.sub:
+                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
+                    foreach_op(tensors1, tensors2)
+                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
                     foreach_op_(tensors1, tensors2)
-                    self.assertEqual(expected, tensors1)
+                continue
+            try:
+                actual = foreach_op(tensors1, tensors2)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e)):
+                    [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
+            else:
+                expected = [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
+                self.assertEqual(expected, actual)
+            try:
+                foreach_op_(tensors1, tensors2)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e)):
+                    [getattr(t1, native_op.__name__ + '_')(t2) for t1, t2 in zip(tensors1, tensors2)]
+            else:
+                self.assertEqual(actual, tensors1)
 
-    # Test that if foreach ops works or not
-    # when tensors are on different devices
-    # but tensors with the same index are on the same device.
     @skipMeta
-    @deviceCountAtLeast(3)
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=True))
-    def test_pointwise_op_tensors_on_different_devices(self, devices, dtype):
+    def test_pointwise_op_tensors_on_different_devices(self, device, dtype):
+        if self.device_type != 'cuda':
+            self.skipTest('CUDA is necessary for tests with tensors on different devices')
+
         pointwise_ops = [
             (torch._foreach_addcmul, torch._foreach_addcmul_, torch.addcmul),
             (torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv),
         ]
         for foreach_op, foreach_op_, native_op in pointwise_ops:
-            if dtype == torch.bool and "sub" in native_op.__name__:
-                continue
-            for dev_list in itertools.combinations(['cpu'] + devices, 3):
-                if dtype == torch.bool:
-                    continue
-                if 'cpu' in dev_list and dtype in (torch.float16, torch.bfloat16):
-                    continue
-                if "addcdiv" in native_op.__name__ and dtype in torch.testing.get_all_int_dtypes():
-                    continue
+            # tensors1: ['cuda', 'cpu]
+            # tensors2: ['cuda', 'cpu]
+            # tensors3: ['cuda', 'cpu]
+            _cuda_tensors = self._get_test_data(device, dtype, 3)
+            _cpu_tensors = self._get_test_data('cpu', dtype, 3)
+            tensors1, tensors2, tensors3 = [[_cuda_tensors[i], _cpu_tensors[i]] for i in range(3)]
 
-                # devices of `tensors` are as follows
-                # tensors1: [dev0, dev1, dev2]
-                # tensors2: [dev0, dev1, dev2]
-                # tensors3: [dev0, dev1, dev2]
-                dev0, dev1, dev2 = dev_list
-                tensors1 = self._get_test_data(dev0, dtype, 3)
-                tensors2 = self._get_test_data(dev1, dtype, 3)
-                tensors3 = self._get_test_data(dev2, dtype, 3)
-                tmp21, tmp31 = tensors2[0], tensors3[0]
-                tensors2[0], tensors3[0] = tensors1[1:]
-                tensors1[1:] = [tmp21, tmp31]
-                tmp23 = tensors2[2]
-                tmp32 = tensors3[1]
-                tensors2[2] = tmp32
-                tensors3[1] = tmp23
-
-                expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
+            if native_op == torch.addcdiv:
+                if dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
+                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv"):
+                        foreach_op(tensors1, tensors2, tensors3)
+                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv"):
+                        foreach_op_(tensors1, tensors2, tensors3)
+                    continue
+            try:
                 actual = foreach_op(tensors1, tensors2, tensors3)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e)):
+                    expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
+            else:
+                expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
                 self.assertEqual(expected, actual)
+            try:
                 foreach_op_(tensors1, tensors2, tensors3)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e)):
+                    [getattr(t1, native_op.__name__ + '_')(t2, t3) for t1, t2, t3 in zip(tensors1, tensors3, tensors3)]
+            else:
                 self.assertEqual(expected, tensors1)
 
 
