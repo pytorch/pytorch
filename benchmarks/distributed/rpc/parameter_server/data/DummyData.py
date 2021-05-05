@@ -9,10 +9,10 @@ class DummyData(Dataset):
 
     def __init__(
         self,
-        max_val: int = 10,
-        input_samples: int = 10,
-        input_dim: int = 10,
-        sparsity_percentage: int = 10
+        max_val: int,
+        input_samples: int,
+        input_dim: int,
+        sparsity_percentage: int
     ):
         self.max_val = max_val
         self.input_samples = input_samples

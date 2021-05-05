@@ -9,16 +9,16 @@ class DdpTrainerBase(TrainerBase):
     NCCL_ALLREDUCE = "nccl_allreduce"
     GLOO_ALLREDUCE = "gloo_allreduce"
 
-    def __init__(self, rank, metric_class="cuda", overwrite_metrics=False):
-        super().__init__(rank, metric_class, overwrite_metrics)
+    def __init__(self, rank):
+        super().__init__(rank)
 
     @staticmethod
     @abstractmethod
     def hook(state, bucket):
         return
 
-    def record_hook_fut_start(self, key, metric_name):
-        self.record_start(self.HOOK_FUTURE_METRIC, key, metric_name)
+    def record_hook_fut_start(self, key, metric_name, cuda=True):
+        self.record_start(self.HOOK_FUTURE_METRIC, key, metric_name, cuda)
 
     def record_hook_fut_end(self, key):
         self.record_end(self.HOOK_FUTURE_METRIC, key)

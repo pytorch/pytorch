@@ -26,7 +26,7 @@
 The trainer directory contains base classes to provide a starting point for implementing a trainer.
 Inherit from a base class and implement your trainer. The benchmark has two requirements for trainers.
 
-1. It must implement a __init__ method that takes rank, trainer_count, and ps_rref as arguments  
+1. It must implement a __init__ method that takes rank, trainer_count, and ps_rref as arguments
 
     ```python
     def __init__(self, rank, trainer_count, ps_rref, backend, use_cuda_rpc):
@@ -41,9 +41,9 @@ Inherit from a base class and implement your trainer. The benchmark has two requ
 ## Parameter Server class
 
 The parameter_server directory contains base classes to provide a starting point for implementing a parameter server.
-Inherit from a base class and implement your parameter server. The benchmark has three requirements for parameter servers.
+Inherit from a base class and implement your parameter server. The benchmark has two requirements for parameter servers.
 
-1. It must implement a __init__ method that takes rank and ps_trainer_count as arguments  
+1. It must implement a __init__ method that takes rank and ps_trainer_count as arguments
 
     ```python
     def __init__(self, rank, ps_trainer_count, backend, use_cuda_rpc):
@@ -53,10 +53,4 @@ Inherit from a base class and implement your parameter server. The benchmark has
 
     ```python
     def reset_state(ps_rref):
-    ```
-
-3. It must implement a get_metrics_rpc method
-
-    ```python
-    def get_metrics_rpc(ps_rref):
     ```

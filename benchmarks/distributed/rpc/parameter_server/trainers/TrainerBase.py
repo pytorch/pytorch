@@ -1,4 +1,5 @@
 import functools
+import time
 from abc import ABC, abstractmethod
 
 from metrics.MetricsLogger import MetricsLogger
@@ -13,74 +14,78 @@ class TrainerBase(ABC):
     BACKWARD_METRIC = "backward_metric"
     BACKWARD = "backward"
 
-    def __init__(self, rank, metric_class="cuda", overwrite_metrics=False):
-        self.__metrics_logger = MetricsLogger(rank, metric_class, overwrite_metrics)
+    def __init__(self, rank):
+        self.__metrics_logger = MetricsLogger(rank)
 
     @abstractmethod
     def train(self):
         return
 
-    def record_start(self, metric_type, key, metric_name):
-        self.__metrics_logger.add_metric(
-            metric_type,
+    def record_start(self, type, key, name, cuda=True):
+        self.__metrics_logger.record_start(
+            type,
             key,
-            metric_name
+            name,
+            cuda
         )
 
-    def record_end(self, metric_type, key):
-        self.__metrics_logger.add_metric_end(
-            metric_type,
+    def record_end(self, type, key):
+        self.__metrics_logger.record_end(
+            type,
             key
         )
 
-    def record_batch_start(self, key):
-        self.__metrics_logger.add_metric(
+    def record_batch_start(self, key, cuda=True):
+        self.__metrics_logger.record_start(
             self.BATCH_LEVEL_METRIC,
             key,
-            self.BATCH_ALL
+            self.BATCH_ALL,
+            cuda
         )
 
     def record_batch_end(self, key):
-        self.__metrics_logger.add_metric_end(
+        self.__metrics_logger.record_end(
             self.BATCH_LEVEL_METRIC,
             key
         )
 
-    def record_forward_start(self, key):
-        self.__metrics_logger.add_metric(
+    def record_forward_start(self, key, cuda=True):
+        self.__metrics_logger.record_start(
             self.FORWARD_METRIC,
             key,
-            self.FORWARD_PASS
+            self.FORWARD_PASS,
+            cuda
         )
 
     def record_forward_end(self, key):
-        self.__metrics_logger.add_metric_end(
+        self.__metrics_logger.record_end(
             self.FORWARD_METRIC,
             key
         )
 
-    def record_backward_start(self, key):
-        self.__metrics_logger.add_metric(
+    def record_backward_start(self, key, cuda=True):
+        self.__metrics_logger.record_start(
             self.BACKWARD_METRIC,
             key,
-            self.BACKWARD
+            self.BACKWARD,
+            cuda
         )
 
     def record_backward_end(self, key):
-        self.__metrics_logger.add_metric_end(
+        self.__metrics_logger.record_end(
             self.BACKWARD_METRIC,
             key
         )
 
     @staticmethod
-    def methodmetric(metric_name, metric_type="method_metric"):
+    def methodmetric(metric_name, metric_type="method_metric", cuda=True):
         def decorator(function):
             @functools.wraps(function)
             def wrapper(self, *args):
                 key = time.time()
-                self.__metrics_logger.add_metric(metric_type, key, metric_name)
+                self.__metrics_logger.record_start(metric_type, key, metric_name, cuda)
                 result = function(self, *args)
-                self.__metrics_logger.add_metric_end(metric_type, key)
+                self.__metrics_logger.record_end(metric_type, key)
                 return result
             return wrapper
         return decorator

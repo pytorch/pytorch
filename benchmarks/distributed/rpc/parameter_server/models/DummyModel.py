@@ -5,11 +5,11 @@ import torch.nn.functional as F
 class DummyModel(nn.Module):
     def __init__(
         self,
-        num_embeddings=10,
-        embedding_dim=10,
-        dense_input_size=10,
-        dense_output_size=10,
-        sparse=True
+        num_embeddings: int,
+        embedding_dim: int,
+        dense_input_size: int,
+        dense_output_size: int,
+        sparse: bool
     ):
         super().__init__()
         self.embedding = nn.EmbeddingBag(

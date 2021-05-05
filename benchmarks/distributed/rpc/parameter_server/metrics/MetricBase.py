@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class MetricBase(ABC):
-    def __init__(self, name: str):
+    def __init__(self, name):
         self.name = name
         self.start = None
         self.end = None
@@ -21,9 +21,6 @@ class MetricBase(ABC):
 
     def get_name(self):
         return self.name
-
-    def get_start(self):
-        return self.start
 
     def get_end(self):
         return self.end

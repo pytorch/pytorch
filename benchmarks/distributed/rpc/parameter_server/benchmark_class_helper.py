@@ -1,20 +1,12 @@
 from data.DummyData import DummyData
 from models.DummyModel import DummyModel
-from parameter_servers.AverageBatchParameterServer import \
-    AverageBatchParameterServer
-from parameter_servers.AverageParameterServer import AverageParameterServer
 from trainers.DdpNcclTrainer import DdpNcclTrainer
-from trainers.DdpSparseRpcTrainer import DdpSparseRpcTrainer
 
 trainer_map = {
-    "DdpNcclTrainer": DdpNcclTrainer,
-    "DdpSparseRpcTrainer": DdpSparseRpcTrainer
+    "DdpNcclTrainer": DdpNcclTrainer
 }
 
-ps_map = {
-    "AverageParameterServer": AverageParameterServer,
-    "AverageBatchParameterServer": AverageBatchParameterServer
-}
+ps_map = {}
 
 model_map = {
     "DummyModel": DummyModel

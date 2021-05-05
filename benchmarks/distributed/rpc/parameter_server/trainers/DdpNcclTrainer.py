@@ -14,14 +14,14 @@ class DdpNcclTrainer(DdpTrainerBase):
             self.cref = cref
             self.process_group = process_group
             self.process_group_size = process_group.size()
-            self.bp_location = 0
+            self.param_location = 0
             self.batch_number = -1
 
         def get_key(self):
-            return "{},{}".format(self.batch_number, self.bp_location)
+            return f"{self.batch_number},{self.param_location}"
 
         def next_batch_state(self):
-            self.bp_location = 0
+            self.param_location = 0
             self.batch_number += 1
 
     def __init__(self, rank, trainer_count, ps_rref, epochs):
@@ -38,7 +38,7 @@ class DdpNcclTrainer(DdpTrainerBase):
         key = state.get_key()
         cref.record_hook_fut_start(key, cref.NCCL_ALLREDUCE)
         fut = state.process_group.allreduce(tensors).get_future()
-        state.bp_location += tensors_count
+        state.param_location += tensors_count
 
         def callback(fut):
             cref.record_hook_fut_end(key)
@@ -75,7 +75,7 @@ class DdpNcclTrainer(DdpTrainerBase):
         optimizer = torch.optim.SGD(ddp_model.parameters(), 1e-4)
 
         def epoch_key(epoch, index):
-            return "{},{}".format(epoch, index)
+            return f"{epoch},{index}"
 
         for epoch in range(self.epochs):
             for index, batch in enumerate(data):
