@@ -1140,7 +1140,9 @@ def parse_kineto_results(result):
                     cuda_memory_usage += mem_record[0].cuda_memory_usage()
                     mem_record[1] = True
 
-        is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        is_async = kineto_event.is_async() or (
+            kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        )
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
             name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
@@ -1277,7 +1279,9 @@ def parse_legacy_records(thread_records):
 
                 cpu_memory_usage = cpu_memory_allocs[record_key]
                 cuda_memory_usage = cuda_memory_allocs[record_key]
-                is_async = start.thread_id() != record.thread_id()
+                is_async = start.is_async() or (
+                    start.thread_id() != record.thread_id()
+                )
                 is_remote_event = record.is_remote()
                 start_flops = start.flops()
 

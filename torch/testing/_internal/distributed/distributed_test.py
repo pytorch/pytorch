@@ -1000,6 +1000,7 @@ class DistributedTest:
                             [[rank + 1] * 3] for rank in range(dist.get_world_size())
                         ]
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl")
@@ -1067,6 +1068,7 @@ class DistributedTest:
                         # Each rank sends/recvs from other rank twice.
                         self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
                 # Each rank would have 2 * (world_size - 1) sends, verify that
@@ -1141,6 +1143,7 @@ class DistributedTest:
                         expected_event_count = dist.get_world_size() - 1
                         self.assertEqual(event_count, expected_event_count)
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
@@ -1198,6 +1201,7 @@ class DistributedTest:
                         r: [[r] * 3] for r in range(1, dist.get_world_size())
                     }
                     for event in events:
+                        self.assertTrue(event.is_async)
                         self.assertEqual(event.name, expected_event_name)
                         if rank == 0:
                             self.assertTrue(event.input_shapes in expected_shapes.values())
@@ -1645,6 +1649,7 @@ class DistributedTest:
                 print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
+                    self.assertTrue(e.is_async)
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
                     # Verify tensor shapes if given
@@ -4607,6 +4612,7 @@ class DistributedTest:
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
+                self.assertTrue(event.is_async)
                 self.assertEqual(event.name, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
@@ -4637,6 +4643,8 @@ class DistributedTest:
             self.assertGreaterEqual(len(events), 1)
             self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
+            for event in events:
+                self.assertTrue(event.is_async)
             # Ensure searching unused parameters was profiled
             events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)

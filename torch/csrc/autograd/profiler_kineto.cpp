@@ -102,7 +102,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .endThreadId(ctx->endThreadId)
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope);
+          .scope(ctx->recFunScope)
+          .setAsync(fn.isAsync());
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
       }
