@@ -1,14 +1,16 @@
 #!/bin/bash
 set -eux -o pipefail
 
-# The map's key and value must be delimited by `:`
-# for example
+# The map's key and value must be delimited by `:`,
+# Don't leave whitespace between key and value `10.1: cudnn-10.1-windows10-x64-v7.6.4.38`
+# example
 # declare -a installers=(
-#    "10.1: cudnn-10.1-windows10-x64-v7.6.4.38",
-#    "11.1: cudnn-11.1-windows-x64-v8.0.5.39",
-#    "11.2: cudnn-11.2-windows-x64-v8.1.0.77",
-#    "11.3: cudnn-11.3-windows-x64-v8.2.0.53",
+#    "10.1:cudnn-10.1-windows10-x64-v7.6.4.38",
+#    "11.1:cudnn-11.1-windows-x64-v8.0.5.39",
+#    "11.2:cudnn-11.2-windows-x64-v8.1.0.77",
+#    "11.3:cudnn-11.3-windows-x64-v8.2.0.53",
 #)
+
 
 map_get_value() {
     key=$1

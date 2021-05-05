@@ -5,10 +5,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/maps.sh"
 
 # cuda_installer_name
 declare -a installers=(
-    "10.1: cudnn-10.1-windows10-x64-v7.6.4.38"
-    "11.1: cudnn-11.1-windows-x64-v8.0.5.39"
-    "11.2: cudnn-11.2-windows-x64-v8.1.0.77"
-    "11.3: cudnn-11.3-windows-x64-v8.2.0.53"
+    "10.1:cudnn-10.1-windows10-x64-v7.6.4.38"
+    "11.1:cudnn-11.1-windows-x64-v8.0.5.39"
+    "11.2:cudnn-11.2-windows-x64-v8.1.0.77"
+    "11.3:cudnn-11.3-windows-x64-v8.2.0.53"
 )
 
 map_get_value $CUDA_VERSION "${installers[@]}"

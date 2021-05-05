@@ -7,10 +7,10 @@ cuda_major_version=${CUDA_VERSION%.*}
 
 # cuda_installer_name
 declare -a installers=(
-    "10.1: cuda_10.1.243_426.00_win10"
-    "11.1: cuda_11.1.0_456.43_win10"
-    "11.2: cuda_11.2.2_461.33_win10"
-    "11.3: cuda_11.3.0_465.89_win10"
+    "10.1:cuda_10.1.243_426.00_win10"
+    "11.1:cuda_11.1.0_456.43_win10"
+    "11.2:cuda_11.2.2_461.33_win10"
+    "11.3:cuda_11.3.0_465.89_win10"
 )
 
 map_get_value $CUDA_VERSION "${installers[@]}"
@@ -23,8 +23,8 @@ fi
 
 # msbuild_project_dir
 declare -a build_dirs=(
-    "10 CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-    "11 visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+    "10:CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+    "11:visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
 )
 
 map_get_value $cuda_major_version "${build_dirs[@]}"
@@ -37,10 +37,10 @@ cuda10_packages_template="nvcc cuobjdump nvprune cupti cublas cublas_dev cudart 
 cuda11_packages_template="nvcc cuobjdump nvprune nvprof cupti cublas cublas_dev cudart cufft cufft_dev curand curand_dev cusolver cusolver_dev cusparse cusparse_dev npp npp_dev nvrtc nvrtc_dev nvml_dev"
 
 declare -a install_packages=(
-    "10.1: ${cuda10_packages_template}"
-    "11.1: ${cuda11_packages_template}"
-    "11.2: ${cuda11_packages_template}"
-    "11.3: ${cuda11_packages_template} thrust"
+    "10.1:${cuda10_packages_template}"
+    "11.1:${cuda11_packages_template}"
+    "11.2:${cuda11_packages_template}"
+    "11.3:${cuda11_packages_template} thrust"
 )
 
 map_get_value $CUDA_VERSION "${install_packages[@]}"
