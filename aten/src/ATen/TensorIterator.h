@@ -492,9 +492,9 @@ public:
   TensorIteratorConfig& add_input(const Tensor& input);
 
   // Advanced API: stores input/output Tensors without incrementing
-  //   the reference count. The caller must ensure that these Tensors
-  //   live at least as long as this TensorIteratorConfig and any
-  //   TensorIteratorBase built from this TensorIteratorConfig.
+  // the reference count. The caller must ensure that these Tensors
+  // live at least as long as this TensorIteratorConfig and any
+  // TensorIteratorBase built from this TensorIteratorConfig.
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
