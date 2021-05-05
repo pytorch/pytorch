@@ -22,6 +22,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
     tie_return_values, get_return_value, type_wrapper_name,
@@ -41,7 +42,7 @@ from tools.codegen.api.autograd import (
     is_differentiable)
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import native_function_manager, with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
@@ -93,7 +94,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
-    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'linalg_cholesky_ex',
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
@@ -231,7 +232,7 @@ CALL_REDISPATCH = CodeTemplate("""\
 at::redispatch::${api_name}(${unpacked_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
-# `at::AutoNonVariableTypeMode` guard block.
+# `at::AutoDispatchBelowAutograd` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto ${tmp_var} = ([&]() {
   ${guard}
@@ -363,16 +364,17 @@ def gen_variable_type_shard(
     filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
     for fn in filtered_fns_with_diff_infos:
         f = fn.func
-        name = cpp.name(f.func)
-        formals = gen_formals(f)
+        with native_function_manager(f):
+            name = cpp.name(f.func)
+            formals = gen_formals(f)
 
-        type_definitions.append(METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns).cpp_type(),
-            type_wrapper_name=type_wrapper_name(f),
-            type_definition_body=emit_body(fn),
-            formals=formals,
-        ))
-        wrapper_registrations.append(gen_wrapper_registration(f))
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                type_wrapper_name=type_wrapper_name(f),
+                type_definition_body=emit_body(fn),
+                formals=formals,
+            ))
+            wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
         assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
@@ -387,11 +389,12 @@ def gen_variable_type_shard(
             assert f.is_abstract, msg
 
     fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/{template_name}',
+        'generated_comment': '@' f'generated from {fm.template_dir}/{template_name}',
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     })
 
+@with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     assert dispatch_strategy(fn) == 'use_derived'
     f = fn.func
@@ -672,7 +675,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return call
 
     def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
-        # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
+        # We only care about adding `at::AutoDispatchBelowAutograd` guard for non-variable dispatch
         # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
         # in are now Variables.
@@ -681,9 +684,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoNonVariableTypeMode guard;'
+            guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
-            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
+            guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(

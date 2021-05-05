@@ -10,6 +10,7 @@
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Local linting](#local-linting)
   - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
 - [Writing documentation](#writing-documentation)
@@ -357,13 +358,48 @@ The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
+
+### Local linting
+
+You can run the same linting steps that are used in CI locally via `make`:
+
+```bash
+# Lint all files
+make lint -j 6  # run lint (using 6 parallel jobs)
+
+# Lint only the files you have changed
+make quicklint -j 6
+```
+
+These jobs may require extra dependencies that aren't dependencies of PyTorch
+itself, so you can install them via this command, which you should only have to
+run once:
+
+```bash
+make setup_lint
+```
+
+To run a specific linting step, use one of these targets or see the
+[`Makefile`](Makefile) for a complete list of options.
+
+```bash
+# Check for tabs, trailing newlines, etc.
+make quick_checks
+
+make flake8
+
+make mypy
+
+make cmakelint
+```
+
 ### Running `mypy`
 
 `mypy` is an optional static type checker for Python. We have multiple `mypy`
 configs for the PyTorch codebase, so you can run them all using this command:
 
 ```bash
-for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+make mypy
 ```
 
 See [Guide for adding type annotations to

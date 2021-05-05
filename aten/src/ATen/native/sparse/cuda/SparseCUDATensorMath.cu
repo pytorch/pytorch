@@ -10,6 +10,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -64,12 +65,8 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
   Tensor r__;
   if (cast_beta == 0) {
     r_.zero_();
-  } else if (cast_beta == 1) {
-    if (!is_same_tensor(t, r_)) {
-      r_.copy_(t);
-    }
-  } else {
-    at::mul_out(r_, t, scalar_to_tensor(beta));
+  } else if (!is_same_tensor(t, r_)) {
+    r_.copy_(t);
   }
 
   if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
@@ -111,7 +108,9 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
       r__.data_ptr<scalar_t>(),
       r__.stride(1));
   }
-  r_.copy_(r__);
+  if (!is_same_tensor(r__, r_)) {
+    r_.copy_(r__);
+  }
 }
 
 // --------------------------------------------------------------------
@@ -863,18 +862,20 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
   std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
-  int64_t* mat_el_end_indices_device;
 
-  cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t));
-  search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
-  cudaMemcpy(
-    mat_el_end_indices_host.get(),
-    mat_el_end_indices_device,
-    num_matrices*sizeof(int64_t),
-    cudaMemcpyDeviceToHost
-  );
-  cudaFree(mat_el_end_indices_device);
+  {
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto dataPtr = allocator.allocate(num_matrices*sizeof(int64_t));
+    int64_t* mat_el_end_indices_device = static_cast<int64_t*>(dataPtr.get());
 
+    search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
+    AT_CUDA_CHECK(cudaMemcpy(
+      mat_el_end_indices_host.get(),
+      mat_el_end_indices_device,
+      num_matrices*sizeof(int64_t),
+      cudaMemcpyDeviceToHost
+    ));
+  }
   // Need a pointer to an array to access within a lambda
   int64_t* mat_el_end_indices = &mat_el_end_indices_host[0];
 
@@ -884,6 +885,8 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   int64_t mat_el_begin_idx = 0;
   size_t workspace_buffer_size = 0;
   void* workspace_buffer = nullptr;
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  ::c10::DataPtr dataPtr;
 
   // See Note [Enabling Deterministic Operations]
   deterministic = deterministic || globalContext().deterministicAlgorithms();
@@ -968,11 +971,9 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
             &required_workspace_buffer_size
           ));
           if (required_workspace_buffer_size > workspace_buffer_size) {
-            if (workspace_buffer != nullptr) {
-              cudaFree(workspace_buffer);
-            }
             workspace_buffer_size = required_workspace_buffer_size;
-            cudaMallocManaged(&workspace_buffer, workspace_buffer_size);
+            dataPtr = allocator.allocate(workspace_buffer_size);
+            workspace_buffer = dataPtr.get();
           }
           TORCH_CUDASPARSE_CHECK(cusparseSpMM(
             cusparse_handle,
@@ -1004,9 +1005,6 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   // them in column-major order in memory
   result.transpose_(1,2);
 
-  if (workspace_buffer != nullptr) {
-    cudaFree(workspace_buffer);
-  }
 #else
   TORCH_CHECK(false, "bmm sparse-dense requires CUDA 10.1 or greater");
 #endif

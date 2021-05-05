@@ -48,6 +48,7 @@ set(C10D_SRCS
   ParamCommsUtils.cpp
   PrefixStore.cpp
   ProcessGroup.cpp
+  sequence_num.cpp
   Store.cpp
   TCPStore.cpp
   Utils.cpp
@@ -66,6 +67,9 @@ endif()
 
 if(USE_C10D_MPI)
   list(APPEND C10D_SRCS ProcessGroupMPI.cpp)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(ProcessGroupMPI.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
@@ -129,6 +133,7 @@ copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
+copy_header(sequence_num.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)

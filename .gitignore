@@ -55,6 +55,7 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
@@ -292,3 +293,12 @@ bazel-*
 # direnv, posh-direnv
 .envrc
 .psenvrc
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+core.*

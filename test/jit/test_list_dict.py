@@ -1779,7 +1779,7 @@ class TestNamedTuple(JitTestCase):
 
         @torch.jit.script
         def foo(x) -> float:
-            fv = FeatureVector(3.0, [3.0], 3.0)  # noqa
+            fv = FeatureVector(3.0, [3.0], 3.0)
             rv = fv.float_features
             for val in fv.sequence_features:
                 rv += val
@@ -1860,7 +1860,7 @@ class TestNamedTuple(JitTestCase):
 
         @torch.jit.script
         def foo(a : int, b : float, c : List[int]):
-            tup = MyCoolNamedTuple(a, b, c)  # noqa
+            tup = MyCoolNamedTuple(a, b, c)
             my_a, my_b, my_c = tup
             return tup[:1], my_a, my_c
 
@@ -1874,7 +1874,7 @@ class TestNamedTuple(JitTestCase):
 
         @torch.jit.script
         def foo(a : int):
-            tup = MyCoolNamedTuple(a, 3.14, [9])  # noqa
+            tup = MyCoolNamedTuple(a, 3.14, [9])
             return tup
 
         FileCheck().check('TupleConstruct').run(foo.graph)
@@ -1906,7 +1906,7 @@ class TestNamedTuple(JitTestCase):
                                                   " but instead found type 'str'"):
             @torch.jit.script
             def foo():
-                tup = MyCoolNamedTuple('foo', 'bar', 'baz')  # noqa
+                tup = MyCoolNamedTuple('foo', 'bar', 'baz')
                 return tup
 
     def test_named_tuple_kwarg_construct(self):
@@ -1917,7 +1917,7 @@ class TestNamedTuple(JitTestCase):
 
         @torch.jit.script
         def foo():
-            tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
+            tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)
             return tup
 
         tup = foo()
@@ -1934,7 +1934,7 @@ class TestNamedTuple(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Default values are currently not supported'):
             @torch.jit.script
             def foo():
-                tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
+                tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)
                 return tup
 
     @unittest.skipIf(True, "broken while these tests were not in CI")

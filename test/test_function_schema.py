@@ -91,5 +91,9 @@ class TestFunctionSchema(TestCase):
         schema_b = parse_schema(str(schema_a))
         self.assertEquals(schema_a, schema_b)
 
+    def test_schema_error(self):
+        with self.assertRaisesRegex(RuntimeError, r"schemas with vararg \(...\) can't have default value args"):
+            schema = parse_schema("any.foo(int arg1, int arg2=0, ...)")
+
 if __name__ == '__main__':
     run_tests()

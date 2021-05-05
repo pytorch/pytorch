@@ -35,7 +35,6 @@
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/proto_convert.h"
-#include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/module_python.h"
@@ -59,27 +58,36 @@ namespace py = pybind11;
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
 // Python.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::map<std::string, std::unique_ptr<Workspace>> gWorkspaces;
 // gWorkspace is the pointer to the current workspace. The ownership is kept
 // by the gWorkspaces map.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static Workspace* gWorkspace = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::string gCurrentWorkspaceName;
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFetcherBase::~BlobFetcherBase() {}
+// NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFeederBase::~BlobFeederBase() {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<Tensor>()), TensorFetcher);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 
 Workspace* GetCurrentWorkspace() {
@@ -99,6 +107,7 @@ class StringFetcher : public BlobFetcherBase {
     return py::bytes(blob.Get<string>());
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 
 #ifdef FBCODE_CAFFE2
@@ -199,6 +208,7 @@ using FuncRegistry = std::unordered_map<std::string, Func>;
 
 FuncRegistry& gRegistry() {
   // Always leak the objects registered here.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static FuncRegistry* r = new FuncRegistry();
   return *r;
 }
@@ -291,12 +301,14 @@ class GetPythonGradient : public GradientMakerBase {
         helper.GetRepeatedArgument<int>("grad_input_indices");
     std::vector<std::string> gradientInputs;
     for (int i = 0; i < def_.input_size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       gradientInputs.push_back(I(i));
     }
     for (int i = 0; i < def_.output_size(); ++i) {
       gradientInputs.push_back(O(i));
     }
     if (gradOutputIndices.size() > 0) {
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (int i = 0; i < gradOutputIndices.size(); ++i) {
         int GO_i = gradOutputIndices[i];
         gradientInputs.push_back(GO(GO_i));
@@ -308,6 +320,7 @@ class GetPythonGradient : public GradientMakerBase {
     }
     std::vector<std::string> gradientOutputs;
     if (gradInputIndices.size() > 0) {
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (int i = 0; i < gradInputIndices.size(); ++i) {
         int GI_i = gradInputIndices[i];
         gradientOutputs.push_back(GI(GI_i));
@@ -326,23 +339,34 @@ class GetPythonGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Python, PythonOp<CPUContext, false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonGradient, PythonGradientOp<CPUContext, false>);
 // Always allow running in-place
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Python).AllowInplace([](int, int) { return true; });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonGradient).AllowInplace([](int, int) { return true; });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Python, GetPythonGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonDLPack, PythonOp<CPUContext, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonDLPackGradient, PythonGradientOp<CPUContext, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonDLPack).AllowInplace([](int, int) { return true; });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
   return true;
 });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
 
 class BackgroundPlan {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   BackgroundPlan(Workspace* ws, PlanDef def) : ws_(ws), def_(def) {}
 
   void run() {
@@ -545,6 +569,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "_tensor_impl_raw_handle",
           [](TensorCPU* t) -> void* {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto p = t->getIntrusivePtr();
             // We return a raw non-owning pointer here, we rely on surrounding
             // code to keep the original tensor alive
@@ -677,6 +702,7 @@ void addObjectMethods(py::module& m) {
         const auto& meta = GetGradientForOp(def, output_gradients);
         std::vector<py::bytes> grad_ops;
         for (const auto& op : meta.ops_) {
+          // NOLINTNEXTLINE(modernize-use-emplace)
           grad_ops.push_back(
               SerializeAsString_EnforceCheck(op, "addObjectMethods"));
         }
@@ -839,6 +865,7 @@ void addObjectMethods(py::module& m) {
              std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             caffe2::Predictor::TensorMap tensors_data{};
+            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
@@ -869,6 +896,7 @@ void addObjectMethods(py::module& m) {
              std::vector<py::object> inputs) -> std::vector<py::object> {
             std::vector<TensorCPU> tensors_data;
 #ifdef USE_NUMPY
+            // NOLINTNEXTLINE(modernize-loop-convert)
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -886,6 +914,7 @@ void addObjectMethods(py::module& m) {
             instance.Run(tensors_data, &out);
             std::vector<py::object> pyout;
             for (auto& t : out) {
+              // NOLINTNEXTLINE(performance-inefficient-vector-operation)
               pyout.push_back(TensorFetcher().FetchTensor(t, true).obj);
             }
             return pyout;
@@ -978,6 +1007,7 @@ void addObjectMethods(py::module& m) {
              std::vector<py::object> inputs) -> std::vector<py::object> {
             std::vector<Tensor> tensors_data;
 #ifdef USE_NUMPY
+            // NOLINTNEXTLINE(modernize-loop-convert)
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -995,6 +1025,7 @@ void addObjectMethods(py::module& m) {
             instance(tensors_data, &out);
             std::vector<py::object> pyout;
             for (auto& t : out) {
+              // NOLINTNEXTLINE(performance-inefficient-vector-operation)
               pyout.push_back(TensorFetcher().FetchTensor(t, true).obj);
             }
             return pyout;
@@ -1005,6 +1036,7 @@ void addObjectMethods(py::module& m) {
               -> std::vector<py::object> {
             Predictor::TensorMap tensors_data;
 #ifdef USE_NUMPY
+            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
@@ -1110,6 +1142,7 @@ void addGlobalMethods(py::module& m) {
     int argc = args.size();
     std::vector<char*> argv;
     for (auto& arg : args) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation,cppcoreguidelines-pro-type-const-cast)
       argv.push_back(const_cast<char*>(arg.data()));
     }
     char** pargv = argv.data();
@@ -1122,6 +1155,7 @@ void addGlobalMethods(py::module& m) {
     // Ensure we are lexicographically ordered.
     std::vector<std::string> keys;
     for (const auto& key : all_keys) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       keys.push_back(key);
     }
     return keys;
@@ -1160,8 +1194,10 @@ void addGlobalMethods(py::module& m) {
       [](const py::object& root_folder) {
         VLOG(1) << "Resetting workspace.";
         if (root_folder.is(py::none())) {
+          // NOLINTNEXTLINE(modernize-make-unique)
           gWorkspaces[gCurrentWorkspaceName].reset(new Workspace());
         } else {
+          // NOLINTNEXTLINE(modernize-make-unique)
           gWorkspaces[gCurrentWorkspaceName].reset(
               new Workspace(root_folder.cast<std::string>()));
         }
@@ -1179,6 +1215,7 @@ void addGlobalMethods(py::module& m) {
   m.def("workspaces", []() {
     std::vector<std::string> names;
     for (const auto& kv : gWorkspaces) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       names.push_back(kv.first);
     }
     return names;
@@ -1186,6 +1223,7 @@ void addGlobalMethods(py::module& m) {
   m.def("nearby_opnames", [](const std::string& name) {
     std::vector<std::string> alternatives;
     int editTolerance = 3;
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto it : caffe2::CPUOperatorRegistry()->Keys()) {
       if (editDistance(it, name, editTolerance) < editTolerance + 1) {
         alternatives.push_back(it);
@@ -1501,6 +1539,7 @@ void addGlobalMethods(py::module& m) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
           CAFFE_ENFORCE(def->ParseFromString(proto));
@@ -1522,6 +1561,7 @@ void addGlobalMethods(py::module& m) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
           CAFFE_ENFORCE(def->ParseFromString(proto));
@@ -1544,6 +1584,7 @@ void addGlobalMethods(py::module& m) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
           CAFFE_ENFORCE(def->ParseFromString(proto));
@@ -1551,6 +1592,7 @@ void addGlobalMethods(py::module& m) {
           nets.push_back(std::move(def));
         }
         std::map<std::string, TensorProto_DataType> blob_types;
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto blob_type : int_blob_types) {
           blob_types[blob_type.first] =
               static_cast<TensorProto_DataType>(blob_type.second);
@@ -1651,11 +1693,13 @@ void addGlobalMethods(py::module& m) {
     for (auto& in_dev : device_info.first) {
       std::string protob;
       CAFFE_ENFORCE(in_dev.SerializeToString(&protob));
+      // NOLINTNEXTLINE(modernize-use-emplace)
       in_res.push_back(py::bytes(protob));
     }
     for (auto& out_dev : device_info.second) {
       std::string protob;
       CAFFE_ENFORCE(out_dev.SerializeToString(&protob));
+      // NOLINTNEXTLINE(modernize-use-emplace)
       out_res.push_back(py::bytes(protob));
     }
     return std::make_pair(in_res, out_res);
@@ -1921,11 +1965,6 @@ void addGlobalMethods(py::module& m) {
     new_proto.SerializeToString(&out);
     return py::bytes(out);
   });
-
-#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
-  m.def("set_print_stack_traces_on_fatal_signal",
-    &caffe2::setPrintStackTracesOnFatalSignal);
-#endif
 
   auto initialize = [&]() {
   // Initialization of the module
