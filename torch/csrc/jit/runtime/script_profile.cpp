@@ -89,6 +89,7 @@ void ScriptProfile::disable() {
 
 void ScriptProfile::addDatapoint(
     std::shared_ptr<profiling::Datapoint> datapoint) {
+  TORCH_CHECK(enabled_, "Cannot only add datapoint to disabled profilers.");
   datapoints_.push_back(std::move(datapoint));
 }
 
