@@ -2106,10 +2106,15 @@ def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
-    This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
+    This function generates input for torch.linalg.eigh/eigvalsh with UPLO="U" or "L" keyword argument.
     """
     def out_fn(output):
-        return output[0], abs(output[1])
+        if isinstance(output, tuple):
+            # eigh function
+            return output[0], abs(output[1])
+        else:
+            # eigvalsh function
+            return output
 
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
@@ -4415,6 +4420,13 @@ op_db: List[OpInfo] = [
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
            ),
+    OpInfo('linalg.eigvalsh',
+           aten_name='linalg_eigvalsh',
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_eigh,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
            op=torch.linalg.householder_product,
@@ -5351,7 +5363,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_svdvals',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_svdvals,
-           supports_autograd=False,
+           check_batched_gradgrad=False,
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCPUIfNoLapack]),
@@ -5366,9 +5378,10 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Probably related to the way the function is
@@ -5391,9 +5404,10 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
@@ -5410,9 +5424,10 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_2',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
@@ -5430,9 +5445,10 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_3',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
@@ -5451,9 +5467,10 @@ op_db: List[OpInfo] = [
                    variant_test_name='polygamma_n_4',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 5e-4, torch.float32: 5e-4}),),
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
