@@ -5888,7 +5888,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 nets.append(rpc.remote(
                     worker_name(peer_rank),
                     RRefModuleWrapper,
-                    args=(nn.Linear, [1000, 1000]),
+                    args=(nn.Identity, []),
                 ).remote().cuda(peer_rank))
 
             tik = torch.cuda.Event(enable_timing=True)
@@ -5928,8 +5928,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             for peer_rank in range(1, 4):
                 nets.append(rpc.remote(
                     worker_name(peer_rank),
-                    nn.Linear,
-                    args=(1000, 1000),
+                    nn.Identity,
                 ).remote().cuda(peer_rank))
 
             tik = torch.cuda.Event(enable_timing=True)
