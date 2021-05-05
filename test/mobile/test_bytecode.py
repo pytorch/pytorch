@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import torch
 import torch.utils.show_pickle
-
+from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.jit.mobile import (
     _load_for_lite_interpreter,
     _get_model_bytecode_version,
@@ -106,6 +106,35 @@ class testVariousModelVersions(TestCase):
         version_v5 = _get_model_bytecode_version(script_module_v5_path)
 
         assert(version_v4 == 4)
+
+    def test_all_backport_functions(self):
+        minimum_to_version = 4
+        class TestModule(torch.nn.Module):
+            def __init__(self, v):
+                super().__init__()
+                self.x = v
+
+            def forward(self, y: int):
+                increment = torch.ones([2, 4], dtype=torch.float64)
+                return self.x + y + increment
+
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            output_model_path = Path(tmpdirname, "script_module.ptl")
+            script_module = torch.jit.script(TestModule(1))
+            optimized_scripted_module = optimize_for_mobile(script_module)
+            exported_optimized_scripted_module = optimized_scripted_module._save_for_lite_interpreter(str(output_model_path))
+
+            # Backport model to v4 to buffer
+            output_model_path_backport = Path(tmpdirname, "script_module_backport.ptl")
+            backport_success = _backport_for_mobile(output_model_path, output_model_path_backport, 4)
+            assert(backport_success)
+
+            backport_version = _get_model_bytecode_version(output_model_path_backport)
+            assert(backport_version == 4)
+
+            shutil.rmtree(tmpdirname)
+
 
     def test_backport_bytecode_from_file_to_file(self):
         script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"

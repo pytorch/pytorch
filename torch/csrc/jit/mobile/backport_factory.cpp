@@ -26,15 +26,6 @@ bool backport_v5_to_v4(
     caffe2::serialize::PyTorchStreamReader& reader,
     caffe2::serialize::PyTorchStreamWriter& writer);
 
-BackportFactory* BackportFactory::instance = nullptr;
-
-BackportFactory* BackportFactory::getInstance() {
-  if (instance == nullptr) {
-    instance = new BackportFactory();
-  }
-  return instance;
-}
-
 BackportFactory::BackportFactory() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
 }

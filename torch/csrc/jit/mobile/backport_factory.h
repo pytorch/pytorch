@@ -47,14 +47,12 @@ class BackportFactory final {
       caffe2::serialize::PyTorchStreamWriter& final_writer,
       int64_t from_version,
       int64_t to_version) const;
-  static BackportFactory* getInstance();
 
   BackportFactory(BackportFactory const&) = delete;
   BackportFactory& operator=(BackportFactory const&) = delete;
+  BackportFactory();
 
  private:
-  static BackportFactory* instance;
-  BackportFactory();
   // Registry of backport functions.
   void registerBytecodeBackportFunction(
       const int64_t from_version,
