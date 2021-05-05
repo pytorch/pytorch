@@ -8,7 +8,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Union, cast, Tuple
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -17,6 +17,7 @@ from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElas
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
+from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
 
@@ -63,7 +64,7 @@ class LaunchConfig:
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
     rdzv_configs: Dict[str, Any] = field(default_factory=dict)
-    rdzv_timeout: int = 300
+    rdzv_timeout: int = 900
     max_restarts: int = 3
     monitor_interval: float = 30
     start_method: str = "spawn"
@@ -139,15 +140,34 @@ def _get_entrypoint_name(
         2.2 otherwise, use ``entrypoint`` value.
     3. Otherwise, return empty string.
     """
-    if isinstance(entrypoint, Callable):  # type: ignore
-        return entrypoint.__name__  # type: ignore
-    elif isinstance(entrypoint, str):  # type: ignore
+    if isinstance(entrypoint, Callable):  # type: ignore[arg-type]
+        return entrypoint.__name__  # type: ignore[union-attr]
+    elif isinstance(entrypoint, str):
         if entrypoint == sys.executable:
             return next((arg for arg in args if arg[0] != "-"), "")
         else:
             return entrypoint
     else:
         return ""
+
+
+def _get_addr_and_port(
+    rdzv_parameters: RendezvousParameters,
+) -> Tuple[Optional[str], Optional[int]]:
+    if rdzv_parameters.backend != "static":
+        return (None, None)
+    endpoint = rdzv_parameters.endpoint
+    endpoint = endpoint.strip()
+    if not endpoint:
+        raise ValueError(
+            "Endpoint is missing in endpoint. Try to add --master_addr and --master_port"
+        )
+    master_addr, master_port = parse_rendezvous_endpoint(endpoint, default_port=-1)
+    if master_port == -1:
+        raise ValueError(
+            f"port is missing in endpoint: {endpoint}. Try to specify --master_port"
+        )
+    return (master_addr, master_port)
 
 
 # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
@@ -192,6 +212,7 @@ def launch_agent(
 
     agent = None
     rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_parameters)
+    master_addr, master_port = _get_addr_and_port(rdzv_parameters)
     try:
         spec = WorkerSpec(
             role=config.role,
@@ -203,6 +224,8 @@ def launch_agent(
             monitor_interval=config.monitor_interval,
             redirects=config.redirects,
             tee=config.tee,
+            master_addr=master_addr,
+            master_port=master_port,
         )
 
         cfg = metrics.MetricsConfig(config.metrics_cfg) if config.metrics_cfg else None

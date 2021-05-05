@@ -1,4 +1,4 @@
-from typing import cast, Callable, Generic, List, Type, TypeVar
+from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
 from torch._six import PY37
@@ -22,6 +22,24 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
+
+    def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
+        r"""
+        Create an empty unset ``Future``. If the future is intended to hold
+        values containing CUDA tensors, (a superset of) their CUDA devices must
+        be specified at construction. (This is only supported if
+        ``torch.cuda.is_available()`` returns ``True``). This is needed to
+        ensure proper CUDA stream synchronization. The child futures, returned
+        by the ``then`` method, will inherit these devices.
+
+        Args:
+            devices(``List[Union[int, str, torch.device]]``, optional): the set
+                of devices on which tensors contained in this future's value are
+                allowed to reside and on which callbacks are allowed to operate.
+        """
+        if devices is None:
+            devices = []
+        super().__init__([torch.device(d) for d in devices])
 
     def done(self) -> bool:
         r"""
@@ -194,7 +212,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             raise fut_result
 
         super()._set_unwrap_func(raise_error)
-        self.set_result(result)  # type: ignore
+        self.set_result(result)  # type: ignore[arg-type]
 
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:

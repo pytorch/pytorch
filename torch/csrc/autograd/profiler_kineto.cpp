@@ -7,12 +7,15 @@
 #include <stdexcept>
 
 #ifdef USE_KINETO
-#include <pthread.h>
 #include <libkineto.h>
 
+#ifndef USE_KINETO_UPDATED
+#include <pthread.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#endif
 
+#ifndef _MSC_VER
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
 extern "C" {
@@ -22,6 +25,7 @@ __attribute__((weak)) int acc_get_device_type() {
   throw std::runtime_error("Dummy implementation of acc_get_device_type is not supposed to be called!");
 }
 } // extern "C"
+#endif
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -37,19 +41,20 @@ inline int64_t getTimeUs() {
   return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
 }
 
+#ifndef USE_KINETO_UPDATED
 // Getting the linux tid is expensive, so cache it.
 // Caching linux pids and tids is not advisable in the general case,
 // but this is only for profiling purposes and we don't need to handle
 // special cases during fork, clone etc.
-pid_t cachedTid() {
-  static thread_local pid_t tid{(pid_t)syscall(SYS_gettid)};
-  return tid;
-}
+static thread_local pid_t cachedTid;
+#endif
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
+std::string dtypesToStr(const std::vector<std::string>& types);
+std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
-struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
+struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
   ~KinetoThreadLocalState() override = default;
 
@@ -59,10 +64,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     if (!ctx) {
       return;
     }
+#ifdef USE_KINETO_UPDATED
+    libkineto::GenericTraceActivity op;
+    op.activityType = libkineto::ActivityType::CPU_OP;
+    op.activityName = std::string(fn.name().str());
+#else
     libkineto::ClientTraceActivity op;
+    op.opType = std::string(fn.name().str());
+#endif
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
-    op.opType = std::string(fn.name().str());
     op.device = 0;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
@@ -71,17 +82,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     //   op.inputDims = shapesToStr(*ctx->shapes);
     // }
 
-    // Not setting atm
-    op.inputTypes = "[]";
-    op.arguments = "[]";
-    op.outputDims = "[]";
-    op.outputTypes = "[]";
-    op.inputNames = "[]";
-    op.outputNames = "[]";
-
-    // setting both pthread and linux tid for Kineto
-    op.sysThreadId = cachedTid();
-    op.pthreadId = pthread_self();
+#ifdef USE_KINETO_UPDATED
+    libkineto::api().activityProfiler().recordThreadInfo();
+    op.sysThreadId = libkineto::systemThreadId();
+#else
+    if (!cachedTid) {
+      cachedTid = (pid_t)syscall(SYS_gettid);
+      libkineto::api().activityProfiler().recordThreadInfo(cachedTid, pthread_self());
+    }
+    op.sysThreadId = cachedTid;
+#endif
 
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
@@ -92,9 +102,13 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .endThreadId(ctx->endThreadId)
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope);
+          .scope(ctx->recFunScope)
+          .setAsync(fn.isAsync());
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
+      }
+      if (ctx->dtypes && !ctx->dtypes->empty()) {
+        kineto_events_.back().dtypes(*ctx->dtypes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
@@ -127,7 +141,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {
-      // ClientTraceActivity events are already processed
+      // CPU_OP events are already processed
       if (ev_ptr->type() != libkineto::ActivityType::CPU_OP) {
         kineto_events_.emplace_back();
         kineto_events_.back()
@@ -139,13 +153,28 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
-      if (kineto_events_[idx].hasShapes()) {
-        cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
-      } else {
-        cpu_trace->activities[idx].inputDims = "[]";
+      auto& kineto_event = kineto_events_[idx];
+      auto& activity = cpu_trace->activities[idx];
+
+      if (kineto_event.hasShapes()) {
+        activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
       }
-      if (kineto_events_[idx].hasStack()) {
-        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+      if (kineto_event.hasStack()) {
+        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack()));
+      }
+      if (kineto_event.hasTypes()) {
+        activity.addMetadata("Input type", dtypesToStr(kineto_event.dtypes()));
+      }
+
+      // add information about an associated forward op, if a sequence number
+      // is available (e.g. during training)
+      if (kineto_event.sequenceNr() >= 0) {
+        activity.addMetadata(
+            "Fwd thread id",
+            std::to_string(kineto_event.fwdThreadId()));
+        activity.addMetadata(
+            "Sequence number",
+            std::to_string(kineto_event.sequenceNr()));
       }
     }
   }
@@ -154,6 +183,27 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace =
       std::make_unique<libkineto::CpuTraceBuffer>();
 };
+
+std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
+  std::vector<std::string> types;
+  types.reserve(fn.inputs().size());
+  for (const c10::IValue& input : fn.inputs()) {
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        types.push_back(
+            static_cast<std::string>(input.toTensor().dtype().name()));
+      } else {
+        types.emplace_back();
+      }
+    } else if (input.isScalar() || input.isList()) {
+      types.push_back(input.tagKind());
+    } else {
+      types.emplace_back();
+    }
+  }
+  return types;
+}
 
 KinetoThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(
@@ -181,6 +231,7 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+          ctx_ptr->dtypes = inputTypes(fn);
         }
 
         if (state_ptr->config().with_flops) {
@@ -191,7 +242,7 @@ void pushProfilingCallbacks() {
         ctx_ptr->fwdThreadId = fn.forwardThreadId();
         ctx_ptr->recFunScope = (uint8_t)fn.scope();
 
-#ifndef C10_MOBILE
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
         // backward nodes source range corresponds to the forward node
         // TODO: consider using C++ stack trace
         if (state_ptr->config().with_stack &&
@@ -241,6 +292,22 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   }
   oss << "]";
   return oss.str();
+}
+
+std::string dtypesToStr(const std::vector<std::string>& types) {
+  if (types.empty()) {
+    return "[]";
+  } else {
+    std::ostringstream oss;
+    std::transform(
+        types.begin(),
+        types.end(),
+        std::ostream_iterator<std::string>(oss, ", "),
+        [](std::string s) -> std::string { return "\"" + s + "\""; });
+    auto rc = oss.str();
+    rc.erase(rc.length() - 2); // remove last ", "
+    return "[" + rc + "]";
+  }
 }
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
@@ -345,6 +412,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       std::move(state_ptr->kineto_events_),
       state_ptr->consolidate(),
       std::move(trace));
+}
+
+void addMetadata(const std::string& key, const std::string& value) {
+  libkineto::api().activityProfiler().addMetadata(key, value);
 }
 
 KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {

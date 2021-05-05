@@ -10,7 +10,7 @@
 
 namespace at { namespace native {
 
-void digamma_kernel_cuda(TensorIterator& iter) {
+void digamma_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "digamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return calc_digamma(a);
@@ -18,21 +18,21 @@ void digamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void trigamma_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+void trigamma_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "trigamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return calc_trigamma(a);
     });
   });
 }
 
-void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
+void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel_cuda(iter);
   } else if (n == 1) {
     trigamma_kernel_cuda(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "polygamma_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "polygamma_cuda", [&]() {
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         return calc_polygamma(int(n), a);
       });
@@ -40,7 +40,7 @@ void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
   }
 }
 
-void lgamma_kernel_cuda(TensorIterator& iter) {
+void lgamma_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "lgamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::lgamma(a);

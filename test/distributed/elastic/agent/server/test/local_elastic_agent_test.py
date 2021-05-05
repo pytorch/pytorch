@@ -84,6 +84,20 @@ def _fatal_signal_function(expected_error_index: int, sig: int):
         os.kill(os.getpid(), sig)
 
 
+def _check_master_port_addr_override(
+    expected_master_addr: str, expected_master_port: int
+):
+    actual_master_addr = os.environ["MASTER_ADDR"]
+    actual_master_port = int(os.environ["MASTER_PORT"])
+    if (
+        expected_master_addr != actual_master_addr
+        and expected_master_port != actual_master_port
+    ):
+        raise RuntimeError(
+            f"Expected addr: {expected_master_addr}:{expected_master_port}, got addr: {actual_master_addr}:{actual_master_port}"
+        )
+
+
 def _bipolar_function():
     rank = int(os.environ["RANK"])
     if rank % 2 == 0:
@@ -146,11 +160,13 @@ def _check_env_function():
         "LOCAL_WORLD_SIZE",
         "ROLE_WORLD_SIZE",
         "WORLD_SIZE",
+        "GROUP_WORLD_SIZE",
         "MASTER_ADDR",
         "MASTER_PORT",
         "TORCHELASTIC_RESTART_COUNT",
         "TORCHELASTIC_MAX_RESTARTS",
         "TORCHELASTIC_RUN_ID",
+        "TORCHELASTIC_USE_AGENT_STORE"
     ]
     for var in env_vars:
         _ = os.environ[var]
@@ -200,6 +216,8 @@ class LocalElasticAgentTest(unittest.TestCase):
         max_nodes=1,
         max_restarts=0,
         monitor_interval=0.01,
+        master_addr_override: Optional[str] = None,
+        master_port_override: Optional[int] = None,
     ):
         rdzv_params = RendezvousParameters(
             backend="etcd",
@@ -219,6 +237,8 @@ class LocalElasticAgentTest(unittest.TestCase):
             monitor_interval=monitor_interval,
             redirects=node_config.redirects,
             tee=node_config.tee,
+            master_addr=master_addr_override,
+            master_port=master_port_override,
         )
 
     def get_agent(
@@ -243,6 +263,8 @@ class LocalElasticAgentTest(unittest.TestCase):
         start_method: str = "spawn",
         max_restarts: int = 0,
         exit_barrier_timeout=5,
+        master_addr_override: Optional[str] = None,
+        master_port_override: Optional[int] = None,
     ) -> Optional[RunResult]:
         """
         Runs a single agent. This method can be called either on a separate process
@@ -257,6 +279,8 @@ class LocalElasticAgentTest(unittest.TestCase):
             min_nodes=min_nodes,
             max_nodes=max_nodes,
             max_restarts=max_restarts,
+            master_addr_override=master_addr_override,
+            master_port_override=master_port_override,
         )
         agent = self.get_agent(
             spec=spec,
@@ -331,6 +355,24 @@ class LocalElasticAgentTest(unittest.TestCase):
         self.assertFalse(res.is_failed())
         self.assertIsNone(res.return_values[0])
         self.assertIsNone(res.return_values[1])
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_check_master_addr_port_override(self):
+        master_addr = "test_host"
+        master_port = 42
+        res = self.run_agent(
+            Conf(
+                entrypoint=_check_master_port_addr_override,
+                args=(master_addr, master_port),
+                local_world_size=1,
+            ),
+            master_addr_override=master_addr,
+            master_port_override=master_port,
+        )
+        self.assertFalse(res.is_failed())
+        self.assertIsNone(res.return_values[0])
 
     @unittest.skipIf(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"

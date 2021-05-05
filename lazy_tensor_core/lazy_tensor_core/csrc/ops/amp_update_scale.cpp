@@ -18,13 +18,13 @@ lazy_tensors::Shape NodeOutputShape(const Value& growth_tracker,
 
 }  // namespace
 
-AmpUpdateScale::AmpUpdateScale(const Value& growth_tracker,
-                               const Value& current_scale,
+AmpUpdateScale::AmpUpdateScale(const Value& current_scale,
+                               const Value& growth_tracker,
                                const Value& found_inf,
                                double scale_growth_factor,
                                double scale_backoff_factor, int growth_interval)
-    : Node(ir::OpKind(at::aten::_amp_update_scale),
-           {growth_tracker, current_scale, found_inf},
+    : Node(ir::OpKind(at::aten::_amp_update_scale_),
+           {current_scale, growth_tracker, found_inf},
            NodeOutputShape(growth_tracker, current_scale),
            /*num_outputs=*/2),
       scale_growth_factor_(scale_growth_factor),

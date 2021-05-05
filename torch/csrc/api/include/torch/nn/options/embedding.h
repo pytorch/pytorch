@@ -21,11 +21,16 @@ struct TORCH_API EmbeddingOptions {
   TORCH_ARG(int64_t, num_embeddings);
   /// The size of each embedding vector.
   TORCH_ARG(int64_t, embedding_dim);
-  /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at `padding_idx` is not updated
+  /// during training, i.e. it remains as a fixed "pad". For a newly constructed
+  /// Embedding, the embedding vector at `padding_idx` will default to all
+  /// zeros, but can be updated to another value to be used as the padding vector.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -42,11 +47,14 @@ struct TORCH_API EmbeddingFromPretrainedOptions {
   /// If ``true``, the tensor does not get updated in the learning process.
   /// Equivalent to ``embedding.weight.requires_grad_(false)``. Default: ``true``
   TORCH_ARG(bool, freeze) = true;
-  /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at `padding_idx` is not updated
+  /// during training, i.e. it remains as a fixed "pad".
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -66,11 +74,14 @@ namespace functional {
 /// F::embedding(input, weight, F::EmbeddingFuncOptions().norm_type(2.5).scale_grad_by_freq(true).sparse(true));
 /// ```
 struct TORCH_API EmbeddingFuncOptions {
-  /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at `padding_idx` is not updated
+  /// during training, i.e. it remains as a fixed "pad".
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -100,6 +111,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.
@@ -115,6 +127,13 @@ struct TORCH_API EmbeddingBagOptions {
   /// If ``true``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at padding_idx is not updated
+  /// during training, i.e. it remains as a fixed "pad". For a newly constructed
+  /// EmbeddingBag, the embedding vector at `padding_idx` will default to all
+  /// zeros, but can be updated to another value to be used as the padding vector.
+  /// Note that the embedding vector at `padding_idx` is excluded from the reduction.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 // ============================================================================
@@ -127,6 +146,7 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.
@@ -141,6 +161,11 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at padding_idx is not updated
+  /// during training, i.e. it remains as a fixed "pad". Note that the embedding
+  /// vector at `padding_idx` is excluded from the reduction.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 // ============================================================================
@@ -161,6 +186,7 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.
@@ -179,6 +205,11 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If specified, the entries at `padding_idx` do not contribute to the
+  /// gradient; therefore, the embedding vector at padding_idx is not updated
+  /// during training, i.e. it remains as a fixed "pad". Note that the embedding
+  /// vector at `padding_idx` is excluded from the reduction.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 } // namespace functional

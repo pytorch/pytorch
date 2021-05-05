@@ -64,7 +64,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 #
 # declarations blocklist
@@ -485,7 +485,7 @@ def method_impl(
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
     method_header += [
-        "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+        "const Tensor& self = THPVariable_Unpack(self_);"
     ] if method else []
 
     method_footer = ([] if noarg else ['Py_RETURN_NONE;']) + ['END_HANDLE_TH_ERRORS']
@@ -759,8 +759,11 @@ def sort_overloads(
 ) -> Sequence[PythonSignatureGroup]:
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
+        # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
+        # discussed why it is important to prioritize int/int? over int[]
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
-                'Dimname' in str(t1) and 'Dimname' not in str(t2))
+                'Dimname' in str(t1) and 'Dimname' not in str(t2) or
+                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?'))
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

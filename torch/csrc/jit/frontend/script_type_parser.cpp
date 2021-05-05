@@ -65,7 +65,7 @@ TypePtr ScriptTypeParser::subscriptToType(
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
 
-  } else if (typeName == "Future") {
+  } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
@@ -183,7 +183,9 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* end;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
     throw ErrorReport(subscript.subscript_exprs().range())

@@ -2306,8 +2306,8 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        remote_compute = rpc.remote(dst, TensorPipeDistAutogradTest.MyRemoteCompute)
-        local_compute = TensorPipeDistAutogradTest.MyLocalCompute(remote_compute)
+        remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
+        local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
             input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
             # Run local autograd

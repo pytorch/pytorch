@@ -8,7 +8,7 @@ namespace ops {
 
 class AmpUpdateScale : public Node {
  public:
-  AmpUpdateScale(const Value& growth_tracker, const Value& current_scale,
+  AmpUpdateScale(const Value& current_scale, const Value& growth_tracker,
                  const Value& found_inf, double scale_growth_factor,
                  double scale_backoff_factor, int growth_interval);
 
