@@ -6784,7 +6784,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_lower_tuple(self):
         class TupleModule(torch.nn.Module):
             def forward(self, input1, input2):
-            # type: (torch.Tensor, torch.Tensor) -> torch.Tensor:
+                # type: (torch.Tensor, torch.Tensor) -> torch.Tensor
                 a = (input1, input2)
                 b = a
                 c = b
@@ -6811,7 +6811,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_lower_tuple_2(self):
         class TupleModule(torch.nn.Module):
             def forward(self, input):
-            # type: (torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                # type: (torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
                 a = (input, input)
                 for x in range(5):
                     c, d = a
