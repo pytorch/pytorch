@@ -1453,14 +1453,13 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer)
 
-  set(ONNX_OPTIMIZER_SRCS
+  set(OPTIMIER_INCLUDE_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/optimize.cc"
     "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass.cc"
     "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass_registry.cc"
     "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass_manager.cc")
 
   if(NOT USE_SYSTEM_ONNX)
-    include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
@@ -1468,7 +1467,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     else()
       caffe2_interface_library(onnx onnx_library)
     endif()
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library ${ONNX_OPTIMIZER_SRCS})
+    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
     # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
@@ -1485,12 +1484,13 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     if(NOT ONNX_PROTO_LIBRARY)
       message(FATAL_ERROR "Cannot find onnx")
     endif()
-    set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
+    set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION)
     message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx ${ONNX_OPTIMIZER_SRCS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx )
   endif()
   include_directories(${FOXI_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
+  include_directories(${OPTIMIER_INCLUDE_DIRS})
+  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader ${OPTIMIER_INCLUDE_DIRS})
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
