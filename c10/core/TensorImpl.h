@@ -288,7 +288,7 @@ struct C10_API VariableVersion {
   //
   // 2. Inplace update to inference tensor in inference tensor doesn't bump
   //    version counter.
-  //    * It either doesn't call bump() by skipping InplaceOrView kernel,
+  //    * It either doesn't call bump() by skipping ADInplaceOrView kernel,
   //      - e.g. inference_tensor.add_(1)
   //    * or bump() is a no-op for inference tensor.
   //      - e.g. inference_tensor.add_(normal_tensor)
@@ -704,16 +704,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
-  // Inference tensor doesn't have autograd or InplaceOrView key.
+  // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference_tensor() {
-    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
     bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        no_InplaceOrView == no_Autograd,
-        "InplaceOrView and Autograd keys must be on/off at the same time.");
-    return no_InplaceOrView && no_Autograd;
+        no_ADInplaceOrView == no_Autograd,
+        "ADInplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_ADInplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
