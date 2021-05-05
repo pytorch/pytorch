@@ -30,7 +30,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   if (input.dim() == 2) {
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     MPSImageTranspose* transpose = [[MPSImageTranspose alloc]
         initWithDevice:[MPSCNNContext sharedInstance].device];
@@ -45,12 +45,12 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     id<MTLBuffer> sizeBuf2 = makeMTLBuffer<ushort>(
         std::vector<ushort>{outputSizes.begin(), outputSizes.end()});
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] specializedPipelineState:@"transpose"
+        [[MPSCNNContext sharedInstance] specializedPipelineState:"transpose"
                                                        Constants:@[
                                                          @(dim0),
                                                          @(dim1),
