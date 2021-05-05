@@ -33,57 +33,63 @@ static void flattenTupleInBlockParam(Node* n, size_t index) {
   auto input = n->inputs()[index];
   TupleTypePtr tt = input->type()->cast<TupleType>();
 
-  Block* loop_block = n->blocks().at(0);
-  Node* loop_block_node = n;
+  Block* block = n->blocks().at(0);
+  Node* block_node = n;
 
   std::vector<Value*> new_node_inputs = {};
-  auto new_construct_node = loop_block->prependNode(
-      loop_block->owningGraph()->create(prim::TupleConstruct));
+  auto new_construct_node =
+      block->prependNode(block->owningGraph()->create(prim::TupleConstruct));
   for (size_t j = 0; j < tt->elements().size(); ++j) {
-    auto new_block_in = loop_block->addInput();
+    auto new_block_in = block->addInput();
     new_construct_node->addInput(new_block_in);
-    loop_block_node->addInput(input->node()->inputs().at(j));
+    block_node->addInput(input->node()->inputs().at(j));
   }
-  new_construct_node->output()->setType(
-      loop_block->inputs().at(index - 1)->type());
-  loop_block->inputs().at(index - 1)->replaceAllUsesWith(
+  new_construct_node->output()->setType(block->inputs().at(index - 1)->type());
+  block->inputs().at(index - 1)->replaceAllUsesWith(
       new_construct_node->output());
-  loop_block->eraseInput(index - 1);
-  loop_block_node->removeInput(index);
+  block->eraseInput(index - 1);
+  block_node->removeInput(index);
 }
 
 // Flatten tuple outputs of the block node and append a TupleConstruct
 // node after the block node if there is an outer block.
 static void flattenTupleInBlockReturn(Node* n, size_t index) {
   auto input = n->inputs()[index];
-  Block* loop_block = n->owningBlock();
-  Node* loop_block_node = loop_block->owningNode();
+  Block* block = n->owningBlock();
+  Node* block_node = block->owningNode();
   Node* new_construct_node = nullptr;
   TupleTypePtr tt = input->type()->cast<TupleType>();
-  for (size_t j = 0; j < tt->elements().size(); ++j) {
-    loop_block->registerOutput(input->node()->inputs().at(j));
-  }
 
-  loop_block->eraseOutput(index);
-  if (loop_block_node == nullptr)
+  // 1- Add flattened tuple to block outputs
+  for (size_t j = 0; j < tt->elements().size(); ++j) {
+    block->insertOutput(index + j + 1, input->node()->inputs().at(j));
+  }
+  block->eraseOutput(index);
+
+  if (block_node == nullptr)
+    return;
+  // 2- For uses of the block node in the outer block,
+  // flatten the blocknode outputs and insert a tuple construct
+  // to replace that.
+  // Loop block has an extra element (iter counter)
+  if (block_node->kind() == prim::Loop)
+    index = index - 1;
+  auto tuple_output = block_node->outputs().at(index);
+  // When node has multiple blocks, do not flatten outputs on the second block
+  // again
+  if (!(tuple_output->type()->cast<TupleType>()))
     return;
 
-  if (loop_block_node->kind() == prim::Loop)
-    index = index - 1; // Loop block has an extra element (iter counter)
-  auto tuple_outputs = loop_block_node->outputs().at(index);
-  if (!(tuple_outputs->type()->cast<TupleType>()))
-    return; // When node has multiple blocks, do not flatten outputs again
-
-  new_construct_node = loop_block->owningGraph()->create(prim::TupleConstruct);
-  new_construct_node->insertAfter(loop_block_node);
+  new_construct_node = block->owningGraph()->create(prim::TupleConstruct);
+  new_construct_node->insertAfter(block_node);
   for (size_t j = 0; j < tt->elements().size(); ++j) {
-    auto new_block_out = loop_block_node->addOutput();
+    auto new_block_out = block_node->insertOutput(index + j + 1);
     new_construct_node->addInput(new_block_out);
   }
   // Replace the block node with the new TupleConstruct node
-  new_construct_node->output()->setType(tuple_outputs->type());
-  tuple_outputs->replaceAllUsesWith(new_construct_node->output());
-  loop_block_node->eraseOutput(index);
+  new_construct_node->output()->setType(tuple_output->type());
+  tuple_output->replaceAllUsesWith(new_construct_node->output());
+  block_node->eraseOutput(index);
 }
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
