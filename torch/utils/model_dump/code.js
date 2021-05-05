@@ -165,57 +165,56 @@ class ModelData extends Component {
     if (data.__tensor_v2__) {
       const [storage, offset, size, stride, grad] = data.__tensor_v2__;
       const [dtype, key, device, numel] = storage;
-      let parts = [
-        "(" + size.join(",") + ")",
-        dtype,
-      ];
-      if (device != "cpu") {
-        parts.push(device);
-      }
-      if (grad) {
-        parts.push("grad");
-      }
-      // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
-      // TODO: Check size, stride, offset, and numel and indicate if
-      // the tensor doesn't use all data in storage.
-      // TODO: Maybe show key?
-      void(offset);
-      void(stride);
-      void(key);
-      void(numel);
-      return "tensor(" + parts.join(", ") + ")";
+      return this.renderTensor(
+        "tensor", dtype, key, device, numel, offset, size, stride, grad, []);
     }
     if (data.__qtensor__) {
-      // TODO: Make this have less copy/paste with tensor
       const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
       const [dtype, key, device, numel] = storage;
-      let parts = [
-        "(" + size.join(",") + ")",
-        dtype,
-      ];
+      let extra_parts = [];
       if (quantizer[0] == "per_tensor_affine") {
-        parts.push(`scale=${quantizer[1]}`);
-        parts.push(`zero_point=${quantizer[2]}`);
+        extra_parts.push(`scale=${quantizer[1]}`);
+        extra_parts.push(`zero_point=${quantizer[2]}`);
       } else {
-        parts.push(`quantizer=${quantizer[0]}`);
+        extra_parts.push(`quantizer=${quantizer[0]}`);
       }
-      if (device != "cpu") {
-        parts.push(device);
-      }
-      if (grad) {
-        parts.push("grad");
-      }
-      // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
-      // TODO: Check size, stride, offset, and numel and indicate if
-      // the tensor doesn't use all data in storage.
-      // TODO: Maybe show key?
-      void(offset);
-      void(stride);
-      void(key);
-      void(numel);
-      return "qtensor(" + parts.join(", ") + ")";
+      return this.renderTensor(
+        "qtensor", dtype, key, device, numel, offset, size, stride, grad, extra_parts);
     }
     throw new Error("TODO: handle dict, etc.");
+  }
+
+  renderTensor(
+      prefix,
+      dtype,
+      storage_key,
+      device,
+      storage_numel,
+      offset,
+      size,
+      stride,
+      grad,
+      extra_parts) {
+    let parts = [
+      "(" + size.join(",") + ")",
+      dtype,
+    ];
+    parts.push(...extra_parts);
+    if (device != "cpu") {
+      parts.push(device);
+    }
+    if (grad) {
+      parts.push("grad");
+    }
+    // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
+    // TODO: Check size, stride, offset, and numel and indicate if
+    // the tensor doesn't use all data in storage.
+    // TODO: Maybe show key?
+    void(offset);
+    void(stride);
+    void(storage_key);
+    void(storage_numel);
+    return prefix + "(" + parts.join(", ") + ")";
   }
 
   renderBody(indent, data) {
