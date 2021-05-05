@@ -26,8 +26,7 @@ std::unordered_set<Symbol> supported_ops = {
     prim::PythonOp,
     aten::format,
     prim::Uninitialized,
-    aten::__getitem__
-};
+    aten::__getitem__};
 
 // Flatten block inputs and insert a tuple construct in the block
 static void flattenTupleInBlockParam(Node* n, size_t index) {
@@ -38,26 +37,28 @@ static void flattenTupleInBlockParam(Node* n, size_t index) {
   Node* loop_block_node = n;
 
   std::vector<Value*> new_node_inputs = {};
-  auto new_construct_node = loop_block->prependNode(loop_block->owningGraph()->create(prim::TupleConstruct));
+  auto new_construct_node = loop_block->prependNode(
+      loop_block->owningGraph()->create(prim::TupleConstruct));
   for (size_t j = 0; j < tt->elements().size(); ++j) {
-      auto new_block_in = loop_block->addInput();
-      new_construct_node->addInput(new_block_in);
-      loop_block_node->addInput(input->node()->inputs().at(j));
+    auto new_block_in = loop_block->addInput();
+    new_construct_node->addInput(new_block_in);
+    loop_block_node->addInput(input->node()->inputs().at(j));
   }
-  new_construct_node->output()->setType(loop_block->inputs().at(index - 1)->type());
-  loop_block->inputs().at(index - 1)->replaceAllUsesWith(new_construct_node->output());
+  new_construct_node->output()->setType(
+      loop_block->inputs().at(index - 1)->type());
+  loop_block->inputs().at(index - 1)->replaceAllUsesWith(
+      new_construct_node->output());
   loop_block->eraseInput(index - 1);
   loop_block_node->removeInput(index);
-
 }
 
-// Flatten tuple outputs of the block node and append a TupleConstruct 
+// Flatten tuple outputs of the block node and append a TupleConstruct
 // node after the block node if there is an outer block.
 static void flattenTupleInBlockReturn(Node* n, size_t index) {
   auto input = n->inputs()[index];
   Block* loop_block = n->owningBlock();
   Node* loop_block_node = loop_block->owningNode();
-  Node*  new_construct_node = nullptr;
+  Node* new_construct_node = nullptr;
   TupleTypePtr tt = input->type()->cast<TupleType>();
   for (size_t j = 0; j < tt->elements().size(); ++j) {
     loop_block->registerOutput(input->node()->inputs().at(j));
@@ -103,7 +104,8 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       n->outputs()[i]->replaceAllUsesWith(construct_node->inputs().at(i));
     }
   } else if (n->kind() == prim::TupleIndex) {
-    if ((construct_node->kind() == prim::If) || (construct_node->kind() == prim::Loop)) {
+    if ((construct_node->kind() == prim::If) ||
+        (construct_node->kind() == prim::Loop)) {
       return;
     }
     auto idx = n->inputs().at(1);
@@ -176,7 +178,8 @@ static void flattenInputs(Node* n, Node* insert_point) {
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
       TORCH_CHECK(
           (input->node()->kind() == prim::TupleConstruct),
-          "tuple use not matched to tuple construct. Instead found: ", n->kind().toQualString());
+          "tuple use not matched to tuple construct. Instead found: ",
+          n->kind().toQualString());
       if (supported_ops.count(n->kind()) > 0) {
         if ((n->kind() == prim::Loop)) {
           if (input->node()->kind() == prim::TupleConstruct) {
@@ -196,7 +199,7 @@ static void flattenInputs(Node* n, Node* insert_point) {
         // since tuples might be nested we need to recursively scan
         // the new flattened inputs
       } else {
-          TORCH_WARN(
+        TORCH_WARN(
             "tuple appears in op inputs, but this op does not forward tuples, ",
             "unsupported kind: ",
             n->kind().toQualString());
@@ -236,10 +239,10 @@ static void flattenOutputs(Node* n, Node* insert_point) {
         // note: no update to i to handle nested tuples
       } else {
         TORCH_WARN(
-          "tuple appears in the op outputs, but this op does not forward tuples, ",
-          "unsupported kind: ",
-          n->kind().toQualString());
-          ++i;
+            "tuple appears in the op outputs, but this op does not forward tuples, ",
+            "unsupported kind: ",
+            n->kind().toQualString());
+        ++i;
       }
     } else {
       ++i;
@@ -274,7 +277,7 @@ static void LowerAllTuples(Block* block) {
   // parameters as outputs, we can handle it by simply visiting the node
   VisitNode(block->param_node(), *block->nodes().begin());
   for (auto it = block->nodes().begin(), end = block->nodes().end();
-       it != end;) {    
+       it != end;) {
     auto n = *it++;
     RemoveTupleConstants(n);
     VisitNode(n, *it);
