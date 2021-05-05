@@ -4659,7 +4659,7 @@ def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
 # mha
 #
 
-def in_projection_packed(
+def _in_projection_packed(
     q: Tensor,
     k: Tensor,
     v: Tensor,
@@ -4715,7 +4715,7 @@ def in_projection_packed(
         return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
-def in_projection(
+def _in_projection(
     q: Tensor,
     k: Tensor,
     v: Tensor,
@@ -4769,7 +4769,7 @@ def in_projection(
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
-def scaled_dot_product_attention(
+def _scaled_dot_product_attention(
     q: Tensor,
     k: Tensor,
     v: Tensor,
@@ -4906,7 +4906,8 @@ def multi_head_attention_forward(
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape
-    assert embed_dim == embed_dim_to_check, f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+    assert embed_dim == embed_dim_to_check, \
+        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
         head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
@@ -4915,13 +4916,14 @@ def multi_head_attention_forward(
     assert head_dim * num_heads == embed_dim, f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert key.shape[:2] == value.shape[:2], f"key's [sequence, batch] dims {list(key.shape[:2])} do not match value's {list(value.shape[:2])}"
+        assert key.shape[:2] == value.shape[:2], \
+            f"key's [sequence, batch] dims {list(key.shape[:2])} do not match value's {list(value.shape[:2])}"
     else:
         assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
 
     # compute in-projection
     if not use_separate_proj_weight:
-        q, k, v = in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+        q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
         assert q_proj_weight is not None, "use_separate_proj_weight is True but q_proj_weight is None"
         assert k_proj_weight is not None, "use_separate_proj_weight is True but k_proj_weight is None"
@@ -4930,7 +4932,7 @@ def multi_head_attention_forward(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = in_proj_bias.chunk(3)
-        q, k, v = in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
+        q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
     if attn_mask is not None:
@@ -5004,7 +5006,8 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert list(key_padding_mask.shape) == [bsz, src_len], f"expecting key_padding_mask shape of {[bsz, src_len]}, got {list(key_padding_mask.shape)}"
+        assert list(key_padding_mask.shape) == [bsz, src_len], \
+            f"expecting key_padding_mask shape of {[bsz, src_len]}, got {list(key_padding_mask.shape)}"
         key_padding_mask = key_padding_mask.view(bsz, 1, 1, src_len).   \
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
@@ -5021,7 +5024,7 @@ def multi_head_attention_forward(
         attn_mask = new_attn_mask
 
     # (deep breath) calculate attention
-    attn_output, attn_output_weights = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, training)
+    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, training)
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
