@@ -34,7 +34,7 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     for (int64_t i = sparse_dim - 1; i >= 0; i--) {
       indices_mult_cpu_vec[i] = mult;
       auto sz = full_size[i];
-      TORCH_CHECK(sz == 0 || mult <= LONG_MAX / sz,
+      TORCH_CHECK(sz == 0 || mult <= INT64_MAX / sz,
                   "flatten_indices: integer multiplication overflow");
       mult *= sz;
     }
