@@ -3099,7 +3099,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src, reduce) -> Tensor
+scatter_(dim, index, src, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
