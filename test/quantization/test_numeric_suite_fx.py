@@ -45,6 +45,8 @@ from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
     get_unmatchable_types_map,
     get_base_name_to_sets_of_related_ops,
+    get_base_name_for_op,
+    add_op_to_sets_of_related_ops,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -270,9 +272,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        conv_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, nn.Conv2d) + '_0'
+
         expected_types = {
-            'base_op_torch.nn.Conv2d_0':
-                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            conv_name_0: ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -296,8 +301,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        linear_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, F.linear) + '_0'
+
         expected_types = {
-            'base_op_torch.nn.functional.linear_0':
+            linear_name_0:
                 ((F.linear, F.linear), (toq.linear, toq.linear))
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
@@ -312,8 +321,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        linear_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, F.linear) + '_0'
+
         expected_types = {
-            'base_op_torch.nn.functional.linear_0':
+            linear_name_0:
                 ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
@@ -395,10 +408,18 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        cat_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.cat) + '_0'
+        add_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.add) + '_0'
+        add_name_1 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.add) + '_1'
+
         expected_types = {
-            'base_op_torch.cat_0': ((torch.cat, torch.cat), (torch.cat, torch.cat)),
-            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
-            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
+            cat_name_0: ((torch.cat, torch.cat), (torch.cat, torch.cat)),
+            add_name_0: ((torch.add, torch.add), (toq.add, toq.add)),
+            add_name_1: ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -424,10 +445,18 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        add_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.add) + '_0'
+        add_name_1 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.add) + '_1'
+        add_name_2 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.add) + '_2'
+
         expected_types = {
-            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
-            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'base_op_torch.add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+            add_name_0: ((torch.add, torch.add), (toq.add, toq.add)),
+            add_name_1: ((torch.add, torch.add), (toq.add, toq.add)),
+            add_name_2: ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -459,15 +488,27 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        conv_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, nn.Conv2d) + '_0'
+        conv_name_1 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, nn.Conv2d) + '_1'
+        mul_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.mul) + '_0'
+        relu_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.relu) + '_0'
+        sigmoid_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.sigmoid) + '_0'
+
         # all of these should be matched
         expected_types = {
-            'base_op_torch.nn.Conv2d_1':
+            conv_name_1:
                 ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
-            'base_op_torch.nn.Conv2d_0':
+            conv_name_0:
                 ((nn.Conv2d, nn.Conv2d), (nn.Conv2d, nn.Conv2d)),
-            'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
-            'base_op_torch.relu_0': ((F.relu, F.relu), (F.relu, F.relu)),
-            'base_op_torch.sigmoid_0':
+            mul_name_0: ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            relu_name_0: ((F.relu, F.relu), (F.relu, F.relu)),
+            sigmoid_name_0:
                 ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
@@ -487,8 +528,11 @@ class TestFXGraphMatcher(QuantizationTestCase):
         m1p = prepare_fx(m1, qconfig_dict)
         m2p = prepare_fx(m2, qconfig_dict)
         results = get_matching_subgraph_pairs(m1p, m2p)
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        sigmoid_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, torch.sigmoid) + '_0'
         expected_types = {
-            'base_op_torch.sigmoid_0':
+            sigmoid_name_0:
                 (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
         }
         self.assert_types_for_matched_subgraph_pairs(
@@ -655,14 +699,18 @@ class TestFXGraphMatcher(QuantizationTestCase):
         m2 = prepare_fx(M2().eval(), qconfig_dict)
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
-            _wrapped_hardswish)
+        add_op_to_sets_of_related_ops(
+            base_name_to_sets_of_related_ops, _wrapped_hardswish, F.hardswish)
 
         results = get_matching_subgraph_pairs(
             m1, m2,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+
+        hardswish_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, F.hardswish) + '_0'
+
         expected_types = {
-            'base_op_torch.nn.functional.hardswish_0':
+            hardswish_name_0:
                 ((F.hardswish, F.hardswish), (_wrapped_hardswish, _wrapped_hardswish)),
         }
         self.assert_types_for_matched_subgraph_pairs(
@@ -1424,10 +1472,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         data = torch.randn(4, 4)
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
-            _wrapped_hardswish)
-        base_name_to_sets_of_related_ops['torch.sigmoid'].add(
-            _wrapped_sigmoid)
+        add_op_to_sets_of_related_ops(
+            base_name_to_sets_of_related_ops, _wrapped_hardswish, F.hardswish)
+        add_op_to_sets_of_related_ops(
+            base_name_to_sets_of_related_ops, _wrapped_sigmoid, F.sigmoid)
 
         # test compare weights
         results = _extract_weights_impl(
