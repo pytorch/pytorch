@@ -75,6 +75,8 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
 
 CREATE_BINARY_META_FUNC(gcd);
 CREATE_BINARY_META_FUNC(nextafter);
+CREATE_BINARY_META_FUNC(igamma);
+CREATE_BINARY_META_FUNC(igammac);
 
 } // namespace meta
 
@@ -214,6 +216,8 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tens
 
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -1109,40 +1113,6 @@ Tensor hypot(const Tensor& self, const Tensor& other) {
 
 Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
-}
-
-Tensor& igamma_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  igamma_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor igamma(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  igamma_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& igamma_(Tensor& self, const Tensor& other) {
-  return at::igamma_out(self, self, other);
-}
-
-Tensor& igammac_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  igammac_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor igammac(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  igammac_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& igammac_(Tensor& self, const Tensor& other) {
-  return at::igammac_out(self, self, other);
 }
 
 // Note: this function is only for testing.

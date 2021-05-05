@@ -6555,32 +6555,32 @@
     CompositeExplicitAutograd: hypot_
 
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: igamma_out
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igamma.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: igamma.out
   variants: method
-  dispatch:
-    CPU, CUDA: igamma_
 
 - func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: igammac_out
 
 - func: igammac(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igammac.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: igammac
 
 - func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: igammac.out
   variants: method
-  dispatch:
-    CPU, CUDA: igammac_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
