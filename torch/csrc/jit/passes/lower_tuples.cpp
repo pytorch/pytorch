@@ -25,7 +25,65 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Return,
     prim::PythonOp,
     aten::format,
+    prim::Uninitialized,
+    aten::__getitem__
 };
+
+// Flatten block inputs and insert a tuple construct in the block
+static void flattenTupleInBlockParam(Node* n, size_t index) {
+  auto input = n->inputs()[index];
+  TupleTypePtr tt = input->type()->cast<TupleType>();
+
+  Block* loop_block = n->blocks().at(0);
+  Node* loop_block_node = n;
+
+  std::vector<Value*> new_node_inputs = {};
+  auto new_construct_node = loop_block->prependNode(loop_block->owningGraph()->create(prim::TupleConstruct));
+  for (size_t j = 0; j < tt->elements().size(); ++j) {
+      auto new_block_in = loop_block->addInput();
+      new_construct_node->addInput(new_block_in);
+      loop_block_node->addInput(input->node()->inputs().at(j));
+  }
+  new_construct_node->output()->setType(loop_block->inputs().at(index - 1)->type());
+  loop_block->inputs().at(index - 1)->replaceAllUsesWith(new_construct_node->output());
+  loop_block->eraseInput(index - 1);
+  loop_block_node->removeInput(index);
+
+}
+
+// Flatten tuple outputs of the block node and append a TupleConstruct 
+// node after the block node if there is an outer block.
+static void flattenTupleInBlockReturn(Node* n, size_t index) {
+  auto input = n->inputs()[index];
+  Block* loop_block = n->owningBlock();
+  Node* loop_block_node = loop_block->owningNode();
+  Node*  new_construct_node = nullptr;
+  TupleTypePtr tt = input->type()->cast<TupleType>();
+  for (size_t j = 0; j < tt->elements().size(); ++j) {
+    loop_block->registerOutput(input->node()->inputs().at(j));
+  }
+
+  loop_block->eraseOutput(index);
+  if (loop_block_node == nullptr)
+    return;
+
+  if (loop_block_node->kind() == prim::Loop)
+    index = index - 1; // Loop block has an extra element (iter counter)
+  auto tuple_outputs = loop_block_node->outputs().at(index);
+  if (!(tuple_outputs->type()->cast<TupleType>()))
+    return; // When node has multiple blocks, do not flatten outputs again
+
+  new_construct_node = loop_block->owningGraph()->create(prim::TupleConstruct);
+  new_construct_node->insertAfter(loop_block_node);
+  for (size_t j = 0; j < tt->elements().size(); ++j) {
+    auto new_block_out = loop_block_node->addOutput();
+    new_construct_node->addInput(new_block_out);
+  }
+  // Replace the block node with the new TupleConstruct node
+  new_construct_node->output()->setType(tuple_outputs->type());
+  tuple_outputs->replaceAllUsesWith(new_construct_node->output());
+  loop_block_node->eraseOutput(index);
+}
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
   if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex &&
@@ -33,8 +91,8 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     return;
   }
   // tuple index has two inputs, tuple and index
-  auto construct = n->inputs().at(0)->node();
-  if (construct->kind() != prim::TupleConstruct) {
+  auto construct_node = n->inputs().at(0)->node();
+  if (construct_node->kind() != prim::TupleConstruct) {
     if (must_remove_tuples) {
       AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
     }
@@ -42,9 +100,12 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
   }
   if (n->kind() == prim::TupleUnpack) {
     for (size_t i = 0; i < n->outputs().size(); ++i) {
-      n->outputs()[i]->replaceAllUsesWith(construct->inputs().at(i));
+      n->outputs()[i]->replaceAllUsesWith(construct_node->inputs().at(i));
     }
   } else if (n->kind() == prim::TupleIndex) {
+    if ((construct_node->kind() == prim::If) || (construct_node->kind() == prim::Loop)) {
+      return;
+    }
     auto idx = n->inputs().at(1);
     auto maybe_int = constant_as<int64_t>(idx);
     if (!maybe_int) {
@@ -54,21 +115,21 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       return;
     }
     auto int_idx = *maybe_int;
-    auto len = construct->output()->type()->containedTypes().size();
+    size_t len = construct_node->output()->type()->containedTypes().size();
     if (int_idx < 0) {
       int_idx += len;
     }
     // currently, we allow non-constant tuple index if the tuple is of one type.
     // so we need to check bounds here
     if (int_idx >= 0 && static_cast<size_t>(int_idx) < len) {
-      n->output()->replaceAllUsesWith(construct->inputs().at(int_idx));
+      n->output()->replaceAllUsesWith(construct_node->inputs().at(int_idx));
     }
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);
     int64_t end = n->i(attr::end);
     for (int64_t i = beg; i < end; i += 1) {
-      values.push_back(construct->inputs().at(i));
+      values.push_back(construct_node->inputs().at(i));
     }
     auto graph = n->owningGraph();
     auto tuple_out = graph->createTuple(values);
@@ -108,57 +169,53 @@ static void RemoveTupleConstants(Node* n) {
   n->replaceAllUsesWith(tuple_construct);
 }
 
-static void VisitNode(Node* n, Node* insert_point) {
-  auto& graph = *n->owningGraph();
-
-  // tuple construction operators will become dead when the unpacks are replaced
-  if (n->kind() == prim::TupleConstruct) {
-    return;
-  }
-
-  // note: changing the second argument to false changes this pass from a
-  // complete lowering pass to one that removes tuples when possible. When
-  // tuples are first-class in the interpreter, we should still run this pass to
-  // remove extraneous uses
-
-  if (n->kind() == prim::TupleUnpack || n->kind() == prim::TupleIndex ||
-      n->kind() == prim::TupleSlice) {
-    removeTupleNodes(n, /*must_remove_tuples*/ true);
-    return;
-  }
-
+static void flattenInputs(Node* n, Node* insert_point) {
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for (size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
       TORCH_CHECK(
-          supported_ops.count(n->kind()) > 0,
-          "tuple appears in op that does not forward tuples, ",
-          "unsupported kind: ",
-          n->kind().toQualString());
-      TORCH_CHECK(
-          input->node()->kind() == prim::TupleConstruct,
-          "tuple use not matched to tuple construct");
-      for (size_t j = 0; j < tt->elements().size(); ++j) {
-        n->insertInput(i + 1 + j, input->node()->inputs().at(j));
+          (input->node()->kind() == prim::TupleConstruct),
+          "tuple use not matched to tuple construct. Instead found: ", n->kind().toQualString());
+      if (supported_ops.count(n->kind()) > 0) {
+        if ((n->kind() == prim::Loop)) {
+          if (input->node()->kind() == prim::TupleConstruct) {
+            flattenTupleInBlockParam(n, i);
+          }
+        } else if ((n->kind() == prim::Return)) {
+          if (input->node()->kind() == prim::TupleConstruct) {
+            flattenTupleInBlockReturn(n, i);
+          }
+        } else {
+          for (size_t j = 0; j < tt->elements().size(); ++j) {
+            n->insertInput(i + 1 + j, input->node()->inputs().at(j));
+          }
+          n->removeInput(i);
+        }
+        // note: no update to i
+        // since tuples might be nested we need to recursively scan
+        // the new flattened inputs
+      } else {
+          TORCH_WARN(
+            "tuple appears in op inputs, but this op does not forward tuples, ",
+            "unsupported kind: ",
+            n->kind().toQualString());
+        ++i;
       }
-      n->removeInput(i);
-      // note: no update to i
-      // since tuples might be nested we need to recursively scan
-      // the new flattened inputs
     } else {
       ++i;
     }
   }
-  for (auto b : n->blocks()) {
-    LowerAllTuples(b);
-  }
+}
 
+static void flattenOutputs(Node* n, Node* insert_point) {
   // flatten the outputs list
+  auto& graph = *n->owningGraph();
   for (size_t i = 0; i < n->outputs().size();) {
     Value* output = n->outputs()[i];
     if (!output->hasUses()) {
-      return;
+      ++i;
+      continue;
     }
 
     // (a, b, tup, c) -> (a, b, t0, t1, c)
@@ -166,25 +223,49 @@ static void VisitNode(Node* n, Node* insert_point) {
     //    tup = (t0, t1)
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
-      TORCH_CHECK(
-          supported_ops.count(n->kind()) > 0,
-          "tuple appears in op that does not forward tuples, ",
+      if (supported_ops.count(n->kind()) > 0) {
+        for (size_t j = 0; j < tt->elements().size(); j++) {
+          n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
+        }
+        auto new_tup =
+            graph.createTuple(n->outputs().slice(i + 1, tt->elements().size()));
+        new_tup->insertBefore(insert_point);
+        insert_point = new_tup;
+        output->replaceAllUsesWith(new_tup->output());
+        n->eraseOutput(i);
+        // note: no update to i to handle nested tuples
+      } else {
+        TORCH_WARN(
+          "tuple appears in the op outputs, but this op does not forward tuples, ",
           "unsupported kind: ",
           n->kind().toQualString());
-      for (size_t j = 0; j < tt->elements().size(); j++) {
-        n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
+          ++i;
       }
-      auto new_tup =
-          graph.createTuple(n->outputs().slice(i + 1, tt->elements().size()));
-      new_tup->insertBefore(insert_point);
-      insert_point = new_tup;
-      output->replaceAllUsesWith(new_tup->output());
-      n->eraseOutput(i);
-      // note: no update to i to handle nested tuples
     } else {
       ++i;
     }
   }
+}
+
+static void VisitNode(Node* n, Node* insert_point) {
+  // tuple construction operators will become dead when the unpacks are replaced
+  if (n->kind() == prim::TupleConstruct) {
+    return;
+  }
+  // note: changing the second argument to false changes this pass from a
+  // complete lowering pass to one that removes tuples when possible. When
+  // tuples are first-class in the interpreter, we should still run this pass to
+  // remove extraneous uses
+  if (n->kind() == prim::TupleUnpack || n->kind() == prim::TupleIndex ||
+      n->kind() == prim::TupleSlice) {
+    removeTupleNodes(n, /*must_remove_tuples*/ true);
+    return;
+  }
+  flattenInputs(n, insert_point);
+  for (auto b : n->blocks()) {
+    LowerAllTuples(b);
+  }
+  flattenOutputs(n, insert_point);
 }
 
 static void LowerAllTuples(Block* block) {
@@ -193,7 +274,7 @@ static void LowerAllTuples(Block* block) {
   // parameters as outputs, we can handle it by simply visiting the node
   VisitNode(block->param_node(), *block->nodes().begin());
   for (auto it = block->nodes().begin(), end = block->nodes().end();
-       it != end;) {
+       it != end;) {    
     auto n = *it++;
     RemoveTupleConstants(n);
     VisitNode(n, *it);

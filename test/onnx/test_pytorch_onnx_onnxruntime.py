@@ -6781,6 +6781,46 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randn(2, 5, 7, dtype=torch.float64)
         self.run_test(Celu(), (input,))
 
+    def test_lower_tuple(self):
+        class TupleModule(torch.nn.Module):
+            def forward(self, input1, input2):
+            # type: (torch.Tensor, torch.Tensor) -> torch.Tensor:
+                a = (input1, input2)
+                b = a
+                c = b
+                for i in range(5):
+                    d = a[0]
+                    for j in range(2):
+                        e, f = a
+                        a = (d, f)
+                        if f.size(0) != input1.size(-1):
+                            g = a[1]
+                            b = (g, f)
+                        else:
+                            k = a[0:]
+                            b = (f, k[0])
+                    m, n = b
+                    c = (n, m)
+                p, q = c
+                return p + q
+
+        input1 = torch.randn(2)
+        input2 = torch.randn(2)
+        self.run_test(TupleModule(), (input1, input2))
+
+    def test_lower_tuple_2(self):
+        class TupleModule(torch.nn.Module):
+            def forward(self, input):
+            # type: (torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                a = (input, input)
+                for x in range(5):
+                    c, d = a
+                    a = (c, d)
+                return a
+
+        input = torch.randn(2)
+        self.run_test(TupleModule(), (input,))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where(self):
         class Model(torch.nn.Module):
