@@ -1309,7 +1309,7 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {'einsum',
                    'expand',
-                   'expand_as'
+                   'expand_as',
                    'index_put',
                    'polygamma',
                    'repeat',
