@@ -12,7 +12,7 @@ namespace native {
 
 using activation_fn = void (*)(TensorIterator&);
 using activation_backward_fn = void (*)(TensorIterator&);
-using softplus_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
+using softplus_fn = void (*)(TensorIteratorBase&, const Scalar&, const Scalar&);
 using softplus_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
 using threshold_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
 using hardtanh_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);

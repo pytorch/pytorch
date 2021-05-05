@@ -22,6 +22,12 @@ TORCH_META_FUNC(elu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(softplus) (
+  const Tensor& self, const Scalar& beta, const Scalar& threshold
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -72,6 +78,12 @@ TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
 ) {
   elu_stub(device_type(), *this, alpha, scale, input_scale);
+}
+
+TORCH_IMPL_FUNC(softplus_out) (
+  const Tensor& self, const Scalar& beta, const Scalar& threshold, const Tensor& result
+) {
+  softplus_stub(device_type(), *this, beta, threshold);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -359,19 +371,6 @@ Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
-}
-
-Tensor & softplus_out(const Tensor& self, const Scalar& beta, const Scalar& threshold, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  softplus_stub(iter.device_type(), iter, beta, threshold);
-  return result;
-}
-
-Tensor softplus(const Tensor& self, const Scalar& beta, const Scalar& threshold) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  softplus_stub(iter.device_type(), iter, beta, threshold);
-  return iter.output();
 }
 
 Tensor & softplus_backward_out(const Tensor& grad_output,

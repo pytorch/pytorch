@@ -283,7 +283,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
   });
 }
 
-void softplus_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();

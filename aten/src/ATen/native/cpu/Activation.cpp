@@ -524,7 +524,7 @@ static void leaky_relu_backward_kernel(TensorIterator& iter, const Scalar& negva
   });
 }
 
-void softplus_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto beta = beta_.to<scalar_t>();
