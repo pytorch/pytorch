@@ -10,6 +10,7 @@ namespace caffe2 {
 using namespace std;
 using namespace dnnlowp;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 LSTMUnitDNNLowPOp<T>::LSTMUnitDNNLowPOp(
     const OperatorDef& operator_def,
@@ -163,6 +164,7 @@ static void LSTMUnit(
             f_times_c_prev,
             0,
             c_to_tanh_params.real_multiplier,
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             32,
             true /*signed*/);
         int32_t c_temp = f_times_c_prev_rescaled + i_times_g;
@@ -278,6 +280,7 @@ bool LSTMUnitDNNLowPOp<T>::RunOnDevice() {
   OutputTensorCPU_(HIDDEN_T)->ResizeLike(InputTensorCPU_(CELL_T_M_1));
 
   vector<uint8_t> Ctemp, Htemp;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint8_t *Cdata, *Hdata;
   if (dequantize_output_) {
     Ctemp.resize(OutputTensorCPU_(CELL_T)->size());
@@ -347,10 +350,12 @@ bool LSTMUnitDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     LSTMUnit,
     DNNLOWP,
     LSTMUnitDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8LSTMUnit,
     DNNLOWP,
