@@ -994,6 +994,8 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
         }
 
         if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          // No need to pass DataPtrs, because dstFuture won't directly contain
+          // the value, it will contain the srcFutures (which have no DataPtrs).
           ctx->dstFuture->markCompleted(ctx->asIvalue);
         }
       };
@@ -1001,6 +1003,19 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     }
   }
   return ctx->dstFuture;
+}
+
+namespace {
+
+std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
+  std::ostringstream oss;
+  std::copy(
+      devices.begin(),
+      devices.end(),
+      std::ostream_iterator<c10::Device>(oss, ", "));
+  return oss.str();
+}
+
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
@@ -1016,11 +1031,21 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
-    TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
-    TORCH_CHECK(i == 0 || (devices == srcs.get(i)->devices()));
+    TORCH_CHECK_TYPE(
+        i == 0 || (*typePtr == *srcs.get(i)->elementType()),
+        "Expected all futures to have the same type, but found ", *typePtr,
+        " in position 0 and ", *srcs.get(i)->elementType(), " in position ", i);
+    TORCH_CHECK_VALUE(
+        i == 0 || (devices == srcs.get(i)->devices()),
+        "Expected all futures to have the same devices, but found ",
+        formatSetOfDevices(devices), " in position 0 and ",
+        formatSetOfDevices(srcs.get(i)->devices()), " in position ", i);
   }
   struct Ctx {
-    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr, std::vector<c10::Device> devices)
+    explicit Ctx(
+        List<intrusive_ptr<ivalue::Future>> srcs,
+        TypePtr typePtr,
+        std::vector<c10::Device> devices)
         : srcFutures(std::move(srcs)),
           dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
     std::atomic<bool> done{false};
