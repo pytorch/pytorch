@@ -496,6 +496,19 @@ void RecordFunction::end() {
   }
 }
 
+void RecordFunction::_setAsync() {
+  if (isActive()) {
+    state_->is_async_ = true;
+  }
+}
+
+bool RecordFunction::isAsync() const {
+  if (isActive()) {
+    return state_->is_async_;
+  }
+  return false;
+}
+
 // RecordFunction pre-sampling
 namespace {
 // Whether to try to create RecordFunction on each call (>0) or
