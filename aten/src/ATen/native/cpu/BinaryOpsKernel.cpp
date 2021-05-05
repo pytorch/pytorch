@@ -547,7 +547,7 @@ void ne_kernel(TensorIterator& iter) {
   }
 }
 
-void maximum_kernel(TensorIterator& iter) {
+void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
@@ -574,7 +574,7 @@ void maximum_kernel(TensorIterator& iter) {
   }
 }
 
-void minimum_kernel(TensorIterator& iter) {
+void minimum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {

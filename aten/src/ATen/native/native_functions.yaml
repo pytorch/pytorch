@@ -6665,12 +6665,13 @@
     CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
+  structured_delegate: maximum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: maximum
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: maximum_out
@@ -6685,12 +6686,13 @@
   device_check: NoCheck   # TensorIterator
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
+  structured_delegate: minimum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: minimum
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: minimum_out
