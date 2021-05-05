@@ -667,6 +667,8 @@ void initTensorExprBindings(PyObject* module) {
         }
         return cg;
       });
+  te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
+  te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
 }
 } // namespace jit
 } // namespace torch
