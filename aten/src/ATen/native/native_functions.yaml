@@ -5459,7 +5459,7 @@
   structured_delegate: scatter.src_out
   variants: method
 
-- func: scatter.src_out(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)  
+- func: scatter.src_out(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
@@ -5473,7 +5473,7 @@
   structured_delegate: scatter.value_out
   variants: function, method
 
-- func: scatter.value_out(Tensor self, int dim, Tensor index, Scalar value, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)  
+- func: scatter.value_out(Tensor self, int dim, Tensor index, Scalar value, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
