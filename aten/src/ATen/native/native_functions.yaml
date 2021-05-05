@@ -2406,20 +2406,26 @@
     CPU, CUDA: log2_out
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logaddexp_out
 
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  structured_delegate: logaddexp.out
   dispatch:
     CompositeExplicitAutograd: logaddexp
 
 - func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logaddexp2_out
 
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  structured_delegate: logaddexp2.out
   dispatch:
     CompositeExplicitAutograd: logaddexp2
 
