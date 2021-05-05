@@ -9,10 +9,10 @@ from torch.fx.graph import Graph, Node
 from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
+    get_base_name_to_sets_of_related_ops,
     get_unmatchable_types_map,
 )
 from .pattern_utils import (
-    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
     get_reversed_fusions,
     end_node_matches_reversed_fusion,

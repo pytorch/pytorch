@@ -35,7 +35,6 @@ from torch.testing._internal.common_quantized import override_qengines
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.quantization.fx.quantization_patterns as qp
 from torch.quantization.ns.pattern_utils import (
-    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
 )
 from torch.quantization.ns.graph_matcher import (
@@ -45,6 +44,7 @@ from torch.quantization.ns.graph_matcher import (
 from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
     get_unmatchable_types_map,
+    get_base_name_to_sets_of_related_ops,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
