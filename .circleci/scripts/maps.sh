@@ -19,7 +19,7 @@ map_get_value() {
     map_return_value=""
 
     for elem in "${maps[@]}"; do
-    IFS=": " read -a pair <<< "$elem"
+    IFS=":" read -a pair <<< "$elem"
     if [[ "$key" == "${pair[0]}" ]]; then
         map_return_value=${pair[1]}
         break
