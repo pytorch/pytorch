@@ -4465,6 +4465,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic_axes(self):
+        class Split(torch.nn.Module):
+            def forward(self, x):
+                return x.split(1, dim=-1)
+
+        x = torch.randn(4, 384, 2)
+        input_names = ["logits"]
+        self.run_test(Split(), x, input_names=input_names,
+                      dynamic_axes={input_names[0]: {0: 'batch'}})
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_chunk(self):
         class ChunkModel(torch.nn.Module):
