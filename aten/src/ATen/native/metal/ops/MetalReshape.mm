@@ -30,7 +30,7 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};
-  mt.texture()->allocateTemporaryTextureStorage(inferred_size, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:@"reshape"
