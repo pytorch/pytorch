@@ -26,4 +26,3 @@ map_get_value() {
     fi
     done
 }
-
