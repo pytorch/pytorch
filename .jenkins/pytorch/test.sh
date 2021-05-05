@@ -475,7 +475,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test || "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc5_4_test ]]; then
   test_python_gloo_with_tls
 fi
 else
