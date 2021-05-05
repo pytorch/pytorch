@@ -18,7 +18,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 from pathlib import Path
 
@@ -92,9 +92,8 @@ class PackageScriptModuleTest(PackageTestCase):
         Test to verify saving multiple ScriptModules with same top module
         but different submodules works. Submodule is redefined to between
         the defintion of the top module to check that the different concrete
-        types of the modules are thoroughly recognized by serializaiton code. 
+        types of the modules are thoroughly recognized by serializaiton code.
         """
-        from package_a.test_module import ModWithSubmod
 
         class Submod(torch.nn.Module):
             def __init__(self):
@@ -385,7 +384,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_load_shared_tensors(self):
         """
-        Test tensors shared across eager and ScriptModules on load 
+        Test tensors shared across eager and ScriptModules on load
         are the same.
         """
         from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
@@ -423,12 +422,12 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_load_shared_tensors_repackaged(self):
         """
-        Test tensors shared across eager and ScriptModules on load 
+        Test tensors shared across eager and ScriptModules on load
         are the same across multiple package saves and loads. This is
         an important test because not all of the tensor information is restored
         in python between packages. The python identity is not maintained, but
         the backing cpp TensorImpl is. We load/save storages based off of this
-        cpp TensorImpl and not the python identity. 
+        cpp TensorImpl and not the python identity.
         """
         from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
