@@ -70,7 +70,67 @@
 #include <vector>
 #include "Functions.h"
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
+  if (reduce == "add") {
+    return native::SCATTER_GATHER_OP::REDUCE_ADD;
+  } else if (reduce == "multiply") {
+    return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
+  }
+}
+
+template <typename Meta>
+void scatter_meta_impl(
+    Meta& meta,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const c10::optional<c10::string_view> reduce) {
+  TORCH_CHECK_INDEX(
+      index.scalar_type() == ScalarType::Long,
+      "scatter_(): Expected dtype int64 for index.");
+
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  meta.set_output(self.sizes(), self.options());
+
+  if (reduce.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(self.scalar_type()) ||
+            at::isComplexType(self.scalar_type()),
+        "scatter_(): Expected floating or complex type for self.");
+
+    // Test that `reduce` is a valid argument
+    get_operator_enum(reduce.value());
+  }
+}
+
+TORCH_META_FUNC2(scatter, src)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ c10::optional<c10::string_view> reduce) {
+  at::assert_no_overlap(self, src);
+  scatter_meta_impl(*this, self, dim, index, reduce);
+}
+
+TORCH_META_FUNC2(scatter, value)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& src,
+ c10::optional<c10::string_view> reduce) {
+  scatter_meta_impl(*this, self, dim, index, reduce);
+}
+
+} // namespace meta
+
+namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_stub);
@@ -1004,136 +1064,53 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
 }
 
-SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
-  if (reduce == "add") {
-    return SCATTER_GATHER_OP::REDUCE_ADD;
-  }
-  else if (reduce == "multiply") {
-    return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-  }
-  else {
-    TORCH_CHECK(false,
-                "reduce argument must be either add or multiply.");
-  }
-}
-
-template <typename SrcTy, typename ReduceStub, typename AssignStub>
-Tensor& scatter_base_impl(
+template <typename T, typename ReduceStub, typename FillStub>
+void scatter_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
-    const SrcTy& src,
-    c10::optional<c10::string_view> reduce,
-    Tensor& out,
+    const T& src,
+    const c10::optional<c10::string_view>& reduce,
+    const Tensor& out,
     ReduceStub& reduce_stub,
-    AssignStub& assign_stub) {
-  TORCH_CHECK_INDEX(
-      index.scalar_type() == ScalarType::Long,
-      "scatter_(): Expected dtype int64 for index.");
+    FillStub& fill_stub) {
+  auto mut_out = const_cast<Tensor&>(out);
 
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-
-  resize_output(out, self.sizes());
-  out.copy_(self);
+  if (&self != &mut_out) {
+    mut_out.copy_(self);
+  }
 
   if (reduce.has_value()) {
-    TORCH_CHECK(
-        at::isFloatingType(self.scalar_type()) ||
-            at::isComplexType(self.scalar_type()),
-        "scatter_(): Expected floating or complex type for self.");
-
-    SCATTER_GATHER_OP op = get_operator_enum(reduce.value());
-    reduce_stub(self.device().type(), out, dim, index, src, op);
+    auto op = meta::get_operator_enum(reduce.value());
+    reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
-    assign_stub(self.device().type(), out, dim, index, src);
+    fill_stub(self.device().type(), mut_out, dim, index, src);
   }
-
-  return out;
 }
 
-Tensor& scatter_impl(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Tensor& src,
-    c10::optional<c10::string_view> reduce,
-    Tensor& out) {
-  at::assert_no_overlap(self, src);
-  return scatter_base_impl(
-      self, dim, index, src, reduce, out, scatter_reduce_stub, scatter_stub);
+TORCH_IMPL_FUNC(scatter_src_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ c10::optional<c10::string_view> reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, src, reduce, out,
+               scatter_reduce_stub,
+               scatter_stub);
 }
 
-Tensor& scatter_impl(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Scalar& value,
-    c10::optional<c10::string_view> reduce,
-    Tensor& out) {
-  return scatter_base_impl(
-      self, dim, index, value, reduce, out,
-      scatter_scalar_reduce_stub, scatter_fill_stub);
-}
-
-Tensor& scatter_src_(
-    Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Tensor& src,
-    c10::optional<c10::string_view> reduce) {
-  return scatter_impl(self, dim, index, src, reduce, self);
-}
-
-Tensor& scatter_value_(
-    Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Scalar& value,
-    c10::optional<c10::string_view> reduce) {
-  return scatter_impl(self, dim, index, value, reduce, self);
-}
-
-Tensor scatter_src(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Tensor& src,
-    c10::optional<c10::string_view> reduce) {
-  Tensor out = at::empty_like(self);
-  scatter_impl(self, dim, index, src, reduce, out);
-  return out;
-}
-
-Tensor scatter_value(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Scalar& value,
-    c10::optional<c10::string_view> reduce) {
-  Tensor out = at::empty_like(self);
-  scatter_impl(self, dim, index, value, reduce, out);
-  return out;
-}
-
-Tensor& scatter_src_out(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Tensor& src,
-    c10::optional<c10::string_view> reduce,
-    Tensor& out) {
-  return scatter_impl(self, dim, index, src, reduce, out);
-}
-
-Tensor& scatter_value_out(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const Scalar& value,
-    c10::optional<c10::string_view> reduce,
-    Tensor& out) {
-  return scatter_impl(self, dim, index, value, reduce, out);
+TORCH_IMPL_FUNC(scatter_value_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& value,
+ c10::optional<c10::string_view> reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, value, reduce, out,
+               scatter_scalar_reduce_stub,
+               scatter_fill_stub);
+>>>>>>> a3396de2e7 (Port `scatter` to structured kernel.)
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
