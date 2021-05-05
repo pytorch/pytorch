@@ -110,7 +110,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
   return matchedOperator;
 }
 
-std::shared_ptr<JitFuture> sendPythonRemoteCall(
+c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
@@ -136,7 +136,7 @@ std::shared_ptr<JitFuture> sendPythonRemoteCall(
 using namespace torch::distributed::autograd;
 
 c10::intrusive_ptr<JitFuture> toPyJitFuture(
-    const std::shared_ptr<JitFuture>& messageJitFuture,
+    const c10::intrusive_ptr<JitFuture>& messageJitFuture,
     bool hasValue) {
   if (hasValue) {
     auto child = messageJitFuture->createInstance(PyObjectType::get());

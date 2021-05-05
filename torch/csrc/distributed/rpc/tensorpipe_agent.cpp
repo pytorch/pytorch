@@ -868,7 +868,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
-          std::shared_ptr<JitFuture> futureResponseMessage;
+          c10::intrusive_ptr<JitFuture> futureResponseMessage;
           try {
             // Instead of creating a MultiStreamGuard here, the ctx is passed
             // to the callback and the MultiStreamGuard is created there,
@@ -881,7 +881,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
-                std::make_shared<JitFuture>(at::AnyClassType::get());
+                c10::make_intrusive<JitFuture>(at::AnyClassType::get());
             futureResponseMessage->setError(std::current_exception());
           }
 
@@ -910,7 +910,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       });
 }
 
-std::shared_ptr<JitFuture> TensorPipeAgent::send(
+c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
     const float rpcTimeoutSeconds,
