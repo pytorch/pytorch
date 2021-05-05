@@ -1,9 +1,4 @@
 import torch
-
-# TODO: remove this global setting
-# Sparse tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 import itertools
 import functools
 import operator
@@ -95,7 +90,6 @@ class TestSparse(TestCase):
             ((10, 0, 3), 0, 3),
             ((10, 0, 3), 0, 0),
         ]
-
         printed = []
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
@@ -777,7 +771,7 @@ class TestSparse(TestCase):
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [dj, di], dtype, device, coalesced)
-            y = torch.randn(dj, dk, device=device)
+            y = torch.randn(dj, dk, dtype=dtype, device=device)
 
             x_coalesced = x.coalesce()
             self.assertTrue(x_coalesced.is_coalesced())
@@ -1560,7 +1554,7 @@ class TestSparse(TestCase):
 
         y = x1.clone()
         y.zero_()
-        expected = torch.zeros(x1.size())
+        expected = torch.zeros(x1.size(), dtype=dtype, device=device)
         self.assertEqual(self.safeToDense(y), expected)
 
         self.assertEqual(x1.is_coalesced(), coalesced)
@@ -2854,6 +2848,27 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, float("nan")]), device=device)
         t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, True]), device=device)
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
+
+    @coalescedonoff
+    @dtypes(torch.float32, torch.float64)
+    def test_div_rounding_mode(self, device, dtype, coalesced):
+        sparse, _, _ = self._gen_sparse(2, 10, (10, 10), dtype,
+                                        device, coalesced)
+        dense = self.safeToDense(sparse)
+
+        for mode in (None, 'floor', 'trunc'):
+            actual = sparse.div(-2, rounding_mode=mode)
+            expect = dense.div(-2, rounding_mode=mode)
+            self.assertEqual(self.safeToDense(actual), expect)
+
+            # Test inplace
+            actual = sparse.clone().div_(-2, rounding_mode=mode)
+            self.assertEqual(self.safeToDense(actual), expect)
+
+            # Test out argument
+            actual.zero_()
+            torch.div(sparse, -2, rounding_mode=mode, out=actual)
+            self.assertEqual(self.safeToDense(actual), expect)
 
     def test_div_by_sparse_error(self, device):
         self.assertRaisesRegex(RuntimeError, 'Sparse division requires',

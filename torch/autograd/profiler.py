@@ -481,6 +481,8 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
             parsed_results = parse_kineto_results(self.kineto_results)
@@ -1138,7 +1140,9 @@ def parse_kineto_results(result):
                     cuda_memory_usage += mem_record[0].cuda_memory_usage()
                     mem_record[1] = True
 
-        is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        is_async = kineto_event.is_async() or (
+            kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        )
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
             name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
@@ -1275,7 +1279,9 @@ def parse_legacy_records(thread_records):
 
                 cpu_memory_usage = cpu_memory_allocs[record_key]
                 cuda_memory_usage = cuda_memory_allocs[record_key]
-                is_async = start.thread_id() != record.thread_id()
+                is_async = start.is_async() or (
+                    start.thread_id() != record.thread_id()
+                )
                 is_remote_event = record.is_remote()
                 start_flops = start.flops()
 
@@ -1531,6 +1537,16 @@ def build_table(
         assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
 
+    def flops_rate(evt):
+        US_IN_SECOND = 1000.0 * 1000.0
+        if evt.flops > 0:
+            if evt.cuda_time_total != 0:
+                return float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
+            else:
+                return float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
+        else:
+            return -1
+
     add_column(name_column_width)
     for _ in headers[1:]:
         add_column(DEFAULT_COLUMN_WIDTH)
@@ -1545,15 +1561,11 @@ def build_table(
 
     if with_flops:
         # Auto-scaling of flops header
-        US_IN_SECOND = 1000.0 * 1000.0  # cpu_time_total is in us
         raw_flops = []
         for evt in events:
-            if evt.flops > 0:
-                if evt.cuda_time_total != 0:
-                    evt.flops = float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
-                else:
-                    evt.flops = float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
-                raw_flops.append(evt.flops)
+            rate = flops_rate(evt)
+            if rate > 0:
+                raw_flops.append(rate)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
             headers.append(flops_header)
@@ -1657,10 +1669,11 @@ def build_table(
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
-            if evt.flops <= 0.0:
+            rate = flops_rate(evt)
+            if rate <= 0.0:
                 row_values.append("--")
             else:
-                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
+                row_values.append('{0:8.3f}'.format(rate * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
