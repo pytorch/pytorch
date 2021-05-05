@@ -343,7 +343,16 @@ void NodeToONNX(
     if (func) {
       pyobj = func->get();
     }
-    if (!py::hasattr(pyobj, "symbolic")) {
+
+    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
+    py::object is_registered_op = onnx_registry.attr("is_registered_op")(
+        "prim_PythonOp", "", opset_version);
+    if (!py::hasattr(pyobj, "symbolic") &&
+        (!PyObject_IsTrue(is_registered_op.ptr()))) {
+      // Simply clone the node, unless either
+      // 1. The torch.autograd.Function class of this node object has `symbolic`
+      // method defined.
+      // 2. Custom export symbolic is registered for prim::PythonOp.
       cloneNode(op);
       return;
     }
@@ -351,8 +360,7 @@ void NodeToONNX(
     // Prepare args for Python. First one is the graph, and is followed
     // by regular args, with Variables replaced by corresponding nodes.
     Py_ssize_t input_nr = 0;
-    py::tuple py_symbolic_args(1 + op->cconv.size());
-    py_symbolic_args[input_nr++] = py::cast(new_block->owningGraph());
+    py::tuple py_symbolic_args(op->cconv.size());
     auto inputs = op->inputs();
     auto node_it = inputs.begin();
     auto scalar_it = op->scalar_args.begin();
@@ -375,16 +383,35 @@ void NodeToONNX(
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*new_block->owningGraph(), op->scope());
-    // Call the symbolic function
-    // Use a little trampoline function so we can give good error messages
-    // upon argument mismatch
-    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    onnx_registry.attr("register_op")(
-        op->name(), pyobj.attr("symbolic"), "", opset_version);
-    py::object raw_output = onnx.attr("_run_symbolic_method")(
-        op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 
-    processSymbolicOutput(op->name(), op, raw_output);
+    if (py::hasattr(pyobj, "symbolic")) {
+      // Call the symbolic function
+      // Use a little trampoline function so we can give good error messages
+      // upon argument mismatch
+      onnx_registry.attr("register_op")(
+          op->name(), pyobj.attr("symbolic"), "", opset_version);
+      py::object raw_output = onnx.attr("_run_symbolic_method")(
+          new_block->owningGraph(),
+          op->name(),
+          pyobj.attr("symbolic"),
+          py_symbolic_args);
+
+      processSymbolicOutput(op->name(), op, raw_output);
+    } else {
+      TORCH_INTERNAL_ASSERT(PyObject_IsTrue(is_registered_op.ptr()));
+      Node* n = static_cast<Node*>(op);
+      n->s_(attr::name, op->name());
+      // Call symbolic function
+      py::object raw_output = onnx.attr("_run_symbolic_function")(
+          new_block->owningGraph(),
+          new_block,
+          n,
+          py_symbolic_args,
+          env,
+          operator_export_type);
+
+      processSymbolicOutput(op->kind().toUnqualString(), n, raw_output);
+    }
   };
 
   auto k = old_node->kind();
