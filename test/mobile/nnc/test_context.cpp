@@ -11,7 +11,7 @@ namespace nnc {
 extern "C" {
 
 // out = a * n (doing calculation in the `tmp` buffer)
-int bad_mul_kernel(void** args) {
+int slow_mul_kernel(void** args) {
   const int size = 128;
   at::Tensor a = at::from_blob(args[0], {size}, at::kFloat);
   at::Tensor out = at::from_blob(args[1], {size}, at::kFloat);
@@ -32,7 +32,7 @@ int dummy_kernel(void** /* args */) {
 
 } // extern "C"
 
-REGISTER_NNC_KERNEL("bad_mul", bad_mul_kernel)
+REGISTER_NNC_KERNEL("slow_mul", slow_mul_kernel)
 REGISTER_NNC_KERNEL("dummy", dummy_kernel)
 
 InputSpec create_test_input_spec(const std::vector<int64_t>& sizes) {
@@ -55,13 +55,13 @@ MemoryPlan create_test_memory_plan(const std::vector<int64_t>& buffer_sizes) {
   return memory_plan;
 }
 
-TEST(Function, ExecuteBadMul) {
+TEST(Function, ExecuteSlowMul) {
   const int a = 999;
   const int n = 100;
   const int size = 128;
   Function f;
 
-  f.set_nnc_kernel_id("bad_mul");
+  f.set_nnc_kernel_id("slow_mul");
   f.set_input_specs({create_test_input_spec({size})});
   f.set_output_spec({create_test_output_spec({size})});
   f.set_parameters({at::ones({1}, at::kInt).mul(n)});

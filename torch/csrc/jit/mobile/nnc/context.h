@@ -168,8 +168,9 @@ class TORCH_API Function {
   mutable std::unique_ptr<ExecutionState> execution_state_;
 };
 
-// Represents a set of compiled NNC functions which has a 1-1 correspondence
-// with a `Module`. It's similar as torch::jit::mobile::CompilationUnit.
+// CompilationUnit consists of a set of compiled NNC functions. It has a 1-1
+// correspondence with a `Module`.
+// It's similar as torch::jit::mobile::CompilationUnit.
 class TORCH_API CompilationUnit {
  public:
   CompilationUnit() = default;
