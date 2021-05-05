@@ -104,9 +104,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
-    const bool has_integral = has_int_or_bool_tensor(input);                                                                          \
-                                                                                                                                      \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_integral) {                                                  \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_int_or_bool_tensor(input)) {                                  \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -115,9 +113,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
                                                                                                                                       \
 void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
-    const bool has_integral = has_int_or_bool_tensor(input);                                                                          \
-                                                                                                                                      \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_integral) {                                                  \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_int_or_bool_tensor(input)) {                                  \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -128,9 +124,7 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
 #define FOREACH_POINTWISE_OP_SCALARLIST(NAME, OP)                                                                                                        \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-    const bool has_integral = has_int_or_bool_tensor(input);                                                                                             \
-                                                                                                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral) {                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_int_or_bool_tensor(input)) {                                                    \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -139,9 +133,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
                                                                                                                                                          \
 void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-    const bool has_integral = has_int_or_bool_tensor(input);                                                                                             \
-                                                                                                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral) {                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_int_or_bool_tensor(input)) {                                                    \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \

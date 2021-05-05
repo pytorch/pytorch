@@ -8,13 +8,12 @@ namespace native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
 bool has_int_or_bool_tensor(TensorList tensors) {
-  bool has_integral{false};
   for (const auto & tensor : tensors) {
     if (at::isIntegralType(tensor.scalar_type(), /* includeBool= */true)) {
-      has_integral = true;
+      return true;
     }
   }
-  return has_integral;
+  return false;
 }
 
 // Check foreach API restrictions
