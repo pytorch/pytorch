@@ -46,7 +46,7 @@ class TORCH_API DistEngine {
   // The gradients are accumulated in the provided autograd context.
   std::shared_ptr<c10::ivalue::Future> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<torch::autograd::Node>& sendFunction,
+      const std::shared_ptr<SendRpcBackward>& sendFunction,
       bool retainGraph);
 
   // Number of backward passes currently running for the Distributed Engine.
@@ -61,9 +61,13 @@ class TORCH_API DistEngine {
   DistEngine();
   ~DistEngine();
 
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistEngine(const DistEngine&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistEngine& operator=(const DistEngine&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistEngine(DistEngine&&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistEngine& operator=(DistEngine&&) = delete;
 
   // Validates the input roots for the backward computations and retrieves the
@@ -160,6 +164,7 @@ class TORCH_API DistEngine {
 // Guard to clean up resources once the backward pass is done.
 class BackwardPassCleanupGuard {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit BackwardPassCleanupGuard(const ContextPtr& autogradContext)
       : autogradContext_(autogradContext) {}
 

@@ -5,6 +5,8 @@
 #include "caffe2/core/init.h"
 #include "observers/observer_config.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
@@ -22,6 +24,7 @@ void NetObserverReporterPrint::report(
     if ((p.first == "NET_DELAY") && (info.size() == 1)) {
       // for Net_delay perf
       caffe2_perf.push_back({{"type", "NET"},
+                             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
@@ -31,6 +34,7 @@ void NetObserverReporterPrint::report(
                                c10::to_string(
                                    p.second.cpuMilliseconds /
                                    p.second.latency *
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    100),
                              },
                              {"unit", "percent"},
@@ -41,6 +45,7 @@ void NetObserverReporterPrint::report(
       std::string args_str = get_op_args(p.second);
       std::string type = p.first;
       caffe2_perf.push_back({{"type", type},
+                             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
@@ -50,6 +55,7 @@ void NetObserverReporterPrint::report(
                                c10::to_string(
                                    p.second.cpuMilliseconds /
                                    p.second.latency *
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    100),
                              },
                              {"unit", "percent"},
@@ -75,16 +81,22 @@ void NetObserverReporterPrint::report(
     }
   }
 
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = caffe2_perf.begin(); it != caffe2_perf.end(); it++) {
     std::stringstream buffer;
     auto entry = *it;
     buffer << IDENTIFIER << "{";
+    // NOLINTNEXTLINE(modernize-raw-string-literal)
     buffer << "\"type\": \"" << sanatize(entry["type"]) << "\","
+           // NOLINTNEXTLINE(modernize-raw-string-literal)
            << "\"unit\": \"" << sanatize(entry["unit"]) << "\","
+           // NOLINTNEXTLINE(modernize-raw-string-literal)
            << "\"metric\": \"" << sanatize(entry["metric"]) << "\",";
     if (entry.find("value") != entry.end()) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       buffer << "\"value\": \"" << sanatize(entry["value"]) << "\"";
     } else if (entry.find("info_string") != entry.end()) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       buffer << "\"info_string\": \"" << sanatize(entry["info_string"]) << "\"";
     }
     buffer << "}";
@@ -97,7 +109,7 @@ static std::string get_tensor_shapes(PerformanceInformation p) {
   std::stringstream shape_stream;
   if (!p.tensor_shapes.empty()) {
     shape_stream << "[";
-    for (int i = 0; i < p.tensor_shapes.size(); i++) {
+    for (const auto i : c10::irange(p.tensor_shapes.size())) {
       shape_stream << "[";
       for (int j = 0; j < p.tensor_shapes[i].dims_size(); j++) {
         shape_stream << p.tensor_shapes[i].dims(j) << ", ";
@@ -117,7 +129,7 @@ static std::string get_op_args(PerformanceInformation p) {
   if (!p.args.empty()) {
     std::stringstream args;
     args << "[";
-    for (int i = 0; i < p.args.size(); i++) {
+    for (const auto i : c10::irange(p.args.size())) {
       args << "{" << p.args[i].name() << ": ";
       if (p.args[i].has_i()) {
         args << p.args[i].i();

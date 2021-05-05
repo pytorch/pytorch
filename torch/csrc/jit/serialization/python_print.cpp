@@ -45,6 +45,8 @@ const static std::unordered_set<std::string> reserved_names = {
     "getattr",
     "inf",
     "nan",
+    "infj",
+    "nanj",
     "ops",
     "__torch__",
     // the python keywords
@@ -353,6 +355,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
@@ -600,6 +603,7 @@ struct PythonPrintImpl {
   }
 
   bool isLongLine(const std::string& str) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return str.size() + level * 2 >= 40;
   }
 
@@ -823,14 +827,14 @@ struct PythonPrintImpl {
         body_ << "):\n";
         printBody(graph->block());
       } break;
-      case prim::ModuleDictIndex: {
-        const auto dict = node->inputs().at(0);
+      case prim::ModuleContainerIndex: {
+        const auto container = node->inputs().at(0);
         const auto key = node->inputs().at(1);
         const auto out = node->outputs().at(0);
         assignValuesToTheirUniqueNames(out);
         indent();
         body_ << useOf(out) << " : " << out->type()->annotation_str() << " = "
-              << useOf(dict) << "[" << useOf(key) << "]\n";
+              << useOf(container) << "[" << useOf(key) << "]\n";
       } break;
       default:
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
@@ -859,6 +863,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto& c : val.toStringRef()) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -1463,6 +1468,7 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto type = arg.type();
             registerClassDependencies(type);
             body_ << ", " << arg.name() << ": "

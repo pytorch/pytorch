@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -20,7 +21,7 @@ from .microbatch import Batch
 from .skip.layout import SkipLayout
 from .skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
 from .stream import AbstractStream, current_stream, use_device
-from .worker import Task, create_workers, join_workers
+from .worker import Task, create_workers
 
 __all__: List[str] = []
 
@@ -93,9 +94,6 @@ class Pipeline:
         self.skip_layout = skip_layout
         self.checkpoint_stop = checkpoint_stop
         (self.in_queues, self.out_queues) = create_workers(devices)
-
-    def __del__(self) -> None:
-        join_workers(self.in_queues, self.out_queues)
 
     def run(self, batches: List[Batch]) -> None:
         """Runs pipeline parallelism.

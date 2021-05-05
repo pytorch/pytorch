@@ -65,7 +65,7 @@ inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
-inline PyObject* wrap(at::Scalar scalar) {
+inline PyObject* wrap(const at::Scalar& scalar) {
   return wrap(scalar_to_tensor(scalar));
 }
 
@@ -109,6 +109,16 @@ inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor, at:
   return r.release();
 }
 
+inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  auto r = THPObjectPtr{PyStructSequence_New(type)};
+  if (!r) throw python_error();
+  PyStructSequence_SET_ITEM(r.get(), 0, wrap(std::get<0>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 1, wrap(std::get<1>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 2, wrap(std::get<2>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 3, wrap(std::get<3>(tensors)));
+  return r.release();
+}
+
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
   auto r = THPObjectPtr{PyTuple_New(4)};
   if (!r) throw python_error();
@@ -124,12 +134,15 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, int64_t> tensors
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
   PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
   return r.release();
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -141,12 +154,15 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, at::Tensor, int64_t> tensors) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
   PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
   PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 4, wrap(std::move(std::get<4>(tensors))));
   return r.release();
 }
@@ -162,6 +178,7 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -193,7 +210,9 @@ inline PyObject* wrap(at::IntArrayRef list) {
 inline PyObject* wrap(std::tuple<float, int64_t> tensors) {
   auto r = THPObjectPtr{PyTuple_New(2)};
   if (!r) throw python_error();
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
   return r.release();
 }

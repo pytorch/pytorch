@@ -6,7 +6,7 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 
 // Versions (i.e. why was the version number bumped?)
 
@@ -46,6 +46,7 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
 //      (a versioned symbol preserves the historic behavior of versions 1--3)
 // 5. (Dynamic) Stops torch.full inferring a floating point dtype
 //      when given bool or integer fill values.
+// 6. Write version string to `./data/version` instead of `version`.
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // The version we write when the archive contains bytecode.

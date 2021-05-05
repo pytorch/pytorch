@@ -17,9 +17,9 @@ For Objective-C developers, simply import the umbrella header
 #import <LibTorch/LibTorch.h>
 ```
 
-For Swift developers, you need to create an Objective-C class as a bridge to call the C++ APIs. We highly recommend you to follow the [Image Classification](https://github.com/pytorch/ios-demo-app/tree/master/PyTorchDemo) demo where you can find out how C++, Objective-C and Swift work together. 
+For Swift developers, you need to create an Objective-C class as a bridge to call the C++ APIs. We highly recommend you to follow the [Image Classification](https://github.com/pytorch/ios-demo-app/tree/master/PyTorchDemo) demo where you can find out how C++, Objective-C and Swift work together.
 
-### Disable Bitcode 
+### Disable Bitcode
 
 Since PyTorch is not yet built with bitcode support, you need to disable bitcode for your target by selecting the **Build Settings**, searching for **Enable Bitcode** and set the value to **No**.
 

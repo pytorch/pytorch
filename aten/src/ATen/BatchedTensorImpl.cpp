@@ -15,12 +15,15 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , bdims_(std::move(bdims))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  set_storage_access_should_throw();
+  set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
   checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t dim = 0; dim < public_dims; dim++) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
@@ -73,15 +76,11 @@ void BatchedTensorImpl::checkInvariants() const {
 }
 
 // The following are publically exposed as methods of Tensor
-bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
   return is_contiguous_;
-}
-
-const Storage& BatchedTensorImpl::storage() const {
-  TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
 }
 
 // The following are some internal inherited methods that we do not support.
@@ -101,6 +100,10 @@ bool BatchedTensorImpl::has_storage() const {
   return false;
 }
 #endif
+
+const char* BatchedTensorImpl::tensorimpl_type_name() const {
+  return "BatchedTensorImpl";
+}
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));

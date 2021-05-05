@@ -1,4 +1,6 @@
 #include <ATen/native/vulkan/api/Context.h>
+#include <ATen/vulkan/Context.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 
 #include <sstream>
 
@@ -168,10 +170,22 @@ Context* context() {
   return context.get();
 }
 
+struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
+  bool is_vulkan_available() const override {
+    return available();
+  }
+
+  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+    return vulkan::ops::copy_(self, src);
+  }
+};
+static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
+
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor) {
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group_size) {
   Context* const context = api::context();
   const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
@@ -189,7 +203,7 @@ Descriptor::Set dispatch_prologue(
           shader_layout.handle,
         }),
         shader.cache.retrieve(shader_descriptor),
-        gpu.adapter->local_work_group_size(),
+        local_work_group_size,
       }));
 
   return descriptor.pool.allocate(shader_layout);

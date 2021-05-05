@@ -1045,6 +1045,12 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t m_stride = (output_size + (mr - 1)) & -mr;
       op->prepacked_a =
         (uint8_t*)realloc((void*)op->prepacked_a, k_stride * m_stride);
+      if (op->prepacked_a == NULL) {
+        pytorch_qnnp_log_error(
+            "failed to allocate %zu bytes for packed activation buffer",
+            (k_stride * m_stride));
+        return pytorch_qnnp_status_out_of_memory;
+      }
 
       struct q8gemm_prepackA_sparse_dq_context
         q8gemm_prepack_sparse_dq_context = {

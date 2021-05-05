@@ -152,7 +152,11 @@ class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                &cudnnCreateFilterDescriptor,
                                                &cudnnDestroyFilterDescriptor> {
  public:
-  void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
+  void set(const at::Tensor &t, int64_t pad = 0) {
+    set(t, at::MemoryFormat::Contiguous, pad);
+  }
+
+  void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
   void print();
 private:
@@ -206,7 +210,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
@@ -217,7 +221,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
@@ -299,6 +303,23 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
 #endif
+};
+
+struct TORCH_CUDA_CPP_API ActivationDescriptor
+    : public Descriptor<
+          cudnnActivationStruct,
+          &cudnnCreateActivationDescriptor,
+          &cudnnDestroyActivationDescriptor> {
+  void set(cudnnActivationMode_t mode) {
+    AT_ASSERT(
+        mode == CUDNN_ACTIVATION_RELU,
+        "TODO: support more cuDNN activation modes");
+    AT_CUDNN_CHECK(cudnnSetActivationDescriptor(
+        mut_desc(),
+        mode,
+        cudnnNanPropagation_t::CUDNN_NOT_PROPAGATE_NAN,
+        std::numeric_limits<double>::max()));
+  }
 };
 
 union Constant

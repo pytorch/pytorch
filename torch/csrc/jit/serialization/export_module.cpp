@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
@@ -10,6 +12,7 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -24,6 +27,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -57,79 +61,26 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getModulePath(Node* node, const std::string& root_scope_string) {
-  constexpr size_t kFunction = 0;
-  constexpr size_t kModuleInstanceInfo = 2;
-
-  if (!node->callstack()) {
-    return root_scope_string + ".forward";
-  } else {
-    std::string module_info = root_scope_string;
-    auto callstack_ptr = *(node->callstack());
-    const auto& vec = callstack_ptr->vec();
-
-    for (const auto& element : vec) {
-      const auto& opt_module_instance_info =
-          std::get<kModuleInstanceInfo>(element);
-      if (opt_module_instance_info.has_value()) {
-        const auto& module_instance_info = opt_module_instance_info.value();
-        if (module_instance_info.class_type()) {
-          const auto& class_type = module_instance_info.class_type();
-          const auto& instance_name = module_instance_info.instance_name();
-          auto type_name = class_type->name()->qualifiedName();
-          type_name = type_name.substr(type_name.find_last_of('.') + 1);
-          module_info.append(".")
-              .append(instance_name)
-              .append("(")
-              .append(type_name)
-              .append(")")
-              .append(".")
-              .append(std::get<kFunction>(element)->name());
-        } else {
-          module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
-        }
-      } else {
-        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
-      }
-    }
-
-    return module_info;
-  }
-}
-
-std::string getModuleTypeName(const Module& module, const std::string& prefix) {
-  std::string moduleType = module.type()->str();
-  size_t lastDotIndex = moduleType.rfind('.');
-  if (lastDotIndex != std::string::npos) {
-    moduleType = moduleType.substr(lastDotIndex + 1);
-  }
-  return prefix + "(" + moduleType + ")";
-}
-
-std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
+std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    BackendDebugHandleManager& debug_handle_manager) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
 
-  torch::jit::Code code(graph, func.name());
+  torch::jit::MobileCode code(graph, func.name());
   auto instructions_copy = code.instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
-  std::vector<std::string> op_module_paths;
+  std::vector<int64_t> op_debug_handles;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
-      if (save_mobile_debug_info) {
-        std::string root_scope_string = getModuleTypeName(module, "top");
-        op_module_paths.emplace_back(getModulePath(node, root_scope_string));
-      }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -186,6 +137,11 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
           toString(ins.op),
           " is not supported in mobile module.");
     }
+    auto node = code.instructions_source()[i];
+    int64_t debug_handle =
+        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(node);
+    // Note 1-to-1 correspondence between instructions and debug handles
+    op_debug_handles.emplace_back(debug_handle);
   }
 
   // instructions
@@ -277,16 +233,16 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
-  if (save_mobile_debug_info) {
-    // module debug info
-    std::vector<IValue> module_paths;
-    module_paths.reserve(op_module_paths.size());
-    for (auto& path : op_module_paths) {
-      module_paths.emplace_back(std::move(path));
-    }
-    auto module_debug_info = Table({{"module_debug_info", Tup(module_paths)}});
-    debug_info_vals = Tup({func.qualname().qualifiedName(), module_debug_info});
-  }
+  // module debug info
+  // This is just a set of debug handles.
+  // We always save debug handles.
+  // debug handles generated by debug_handle_manager
+  // will correspond to {source_range, inlinedCallStackPtr} which we will
+  // serialize separately.
+  IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
+  auto function_debug_info =
+      Table({{"function_debug_handles", module_debug_tuple}});
+  debug_info_vals = Tup({func.qualname().qualifiedName(), function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -294,21 +250,25 @@ void setstateTuple(
     const Module& module,
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
-    c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    bool save_mobile_debug_info) {
+    std::unordered_set<std::string>& qn_cache,
+    std::vector<c10::IValue>& debug_info_elements,
+    BackendDebugHandleManager& debug_handle_manager) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
+    const auto qn = setstate.qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      return;
+    }
     if (setstate.isGraphFunction()) {
       auto func_tuple =
-          getFunctionTuple(module, setstate, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, debug_handle_manager);
       elements.push_back(func_tuple.first);
-      if (save_mobile_debug_info) {
-        debug_info_elements->push_back(func_tuple.second.value());
-      }
+      qn_cache.emplace(qn);
+      debug_info_elements.push_back(func_tuple.second);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -316,8 +276,9 @@ void setstateTuple(
           module,
           obj->getSlot(i),
           elements,
+          qn_cache,
           debug_info_elements,
-          save_mobile_debug_info);
+          debug_handle_manager);
     }
   }
 }
@@ -326,17 +287,21 @@ void setstateTuple(
 void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
-    c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    bool save_mobile_debug_info) {
+    std::vector<c10::IValue>& debug_info_elements,
+    BackendDebugHandleManager& debug_handle_manager) {
   auto methods = module.get_methods();
+  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), save_mobile_debug_info);
-    elements.push_back(func_tuple.first);
-    if (save_mobile_debug_info) {
-      debug_info_elements->push_back(func_tuple.second.value());
+    const auto qn = method.function().qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      continue;
     }
+    auto func_tuple =
+        getFunctionTuple(module, method.function(), debug_handle_manager);
+    elements.push_back(func_tuple.first);
+    qn_cache.emplace(qn);
+    debug_info_elements.push_back(func_tuple.second);
   }
 
   // __setstate__ of all components
@@ -344,8 +309,9 @@ void moduleMethodsTuple(
       module,
       module._ivalue(),
       elements,
+      qn_cache,
       debug_info_elements,
-      save_mobile_debug_info);
+      debug_handle_manager);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -473,6 +439,15 @@ class ScriptModuleSerializer {
     }
   }
 
+  void updateSourceRangeTags(const SourceRangeRecords& ranges) {
+    for (const auto& range : ranges) {
+      if (source_range_tags_.find(range.range) == source_range_tags_.end()) {
+        source_range_tags_[range.range] = current_source_range_tag_;
+        current_source_range_tag_++;
+      }
+    }
+  }
+
   void writeCode(const at::NamedTypePtr& root_type) {
     class_deps_.add(root_type);
     for (size_t i = 0; i < class_deps_.size(); ++i) {
@@ -481,6 +456,7 @@ class ScriptModuleSerializer {
       convertNamedType(class_deps_[i]);
     }
 
+    current_source_range_tag_ = 0;
     // Mapping of filename => src. We need this because multiple classes may go
     // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
     for (auto& item : file_streams_) {
@@ -502,7 +478,9 @@ class ScriptModuleSerializer {
       // Write out the debug information
       std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      auto range_data = source_range_pickler.pickle(item.value().ranges());
+      updateSourceRangeTags(item.value().ranges());
+      auto range_data = source_range_pickler.pickle(
+          item.value().ranges(), source_range_tags_);
       writer_.writeRecord(
           debugFilename,
           range_data.data(),
@@ -511,24 +489,53 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void writeByteCode(const Module& module, const bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
+    BackendDebugHandleManager debug_handle_manager;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    c10::optional<std::vector<c10::IValue>> debug_info_elements;
-    if (save_mobile_debug_info) {
-      debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    }
+    std::vector<c10::IValue> debug_info_elements;
+    // Always save debug handles
+    debug_info_elements.emplace_back(
+        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
 
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module, elements, debug_info_elements, debug_handle_manager);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
+    auto debug_info_telements = Tup(std::move(debug_info_elements));
+
+    // At the moment keeping this feature experimental
+    // since we have not evaluated how this affect model size
+    // and we have not build any utility to strip off debug info
+    // when desired
+    // TODO: Build utility to strip off debug map. It should also do the
+    // same for debug_pkl files
     if (save_mobile_debug_info) {
-      auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
-      writeArchive("mobile_debug", debug_info_telements);
+      // Note that stripping off debug map will not strip off
+      // debug handles.
+      // The reason we save debug handles conditionally is so that
+      // we dont end up with a model that has debug handles but has not
+      // debug map to correlate debug handels with.
+      // Once we have a model with both handles and debug map, we can
+      // strip off debug map and have a lean model served to production.
+      // If exception ocurrs we have a model with debug map that can be
+      // used to symbolicate debug handles
+      writeArchive("mobile_debug_handles", debug_info_telements);
+      // Now get the debug-handles-to-inlined-cs-ptr-map
+      // And serialize that in a separate archive
+      auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
+      CallStackDebugInfoPickler cs_debug_info_pickler;
+      auto cs_data = cs_debug_info_pickler.pickle(
+          debug_handle_cs_ptr_map, source_range_tags_);
+      // Write out map: [debug-handle, {source range, InlinedCallStack}]
+      std::string filename = "callstack_debug_map.pkl";
+      static constexpr size_t kMinToCompress = 200;
+      writer_.writeRecord(
+          filename,
+          cs_data.data(),
+          cs_data.size(),
+          cs_data.size() > kMinToCompress /*compress*/);
     }
   }
 
@@ -570,6 +577,32 @@ class ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
+
+  // Uniquely identifies a SourceRange in a model.
+  // SourceRanges are associated with Nodes of Graphs.
+  // However for mobile deployment we dont intend to ship
+  // full JIT with capabilities of reading code and constructing
+  // graphs.
+  // Instead we serialize the Code generated from graph of the methods.
+  // Code is serialized in bytecode format that contains instructions
+  // corresponding to the nodes of the graph. Since original graph is gone, the
+  // question is how do we identify where the ops, in serialized bytecode, come
+  // from in original model code. We do this in two parts.
+  // 1. Associate a unique tag to SourceRange.
+  // 2. Serialize this unique_tag.
+  //  2.1 Meaning save <byte_offset, source_range_tag, source range> instead of
+  //      <byte_offset, source range>
+  // 3. During serializing model for mobile, i.e. bytecode generation,
+  //    save unique tag of SourceRange corresponding to the Node.
+  // 4. During deserialization, read all the debug_pkl, to construct a map
+  //    of <unique_tag, SourceRange> and use tag saved with OPs in bytecode
+  //    to lookup the source range.
+  // Strictly speaking we will serialize InlinedCallStack directly, which
+  // contains SourceRange. This way we have access to entire callstack and not
+  // just source information about where the node is, since bytecode inlines the
+  // graph before saving it.
+  SourceRangeTagMap source_range_tags_;
+  int64_t current_source_range_tag_;
 };
 
 void ExportModule(
@@ -612,9 +645,9 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  c10::optional<std::vector<c10::IValue>> debug_info_elements;
-  moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
+  std::vector<c10::IValue> debug_info_elements;
+  BackendDebugHandleManager dummy;
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
@@ -631,6 +664,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
           "There should be two parts in an operator name.");
       auto opname = op_item[0].toString()->string();
       auto overload = op_item[1].toString()->string();
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       opnames.emplace(overload.empty() ? opname : opname + "." + overload);
     }
   }
@@ -643,26 +677,5 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-namespace mobile {
-
-std::set<std::string> _export_operator_list(
-    torch::jit::mobile::Module& module) {
-  std::set<std::string> operator_list;
-  for (Method func : module.get_methods()) {
-    const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
-    // op_names below isn't a list of unique operator names. In fact
-    // it can contain the same operator name many many times, so we need
-    // to de-dup the list by adding all the operator names into
-    // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
-    for (auto& op_name : op_names) {
-      operator_list.insert(toString(op_name));
-    }
-  }
-  return operator_list;
-}
-
-} // namespace mobile
 } // namespace jit
 } // namespace torch

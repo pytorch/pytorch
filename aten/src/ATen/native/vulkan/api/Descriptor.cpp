@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -99,7 +100,7 @@ void allocate_descriptor_sets(
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
     nullptr,
     descriptor_pool,
-    descriptor_set_layouts.size(),
+    utils::safe_downcast<uint32_t>(descriptor_set_layouts.size()),
     descriptor_set_layouts.data(),
   };
 
@@ -180,7 +181,7 @@ Descriptor::Set& Descriptor::Set::bind(
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  update({
+  update(Item{
       binding,
       shader_layout_signature_[binding],
       {

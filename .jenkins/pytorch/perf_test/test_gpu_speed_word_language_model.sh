@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 . ./common.sh
 
@@ -30,7 +31,7 @@ test_gpu_speed_word_language_model () {
 
   for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py --cuda --epochs 1)
-    echo $runtime
+    echo "$runtime"
     SAMPLE_ARRAY+=("${runtime}")
   done
 
@@ -38,12 +39,12 @@ test_gpu_speed_word_language_model () {
 
   stats=$(python ../get_stats.py "${SAMPLE_ARRAY[@]}")
   echo "Runtime stats in seconds:"
-  echo $stats
+  echo "$stats"
 
   if [ "$2" == "compare_with_baseline" ]; then
-    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}"
+    python ../compare_with_baseline.py --test-name "${FUNCNAME[0]}" --sample-stats "${stats}"
   elif [ "$2" == "compare_and_update" ]; then
-    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}" --update
+    python ../compare_with_baseline.py --test-name "${FUNCNAME[0]}" --sample-stats "${stats}" --update
   fi
 }
 

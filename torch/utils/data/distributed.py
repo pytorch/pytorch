@@ -74,9 +74,11 @@ class DistributedSampler(Sampler[int]):
         self.epoch = 0
         self.drop_last = drop_last
         if self.drop_last:
-            self.num_samples = len(self.dataset) // self.num_replicas  # type: ignore
+            self.num_samples = len(self.dataset) // self.num_replicas  # type: ignore[arg-type]
         else:
-            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)  # type: ignore
+            self.num_samples = math.ceil(
+                len(self.dataset) / self.num_replicas  # type: ignore[arg-type]
+            )
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
@@ -86,7 +88,7 @@ class DistributedSampler(Sampler[int]):
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g)  # type: ignore
+            indices = torch.randperm(len(self.dataset), generator=g)  # type: ignore[arg-type]
         else:
             indices = range(len(self.dataset))  # type: ignore
 

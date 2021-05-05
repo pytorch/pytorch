@@ -1,5 +1,4 @@
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc as container_abcs
 
 import torch
 from copy import deepcopy

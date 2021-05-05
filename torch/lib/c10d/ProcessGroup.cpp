@@ -1,6 +1,5 @@
-#include <c10d/ProcessGroup.hpp>
 #include <ATen/ThreadLocalState.h>
-
+#include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
 
@@ -18,8 +17,8 @@ std::string opTypeToString(OpType opType) {
       return "REDUCE";
     case OpType::ALLGATHER:
       return "ALLGATHER";
-    case OpType::ALLGATHER_BASE:
-      return "ALLGATHER_BASE";
+    case OpType::_ALLGATHER_BASE:
+      return "_ALLGATHER_BASE";
     case OpType::ALLGATHER_COALESCED:
       return "ALLGATHER_COALESCED";
     case OpType::GATHER:
@@ -53,17 +52,33 @@ bool isP2POp(OpType opType) {
       opType == OpType::RECVANYSOURCE;
 }
 
-
-ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
+ProcessGroup::Work::Work(
+    int rank,
+    OpType opType,
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
-    auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    auto recordingFunction =
+        std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->isActive()) {
-        recordingFunction->before(profilingTitle, {});
-        std::function<void()> end_handler = [this, recordingFunction]() {
-          recordingFunction->end();
-        };
-        recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
+      // Work events follow a future like pattern and can potentially be marked
+      // as complete by different threads, so explicitly set as async event.
+      recordingFunction->_setAsync();
+      // Passing input tensor to recordFunction allows for shape information in
+      // profiling output.
+      std::vector<c10::IValue> inputs;
+      if (inputTensors) {
+        inputs.reserve(inputTensors->size());
+        for (const auto& tensor : *inputTensors) {
+          inputs.push_back(tensor);
+        }
+      }
+      recordingFunction->before(profilingTitle, inputs);
+      std::function<void()> end_handler = [this, recordingFunction]() {
+        recordingFunction->end();
+      };
+      recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
     }
   }
 }
@@ -156,7 +171,8 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
-ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
+ProcessGroup::ProcessGroup(int rank, int size)
+    : rank_(rank), size_(size), dist_debug_level_(parseDistDebugLevel()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 

@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
 
 namespace at { namespace native {
@@ -33,7 +34,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(cpu_tensor.device().type() == DeviceType::CPU,
+  TORCH_CHECK(cpu_tensor.device().is_cpu(),
              "dense_to_mkldnn expects CPU tensor input");
   TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
              "dense_to_mkldnn expects strided tensor input");
@@ -75,6 +76,10 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
   auto w = itensor_from_mkldnn(self);
 
@@ -83,6 +88,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
   // its original form.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (w.ndims() == 5) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
@@ -112,6 +118,10 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
   auto w = itensor_from_mkldnn(self);
 

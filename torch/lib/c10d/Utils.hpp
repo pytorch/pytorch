@@ -1,5 +1,22 @@
 #pragma once
 
+#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
+#include <c10d/Types.hpp>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SSIZE_T ssize_t;
+#pragma comment(lib, "Ws2_32.lib")
+#else
+#include <fcntl.h>
+#include <netdb.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 #include <sys/types.h>
 
 #include <chrono>
@@ -12,24 +29,24 @@
 #include <tuple>
 #include <vector>
 
-#include <ATen/ATen.h>
-
-#include <c10d/Types.hpp>
-
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-typedef SSIZE_T ssize_t;
-#pragma comment(lib, "Ws2_32.lib")
-#else
-#include <sys/socket.h>
-#include <sys/poll.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#endif
-
 namespace c10d {
+
+// Distributed c10d debug levels
+enum DistributedDebugLevel {
+  OFF = 0,
+  DETAIL = 1,
+  INFO = 2,
+};
+
+// String debug log levels
+extern const char* kDistDebugEnvVar;
+extern const char* kDistDebugDetailLogLevel;
+extern const char* kDistDebugInfoLogLevel;
+extern const char* kDistDebugOffLogLevel;
+
+std::string parse_env(const char* env_var_name);
+
+DistributedDebugLevel parseDistDebugLevel();
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -72,8 +89,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
       val = std::stoi(stringValue);
     } catch (std::exception& e) {
       throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(envVarName));
+          "Invalid value for environment variable: " + std::string(envVarName));
     }
     if (val == 1) {
       return true;
@@ -81,8 +97,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
       return false;
     } else {
       throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(envVarName));
+          "Invalid value for environment variable: " + std::string(envVarName));
     }
   }
   return false;
@@ -149,7 +164,6 @@ inline void assertTypeMatch(
        toString(options) + ", got " + toString(tensors[index].options()) + ")");
   }
 }
-
 
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
@@ -339,7 +353,8 @@ inline at::Tensor newLikeFlat(
   std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
+  return at::empty_strided(
+      sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -405,7 +420,7 @@ inline void checkSplitSizes(
     TORCH_CHECK(
         split_sizes.size() == group_size,
         "Number of tensor splits not equal to group size");
-    int sum = std::accumulate(split_sizes.begin(), split_sizes.end(), 0);
+    const auto sum = c10::sum_integers(split_sizes);
     TORCH_CHECK(
         sum == tensor.size(0), "Split sizes doesn't match total dim 0 size");
   }
@@ -475,22 +490,23 @@ using SizeType = uint64_t;
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
-#define SYSCHECK(expr, success_cond)                                               \
-  while (true) {                                                                   \
-    auto __output = (expr);                                                        \
-    auto errno_local = WSAGetLastError();                                          \
-    (void)__output;                                                                \
-    if (!(success_cond)) {                                                         \
-      if (errno == EINTR) {                                                        \
-        continue;                                                                  \
-      } else if (errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK ) {  \
-        throw std::runtime_error("Socket Timeout");                                \
-      } else {                                                                     \
-        throw std::system_error(errno_local, std::system_category());              \
-      }                                                                            \
-    } else {                                                                       \
-      break;                                                                       \
-    }                                                                              \
+#define SYSCHECK(expr, success_cond)                                      \
+  while (true) {                                                          \
+    auto __output = (expr);                                               \
+    auto errno_local = WSAGetLastError();                                 \
+    (void)__output;                                                       \
+    if (!(success_cond)) {                                                \
+      if (errno == EINTR) {                                               \
+        continue;                                                         \
+      } else if (                                                         \
+          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
+        throw std::runtime_error("Socket Timeout");                       \
+      } else {                                                            \
+        throw std::system_error(errno_local, std::system_category());     \
+      }                                                                   \
+    } else {                                                              \
+      break;                                                              \
+    }                                                                     \
   }
 #else
 #define SYSCHECK(expr, success_cond)                            \
@@ -565,10 +581,16 @@ void sendBytes(
   }
 #endif
 
+// Ignore SIGPIPE as the send() return value is always checked for error
+#ifdef MSG_NOSIGNAL
+  flags |= MSG_NOSIGNAL;
+#endif
+
   while (bytesToSend > 0) {
     ssize_t bytesSent;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent = ::send(socket, (const char*)currentBytes, bytesToSend, flags))
+        bytesSent =
+            ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

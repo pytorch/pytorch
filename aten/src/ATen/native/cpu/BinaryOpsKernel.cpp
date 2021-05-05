@@ -11,6 +11,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/copysign.h>
 
 namespace at {
 namespace native {
@@ -21,7 +22,7 @@ using namespace vec256;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
+void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
@@ -40,7 +41,7 @@ void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
   }
 }
 
-void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val, Scalar max_val) {
+void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
@@ -50,7 +51,7 @@ void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val,
     auto max_vec = Vec256<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-        return std::min(max_scalar, std::max(min_scalar, a + alpha * b));
+        return std::min(max_scalar, std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
         auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
@@ -61,7 +62,7 @@ void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val,
     });
 }
 
-void atan2_kernel(TensorIterator& iter) {
+void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
@@ -74,11 +75,11 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) __ubsan_ignore_undefined__ {
+void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
-void mul_kernel(TensorIterator& iter) {
+void mul_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else {
@@ -92,7 +93,7 @@ void mul_kernel(TensorIterator& iter) {
   }
 }
 
-void div_true_kernel(TensorIterator& iter) {
+void div_true_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -104,7 +105,7 @@ void div_true_kernel(TensorIterator& iter) {
   });
 }
 
-void div_trunc_kernel(TensorIterator& iter) {
+void div_trunc_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
@@ -138,7 +139,7 @@ void div_trunc_kernel(TensorIterator& iter) {
 // For reference, see CPython's implementation:
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
-void div_floor_kernel(TensorIterator& iter) {
+void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
     // In the special case of unsigned integer division, floor division is
@@ -165,8 +166,14 @@ void div_floor_kernel(TensorIterator& iter) {
   } else {
     // See NOTE: [Floor Division in Python]
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
-      cpu_kernel(iter,
+      using vec_t = Vec256<scalar_t>;
+      cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            if (C10_UNLIKELY(b == 0)) {
+              // Divide by zero: return standard IEEE result
+              return a / b;
+            }
+
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
             if ((mod != 0) && (b < 0) != (mod < 0)) {
@@ -176,12 +183,28 @@ void div_floor_kernel(TensorIterator& iter) {
             scalar_t floordiv;
             if (div != 0) {
               floordiv = std::floor(div);
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (div - floordiv > scalar_t(0.5)) {
                 floordiv += scalar_t(1.0);
               }
             } else {
-              floordiv = std::copysign(scalar_t(0), a / b);
+              floordiv = c10::copysign(scalar_t(0), a / b);
             }
+            return floordiv;
+          },
+          [](vec_t a, vec_t b) -> vec_t {
+            auto mod = a.fmod(b);
+            auto div = (a - mod) / b;
+            const auto zero = vec_t(0);
+            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+            const auto one = vec_t(1);
+            div = vec_t::blendv(div, div - one, mask);
+            auto floordiv = div.floor();
+            mask = (div - floordiv) > vec_t(0.5);
+            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+            const auto basic_div = a / b;
+            floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+            floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
             return floordiv;
           });
     });
@@ -616,7 +639,9 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
             [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
               auto z = std::abs(a - b);
               return z < beta_val
+                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   ? static_cast<scalar_t>(0.5) * z * z / beta_val
+                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   : z - static_cast<scalar_t>(0.5) * beta_val;
             },
             [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
@@ -625,6 +650,30 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
                   point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
             });
       });
+}
+
+void huber_kernel(TensorIterator& iter, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t delta_val(delta);
+    const Vec delta_val_vec(delta_val);
+    const Vec point_five_vec(static_cast<scalar_t>(0.5));
+    cpu_kernel_vec(
+      iter,
+      [&delta_val](scalar_t a, scalar_t b) -> scalar_t {
+        auto z = std::abs(a - b);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return z < delta_val ? static_cast<scalar_t>(0.5) * z * z :
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        delta_val * (z - static_cast<scalar_t>(0.5) * delta_val);
+      },
+      [&delta_val_vec, &point_five_vec](Vec a, Vec b) {
+        auto z = (a - b).abs();
+        return Vec::blendv(point_five_vec * z * z,
+          delta_val_vec * (z - point_five_vec * delta_val_vec),
+          z >= delta_val_vec);
+    });
+  });
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
@@ -640,7 +689,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
   });
 }
 
-void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
+void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -798,6 +847,7 @@ void logaddexp2_kernel(TensorIterator& iter) {
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
           Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
           Vec256<scalar_t> one(1.0);
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Vec256<scalar_t> two(2.0);
           Vec256<scalar_t> m = maximum(a, b);
           return Vec256<scalar_t>::blendv(
@@ -889,28 +939,15 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
-}
-
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
-}
-
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
-
-void copysign_kernel(TensorIterator& iter) {
+void copysign_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        return copysign(a, b);
-    });
+    cpu_kernel_vec(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return c10::copysign(a, b);
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.copysign(b);
+      });
   });
 }
 
@@ -928,52 +965,113 @@ void xlogy_kernel(TensorIterator& iter) {
   });
 }
 
+void xlog1py_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlog1py_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log1p(y);
+    });
+  });
+}
+
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(add_stub, &add_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(rshift_stub, &rshift_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(le_stub, &le_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gt_stub, &gt_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(huber_stub, &huber_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
+REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 
 } // namespace native
 } // namespace at

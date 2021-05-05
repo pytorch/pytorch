@@ -48,9 +48,12 @@ class AttributePropagator {
       return false;
     };
 
-    // forward is preserved by default.
-    auto method = module_.get_method("forward");
-    preservedMethods_.insert(&method.function());
+    // forward is preserved by default, but
+    // not all modules have a forward function defined
+    if (module_.find_method("forward")) {
+      auto method = module_.get_method("forward");
+      preservedMethods_.insert(&method.function());
+    }
 
     for (auto name : preservedAttrs) {
       TORCH_CHECK(checkName(name), "Unknown name: " + name);
@@ -220,11 +223,11 @@ class AttributePropagator {
           blocks.push(sub_block);
         }
 
-        // Modules with prim::ModuleDictIndex cannot be frozen because they
+        // Modules with prim::ModuleContainerIndex cannot be frozen because they
         // return InterfaceTypes.
         TORCH_CHECK(
-            n->kind() != prim::ModuleDictIndex,
-            "Freezing modules containing prim::ModuleDictIndex is not supported");
+            n->kind() != prim::ModuleContainerIndex,
+            "Freezing modules containing prim::ModuleContainerIndex is not supported");
 
         if (n->kind() == prim::SetAttr || n->kind() == prim::GetAttr) {
           // By default if interface attributes are present then fail freezing.
@@ -264,6 +267,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordMutableAttrs,
                   *this,
@@ -389,6 +393,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::inlineInterfaceCalls,
                   *this,
@@ -484,6 +489,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::propagateAttributes,
                   *this,
@@ -609,6 +615,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordReferencedAttrs,
                   *this,
@@ -640,6 +647,7 @@ class AttributePropagator {
       auto attr = module.attr(name);
       auto attrTy = attr.type();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool isMutable;
       if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);
@@ -752,12 +760,14 @@ Module freeze_module(
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces,
     bool preserveParameters) {
-  Method method = module.get_method("forward");
-  // Check that module does not return itself.
-  for (auto& output : method.graph()->outputs()) {
-    TORCH_CHECK(
-        output->type() != module.type(),
-        "attempted to freeze a module that return itself");
+  if (module.find_method("forward")) {
+    Method method = module.get_method("forward");
+    // Check that module does not return itself.
+    for (auto& output : method.graph()->outputs()) {
+      TORCH_CHECK(
+          output->type() != module.type(),
+          "attempted to freeze a module that return itself");
+    }
   }
 
   auto moduleClone = module.clone(true);

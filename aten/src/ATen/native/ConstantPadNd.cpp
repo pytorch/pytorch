@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at { namespace native {
 
-Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
+Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
     TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
 
@@ -20,7 +22,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     bool all_pads_non_positive = true;
 
     auto c_input = self;
-    for (int i = l_diff; i < l_inp; i++) {
+    for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] < 0) {
             c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
@@ -69,7 +71,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     output.fill_(value);
 
     auto c_output = output;
-    for (int i = l_diff; i < l_inp; i++) {
+    for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] > 0) {
             c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx]);

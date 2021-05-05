@@ -276,11 +276,13 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
   ComputeLocationBase(int64_t size)
     : max_val(static_cast<scalar_t>(size - 1))
     , scaling_factor(static_cast<scalar_t>(size) / 2)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     , low(static_cast<scalar_t>(-0.5))
     , twice_span(static_cast<scalar_t>(size) * 2)
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
   }
 
@@ -542,16 +544,25 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto interp_params = compute_interp_params(x, y);
 
     auto nw = std::get<4>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne = std::get<5>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw = std::get<6>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se = std::get<7>(interp_params);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto nw_mask = std::get<8>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne_mask = std::get<9>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw_mask = std::get<10>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se_mask = std::get<11>(interp_params);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_y_n = std::get<12>(interp_params);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_x_w = std::get<13>(interp_params);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
@@ -612,24 +623,33 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     // So we store the necessary vectors to temporary arrays and use the helper
     // mask_scatter_add defined above.
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_gInp_nw_offset_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_gInp_ne_offset_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_gInp_sw_offset_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_gInp_se_offset_arr[iVec::size()];
     i_gInp_nw_offset.store(i_gInp_nw_offset_arr);
     i_gInp_ne_offset.store(i_gInp_ne_offset_arr);
     i_gInp_sw_offset.store(i_gInp_sw_offset_arr);
     i_gInp_se_offset.store(i_gInp_se_offset_arr);
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_nw_mask_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_ne_mask_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_sw_mask_arr[iVec::size()];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_se_mask_arr[iVec::size()];
     nw_mask.store(i_nw_mask_arr);
     ne_mask.store(i_ne_mask_arr);
     sw_mask.store(i_sw_mask_arr);
     se_mask.store(i_se_mask_arr);
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t gInp_corner_arr[Vec::size()];
 
     auto gx = Vec(0), gy = Vec(0);
@@ -759,8 +779,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
 
     auto i_gInp_offset = i_y_nearest * iVec(inp_W) + i_x_nearest;  // gInp is contiguous
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t mask_arr[iVec::size()];
     i_mask.store(mask_arr);
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(gInp_offset_arr);
 
@@ -812,28 +834,34 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     , compute_W(input.size(3)) {}
 
   // Calculate the cubic convolution coefficient
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   inline void get_cubic_coefficients(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
     x = tx;           // x = |0 - tx| <= 1
     coeffs[1] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
   }
 
   // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   inline void get_cubic_coefficients_grad(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
     x = Vec(0) - tx;  // x = |0 - tx| <= 1
     coeffs[1] = (Vec(-3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = (Vec(3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
@@ -844,14 +872,14 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto mask_x = must_in_bound ? iVec(-1) : (ix > iVec(-1)) & (ix < iVec(inp_W));
     auto mask_y = must_in_bound ? iVec(-1) : (iy > iVec(-1)) & (iy < iVec(inp_H));
     auto mask = cast<scalar_t>(mask_x & mask_y);
-    
+
     auto offset = iy * iVec(inp_sH) + ix * iVec(inp_sW);
 
     auto val = mask_gather<sizeof(scalar_t)>(Vec(0), data, offset, mask);
     return val;
   }
 
-  inline void add_value_bounded(scalar_t* data, int64_t len, const Vec& x, const Vec&y, 
+  inline void add_value_bounded(scalar_t* data, int64_t len, const Vec& x, const Vec&y,
                                const Vec& delta) const {
 
     auto ix = convert_to_int_of_same_size(compute_W.compute_coordinates(x));
@@ -860,14 +888,17 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto mask_x = must_in_bound ? iVec(-1) : (ix > iVec(-1)) & (ix < iVec(inp_W));
     auto mask_y = must_in_bound ? iVec(-1) : (iy > iVec(-1)) & (iy < iVec(inp_H));
     auto mask = cast<scalar_t>(mask_x & mask_y);
-    
+
     auto i_gInp_offset = iy * iVec(inp_W) + ix;
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t i_gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(i_gInp_offset_arr);
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     integer_t mask_arr[iVec::size()];
     mask.store(mask_arr);
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t gInp_corner_arr[Vec::size()];
     delta.store(gInp_corner_arr);
 
@@ -885,7 +916,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto ix = x.floor();
     auto iy = y.floor();
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_x[4];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_y[4];
     get_cubic_coefficients(coeff_x, x - ix);
     get_cubic_coefficients(coeff_y, y - iy);
@@ -897,9 +930,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
       auto inp_slice_C_ptr = inp_slice[c].data();
 
       // Interpolate the 4 values in the x direction
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       Vec interp_x[4];
       for (int64_t i = 0; i < 4; ++i) {
-        interp_x[i] = 
+        interp_x[i] =
           coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i)) +
           coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i)) +
           coeff_x[2] * get_value_bounded(inp_slice_C_ptr, ix + Vec(1), iy + Vec(-1 + i)) +
@@ -928,12 +962,16 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     auto ix = x.floor();
     auto iy = y.floor();
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_x[4];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_y[4];
     get_cubic_coefficients(coeff_x, x - ix);
     get_cubic_coefficients(coeff_y, y - iy);
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_x_grad[4];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     Vec coeff_y_grad[4];
     get_cubic_coefficients_grad(coeff_x_grad, x - ix);
     get_cubic_coefficients_grad(coeff_y_grad, y - iy);
@@ -1182,6 +1220,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 10 /* 2d * 5 tensors*/);
 
 #define HANDLE_CASE(interp, padding, align_corners)                              \
@@ -1244,7 +1283,9 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
 
 

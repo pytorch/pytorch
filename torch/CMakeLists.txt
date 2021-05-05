@@ -77,7 +77,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_SRC_DIR}/lib
     )
 
-
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
@@ -94,10 +93,7 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 
 if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
-    if(BUILD_TEST)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
-    endif(BUILD_TEST)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -155,6 +151,9 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
+if(USE_MLCOMPUTE)
+    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+endif()
 
 if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
@@ -162,7 +161,7 @@ endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
 # of type stub files to be omitted.
-# For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
+# For compatibility with older CMake versions, we omit it for now, but leave it as a comment in case compatibility with the older
 # CMake versions is eventually dropped.
 # set(Modules
 #     __init__
@@ -216,7 +215,7 @@ add_custom_command(
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
-  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
   target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -256,6 +255,11 @@ if(USE_NUMPY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
 endif()
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(WIN32)
@@ -267,7 +271,6 @@ if(USE_DISTRIBUTED)
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
     endif()
@@ -342,10 +345,13 @@ endif()
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND
+    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
+  COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
       --hip_version=${HIP_VERSION}
+  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(
