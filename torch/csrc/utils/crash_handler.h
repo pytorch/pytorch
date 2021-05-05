@@ -2,18 +2,28 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <string>
 
-
 namespace torch {
 namespace crash_handler {
 
-TORCH_API void _enable_minidump_collection(const std::string& dir);
-TORCH_API void _disable_minidump_collection();
+// Set up a handler that writes minidumps to 'dir' on signals. This is not
+// necessary to call unless you want to change 'dir' to something other than
+// the default '/tmp/pytorch_crashes'.
+TORCH_API void enable_minidumps(const std::string& dir);
 
-TORCH_API const std::string& _get_minidump_directory();
+// Enable minidumps when passing exceptions up to Python. By default these don't
+// do anything special, but it can be useful to write out a minidump on
+// exceptions for debugging purposes. This has no effect in C++.
+TORCH_API void enable_minidumps_on_exceptions();
 
-bool is_enabled();
+// Disable all minidump writing and un-register the signal handler
+TORCH_API void disable_minidumps();
+
+// Get the directory that minidumps will be written to
+TORCH_API const std::string& get_minidump_directory();
+
+bool is_enabled_on_exceptions();
 
 void write_minidump();
 
 } // namespace crash_handler
-} // namepsace torch
+} // namespace torch
