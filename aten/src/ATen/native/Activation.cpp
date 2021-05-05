@@ -28,6 +28,12 @@ TORCH_META_FUNC(softplus) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(leaky_relu) (
+  const Tensor& self, const Scalar& negval
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -84,6 +90,12 @@ TORCH_IMPL_FUNC(softplus_out) (
   const Tensor& self, const Scalar& beta, const Scalar& threshold, const Tensor& result
 ) {
   softplus_stub(device_type(), *this, beta, threshold);
+}
+
+TORCH_IMPL_FUNC(leaky_relu_out) (
+  const Tensor& self, const Scalar& negval, const Tensor& result
+) {
+  leaky_relu_stub(device_type(), *this, negval);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -777,29 +789,6 @@ Tensor infinitely_differentiable_gelu_backward(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
-}
-
-Tensor& leaky_relu_out(const Tensor& self,
-    const Scalar& negval,
-    Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  leaky_relu_stub(iter.device_type(), iter, negval);
-  return result;
-}
-
-Tensor leaky_relu(
-    const Tensor& self,
-    const Scalar& negval) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  leaky_relu_stub(iter.device_type(), iter, negval);
-  return iter.output();
-}
-
-Tensor & leaky_relu_(
-    Tensor & self,
-    const Scalar& neg_val) {
-  return at::leaky_relu_out(self, self, neg_val);
 }
 
 // Note: leakyReLu backward calculation doesn't support in-place call with negative slope.

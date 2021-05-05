@@ -486,7 +486,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
   });
 }
 
-static void leaky_relu_kernel(TensorIterator& iter, const Scalar& negval_) {
+static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
     using Vec = Vec256<scalar_t>;
     auto zero_vec = Vec((scalar_t)(0));
