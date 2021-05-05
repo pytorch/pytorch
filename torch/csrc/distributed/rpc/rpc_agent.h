@@ -10,6 +10,9 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
+
 // Default RPC timeout
 constexpr float kDefaultRpcTimeoutSeconds = 60;
 // Unset RPC timeout. This is the value agent::send() will have if user does not
@@ -264,8 +267,7 @@ class TORCH_API RpcAgent {
   std::shared_ptr<TypeResolver> getTypeResolver();
 
   // Retrieves the device map for the provided destination worker.
-  virtual std::unordered_map<c10::Device, c10::Device> getDeviceMap(
-      const WorkerInfo& dst) const;
+  virtual DeviceMap getDeviceMap(const WorkerInfo& dst) const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
