@@ -27,8 +27,8 @@ static inline bool broadCastFirstInput(MPSImage* X1, MPSImage* X2) {
 Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
     const Tensor& input2,
-    NSString* arrayKernel,
-    NSString* nonarrayKernel) {
+    const std::string& arrayKernel,
+    const std::string& nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -65,8 +65,8 @@ Tensor binaryElementwiseShaderKernel(
 Tensor& binaryElementwiseShaderKernel_(
     Tensor& input1,
     const Tensor& input2,
-    NSString* arrayKernel,
-    NSString* nonarrayKernel) {
+    const std::string& arrayKernel,
+    const std::string& nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -169,7 +169,7 @@ Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel(
-        input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
+        input1, input2_, "elementwise_add", "elementwise_add_nonarray");
   }
 }
 
@@ -180,7 +180,7 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel_(
-        input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
+        input1, input2_, "elementwise_add", "elementwise_add_nonarray");
   }
 }
 
@@ -191,7 +191,7 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel(
-        input1, input2_, @"elementwise_sub", @"elementwise_sub_nonarray");
+        input1, input2_, "elementwise_sub", "elementwise_sub_nonarray");
   }
 }
 
@@ -202,7 +202,7 @@ Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNSubtract>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel_(
-        input1, input2_, @"elementwise_sub", @"elementwise_sub_nonarray");
+        input1, input2_, "elementwise_sub", "elementwise_sub_nonarray");
   }
 }
 
@@ -213,7 +213,7 @@ Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel(
-        input1, input2_, @"elementwise_mul", @"elementwise_mul_nonarray");
+        input1, input2_, "elementwise_mul", "elementwise_mul_nonarray");
   }
 }
 
@@ -224,7 +224,7 @@ Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNMultiply>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel_(
-        input1, input2_, @"elementwise_mul", @"elementwise_mul_nonarray");
+        input1, input2_, "elementwise_mul", "elementwise_mul_nonarray");
   }
 }
 
@@ -235,7 +235,7 @@ Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
     return binaryElementwiseMPSCNNKernel<MPSCNNDivide>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel(
-        input1, input2_, @"elementwise_div", @"elementwise_div_nonarray");
+        input1, input2_, "elementwise_div", "elementwise_div_nonarray");
   }
 }
 
@@ -246,7 +246,7 @@ Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNDivide>(input1, input2_);
   } else {
     return binaryElementwiseShaderKernel_(
-        input1, input2_, @"elementwise_div", @"elementwise_div_nonarray");
+        input1, input2_, "elementwise_div", "elementwise_div_nonarray");
   }
 }
 

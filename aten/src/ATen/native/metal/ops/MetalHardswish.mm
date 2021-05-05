@@ -25,7 +25,7 @@ Tensor& hardswish_(Tensor& input) {
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:mpscnn::kernelFor(
-                                   X, @"hardswish", @"hardswish_nonarray")
+                                   X, "hardswish", "hardswish_nonarray")
                      Constants:@[
                        @(X.featureChannels),
                        @(X.height),

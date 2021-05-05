@@ -50,7 +50,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] specializedPipelineState:@"transpose"
+        [[MPSCNNContext sharedInstance] specializedPipelineState:"transpose"
                                                        Constants:@[
                                                          @(dim0),
                                                          @(dim1),

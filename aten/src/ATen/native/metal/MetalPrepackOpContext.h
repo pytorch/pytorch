@@ -100,19 +100,19 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   const Tensor& get_weight() const {
     return weight_;
   }
-  
+
   const c10::optional<Tensor>& get_bias() const {
     return bias_;
   }
-    
+
   const c10::optional<Scalar>& get_output_min() const {
     return output_min_;
   }
-    
+
   const c10::optional<Scalar>& get_output_max() const {
     return output_max_;
   }
-  
+
   void set_opaqueOpPtr(void* ptr) {
       opaqueOpPtr_ = ptr;
   }
@@ -120,15 +120,15 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   void* get_opaqueOpPtr() const {
     return opaqueOpPtr_;
   }
-    
+
   void set_releaseCallback(const std::function<void(void*)>& func) {
     releaseCallback_ = func;
   }
-  
+
   std::function<void(void*)>& get_releaseCallback () {
      return releaseCallback_;
   }
-  
+
 private:
   Tensor weight_;
   c10::optional<Tensor> bias_;
