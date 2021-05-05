@@ -1454,10 +1454,10 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer)
 
   set(ONNX_OPTIMIZER_SRCS
-    "../third_party/optimizer/onnxoptimizer/optimize.cc"
-    "../third_party/optimizer/onnxoptimizer/pass.cc"
-    "../third_party/optimizer/onnxoptimizer/pass_registry.cc"
-    "../third_party/optimizer/onnxoptimizer/pass_manager.cc")
+    "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/optimize.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass_registry.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer/onnxoptimizer/pass_manager.cc")
 
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
