@@ -85,7 +85,7 @@ DECLARE_DISPATCH(binary_fn, logaddexp_stub);
 DECLARE_DISPATCH(binary_fn, logaddexp2_stub);
 DECLARE_DISPATCH(structured_binary_fn, gcd_stub);
 DECLARE_DISPATCH(binary_fn, lcm_stub);
-DECLARE_DISPATCH(binary_fn, hypot_stub);
+DECLARE_DISPATCH(structured_binary_fn, hypot_stub);
 DECLARE_DISPATCH(structured_binary_fn, igamma_stub);
 DECLARE_DISPATCH(structured_binary_fn, igammac_stub);
 DECLARE_DISPATCH(structured_binary_fn, nextafter_stub);

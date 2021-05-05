@@ -6541,15 +6541,17 @@
     CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: hypot_out
 
 - func: hypot(Tensor self, Tensor other) -> Tensor
+  structured_delegate: hypot.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: hypot
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: hypot.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: hypot_
