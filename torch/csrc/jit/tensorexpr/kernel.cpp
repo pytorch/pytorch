@@ -1340,7 +1340,7 @@ Tensor* computeSoftmax(
 }
 
 Tensor* computeSum(
-    const std::vector<ArgValue> &inputs,
+    const std::vector<ArgValue>& inputs,
     const c10::optional<ScalarType>& outputType) {
   std::vector<size_t> axes;
   bool keepdim = false;
