@@ -760,7 +760,7 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
 
 .. note::
     While `X = \ `:attr:`A`\ `.pinv() @ \ `:attr:`B`, this function computes the
-    solution in a faster and more numerically stable way that performing the
+    solution in a faster and more numerically stable way than performing the
     computations separately.
 
 .. warning::
