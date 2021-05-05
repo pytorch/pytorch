@@ -20,7 +20,7 @@ namespace jit {
 // used in torch.package deserialization
 class TORCH_API StorageContextTracker {
  public:
-  explicit StorageContextTracker() {}
+  explicit StorageContextTracker() = default;
 
   void addStorage(
       const std::string& name,
@@ -73,7 +73,7 @@ TORCH_API Module import_ir_module(
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     std::shared_ptr<torch::jit::StorageContextTracker> storage_tracker,
     c10::optional<at::Device> device,
-    std::string ts_id /* torchscript identifier inside packge */);
+    std::string ts_id /* torchscript identifier inside package */);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
