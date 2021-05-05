@@ -293,6 +293,9 @@ class TestNNAPI(TestCase):
                     output_size = model(inp).numel()
                     atol_rtol = None
                     limit = None
+                    convert_dims = input_dim[:2] + (0, 0)
+                    convert_arg = torch.zeros(*convert_dims)
+
                     if "quant" in kind:
                         model = torch.nn.Sequential(model)
                         model.eval()
@@ -306,10 +309,20 @@ class TestNNAPI(TestCase):
                         # the output in this test.
                         atol_rtol = (1, 0)
                         limit = output_size * 0.03
+                        convert_arg = qpt(torch.zeros(*convert_dims), 1.0 / 16, 128)
+
                     if "nhwc" in kind:
                         inp = nhwc(inp)
+                        convert_arg = nhwc(convert_arg)
 
                     self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
+                    self.check(
+                        model,
+                        inp,
+                        convert_args=[convert_arg],
+                        atol_rtol=atol_rtol,
+                        limit=limit
+                    )
 
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()

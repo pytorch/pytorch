@@ -1540,7 +1540,7 @@ class _NnapiSerializer(object):
                 scale=raw_weight.q_scale(),
                 zero_point=raw_weight.q_zero_point() + 128)
         weight_scale = unsigned_weight.q_scale()
-        _, image_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_image)
+        _, image_oper = self.get_tensor_operand_by_jitval(jit_image)
         bias_scale = image_oper.scale * weight_scale
         int_bias = torch.quantize_per_tensor(raw_bias, bias_scale, 0, torch.qint32)
         bias_id = self.add_tensor_operand_for_weight(int_bias)
@@ -1576,7 +1576,7 @@ class _NnapiSerializer(object):
             args,
             transpose,
             fuse_code):
-        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_image)
+        image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
         in_c = image_oper.shape[1]
 
         if args.group == 1:
@@ -1630,13 +1630,6 @@ class _NnapiSerializer(object):
 
         assert out_c == bias_oper.shape[0]
 
-        out_shape = get_conv_pool_shape(image_oper.shape, args, out_c, transpose)
-        out_oper = image_oper._replace(
-            shape=out_shape,
-            scale=out_scale,
-            zero_point=out_zero_point,
-        )
-
         use_nchw = image_oper.use_nchw()
 
         if depthwise:
@@ -1668,9 +1661,52 @@ class _NnapiSerializer(object):
             inputs[10] = self.add_immediate_bool_scalar(use_nchw)
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(jit_out, out_oper)
+        out_shape = get_conv_pool_shape(image_oper.shape, args, out_c, transpose)
+        out_oper = image_oper._replace(
+            shape=out_shape,
+            scale=out_scale,
+            zero_point=out_zero_point,
+        )
+        out_id = self.add_tensor_operand(jit_out, out_oper)
+        self._handle_conv_pool_flexible_input(out_id, jit_image, args, transpose)
 
+        outputs[0] = out_id
         self.add_operation(opcode, inputs, outputs)
+
+    def _handle_conv_pool_flexible_input(self, out_id, jit_image, args, transpose):
+        image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
+        batch, in_ch, in_h, in_w = image_oper.shape
+
+        if batch == 0 or in_ch == 0:
+            raise Exception("Only H & W can be flexible")
+
+        # H & W
+        if transpose:
+            if in_h == 0:
+                self.compute_operand_shape(
+                    out_id,
+                    2,
+                    f"({flex_name(image_id, 2)} - 1) * {args.stride_h} + {args.kernel_h} - {args.pad_t} - {args.pad_b}"
+                )
+            if in_w == 0:
+                self.compute_operand_shape(
+                    out_id,
+                    3,
+                    f"({flex_name(image_id, 3)} - 1) * {args.stride_w} + {args.kernel_w} - {args.pad_l} - {args.pad_r}"
+                )
+        else:
+            if in_h == 0:
+                self.compute_operand_shape(
+                    out_id,
+                    2,
+                    f"({flex_name(image_id, 2)} - {args.kernel_h} + {args.pad_t} + {args.pad_b}) // {args.stride_h} + 1"
+                )
+            if in_w == 0:
+                self.compute_operand_shape(
+                    out_id,
+                    3,
+                    f"({flex_name(image_id, 3)} - {args.kernel_w} + {args.pad_l} + {args.pad_r}) // {args.stride_w} + 1"
+                )
 
 
 def serialize_model(module, inputs, config=None):
