@@ -1450,15 +1450,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
-  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/optimizer)
-  add_library(onnx_optimizer STATIC
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/optimize.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_registry.cc"
-    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_manager.cc"
-  )
-
   if(NOT USE_SYSTEM_ONNX)
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
@@ -1489,6 +1480,15 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
   include_directories(${FOXI_INCLUDE_DIRS})
+
+  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/optimizer)
+  add_library(onnx_optimizer STATIC
+    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/optimize.cc"
+    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass.cc"
+    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_registry.cc"
+    "${PROJECT_SOURCE_DIR}/third_party/optimizer/onnxoptimizer/pass_manager.cc"
+  )
   caffe2_interface_library(onnx_optimizer optimizer_library)
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader onnx_optimizer)
   # Recover the build shared libs option.
