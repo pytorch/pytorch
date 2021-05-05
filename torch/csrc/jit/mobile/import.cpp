@@ -107,7 +107,7 @@ std::string operator_str(
   return result;
 }
 
-TypePtr resolveTypeNameGeneral(
+TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
   // HACK: first we check whether the name starts with special prefix to
@@ -130,14 +130,14 @@ TypePtr resolveTypeNameGeneral(
   }
 }
 
-c10::StrongTypePtr typeResolverGeneral(
+c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
   return c10::StrongTypePtr(
-      compilation_unit, resolveTypeNameGeneral(qn, compilation_unit));
+      compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
 }
 
-c10::intrusive_ptr<c10::ivalue::Object> objLoaderGeneral(
+c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     at::StrongTypePtr type,
     IValue input,
     std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
@@ -269,7 +269,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
 }
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  return resolveTypeNameGeneral(qn, compilation_unit_);
+  return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
 void BytecodeDeserializer::parseMethods(
@@ -537,11 +537,11 @@ c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
   auto type_resolver = [this](const c10::QualifiedName& qn) {
-    return typeResolverGeneral(qn, compilation_unit_);
+    return typeResolverMobile(qn, compilation_unit_);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderGeneral(type, input, mcu);
+    return objLoaderMobile(type, input, mcu);
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
