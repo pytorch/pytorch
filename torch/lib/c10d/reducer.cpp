@@ -1013,6 +1013,10 @@ void Reducer::search_unused_parameters(
     return;
   }
 
+  RECORD_FUNCTION(
+      "torch.distributed.ddp.reducer::search_unused_parameters",
+      std::vector<c10::IValue>());
+
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {
     const auto& grad_fn = output.grad_fn();
