@@ -1070,6 +1070,10 @@ void CudaCodeGen::Initialize() {
   USE_TRIGGER(cuda_codegen_created);
 }
 
+void CudaCodeGen::call_raw(const std::vector<void*>& args) {
+  throw std::runtime_error("CudaCodeGen::call_raw is not implemented yet");
+}
+
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("cuda_codegen: wrong number of args in call");

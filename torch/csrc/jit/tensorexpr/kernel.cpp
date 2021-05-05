@@ -3185,3 +3185,21 @@ void TensorExprKernel::runKernel(Stack& stack) {
     push_one(stack, std::move(o));
   }
 }
+
+void TensorExprKernel::runFast(
+    const std::vector<void*>& inputs,
+    const std::vector<void*>& outputs) {
+  KernelScope kernelScope(&kernelArena_);
+
+  std::vector<void*> args(inputs);
+  args.reserve(inputs.size() + outputs.size() + constants_.size());
+  args.insert(args.end(), outputs.begin(), outputs.end());
+
+  // TODO: we can consider preallocating and pre-filling the args vector.
+  for (auto c : constants_) {
+    args.push_back(c.ptr);
+  }
+
+  // Call the kernel.
+  codegen_->call_raw(args);
+}
