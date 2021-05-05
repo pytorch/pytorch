@@ -581,6 +581,11 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
+        if torch._C._get_tracing_state():
+            warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
+                          'Recommended usage would be tensor.shape[0]. '
+                          'Passing a tensor of different shape might lead to errors or silently give '
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):
