@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: macos-10.15
     steps:
-      - name: my thing
+      - name: my 2thing
         uses: driazati/test-action@master
         with:
           who-to-greet: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
