@@ -354,7 +354,6 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     find a tensor or are not sure, return False. Note: this
     function is not exact.
     """
-    # print('checking no tensors', node.format_node())
     if cache and node in cache:
         return cache[node]
 

@@ -94,6 +94,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
+DType = Any  # torch.float, torch.quint8, etc
+
 # ------------------------
 # Helper Functions
 # ------------------------
@@ -413,13 +415,12 @@ def insert_observers_for_model(
 
     return result_node
 
-# TODO(before land): typehints
 def get_standalone_module_configs_rewrite(
     node: Node,
-    modules: Any,
-    prepare_custom_config_dict: Any,
-    qconfig: Any,
-) -> Tuple[Any, Any]:
+    modules: Dict[str, torch.nn.Module],
+    prepare_custom_config_dict: Dict[str, Any],
+    qconfig: QConfigAny,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     standalone_module = modules[node.target]  # type: ignore[index]
     standalone_module_name_configs = \
         prepare_custom_config_dict.get("standalone_module_name", [])
@@ -438,7 +439,7 @@ def insert_observer_rewrite(
     node: Node,
     observer: torch.quantization.ObserverBase,
     model: torch.nn.Module,
-    modules: Any,  # TODO(before land): real typehint
+    modules: Dict[str, torch.nn.Module],
     graph: Graph,
 ) -> Node:
     model_device = assert_and_get_unique_device(model)
@@ -463,14 +464,13 @@ def get_target_dtype_for_node_rewrite(
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
     qhandler: Optional[QuantizeHandler],
-) -> Any:  # TODO: real typehint
+) -> DType:
     """
     Returns the expected dtype of the input and output of this node after
     convert.
     """
     if node.op == 'placeholder':
         if inputs_seen_counter in input_quantized_idxs:
-            # TODO(before land): properly set between quint8 and qint8
             return torch.quint8
         else:
             # if dtype is fp32 (default), do nothing
@@ -478,13 +478,11 @@ def get_target_dtype_for_node_rewrite(
             return torch.float
 
     elif node.op in ('call_module', 'call_method', 'call_function'):
-
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
                 act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
-                # print(f'dtypes act {act_dtype} weight {weight_dtype} act_compute {act_compute_dtype}')
                 return act_dtype
             else:
                 return torch.float
@@ -496,7 +494,6 @@ def get_target_dtype_for_node_rewrite(
 
     elif node.op == 'output':
         if outputs_seen_counter in output_quantized_idxs:
-            # TODO(before land): properly set between quint8 and qint8
             return torch.quint8
         else:
             # if dtype is fp32 (default), do nothing
@@ -519,7 +516,7 @@ def getattr_from_fqn(gm: torch.nn.Module, fqn: str) -> Any:
 
 def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     node: Union[Node, Any],
-    arg: Any,
+    arg: Argument,
     qconfig: QConfigAny,
     load_arg: Callable,
     model: torch.nn.Module,
@@ -529,13 +526,13 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     cache_for_no_tensor_check: Dict[Node, bool],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
-) -> Any:
+) -> Argument:
     # print('checking', node, arg)
 
     # for ops such as torch.cat([x0, x1]),
     # traverse through the list
     if isinstance(arg, list):
-        new_arg_to_return: List[Node] = []
+        new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
                 node, inner_arg, qconfig, load_arg, model, modules,
@@ -701,11 +698,11 @@ def maybe_insert_input_observers_for_node_rewrite(
 def maybe_insert_output_observer_for_node_rewrite(
     node: Node,
     model: torch.nn.Module,
-    modules: Any,  # TODO(before land): real typehint
+    modules: Dict[str, torch.nn.Module],
     graph: Graph,
     matches: Dict[str, MatchResult],
     node_name_to_target_dtype: Dict[str, Any],
-    matched_pattern: Any,  # TODO(before land): real typehint
+    matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
 ) -> Optional[Node]:
     """
@@ -797,7 +794,6 @@ def adjust_observers_for_cat(
             continue
         parent_name, name = _parent_name(input_arg.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
-        # input_arg.target = target_to_use
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
@@ -805,7 +801,6 @@ def adjust_observers_for_cat(
         assert output_obs_node.op == 'call_module'
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
-        # output_obs_node.target = target_to_use
 
     # TODO(before land): delete the orphaned observer modules
 
@@ -956,14 +951,12 @@ def insert_observers_for_model_rewrite(
                                 adjust_observers_for_cat(new_node, model, modules)
 
                 else:  # output
-                    # TODO(before land): check for non-node args?
                     prev_node = new_node.args[0]
                     if isinstance(prev_node, Node):
                         if is_activation_post_process_node(prev_node, modules):
                             prev_node = prev_node.args[0]
                     elif isinstance(prev_node, dict):
                         # get first value
-                        # TODO(before land): make generic
                         prev_node = list(prev_node.items())[0][1]
                         assert isinstance(prev_node, Node)
                         if is_activation_post_process_node(prev_node, modules):
