@@ -249,12 +249,12 @@ class LazyTensor {
       std::vector<LazyTensor> self, LazyTensor& found_inf,
       const LazyTensor& inv_scale);
 
-  static LazyTensor _amp_update_scale(LazyTensor growth_tracker,
-                                      const LazyTensor& current_scale,
-                                      const LazyTensor& found_inf,
-                                      double scale_growth_factor,
-                                      double scale_backoff_factor,
-                                      int growth_interval);
+  static void _amp_update_scale_(LazyTensor& current_scale,
+                                 LazyTensor& growth_tracker,
+                                 const LazyTensor& found_inf,
+                                 double scale_growth_factor,
+                                 double scale_backoff_factor,
+                                 int growth_interval);
 
   static LazyTensor abs(const LazyTensor& input);
   static void abs_(LazyTensor& input);
@@ -418,8 +418,14 @@ class LazyTensor {
   static LazyTensor clamp(const LazyTensor& input,
                           const c10::optional<at::Scalar>& min,
                           const c10::optional<at::Scalar>& max);
+  static LazyTensor clamp(const LazyTensor& input,
+                          const c10::optional<at::Tensor>& min,
+                          const c10::optional<at::Tensor>& max);
   static void clamp_(LazyTensor& input, const c10::optional<at::Scalar>& min,
                      const c10::optional<at::Scalar>& max);
+  static void clamp_out(LazyTensor& out, const LazyTensor& input,
+                        const c10::optional<at::Tensor>& min,
+                        const c10::optional<at::Tensor>& max);
 
   static LazyTensor clone(const LazyTensor& input);
 

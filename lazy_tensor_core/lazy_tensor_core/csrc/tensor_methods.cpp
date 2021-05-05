@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
@@ -140,6 +141,16 @@ struct MinMaxValues {
   ir::Value max;
 };
 
+ir::Value MaybeExpand(const ir::Value& input,
+                      const lazy_tensors::Shape& target_shape) {
+  if (input.shape().dimensions() == target_shape.dimensions()) {
+    return input;
+  }
+  return ir::MakeNode<ir::ops::Expand>(
+      input, lazy_tensors::util::ToVector<lazy_tensors::int64>(
+                 target_shape.dimensions()));
+}
+
 MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
                              const c10::optional<at::Scalar>& min,
                              const c10::optional<at::Scalar>& max) {
@@ -155,6 +166,23 @@ MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
           LazyTensor::GetIrValueForScalar(max ? *max : min_max.max,
                                           shape.get().element_type(),
                                           tensor.GetDevice())};
+}
+
+MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
+                             const c10::optional<at::Tensor>& min,
+                             const c10::optional<at::Tensor>& max) {
+  LTC_CHECK(min || max)
+      << "At least one of \'min\' or \'max\' must not be None";
+  lazy_tensors::PrimitiveType raw_element_type =
+      TensorTypeToLtcType(tensor.dtype());
+  Helpers::MinMax min_max = Helpers::MinMaxValues(raw_element_type);
+  auto shape = tensor.shape();
+  return {min ? MaybeExpand(bridge::GetLtcTensor(*min).GetIrValue(), shape)
+              : LazyTensor::GetIrValueForScalar(min_max.min, shape,
+                                                tensor.GetDevice()),
+          max ? MaybeExpand(bridge::GetLtcTensor(*max).GetIrValue(), shape)
+              : LazyTensor::GetIrValueForScalar(min_max.max, shape,
+                                                tensor.GetDevice())};
 }
 
 void CheckRank(const LazyTensor& t, lazy_tensors::int64 expected_rank,
@@ -281,16 +309,6 @@ absl::optional<ir::Value> GetOptionalIrValue(const LazyTensor& tensor) {
     value = tensor.GetIrValue();
   }
   return value;
-}
-
-ir::Value MaybeExpand(const ir::Value& input,
-                      const lazy_tensors::Shape& target_shape) {
-  if (input.shape().dimensions() == target_shape.dimensions()) {
-    return input;
-  }
-  return ir::MakeNode<ir::ops::Expand>(
-      input, lazy_tensors::util::ToVector<lazy_tensors::int64>(
-                 target_shape.dimensions()));
 }
 
 void CheckIsIntegralOrPred(const lazy_tensors::Shape& shape,
@@ -477,18 +495,18 @@ void LazyTensor::_amp_foreach_non_finite_check_and_unscale_(
   found_inf.SetInPlaceIrValue(ir::Value(node, self.size()));
 }
 
-LazyTensor LazyTensor::_amp_update_scale(LazyTensor growth_tracker,
-                                         const LazyTensor& current_scale,
-                                         const LazyTensor& found_inf,
-                                         double scale_growth_factor,
-                                         double scale_backoff_factor,
-                                         int growth_interval) {
+void LazyTensor::_amp_update_scale_(LazyTensor& current_scale,
+                                    LazyTensor& growth_tracker,
+                                    const LazyTensor& found_inf,
+                                    double scale_growth_factor,
+                                    double scale_backoff_factor,
+                                    int growth_interval) {
   ir::NodePtr node = ir::MakeNode<ir::ops::AmpUpdateScale>(
       growth_tracker.GetIrValue(), current_scale.GetIrValue(),
       found_inf.GetIrValue(), scale_growth_factor, scale_backoff_factor,
       growth_interval);
-  growth_tracker.SetInPlaceIrValue(ir::Value(node, 0));
-  return current_scale.CreateFrom(ir::Value(node, 1));
+  growth_tracker.SetInPlaceIrValue(ir::Value(node, 1));
+  current_scale.SetInPlaceIrValue(ir::Value(node, 0));
 }
 
 LazyTensor LazyTensor::abs(const LazyTensor& input) {
@@ -944,10 +962,26 @@ LazyTensor LazyTensor::clamp(const LazyTensor& input,
       ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
 }
 
+LazyTensor LazyTensor::clamp(const LazyTensor& input,
+                             const c10::optional<at::Tensor>& min,
+                             const c10::optional<at::Tensor>& max) {
+  MinMaxValues min_max = GetMinMaxValues(input, min, max);
+  return input.CreateFrom(
+      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
+}
+
 void LazyTensor::clamp_(LazyTensor& input, const c10::optional<at::Scalar>& min,
                         const c10::optional<at::Scalar>& max) {
   MinMaxValues min_max = GetMinMaxValues(input, min, max);
   input.SetInPlaceIrValue(
+      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
+}
+
+void LazyTensor::clamp_out(LazyTensor& out, const LazyTensor& input,
+                           const c10::optional<at::Tensor>& min,
+                           const c10::optional<at::Tensor>& max) {
+  MinMaxValues min_max = GetMinMaxValues(input, min, max);
+  out.SetInPlaceIrValue(
       ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
 }
 

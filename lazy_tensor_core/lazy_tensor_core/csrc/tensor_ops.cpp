@@ -188,10 +188,10 @@ LazyTensor SoftplusBackward(const LazyTensor& grad_output,
                             const LazyTensor& input, const at::Scalar& beta,
                             const at::Scalar& threshold,
                             const LazyTensor& output) {
-  LazyTensor scaled_output = LazyTensor::mul(output, beta);
-  LazyTensor z = LazyTensor::exp(scaled_output);
+  LazyTensor scaled_input = LazyTensor::mul(input, beta);
+  LazyTensor z = LazyTensor::exp(LazyTensor::mul(output, beta));
   return LazyTensor::where(
-      LazyTensor::gt(scaled_output, threshold), grad_output,
+      LazyTensor::gt(scaled_input, threshold), grad_output,
       LazyTensor::mul(grad_output,
                       LazyTensor::div(LazyTensor::sub(z, 1, 1), z)));
 }
