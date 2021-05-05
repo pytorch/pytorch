@@ -39,7 +39,7 @@ struct BailoutBlock {
   size_t jf_instruction_index; // this node gets patched to jump here on failure
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 
-  BailoutBlock(size_t jf_index) : jf_instruction_index(jf_index) {}
+  explicit BailoutBlock(size_t jf_index) : jf_instruction_index(jf_index) {}
 };
 
 // for keeping track of the current node
@@ -769,7 +769,7 @@ struct MobileCodeImpl : CodeImpl {
           return schema_idx + 1;
         }
         // if the IR has same value as default value of the schema,
-        // it is not neccessary argument.
+        // it is not necessary argument.
         if (schema_value != actual_value.value()) {
           return schema_idx + 1;
         }
