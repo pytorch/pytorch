@@ -279,7 +279,7 @@ void BytecodeDeserializer::parseMethods(
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
-  // version number are seen as version 3 (depricated).
+  // version number are seen as version 3 (deprecated).
   int64_t model_version = 0x3L;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
