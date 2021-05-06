@@ -20,6 +20,7 @@ static at::Tensor genTestData(c10::IntArrayRef args) {
 }
 
 #ifdef TORCH_ENABLE_LLVM
+
 TEST(Conv, DepthwiseConv2D) {
   te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
@@ -51,6 +52,34 @@ TEST(Conv, DepthwiseConv2D) {
 
   ASSERT_TRUE(at::allclose(ref, ot));
 }
+
+TEST(Conv, DepthwiseConv2DNoBias) {
+  te::KernelScope kernel_scope;
+  constexpr int N = 1, C = 72, H = 56, W = 56;
+  constexpr int K = 72, R = 3, S = 3;
+  constexpr int kPad = 1, kStride = 2, kGroups = C;
+  constexpr int CperG = C / kGroups;
+
+  te::Placeholder input("input", te::kFloat, {N, C, H, W});
+  te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
+  te::Tensor* output = te::conv2d_depthwise(
+      input.handle(), weight.handle(), kStride, kPad, kGroups);
+
+  te::LoopNest loop({output});
+  loop.simplify();
+  loop.prepareForCodegen();
+  te::LLVMCodeGen cg(loop.root_stmt(), {input, weight, output});
+
+  auto it = genTestData({N, C, H, W});
+  auto wt = genTestData({K, CperG, R, S});
+  auto ref =
+      at::conv2d(it, wt, at::Tensor(), kStride, kPad, /*dilation=*/1, kGroups);
+  auto ot = at::zeros_like(ref);
+  cg.call({it.data_ptr<float>(), wt.data_ptr<float>(), ot.data_ptr<float>()});
+
+  ASSERT_TRUE(at::allclose(ref, ot));
+}
+
 #endif
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

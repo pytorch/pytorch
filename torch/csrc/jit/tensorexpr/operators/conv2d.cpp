@@ -6,16 +6,20 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+namespace {
+
 void assert_dims_constant(const BufHandle& buf) {
   for (auto const& dim : buf.node()->dims()) {
     TORCH_INTERNAL_ASSERT(dim->isConstant());
   }
 }
 
-Tensor* conv2d_depthwise(
+using InitFunc = std::function<ExprHandle(const std::vector<VarHandle>&)>;
+
+Tensor* conv2d_depthwise_internal(
     BufHandle input,
     BufHandle weight,
-    BufHandle bias,
+    const InitFunc& init_func,
     int stride,
     int pad,
     int groups) {
@@ -24,7 +28,6 @@ Tensor* conv2d_depthwise(
 
   assert_dims_constant(input);
   assert_dims_constant(weight);
-  assert_dims_constant(bias);
 
   auto const& N = immediateAs<int>(input.dim(0));
   auto const& C = immediateAs<int>(input.dim(1));
@@ -46,10 +49,7 @@ Tensor* conv2d_depthwise(
       "conv2d_depthwise",
       {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       Sum(),
-      [&](const std::vector<VarHandle>& v) {
-        auto const& k = v[1];
-        return bias.load(k);
-      },
+      [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
         auto const& n = v[0];
         auto const& k = v[1];
@@ -95,6 +95,36 @@ Tensor* conv2d_depthwise(
   }
 
   return new Tensor(conv->buf(), nest.root_stmt());
+}
+
+} // namespace
+
+Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    BufHandle bias,
+    int stride,
+    int pad,
+    int groups) {
+  assert_dims_constant(bias);
+  auto init_func = [&](const std::vector<VarHandle>& v) {
+    return bias.load(v[1]);
+  };
+  return conv2d_depthwise_internal(
+      input, weight, init_func, stride, pad, groups);
+}
+
+Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    int stride,
+    int pad,
+    int groups) {
+  auto init_func = [](const std::vector<VarHandle>& v) {
+    return ExprHandle(Sum().initializer());
+  };
+  return conv2d_depthwise_internal(
+      input, weight, init_func, stride, pad, groups);
 }
 
 } // namespace tensorexpr
