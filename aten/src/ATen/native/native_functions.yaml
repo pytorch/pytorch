@@ -946,18 +946,22 @@
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: ceil_out
 
@@ -1893,18 +1897,22 @@
 
 - func: floor(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: floor_out
 
@@ -6336,12 +6344,6 @@
   dispatch:
     CompositeExplicitAutograd: lu_solve
 
-- func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _lu_solve_helper_cpu
-    CUDA: _lu_solve_helper_cuda
-
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6432,18 +6434,22 @@
 
 - func: sign(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sign
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sign_out
 
