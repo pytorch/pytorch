@@ -25,14 +25,17 @@ c10::IValue readArchive(
   c10::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
+
+  // TODO (T90180710): Simplify type_resolver and obj_loader when getting
+  // bytecode version from model
   auto type_resolver = [&](const c10::QualifiedName& qn) {
-    return typeResolverGeneral(qn, compilation_unit);
+    return typeResolverMobile(qn, compilation_unit);
   };
 
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderGeneral(type, input, mobile_compilation_unit);
+    return objLoaderMobile(type, input, mobile_compilation_unit);
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
@@ -40,28 +43,7 @@ c10::IValue readArchive(
   return ivalues;
 }
 
-bool check_zip_file(std::shared_ptr<ReadAdapterInterface> rai) {
-  std::array<uint8_t, 2> first_short{};
-  static constexpr uint8_t first_slot = 0x80;
-  static constexpr uint8_t second_slot = 0x02;
-  rai->read(
-      /*pos=*/0,
-      /*buf=*/&first_short,
-      /*n=*/2,
-      /*what=*/"checking archive");
-  if (first_short[0] == first_slot && first_short[1] == second_slot) {
-    // NB: zip files by spec can start with any data, so technically they might
-    // start with 0x80 0x02, but in practice zip files start with a file entry
-    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
-    // files that do not start with the file entry, so it is relatively safe to
-    // perform this check.
-    TORCH_WARN("The zip file might be problematic. Please check it again.");
-    return false;
-  }
-  return true;
-}
-
-std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
+std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
   std::vector<IValue> bytecode_values;
   bytecode_values = readArchive("bytecode", reader).toTuple()->elements();
   return bytecode_values;
@@ -86,10 +68,12 @@ int64_t _get_model_bytecode_version(const std::string& filename) {
 
 int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
+    TORCH_WARN(
+        "The input model might not be generated from _save_for_mobile()");
     return -1;
   }
   PyTorchStreamReader reader(std::move(rai));
-  auto bytecode_values = get_bytecode_values(reader);
+  auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_bytecode_version(bytecode_values);
 }
 
@@ -127,7 +111,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     return std::unordered_map<std::string, OperatorInfo>{};
   }
   PyTorchStreamReader reader(std::move(rai));
-  auto bytecode_values = get_bytecode_values(reader);
+  auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_ops_and_info(bytecode_values);
 }
 
@@ -158,15 +142,15 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   // loop over all the functions in the bytecode
   for (int i = 1; i < bytecode_ivalues.size(); i++) {
     // descend to the operators list
-    auto method_tuple = bytecode_ivalues[i].toTuple()->elements();
-    auto operators_tuple = method_tuple[1].toTuple()->elements()[1];
+    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
     auto operators = operators_tuple.toTuple()->elements()[1];
     for (auto& op_tuple : operators.toTuple()->elements()) {
       auto op = op_tuple.toTuple()->elements();
 
       // grab name
-      std::string op_name = op[0].toStringRef();
-      std::string op_overload_name = op[1].toStringRef();
+      std::string op_name = op.at(0).toStringRef();
+      std::string op_overload_name = op.at(1).toStringRef();
       if (op_overload_name != "") {
         op_name.append(".");
         op_name.append(op_overload_name);
@@ -174,7 +158,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 
       // grab schema size
       if (op.size() > 2) {
-        result.emplace(op_name, OperatorInfo{(int)op[2].toInt()});
+        result.emplace(op_name, OperatorInfo{(int)op.at(2).toInt()});
       } else { // no schema information use default
         result.emplace(op_name, OperatorInfo{});
       }

@@ -1698,7 +1698,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
     return _get_model_ops_and_info(filename);
   });
-  m.def("_get_model_ops_and_info", [](const std::string& buffer) {
+  m.def("_get_model_ops_and_info_from_buffer", [](const std::string& buffer) {
     std::istringstream in(buffer);
     return _get_model_ops_and_info(in);
   });

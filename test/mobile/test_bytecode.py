@@ -2,7 +2,7 @@ from torch.jit.mobile import _get_model_bytecode_version, _get_model_ops_and_inf
 from torch.testing._internal.common_utils import TestCase, run_tests
 from pathlib import Path
 
-pytorch_test_dri = Path(__file__).resolve().parents[1]
+pytorch_test_dir = Path(__file__).resolve().parents[1]
 
 # script_module_v4.ptl and script_module_v5.ptl source code
 # class TestModule(torch.nn.Module):
@@ -22,12 +22,12 @@ pytorch_test_dri = Path(__file__).resolve().parents[1]
 
 class testVariousModelVersions(TestCase):
     def test_get_model_bytecode_version(self):
-        script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
+        script_module_v4 = pytorch_test_dir / "cpp" / "jit" / "script_module_v4.ptl"
         version_v4 = _get_model_bytecode_version(script_module_v4)
         assert(version_v4 == 4)
 
     def test_get_model_ops_and_info(self):
-        script_module_v6 = pytorch_test_dri / "cpp" / "jit" / "script_module_v6.ptl"
+        script_module_v6 = pytorch_test_dir / "cpp" / "jit" / "script_module_v6.ptl"
         ops_v6 = _get_model_ops_and_info(script_module_v6)
         assert(ops_v6["aten::linear"].num_schema_args == 3)
 
