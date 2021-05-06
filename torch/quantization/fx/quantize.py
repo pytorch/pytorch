@@ -677,19 +677,25 @@ def maybe_insert_input_observers_for_node_rewrite(
     # match the current node's target dtype, insert an observer.
     # print('\nnew_node', new_node.format_node(), new_node.op)
     new_args = []
-    new_kwargs = {}
-    for arg in node.args:
-        new_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
-            node, arg, qconfig, load_arg, model, modules, graph,
-            node_name_to_target_dtype, cache_for_no_tensor_check,
-            qhandler, prepare_custom_config_dict)
+    arg_idxs_to_skip = node_bool_tensor_arg_indexes(node)
+    for arg_idx, arg in enumerate(node.args):
+        if arg_idx not in arg_idxs_to_skip:
+            new_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
+                node, arg, qconfig, load_arg, model, modules, graph,
+                node_name_to_target_dtype, cache_for_no_tensor_check,
+                qhandler, prepare_custom_config_dict)
+        else:
+            new_arg = arg
         new_args.append(new_arg)
+
+    new_kwargs = {}
     for k, kwarg in node.kwargs.items():
         new_kwarg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             node, kwarg, qconfig, load_arg, model, modules, graph,
             node_name_to_target_dtype, cache_for_no_tensor_check,
             qhandler, prepare_custom_config_dict)
         new_kwargs[k] = new_kwarg
+
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
     node.kwargs = new_kwargs  # type: ignore[assignment]
@@ -906,15 +912,14 @@ def insert_observers_for_model_rewrite(
             args_have_no_tensors = \
                 all_node_args_have_no_tensors(
                     new_node, modules, cache_for_no_tensor_check)
-            is_like_copy_node = \
-                (qhandler is not None and (
-                    isinstance(qhandler, CopyNodeQuantizeHandler) or
-                    args_have_no_tensors
-                ))
+            # TODO(before land): decide whether we need to handle this better
+            is_getitem = new_node.op == 'call_function' and \
+                new_node.target == operator.getitem
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                is_like_copy_node
+                args_have_no_tensors or
+                is_getitem
             ) and (not new_node.op == 'output')
 
             if not skip_inserting_observers:
@@ -926,7 +931,11 @@ def insert_observers_for_model_rewrite(
                         qhandler, prepare_custom_config_dict)
 
                     is_last_node_of_pattern = root_node is node
-                    if is_last_node_of_pattern:
+                    is_like_copy_node = \
+                        (qhandler is not None and (
+                            isinstance(qhandler, CopyNodeQuantizeHandler)
+                        ))
+                    if is_last_node_of_pattern and (not is_like_copy_node):
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node_rewrite(
                             new_node, model, modules, observed_graph, matches,

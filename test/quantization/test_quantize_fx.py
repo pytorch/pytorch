@@ -1115,9 +1115,9 @@ class TestQuantizeFx(QuantizationTestCase):
         node_list2 = [
             ns.call_module(nn.Conv2d),
             # TODO(before land): verify that this change is ok
-            # ns.call_function(torch.quantize_per_tensor),
-            ns.call_method("transpose"),
             ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("transpose"),
+            # ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
             ns.call_method("transpose"),
             ns.call_method("dequantize"),
