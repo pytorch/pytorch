@@ -337,6 +337,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
   } else {
     ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
   }
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
 
   if (rrefId != forkId) {

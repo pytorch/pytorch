@@ -15,7 +15,6 @@ from torch.utils import mkldnn as mkldnn_utils
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
 from itertools import product
-
 import io
 
 try:
@@ -1822,8 +1821,6 @@ class TestFrozenOptimizations(JitTestCase):
                 scripted_mod = torch.jit.script(mod_eager)
 
             frozen_mod = torch.jit.freeze(scripted_mod)
-            FileCheck().check("aten::relu").run(frozen_mod.graph)
-            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
             if add_z:
                 FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
             else:
@@ -1905,6 +1902,15 @@ class TestFrozenOptimizations(JitTestCase):
     @skipIfNoTorchVision
     def test_conv_hardswish(self):
         with set_default_dtype(torch.float):
+            class Clamp(torch.nn.Module):
+                def __init__(self, min_val, max_val, **kwargs):
+                    super(Clamp, self).__init__()
+                    self.min_val = min_val
+                    self.max_val = max_val
+
+                def forward(self, x):
+                    return torch.clamp(x, self.min_val, self.max_val)
+
             activations = [
                 torch.nn.Hardswish(),
                 torch.nn.Hardsigmoid(),
@@ -1913,6 +1919,11 @@ class TestFrozenOptimizations(JitTestCase):
                 torch.nn.Hardtanh(0., 6.),
                 torch.nn.Hardtanh(1., 100.),
                 torch.nn.Hardtanh(-100., -1.),
+                torch.nn.GELU(),
+                Clamp(-100., -1.),
+                Clamp(1., 100.),
+                Clamp(0., 6.),
+                Clamp(-1., 0.),
             ]
 
             model = torchvision.models.resnet18()
