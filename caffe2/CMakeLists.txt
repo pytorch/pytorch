@@ -599,9 +599,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/mobile/backport.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_common.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_factory.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_v5_to_v4.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
