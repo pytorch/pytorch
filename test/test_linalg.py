@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
+     onlyCUDA, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 
@@ -3199,7 +3199,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
-    @skipCUDAVersionIn([(11, 3)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -4885,22 +4884,6 @@ class TestLinalg(TestCase):
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
-
-    # TODO: This test should be removed and OpInfo should enable complex
-    #       types after this PR is merged:
-    #       https://github.com/pytorch/pytorch/pull/55483
-    @dtypes(torch.cdouble)
-    def test_cross_autograd(self, device, dtype):
-        x = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-        y = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-
-        if torch.device(device).type == 'cuda' and dtype.is_complex:
-            # TODO: Remove this error when cross CUDA supports complex
-            with self.assertRaisesRegex(RuntimeError, r'_th_cross_kernel_out not supported on CUDAType for Complex'):
-                gradcheck(torch.cross, [x, y])
-        else:
-            gradcheck(torch.cross, [x, y])
-            gradgradcheck(torch.cross, [x, y], atol=1e-3, check_batched_grad=False)
 
     @onlyCPU
     @dtypes(torch.float)

@@ -107,7 +107,7 @@ bool canHandle(Node* node) {
   }
 
   // TODO add "canRunNatively" once memory management is audited
-  return getOutOfPlaceOperation(node) != nullptr;
+  return canRunOutOfPlace(node);
 }
 
 bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {

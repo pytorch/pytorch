@@ -17,7 +17,6 @@
 #include <THC/THCTensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
-#include <c10/util/irange.h>
 #include <THC/THCAtomics.cuh>
 
 #include <limits>
@@ -134,7 +133,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   // are not being index.
   Tensor linearIndex;
   int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
-  for (const auto i: c10::irange(src.dim())) {
+  for (auto i = decltype(src.dim()){0}; i < src.dim(); i++) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's device
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
@@ -189,7 +188,7 @@ namespace {
 
 int64_t largestIndex(const Tensor &self) {
   int64_t result = 0;
-  for (const auto i: c10::irange(self.dim())) {
+  for (int64_t i = 0; i < self.dim(); i++) {
     result += (self.sizes()[i] - 1) * self.strides()[i];
   }
   return result;
@@ -276,14 +275,14 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
                               const Tensor & index,
                               const Tensor & src)
 {
-  const auto dstDims = dst.dim();
-  const auto srcDims = src.dim();
+  int dstDims = dst.dim();
+  int srcDims = src.dim();
 
   TORCH_CHECK(index.dim() <= 1, "Index must be vector or scalar");
 
   ptrdiff_t dstSliceSize = 1;
   TORCH_CHECK(dim >= 0 && dim < dstDims, "Indexing dim ", dim, " is out of bounds");
-  for (const auto d: c10::irange(dstDims)) {
+  for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
       dstSliceSize *= dst.size(d);
     }
@@ -298,7 +297,7 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
 
   if (dstDims != srcDims) mismatch = true;
 
-  for (const auto d: c10::irange(srcDims)) {
+  for (int d = 0; d < srcDims; d++) {
     if (d != dim) {
       srcSliceSize *= src.size(d);
       if (!mismatch && dst.size(d) != src.size(d)) mismatch = true;
@@ -437,7 +436,7 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   // and element #0 of slice #101).
   unsigned int sliceStride = info.strides[sliceDim];
 
-  for (const auto i: c10::irange(info.dims)) {
+  for (int i = 0; i < info.dims; ++i) {
     if (i != sliceDim && info.sizes[i] > 1 && info.strides[i] < sliceStride) {
       return true;
     }
@@ -480,7 +479,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   if (globalContext().deterministicAlgorithms()){
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(dim + 1);
-    for (const auto i: c10::irange(dim)) {
+    for (int64_t i = 0; i < dim; i++) {
       indices.emplace_back();
     }
     indices.emplace_back(index);

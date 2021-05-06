@@ -41,38 +41,17 @@ def clamp(g, self, min, max):
     if dtype is not None:
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
-
-    if sym_help._is_none(min):
-        return clamp_max(g, self, max)
-    elif sym_help._is_none(max):
-        return clamp_min(g, self, min)
-    else:
-        if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
-            return g.op("Clip", self, min, max)
-        else:
-            return clamp_max(g, clamp_min(g, self, min), max)
+    return g.op("Clip", self, min, max)
 
 
-@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
-    if sym_help._get_tensor_rank(min) == 0:
-        max = unused(g)
-        return g.op("Clip", self, min, max)
-    else:
-        return g.op("Max", self, min)
+    max = unused(g)
+    return clamp(g, self, min, max)
 
 
-@parse_args('v', 'v')
 def clamp_max(g, self, max):
-    dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
-    if sym_help._get_tensor_rank(max) == 0:
-        min = unused(g)
-        return g.op("Clip", self, min, max)
-    else:
-        return g.op("Min", self, max)
+    min = unused(g)
+    return clamp(g, self, min, max)
 
 
 # Opset 11 gather accepts negative indices

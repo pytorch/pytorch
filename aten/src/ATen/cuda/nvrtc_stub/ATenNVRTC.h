@@ -22,12 +22,10 @@ namespace at { namespace cuda {
 // IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
 // INSTEAD USE, e.g.
 //   detail::getCUDAHooks().nvrtc().cuLoadModule(...)
-// or
+// oe
 //   globalContext().getNVRTC().cuLoadModule(...)
 //
-// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h
-// and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
-// macros).
+// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h.
 
 #ifndef __HIP_PLATFORM_HCC__
 
