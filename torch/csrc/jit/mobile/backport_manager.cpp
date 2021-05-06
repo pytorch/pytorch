@@ -17,7 +17,13 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using caffe2::serialize::ReadAdapterInterface;
 
-// Utility function, can be reused by backport_vn_to_vn-1(). If any utility
+// Current support bytecode version
+namespace {
+constexpr int64_t kBytecodeVersionV4 = 0x4L;
+constexpr int64_t kBytecodeVersionV5 = 0x5L;
+} // namespace
+
+// Utility function that can be reused by backport_vn_to_vn-1(). If any utility
 // function can be reused by other backport function, move it here.
 namespace {
 bool update_bytecode_version(
@@ -129,6 +135,7 @@ bool backport_v5_to_v4(
   writeArchiveV4(writer, "bytecode", bytecode_tuple);
   return true;
 }
+
 } // namespace
 
 // A generic contract for backport logic to the previous bytecode version.
