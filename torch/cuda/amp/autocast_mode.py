@@ -6,7 +6,7 @@ try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
-    np = None
+    np = None  # type: ignore[assignment]
 from torch._six import string_classes
 from typing import Any
 
@@ -16,7 +16,7 @@ def autocast_decorator(autocast_instance, func):
     def decorate_autocast(*args, **kwargs):
         with autocast_instance:
             return func(*args, **kwargs)
-    decorate_autocast.__script_unsupported = '@autocast() decorator is not supported in script mode'
+    decorate_autocast.__script_unsupported = '@autocast() decorator is not supported in script mode'  # type: ignore[attr-defined]
     return decorate_autocast
 
 

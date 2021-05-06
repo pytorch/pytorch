@@ -2,7 +2,7 @@ import os
 import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, \
-    num_profiled_runs, enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.common_jit import check_against_reference
 import torch
 
