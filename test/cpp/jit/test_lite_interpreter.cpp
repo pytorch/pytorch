@@ -636,8 +636,8 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
 namespace {
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
-    std::vector<IValue>& input_data,
-    std::vector<Tensor>& expect_result_list,
+    const std::vector<IValue>& input_data,
+    const std::vector<Tensor>& expect_result_list,
     const int64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);

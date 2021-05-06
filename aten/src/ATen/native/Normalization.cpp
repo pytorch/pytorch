@@ -423,35 +423,38 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
-  bool use_cudnn = false;
-  use_cudnn = (input.is_cuda()
-               && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-               && (input.scalar_type() != at::kHalf
-                 || weight.scalar_type() == at::kFloat)
-               && weight.defined() && bias.defined()
-               && ((running_mean.defined() && running_var.defined())
-                 || (!running_mean.defined() && !running_var.defined() && training))
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
-               && detail::getCUDAHooks().compiledWithCuDNN()
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+  const bool use_cudnn = (
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      && (input.dim() >= 3)
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      && ((input.size(0) <= 880801 && training) // spatial, training
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && detail::getCUDAHooks().compiledWithCuDNN()
+      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
-  if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::tuple_cat(
-             at::cudnn_batch_norm(
-               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
-               bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
-               training, momentum, eps),
-             std::make_tuple(1));
+  if (use_cudnn) {
+    auto input_c = input.contiguous(input.suggest_memory_format());
+    auto weight_c = weight.contiguous();
+    auto bias_c = bias.contiguous();
+    auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
+    auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+
+    Tensor output, save_mean, save_var, reserve;
+    std::tie(output, save_mean, save_var, reserve) =
+        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
+                             training, momentum, eps);
+
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+        output, save_mean, save_var, reserve, 1);
   }
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));

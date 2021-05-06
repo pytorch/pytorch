@@ -2886,7 +2886,6 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   return result;
 }
 
-
 template <typename T>
 std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
