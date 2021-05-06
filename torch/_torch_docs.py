@@ -5086,8 +5086,11 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
-.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
-          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+.. warning::
+
+    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
+    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
+    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
 
 Args:
     input (Tensor): the input 2-D tensor
