@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
-    kineto_available, profile, record_function, DeviceType, ProfilerActivity
+    kineto_available, profile, record_function, supported_activities,
+    DeviceType, ProfilerActivity
 )
 
 try:
@@ -413,12 +414,11 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1)
         self.assertIn("FLOPS", profiler_output)
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_profiler_api(self):
         called_num = [0]
 
-        use_cuda = torch.cuda.is_available()
-        with _profile(use_cuda=use_cuda, use_kineto=True):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        with profile(activities=supported_activities()):
             self.payload(use_cuda=use_cuda)
 
         def trace_handler(p):
@@ -429,11 +429,7 @@ class TestProfiler(TestCase):
             called_num[0] += 1
 
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities(),
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
@@ -448,11 +444,7 @@ class TestProfiler(TestCase):
 
         # case without schedule
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities()
         ) as p:
             self.payload(use_cuda=use_cuda)
             self.payload(use_cuda=use_cuda)
