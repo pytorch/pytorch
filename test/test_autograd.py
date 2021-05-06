@@ -4005,16 +4005,24 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'The 0th input has a dimension with stride 0'):
                 gradcheck(lambda x: x, (x,), raise_exception=False, fast_mode=fast_mode)
 
-            # when mkldnn inputs, forward mode testing is not allowed
-            # Update tolerances below to make sure the gradient match even in single precision floats
-            # Use the warning assert to hide the float32 warning
-            x = torch.ones(1).to_mkldnn().requires_grad_()
-            with self.assertWarnsRegex(UserWarning, "Input #0 requires gradient and is not a double precision"):
-                with self.assertRaisesRegex(ValueError, 'MKLDNN inputs are not support for forward AD gradcheck.'):
-                    gradcheck(lambda x: x.to_dense(), (x,), raise_exception=False, fast_mode=fast_mode, check_forward_ad=True,
-                              atol=1e-1, rtol=1e-1)
         check(fast_mode=True)
         check(fast_mode=False)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_gradcheck_validates_input_mkldnn(self):
+        # when mkldnn inputs, forward mode testing is not allowed
+        # Update tolerances below to make sure the gradient match even in single precision floats
+        # Use the warning assert to hide the float32 warning
+        x = torch.ones(1).to_mkldnn().requires_grad_()
+        with self.assertWarnsRegex(UserWarning, "Input #0 requires gradient and is not a double precision"):
+            with self.assertRaisesRegex(ValueError, 'MKLDNN inputs are not support for forward AD gradcheck.'):
+                gradcheck(lambda x: x.to_dense(), (x,), raise_exception=False, fast_mode=False, check_forward_ad=True,
+                          atol=1e-1, rtol=1e-1)
+
+        with self.assertWarnsRegex(UserWarning, "Input #0 requires gradient and is not a double precision"):
+            with self.assertRaisesRegex(ValueError, 'MKLDNN inputs are not support for forward AD gradcheck.'):
+                gradcheck(lambda x: x.to_dense(), (x,), raise_exception=False, fast_mode=True, check_forward_ad=True,
+                          atol=1e-1, rtol=1e-1)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_gradcheck_test_outputs(self):
@@ -4320,15 +4328,17 @@ class TestAutograd(TestCase):
 
             return x + y, y
 
+        err_msg = "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"
+
         # Test for all inputs and outputs being real
         x = torch.rand(2, dtype=torch.double, requires_grad=True)
         y = torch.rand(2, dtype=torch.double, requires_grad=True)
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
 
         def basic_mul(x):
@@ -4341,9 +4351,9 @@ class TestAutograd(TestCase):
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
 
         # Test for all inputs and outputs being complex
@@ -4351,9 +4361,9 @@ class TestAutograd(TestCase):
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
 
     def test_version_counter(self):
