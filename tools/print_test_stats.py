@@ -648,7 +648,11 @@ class TestFile:
 
 
 def parse_report(path: str) -> Iterator[TestCase]:
-    dom = minidom.parse(path)
+    try:
+        dom = minidom.parse(path)
+    except Exception as e:
+        print(f"Error occurred when parsing {path}: {e}")
+        return
     for test_case in dom.getElementsByTagName('testcase'):
         yield TestCase(test_case)
 
@@ -912,7 +916,7 @@ if __name__ == '__main__':
     try:
         send_report_to_scribe(reports_by_file)
     except Exception as e:
-        print(f"error encountered when uploading to scribe: {e}")
+        print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
@@ -931,7 +935,7 @@ if __name__ == '__main__':
         try:
             send_report_to_s3(obj)
         except Exception as e:
-            print(f"error encountered when uploading to s3: {e}")
+            print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
 
     print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
     print(

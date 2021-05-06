@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
@@ -845,6 +846,15 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def hardswish(self):
+            result = torch.hardswish(self)
+            def backward(grad_output):
+                m = (result > 3.).type_as(result)
+                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                return grad_output * m
+
+            return result, backward
+
         def erfc(self):
             def backward(grad_output):
                 # Precomputed constant C = -2.0 / math.sqrt(math.pi)
@@ -1393,9 +1403,9 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
-        def clamp(self,
-                  min: Optional[number],
-                  max: Optional[number]):
+        def clamp_1(self,
+                    min: Optional[number],
+                    max: Optional[number]):
           def backward(grad_output):
             if min is not None and max is not None:
                 mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
@@ -1409,16 +1419,36 @@ const std::vector<std::string> functions = {
             else: #min is None and max is None
                 return grad_output, None, None
           return torch.clamp(self, min=min, max=max), backward
+
+        def clamp_2(self,
+                    min: Optional[Tensor],
+                    max: Optional[Tensor]):
+          def backward(grad_output):
+            if min is not None and max is not None:
+                mask = ((self >= min) * (self <= max)).type_as(self)
+                return grad_output * mask, None, None
+            elif min is not None:
+                mask = (self >= min).type_as(self)
+                return grad_output * mask, None, None
+            elif max is not None:
+                mask = (self <= max).type_as(self)
+                return grad_output * mask, None, None
+            else: #min is None and max is None
+                return grad_output, None, None
+          return torch.clamp(self, min=min, max=max), backward
     )"};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
@@ -1485,6 +1515,7 @@ void loadModule(const CompilationUnit& module) {
           << "gradient must return literal a tuple";
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
