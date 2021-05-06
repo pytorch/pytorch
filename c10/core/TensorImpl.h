@@ -1835,6 +1835,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return n;
   }
 
+  int64_t safe_compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      TORCH_CHECK(
+          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
+          "numel: integer multiplication overflow");
+      n *= s;
+    }
+    return n;
+  }
+
   /**
    * Compute whether or not a tensor is contiguous based on the sizes and
    * strides of a tensor.
@@ -1857,6 +1868,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void refresh_numel() {
     numel_ = compute_numel();
+  }
+
+  void safe_refresh_numel() {
+    numel_ = safe_compute_numel();
   }
 
   /**
