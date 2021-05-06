@@ -5352,7 +5352,7 @@ op_db: List[OpInfo] = [
                # Skip unsupported checks for bool and complex
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda',
-                        dtypes=(torch.bool, torch.complex64, torch.complex128)),),),
+                        dtypes=(torch.bool, torch.complex64, torch.complex128, torch.bfloat16)),),),
     OpInfo('kthvalue',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.float16),
