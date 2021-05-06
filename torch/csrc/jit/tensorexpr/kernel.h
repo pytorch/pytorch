@@ -35,11 +35,40 @@ using ArgValue = c10::variant<
     BufList,
     IntList,
     ArgNone>;
+
+inline std::string getArgValueName(const ArgValue& a) {
+  if (c10::get_if<tensorexpr::BufHandle>(&a)) {
+    return "BufHandle";
+  } else if (c10::get_if<tensorexpr::VarHandle>(&a)) {
+    return "VarHandle";
+  } else if (c10::get_if<double>(&a)) {
+    return "double";
+  } else if (c10::get_if<int64_t>(&a)) {
+    return "int64_t";
+  } else if (c10::get_if<bool>(&a)) {
+    return "bool";
+  } else if (c10::get_if<BufList>(&a)) {
+    return "BufList";
+  } else if (c10::get_if<IntList>(&a)) {
+    return "IntList";
+  } else if (c10::get_if<ArgNone>(&a)) {
+    return "None";
+  } else {
+    throw std::runtime_error("ArgValue type not handled in string conversion");
+  }
+}
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
   for (const auto& x : v) {
-    res.push_back(c10::get<T>(x));
+    auto val = c10::get_if<T>(&x);
+    if (val) {
+      res.push_back(*val);
+    } else {
+      throw std::runtime_error(
+          "vector type not homogeneous - found " + getArgValueName(x) +
+          ", expected " + getArgValueName(v[0]));
+    }
   }
   return res;
 }
@@ -136,12 +165,6 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeSum(const torch::jit::Value* v);
-
-  Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
-
-  Tensor* computeCatWoConditionals(const torch::jit::Value* v);
-
   Tensor* computeConv2d(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
@@ -169,12 +192,6 @@ class TORCH_API TensorExprKernel {
     bool keepdim;
     c10::optional<Dtype> dtype;
   };
-
-  // Get the reduction info for the given node, based on properties and inputs.
-  ReductionInfo getReductionInfo(const torch::jit::Node* node);
-
-  // Get the reduction axes for the given node, based on properties and inputs.
-  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
   struct UnpackedTensorOptions {
