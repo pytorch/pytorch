@@ -4775,10 +4775,11 @@ def _scaled_dot_product_attention(
     attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
 ) -> Tuple[Tensor, Tensor]:
-    r"""Computes scaled dot product attention query, key, value tensors, using
-        an optional attention mask if passed, and applying dropout if a probability
-        greater than 0.0 is specified.
-        Returns a tensor pair containing attended values and attention weights.
+    r"""
+    Computes scaled dot product attention on query, key and value tensors, using
+    an optional attention mask if passed, and applying dropout if a probability
+    greater than 0.0 is specified.
+    Returns a tensor pair containing attended values and attention weights.
 
     Args:
         q, k, v: query, key and value tensors. See Shape section for shape details.
