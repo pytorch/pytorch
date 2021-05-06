@@ -88,7 +88,7 @@ WORKFLOW_DATA = [
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
         "pytorch_android_gradle_custom_build_single",
-        ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build"],
+        ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
         is_master_only=False,
         is_pr_only=True),
     AndroidGradleJob(
