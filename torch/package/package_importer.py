@@ -173,20 +173,20 @@ class PackageImporter(Importer):
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.StorageContextTracker()
+        storage_context = torch._C.StorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
             name = f"{key}.storage"
             dtype = data_type(0).dtype
 
-            if storage_context.has_tensor_impl(name):
-                storage = storage_context.get_tensor_impl(name).storage()
+            if storage_context.has_storage(name):
+                storage = storage_context.get_storage(name, size, dtype).storage()
             else:
                 tensor = self.zip_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
                 )
                 if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
-                    storage_context.add_tensor_impl(name, tensor)
+                    storage_context.add_storage(name, tensor)
                 storage = tensor.storage()
             loaded_storages[key] = restore_location(storage, location)
 
