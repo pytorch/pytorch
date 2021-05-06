@@ -15,12 +15,12 @@
 
 
 
-import sysconfig
+from distutils import sysconfig
 import sys
 
 flags = [
     '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
-    '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_path('include')),
+    '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),
 ]
 
 print(' '.join(flags), end='')

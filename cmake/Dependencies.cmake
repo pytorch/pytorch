@@ -935,18 +935,23 @@ if(BUILD_PYTHON)
   # then these will just use "python", but at least they'll be consistent with
   # each other).
   if(NOT DEFINED PYTHON_INCLUDE_DIR)
-    # TODO: Verify that sysconfig isn't inaccurate
-    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
+    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
+    # which sometimes outputs directories that do not exist
+    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
       set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
     else()
-      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
+      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
+      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+        set(PYTHON_INCLUDE_DIR "${_py_inc}")
+        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      endif()
     endif()
   endif(NOT DEFINED PYTHON_INCLUDE_DIR)
 
   if(NOT DEFINED PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
+    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
       if(MSVC)
