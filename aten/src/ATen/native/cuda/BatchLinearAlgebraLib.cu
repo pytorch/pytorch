@@ -84,10 +84,9 @@ static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transp
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = batchCount(A);
-  auto m = cuda_int_cast(A.size(-2), "m");
-  auto n = cuda_int_cast(A.size(-1), "n");
+  auto n = cuda_int_cast(A.size(-2), "n");
   auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
-  auto lda = std::max<int>(1, m);
+  auto lda = std::max<int>(1, n);
 
   auto alpha = scalar_t{1};
 
@@ -119,10 +118,9 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, boo
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
-  auto m = cuda_int_cast(A.size(-2), "m");
-  auto n = cuda_int_cast(A.size(-1), "n");
+  auto n = cuda_int_cast(A.size(-2), "n");
   auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
-  auto lda = std::max<int>(1, m);
+  auto lda = std::max<int>(1, n);
 
   auto alpha = scalar_t{1};
 
