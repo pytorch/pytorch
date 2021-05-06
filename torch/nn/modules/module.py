@@ -1574,7 +1574,9 @@ class Module:
         for _, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
+    def named_modules(
+        self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True
+    ) -> Iterator[Tuple[str, "Module"]]:
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
