@@ -7,7 +7,7 @@ import os.path
 import pickle
 import tempfile
 
-from typing import Callable, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 
@@ -23,16 +23,19 @@ class Handler:
     args:
         keys: The keys to determine the right handler for key-data pair
         decode_fn: Optional function to decode data
-        key_fn: Optional function to extract detailed key from key-data pair
-
+        key_fn: Optional function to determine eligibility of the Handler to
+            handler data based on key. Directly use result if funciton returns
+            boolean value, otherwise check if the result is among `keys`
     Note:
         For subclass of `Handler`, importing third-party library in `__init__` to
         error out `ModuleNotFoundError` at construction time
     """
+    keys: List[str]
+
     def __init__(self,
                  keys: Union[str, List[str]],
                  decode_fn: Optional[Callable] = None,
-                 key_fn: Optional[Callable] = None) -> None:
+                 key_fn: Optional[Callable[[str], Union[str, bool]]] = None) -> None:
         self.keys = keys if isinstance(keys, list) else list(keys)
         if decode_fn is None:
             assert hasattr(self, 'decode_fn'), \
@@ -47,9 +50,12 @@ class Handler:
         return self.decode_fn(key, data)
 
     def __contains__(self, key):
-        if self.key_fn is not None:
-            key = self.key_fn(key)
-        return key in self.keys
+        if self.key_fn is None:
+            return False
+        k = self.key_fn(key)
+        if isinstance(k, bool):
+            return k
+        return k in self.keys
 
 
 ################################################################
@@ -273,7 +279,7 @@ class MatHandler(Handler):
 # a sample decoder
 ################################################################
 # Extract extension from pathname
-def _default_key_fn(pathname):
+def _default_key_fn(pathname: str) -> str:
     ext = os.path.splitext(pathname)[1]
     # Remove dot
     if ext:
@@ -291,22 +297,27 @@ class Decoder:
         key_fn: Function to extract key from data. Extracting extension
             from file path is set as default
     """
-    handlers: List[Handler]
+    handlers: List[Handler] = []
+    handler_map: Dict[str, Handler] = dict()
 
     def __init__(self,
                  *handler: Handler,
                  key_fn: Callable = _default_key_fn) -> None:
-        self.handlers = list(handler) if handler else []
+        self.add_handler(*handler)
         self.key_fn = key_fn
 
+    # Override 
     # Insert new handler from the beginning of handlers list to make sure the new
     # handler having the highest priority
     def add_handler(self, *handler: Handler) -> None:
         if not handler:
             return
-        self.handlers[0: 0] = list(handler)
+        for h in handler[::-1]:
+            for k in h.keys:
+                self.handler_map[k] = h
+            self.handlers.insert(0, h)
 
-    def decode1(self, key, data):
+    def decode1(self, key: str, data):
         if not data:
             return data
 
@@ -314,9 +325,15 @@ class Decoder:
         if isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase):
             data = data.read()
 
-        for f in self.handlers:
-            if key in f:
-                return f(key, data)
+        # Run though custom key_fn for each handler
+        for handler in self.handlers:
+            if key in handler:
+                return handler(key, data)
+
+        # Fall back to handler using key
+        if key in self.handler_map:
+            return self.handler_map[key](key, data)
+
         return data
 
     def decode(self, data):
