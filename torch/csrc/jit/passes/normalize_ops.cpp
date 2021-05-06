@@ -1,6 +1,9 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 
 #include <c10/util/Exception.h>
+#include "ATen/core/interned_strings.h"
+#include "jit/ir/graph_node_list.h"
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -20,6 +23,19 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   return false;
 }
 
+// Normalizes a __is__ comparison with a bool to `eq`
+bool normalizeIsBool(graph_node_list_iterator& iter) {
+  if(iter->kind() == aten::__is__){
+    ArrayRef<Value*> args = iter->inputs();
+    if(args[0]->type() == BoolType::get() && args[1]->type() == BoolType::get()){
+      iter->replaceWithNewSymbol(aten::eq);
+      iter.destroyCurrent();
+      return true;
+    }
+  }
+  return false;
+}
+
 void NormalizeOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -31,6 +47,9 @@ void NormalizeOps(Block* block) {
       continue;
     }
 
+    if (normalizeIsBool(it)) {
+      continue;
+    }
     it++;
   }
 }
