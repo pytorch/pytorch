@@ -54,22 +54,22 @@ bool InterpreterState::run(Stack& stack) {
     try {
       Instruction inst = code_->instructions_[pc];
 
-//        std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-//        if (inst.op == OP) {
-//          std::cout <<code_->op_names_[inst.X].name;
-//          if (!code_->op_names_[inst.X].overload_name.empty()) {
-//            std::cout << "." << code_->op_names_[inst.X].overload_name;
-//          }
-//            std::cout << std::endl;
-//        }
-
-    switch (inst.op) {
-      case OP: {
-        if (at::hasGlobalCallbacks()) {
-          if (auto* mobile_debug_info =
-                  static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
-                      c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
-            mobile_debug_info->setOpIdx(pc);
+      //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+      //    if (inst.op == OP) {
+      //      std::cout << ", " << code_->op_names_[inst.X].name;
+      //      if (!code_->op_names_[inst.X].overload_name.empty()) {
+      //        std::cout << "." << code_->op_names_[inst.X].overload_name;
+      //      }
+      //    }
+      //    std::cout << std::endl;
+      switch (inst.op) {
+        case OP: {
+          if (at::hasGlobalCallbacks()) {
+            if (auto* mobile_debug_info = static_cast<MobileDebugInfo*>(
+                    c10::ThreadLocalDebugInfo::get(
+                        c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
+              mobile_debug_info->setOpIdx(pc);
+            }
           }
 
           // TODO(iliacher): remove the workaround after RecordFunction is in

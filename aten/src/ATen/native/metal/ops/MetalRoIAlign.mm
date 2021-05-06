@@ -55,7 +55,7 @@ torch::Tensor RoIAlign(
     roiBufferPtr[i * 4 + 3] = rois.data_ptr<float>()[i * Rdim + off + 3];
   }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(features);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   MPSImage* X = imageFromTensor(features);
   id<MTLComputeCommandEncoder> encoder =
