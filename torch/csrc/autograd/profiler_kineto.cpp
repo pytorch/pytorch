@@ -54,10 +54,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     libkineto::GenericTraceActivity op;
     op.activityType = libkineto::ActivityType::CPU_OP;
     op.activityName = std::string(fn.name().str());
-
+    op.device = libkineto::processId();
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
-    op.device = 0;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
