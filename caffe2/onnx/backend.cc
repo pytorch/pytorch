@@ -8,7 +8,7 @@
 
 #ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "onnxoptimizer/optimize.h"
+#include "onnx/optimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
@@ -25,7 +25,6 @@ namespace caffe2 {
 namespace onnx {
 
 namespace {
-
 
 bool AlmostEqual(double a, double b) {
   constexpr static double kEps = 1e-15;

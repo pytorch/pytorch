@@ -61,12 +61,6 @@ new_local_repository(
 )
 
 new_local_repository(
-    name = "optimizer",
-    build_file = "//third_party:optimizer.BUILD",
-    path = "third_party/optimizer",
-)
-
-new_local_repository(
     name = "foxi",
     build_file = "//third_party:foxi.BUILD",
     path = "third_party/foxi",
