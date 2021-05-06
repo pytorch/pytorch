@@ -40,6 +40,10 @@ setup_lint:
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
+		if [ -z "$$(which brew)" ]; then \
+			echo "'brew' is required to install ShellCheck, get it here: https://brew.sh "; \
+			exit 1; \
+		fi; \
 		brew install shellcheck; \
 	else \
 		python tools/actions_local_runner.py --file .github/workflows/lint.yml \
