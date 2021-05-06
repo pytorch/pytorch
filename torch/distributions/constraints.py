@@ -463,8 +463,6 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        # Assumes that matrix or matrices in value are symmetric.
-        # There are also non-symmetric positive definite matrices.
         batch_shape = value.unsqueeze(0).shape[:-2]
         positive = torch.linalg.eigvalsh(value, UPLO="U")[..., :1] > 0.0
         return positive.view(batch_shape)
