@@ -850,8 +850,7 @@ def assert_close(
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
-        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and
-            <class 'torch.Tensor'> instead.
+        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.  # noqa: B950
 
         >>> # NaN != NaN by default.
         >>> expected = torch.tensor(float("Nan"))
