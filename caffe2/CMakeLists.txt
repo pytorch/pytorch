@@ -570,10 +570,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
@@ -1055,6 +1058,10 @@ endif()
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/nnc
+        ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
