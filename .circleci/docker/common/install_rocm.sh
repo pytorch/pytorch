@@ -22,7 +22,7 @@ install_magma() {
 }
 
 ver() {
-    printf "%03d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
+    printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
 
 install_ubuntu() {
