@@ -201,6 +201,8 @@ class TensorPipeAgent : public RpcAgent {
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
+  const std::vector<c10::Device>& getDevices() const override;
+
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 

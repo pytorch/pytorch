@@ -62,7 +62,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
 
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
-  auto futPtr = c10::make_intrusive<JitFuture>(returnType);
+  auto futPtr = jitFuture->createInstance(returnType);
   std::weak_ptr<JitFuture> wp = jitFuture;
   jitFuture->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
     auto future = wp.lock();

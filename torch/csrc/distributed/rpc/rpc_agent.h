@@ -269,6 +269,9 @@ class TORCH_API RpcAgent {
   // Retrieves the device map for the provided destination worker.
   virtual DeviceMap getDeviceMap(const WorkerInfo& dst) const;
 
+  // Retrieve the (non-CPU) devices that are supported by the agent.
+  virtual const std::vector<c10::Device>& getDevices() const;
+
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const WorkerInfo workerInfo_;
