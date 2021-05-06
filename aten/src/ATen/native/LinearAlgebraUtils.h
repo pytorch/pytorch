@@ -10,10 +10,6 @@
 #include <cstring>
 #include <cctype>
 
-#include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
-
 namespace at { namespace native {
 
 /*
