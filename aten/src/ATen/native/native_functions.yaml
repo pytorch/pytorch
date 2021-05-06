@@ -3369,6 +3369,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    MkldnnCPU: mkldnn_gelu
     CPU: gelu_cpu
     CUDA: gelu_cuda
 
@@ -9501,13 +9502,9 @@
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg

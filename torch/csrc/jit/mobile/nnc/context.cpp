@@ -224,7 +224,9 @@ CompilationUnit::CompilationUnit(const c10::IValue& value) {
 c10::IValue CompilationUnit::serialize() const {
   auto functions = c10::fmap(
       functions_,
-      [](const std::unique_ptr<Function>& func) { return func->serialize(); });
+      [](decltype(functions_)::const_reference func) {
+          return func.second->serialize();
+      });
   return Tup({kProducedNNCFileFormatVersion, Tup(std::move(functions))});
 }
 
@@ -238,16 +240,20 @@ c10::impl::GenericList CompilationUnit::run(
 }
 
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
-  functions_.emplace_back(std::move(fn));
+  TORCH_CHECK(
+      0 == functions_.count(fn->name()),
+      "method '",
+      fn->name().qualifiedName(),
+      "' already defined.");
+  functions_.emplace(fn->name(), std::move(fn));
 }
 
 Function* CompilationUnit::find_function(const c10::QualifiedName& name) const {
-  for (auto& fn : functions_) {
-    if (fn->name() == name) {
-      return fn.get();
-    }
+  auto it = functions_.find(name);
+  if (it == functions_.end()) {
+    return nullptr;
   }
-  return nullptr;
+  return it->second.get();
 }
 
 } // namespace nnc

@@ -2306,7 +2306,6 @@ class TestOperatorSignatures(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         known_no_schema = {'cdist',
                            'dstack',
-                           'nn.functional.hardswish',
                            'einsum',
                            'hstack',
                            'linalg.multi_dot',
