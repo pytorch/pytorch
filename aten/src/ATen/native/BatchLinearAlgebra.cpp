@@ -2088,6 +2088,14 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, std::string up
 }
 
 Tensor linalg_eigvalsh(const Tensor& input, std::string uplo) {
+  // if input requires grad we must compute the eigenvectors to make this function differentiable
+  // the eigenvectors are not exposed to the user
+  if (at::GradMode::is_enabled() && input.requires_grad()) {
+    Tensor values;
+    std::tie(values, std::ignore) = at::linalg_eigh(input, uplo);
+    return values;
+  }
+
   squareCheckInputs(input);
   checkUplo(uplo);
   ScalarType real_dtype = toValueType(input.scalar_type());
@@ -2803,10 +2811,14 @@ Tensor linalg_svdvals(const Tensor& input) {
       "torch.linalg.svdvals: input should have at least 2 dimensions, but has ",
       input.dim(),
       " dimensions instead");
+
   Tensor singular_values;
+
+  // if input requires grad we must compute the singular vectors to make this function differentiable
+  // the singular vectors are not exposed to the user
+  const bool input_requires_grad = (at::GradMode::is_enabled() && input.requires_grad());
   std::tie(std::ignore, singular_values, std::ignore) =
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      at::_svd_helper(input, /*full_matrices=*/false, /*compute_uv=*/false);
+      at::_svd_helper(input, /*some=*/input_requires_grad, /*compute_uv=*/input_requires_grad);
   return singular_values;
 }
 
