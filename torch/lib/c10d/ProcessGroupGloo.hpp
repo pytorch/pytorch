@@ -81,15 +81,9 @@ class ProcessGroupGloo : public ProcessGroup {
           outputTensors_(outputTensors) {
     }
 
-    static void execute(c10::intrusive_ptr<AsyncWork> work) {
-      std::exception_ptr eptr;
-      try {
-        work->run();
-      } catch (...) {
-        eptr = std::current_exception();
-      }
-      work->finish(eptr);
-    }
+    ~AsyncWork() override = default;
+
+    static void execute(c10::intrusive_ptr<AsyncWork> work);
 
     virtual void run() = 0;
 
@@ -99,7 +93,7 @@ class ProcessGroupGloo : public ProcessGroup {
     friend class ProcessGroupGloo;
 
    private:
-    std::vector<std::vector<at::Tensor>> outputTensors_;
+    const std::vector<std::vector<at::Tensor>> outputTensors_;
   };
 
   // Wrap c10d store as Gloo store
