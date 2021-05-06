@@ -992,6 +992,8 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
         }
 
         if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          // No need to pass DataPtrs, because dstFuture won't directly contain
+          // the value, it will contain the srcFutures (which have no DataPtrs).
           ctx->dstFuture->markCompleted(ctx->asIvalue);
         }
       };
@@ -1034,7 +1036,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src->hasError()) {
         dst->setError(src->exception_ptr());
       } else {
-        dst->markCompleted(src->constValue());
+        dst->markCompleted(src->constValue(), src->dataPtrs());
       }
     }
   };

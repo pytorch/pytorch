@@ -69,8 +69,10 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     if (future->hasError()) {
       futPtr->setError(future->exception_ptr());
     } else {
-      futPtr->markCompleted(deserializeRespToIValue(
-          *future->constValue().toCustomClass<Message>()));
+      futPtr->markCompleted(
+          deserializeRespToIValue(
+              *future->constValue().toCustomClass<Message>()),
+          future->dataPtrs());
     }
   }));
   if (shouldProfile) {
