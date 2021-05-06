@@ -30,16 +30,6 @@ static Tensor& unary_inplace_func_batch_rule(Tensor& self, optional<int64_t>) {
   return self;
 }
 
-Tensor& test(Tensor& self, optional<int64_t>) {
-  unary_inplace_batch_rule<decltype(&Tensor::abs), &Tensor::abs>(self, {});
-  return self;
-}
-
-Tensor& test2(Tensor& self) {
-  return unary_inplace_plumbing<decltype(&test), &test>(self);
-}
-
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define SINGLE_ARG(...) __VA_ARGS__
 
