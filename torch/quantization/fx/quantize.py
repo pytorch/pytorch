@@ -1034,7 +1034,7 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
     return node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
-# TODO(if RFC is accepted): handle all of this logic in the RFC
+# TODO(if RFC is accepted): delete this function and all dependencies
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         qconfig_map: Dict[str, QConfigAny],
@@ -1137,6 +1137,7 @@ def handle_copy_nodes(
 
     return result_graph
 
+# TODO(if RFC is accepted): delete this function and all dependencies
 def handle_cat_nodes(
         model: torch.nn.Module, observed_graph: Graph, matches: Dict[str, MatchResult],
         activation_post_process_map: Dict[str, List[str]],
