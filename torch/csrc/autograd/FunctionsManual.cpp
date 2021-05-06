@@ -2198,8 +2198,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool is_eigvec_tensor_nonempty, const Tensor& eigenvalues, const Tensor& eigenvectors) {
   TORCH_CHECK(is_eigvec_tensor_nonempty,
-           "eig_backward: Setting eigenvectors to false in torch.eig doesn't compute eigenvectors ",
-           "and hence we cannot compute backward. Please use torch.linalg.eig(A)");
+           "eig_backward: torch.eig(eigenvalues=False) is not differentiable. ",
+           "Please use torch.linalg.eigvals");
 
   // variable names correspond to the ones in the reference document
   auto D = eigenvalues;
