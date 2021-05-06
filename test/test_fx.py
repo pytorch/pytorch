@@ -2314,6 +2314,7 @@ class TestOperatorSignatures(JitTestCase):
                            'stack',
                            'view',
                            'view_as',
+                           'nn.functional.hardshrink',
                            'vstack',
                            '__getitem__',
                            '__radd__',
