@@ -4966,51 +4966,69 @@ class TestLinalg(TestCase):
         self.assertEqual(m3, m2)
         self.assertEqual(m3.norm(2, 0), m2.norm(2, 0))
 
-    # TODO: make this work on CUDA, too
-    @onlyCPU
     @skipCPUIfNoLapack
-    def test_ormqr(self, device):
-        mat1 = torch.randn(7, 7)
-        mat2 = torch.randn(7, 7)
-        q, r = torch.qr(mat1)
-        m, tau = torch.geqrf(mat1)
-        out_holder = torch.empty_like(mat1)
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_ormqr(self, device, dtype):
 
-        res1 = torch.mm(q, mat2)
-        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=False)
-        torch.ormqr(m, tau, mat2, out=out_holder)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res2, out_holder)
+        def run_test(batch, m, n, fortran_contiguous):
+            A = make_tensor((*batch, m, n), dtype=dtype, device=device)
+            reflectors, tau = torch.geqrf(A)
+            if not fortran_contiguous:
+                self.assertTrue(reflectors.transpose(-2, -1).is_contiguous())
+                reflectors = reflectors.contiguous()
 
-        res1 = torch.mm(mat2, q)
-        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=False)
-        torch.ormqr(m, tau, mat2, left=False, transpose=False, out=out_holder)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res2, out_holder)
+            # Q is of size m x m
+            Q, _ = torch.linalg.qr(A, mode='complete')
+            C_right = make_tensor((*batch, m, n), dtype=dtype, device=device)
+            C_left = make_tensor((*batch, n, m), dtype=dtype, device=device)
 
-        res1 = torch.mm(q.t(), mat2)
-        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=True)
-        torch.ormqr(m, tau, mat2, left=True, transpose=True, out=out_holder)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res2, out_holder)
+            expected = Q @ C_right
+            actual = torch.ormqr(reflectors, tau, C_right, left=True, transpose=False)
+            self.assertEqual(expected, actual)
 
-        res1 = torch.mm(mat2, q.t())
-        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=True)
-        torch.ormqr(m, tau, mat2, left=False, transpose=True, out=out_holder)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res2, out_holder)
+            expected = C_left @ Q
+            actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=False)
+            self.assertEqual(expected, actual)
 
-        # m is Fortran-contiguous, now test the C-contiguous input
-        self.assertTrue(m.transpose(-2, -1).is_contiguous())
+            expected = Q.transpose(-2, -1).conj() @ C_right
+            actual = torch.ormqr(reflectors, tau, C_right, left=True, transpose=True)
+            self.assertEqual(expected, actual)
 
-        a = m.contiguous()
-        out = torch.empty_like(mat1)
+            expected = C_left @ Q.transpose(-2, -1).conj()
+            actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=True)
+            self.assertEqual(expected, actual)
 
-        res1 = q @ mat2
-        res2 = torch.ormqr(a, tau, mat2, left=True, transpose=False)
-        torch.ormqr(a, tau, mat2, out=out_holder)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res2, out_holder)
+            # if tau is all zeros then the implicit matrix Q is the identity matrix
+            # so the actual result should be C_right in this case
+            zero_tau = torch.zeros_like(tau)
+            actual = torch.ormqr(reflectors, zero_tau, C_right, left=True, transpose=False)
+            self.assertEqual(C_right, actual)
+
+        batches = [(), (0, ), (2, ), (2, 1)]
+        ns = [5, 2, 0]
+        for batch, (m, n), fortran_contiguous in product(batches, product(ns, ns), [True, False]):
+            run_test(batch, m, n, fortran_contiguous)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_ormqr_errors_and_warnings(self, device, dtype):
+        test_cases = [
+            # input1 size, input2 size, input3 size, error regex
+            ((10,), (2,), (2,), r"input must have at least 2 dimensions"),
+            ((2, 2), (2,), (2,), r"other must have at least 2 dimensions"),
+            ((10, 6), (20,), (10, 6), r"other.shape\[-2\] must be greater than or equal to tau.shape\[-1\]"),
+            ((6, 6), (5,), (5, 5), r"other.shape\[-2\] must be equal to input.shape\[-2\]"),
+            ((1, 2, 2), (2, 2), (1, 2, 2), r"batch dimensions of tau to be equal to input.shape\[:-2\]"),
+            ((1, 2, 2), (1, 2), (2, 2, 2), r"batch dimensions of other to be equal to input.shape\[:-2\]"),
+        ]
+        for a_size, tau_size, c_size, error_regex in test_cases:
+            a = make_tensor(a_size, dtype=dtype, device=device)
+            tau = make_tensor(tau_size, dtype=dtype, device=device)
+            c = make_tensor(c_size, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, error_regex):
+                torch.ormqr(a, tau, c)
 
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
