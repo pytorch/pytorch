@@ -109,6 +109,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
 SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
+    dist.Backend.NCCL,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -939,29 +940,77 @@ class DistributedTest:
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
-        def test_send_recv_nccl(self):
+        def _test_send_recv_nccl(self, profiler_ctx=None):
+            # TODO: now that nccl send/recv is supported, there does not seem to
+            # be a need to have nccl send/recv be tested separately.
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
 
             tensor = _build_tensor(rank + 1, device_id=device_id)
+            profiler_cls = profiler_ctx if profiler_ctx is not None else suppress()
+            with profiler_cls as prof:
+                for src in range(0, dist.get_world_size()):
+                    if src == rank:
+                        # Send mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
+                            dist.send(tensor, dst)
+                    else:
+                        # Recv mode
+                        expected_tensor = _build_tensor(src + 1)
+                        output_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
+                        dist.recv(output_tensor, src)
+                        self.assertEqual(output_tensor, expected_tensor)
 
-            for src in range(0, dist.get_world_size()):
-                if src == rank:
-                    # Send mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
-                        dist.send(tensor, dst)
-                else:
-                    # Recv mode
-                    expected_tensor = _build_tensor(src + 1)
-                    output_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                    dist.recv(output_tensor, src)
-                    self.assertEqual(output_tensor, expected_tensor)
+                self._barrier()
 
-            self._barrier()
+            if profiler_ctx is not None:
+                backend = dist.get_backend()
+                if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                        events = get_profiling_event(event_name, prof)
+                        self.assertTrue(events)
+                        # Event order is not deterministic, so simply assert their shape
+                        # is found in the following list.
+                        expected_shapes = [
+                            [[rank + 1] * 3] for rank in range(dist.get_world_size())
+                        ]
+                        for event in events:
+                            self.assertTrue(event.input_shapes in expected_shapes)
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_send_recv_nccl(self):
+            self._test_send_recv_nccl()
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_send_recv_nccl_autograd_profiler(self):
+            profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
+            self._test_send_recv_nccl(profiler_ctx)
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
+        def test_send_recv_nccl_torch_profiler(self):
+            profiler_ctx = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=True
+            )
+            self._test_send_recv_nccl(profiler_ctx)
 
         # SEND RECV
         def _test_send_recv(self, profiler_ctx):
@@ -1000,6 +1049,7 @@ class DistributedTest:
                             [[rank + 1] * 3] for rank in range(dist.get_world_size())
                         ]
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl")
@@ -1067,6 +1117,7 @@ class DistributedTest:
                         # Each rank sends/recvs from other rank twice.
                         self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
                 # Each rank would have 2 * (world_size - 1) sends, verify that
@@ -1141,6 +1192,7 @@ class DistributedTest:
                         expected_event_count = dist.get_world_size() - 1
                         self.assertEqual(event_count, expected_event_count)
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
@@ -1198,6 +1250,7 @@ class DistributedTest:
                         r: [[r] * 3] for r in range(1, dist.get_world_size())
                     }
                     for event in events:
+                        self.assertTrue(event.is_async)
                         self.assertEqual(event.name, expected_event_name)
                         if rank == 0:
                             self.assertTrue(event.input_shapes in expected_shapes.values())
@@ -1645,6 +1698,7 @@ class DistributedTest:
                 print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
+                    self.assertTrue(e.is_async)
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
                     # Verify tensor shapes if given
@@ -4607,6 +4661,7 @@ class DistributedTest:
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
+                self.assertTrue(event.is_async)
                 self.assertEqual(event.name, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
@@ -4637,6 +4692,8 @@ class DistributedTest:
             self.assertGreaterEqual(len(events), 1)
             self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
+            for event in events:
+                self.assertTrue(event.is_async)
             # Ensure searching unused parameters was profiled
             events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)
