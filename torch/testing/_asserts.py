@@ -814,11 +814,6 @@ def assert_close(
         >>> actual = torch.acos(torch.cos(expected))
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
-        >>> actual = torch.acos(torch.cos(expected))
-        >>> torch.testing.assert_close(actual, expected, rtol=1e-5, atol=0.0)
-        AssertionError: Tensors are not close!
-
         >>> import math
         >>> expected = math.sqrt(2.0)
         >>> actual = 2.0 / math.sqrt(2.0)
