@@ -40,8 +40,8 @@ void fillSliceWithIndex(Tensor& t,int dim) {
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
-void sortKeyValueInplace(Tensor& key,
-                         Tensor& value,
+void sortKeyValueInplace(const Tensor& key,
+                         const Tensor& value,
                          int dim, bool dir) {
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");
