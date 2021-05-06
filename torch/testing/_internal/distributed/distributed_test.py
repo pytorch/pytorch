@@ -6071,7 +6071,7 @@ class DistributedTest:
             }
             net_params, _ = net._build_params_for_reducer()
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
-            print(param_to_name_mapping)
+            self.assertEqual(param_to_name_mapping, expected_mapping)
 
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
             debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
