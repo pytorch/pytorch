@@ -13527,6 +13527,25 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    def test_save_lstm_compatibility(self, device):
+        # Test that saving an LSTM in PyTorch 1.7 and older can still be
+        # loaded in newer versions of PyTorch.
+        model = nn.LSTM(2, 3)
+        x = torch.randn(32, 5, 2)
+        expected = model(x)
+
+        # Get a state dict for PyTorch 1.7 LSTM. Before PyTorch 1.8, proj_size
+        # didn't exist.
+        assert model.proj_size == 0
+        state_dict = model.__dict__
+        del state_dict['proj_size']
+
+        # load a model
+        loaded_model = nn.LSTM(2, 3)
+        loaded_model.__setstate__(state_dict)
+        result = loaded_model(x)
+        self.assertEqual(result, expected)
+
     @onlyCUDA
     @tf32_on_and_off(0.005)
     def test_grid_sample_large(self, device):
