@@ -1297,11 +1297,21 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(alias_result, tensor_result)
 
             if dtype == torch.bfloat16:
-                self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
-                self.assertEqual(out, numpy_result, exact_dtype=False)
+                self.assertEqual(tensor_result, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}, op: {torch_op}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'),
+                                 exact_dtype=False)
+                self.assertEqual(out, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}, op: {torch_op}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'),
+                                 exact_dtype=False)
             else:
-                self.assertEqual(tensor_result, numpy_result)
-                self.assertEqual(out, numpy_result)
+                self.assertEqual(tensor_result, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}, op: {torch_op}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'))
+                self.assertEqual(out, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}, op: {torch_op}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'))
 
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
     def test_maximum_minimum_complex(self, device, dtypes):
