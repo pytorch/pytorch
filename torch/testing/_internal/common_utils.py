@@ -585,7 +585,7 @@ def slowTest(fn):
             end = time.time()
             with open("recordedWithArgsAllSlowTests.txt", "a") as _file:
                 _file.write(
-                        fn.__name__ + ', *args: ' + str([x for x in list(*args)]) + ', **kwargs: ' + str([x for x in list(**kwargs)]) + ', time taken: ' + end-start + ' s'
+                        fn.__name__ + ', *args: ' + str([x for x in args]) + ', **kwargs: ' + str([x for x in kwargs]) + ', time taken: ' + str(end-start) + ' s\n'
                 )
     wrapper.__dict__['slow_test'] = True
     return wrapper

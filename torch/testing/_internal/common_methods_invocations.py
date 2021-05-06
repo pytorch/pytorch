@@ -3666,7 +3666,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda', temp_enable=True),
+               # SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda', temp_enable=True),
                # https://github.com/pytorch/pytorch/issues/55907
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16, ),
