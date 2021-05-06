@@ -463,13 +463,11 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        matrix_shape = value.shape[-2:]
+        # Assumes that matrix or matrices in value are symmetric.
+        # There are also non-symmetric positive definite matrices.
         batch_shape = value.unsqueeze(0).shape[:-2]
-        # TODO: replace with batched linear algebra routine when one becomes available
-        # note that `symeig()` returns eigenvalues in ascending order
-        flattened_value = value.reshape((-1,) + matrix_shape)
-        return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
-                            for v in flattened_value]).view(batch_shape)
+        positive = torch.linalg.eigvalsh(value, UPLO="U")[..., :1] > 0.0
+        return positive.view(batch_shape)
 
 
 class _Cat(Constraint):

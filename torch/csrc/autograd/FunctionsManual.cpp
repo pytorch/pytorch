@@ -2339,8 +2339,8 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   // leads to stable gradient updates, and retains symmetry of the updated matrix if it
   // were updated by a gradient based algorithm.
   TORCH_CHECK(eigenvectors,
-           "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
-           "and hence we cannot compute backward. Please use torch.linalg.eigvalsh");
+           "symeig_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
+           "Please use torch.linalg.eigvalsh(A)");
 
   auto glambda = grads[0];
   auto gv = grads[1];
