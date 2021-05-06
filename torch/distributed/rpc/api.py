@@ -120,13 +120,11 @@ def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None):
             worker_names = _ALL_WORKER_NAMES
             assert (
                 worker_name in worker_names
-            ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+            ), f"{worker_name} is not expected by leader."
         states = _all_gather_sequence_id_to_states[sequence_id]
         assert (
             worker_name not in states.gathered_objects
-        ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
-            worker_name=worker_name, sequence_id=sequence_id
-        )
+        ), f"{worker_name} reported intent sequence id {sequence_id} twice. "
         states.gathered_objects[worker_name] = obj
         if worker_names == set(states.gathered_objects.keys()):
             states.proceed_signal.set()
@@ -260,10 +258,10 @@ def _barrier(worker_names):
 
     """
     try:
-        _all_gather(None, set(worker_names), timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+        _all_gather(None, set(worker_names))
     except RuntimeError as ex:
         logger.error(
-            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+            f"Failed to complete barrier, got error {ex}"
         )
 
 @_require_initialized

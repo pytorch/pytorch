@@ -87,6 +87,16 @@ DONE_FUTURE = concurrent.futures.Future()
 
 FIFTY_MIL_CYCLES = 50000000
 
+_rpc_barrier_count = 0
+
+def _increment_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count += 1
+
+def _reset_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count = 0
+
 class StubRpcAgent:
     def __init__(self, world_size):
         self.world_size = world_size
@@ -124,6 +134,18 @@ def set_and_check_done(value):
 # methods over rpc
 TensorClass = namedtuple("TensorClass", ["tensors"])
 
+class Counter(object):
+    def __init__(self, initval=0):
+        self.val = mp.Value('i', initval)
+        self.lock = Lock()
+
+    def increment(self):
+        with self.lock:
+            self.val.value += 1
+
+    def value(self):
+        with self.lock:
+            return self.val.value
 
 class MyPickleClass:
     def __init__(self):
@@ -1055,12 +1077,23 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
+    def _test_barrier_helper(self, info, names):
+        names = sorted(names)
+        leader = names[0]
+        rpc.rpc_sync(leader, _reset_count)
+        if info.name == leader:
+            self.assertEqual(_rpc_barrier_count, 0)
+        rpc.api._barrier(names)
+        rpc.rpc_sync(leader, _increment_count)
+        if info.name == leader:
+            self.assertEqual(_rpc_barrier_count, len(names))
+
     @dist_init
     def test_rpc_barrier_all(self):
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         names = [worker.name for worker in all_worker_info]
-        rpc.api._barrier(names)
+        self._test_barrier_helper(info, names)
 
     @dist_init
     def test_rpc_barrier_subset(self):
@@ -1068,10 +1101,9 @@ class RpcTest(RpcAgentTestFixture):
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         if info.id % 2:
             names = [worker.name for worker in all_worker_info if worker.id % 2]
-            rpc.api._barrier(names)
         else:
             names = [worker.name for worker in all_worker_info if not worker.id % 2]
-            rpc.api._barrier(names)
+        self._test_barrier_helper(info, names)
 
     @dist_init
     def test_rpc_barrier_partial_subset(self):
@@ -1079,10 +1111,9 @@ class RpcTest(RpcAgentTestFixture):
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         if info.id % 2:
             names = [worker.name for worker in all_worker_info if worker.id % 2]
-            rpc.api._barrier(names)
-        elif info.id == 0:
-            names = ["worker0"]
-            rpc.api._barrier(names)
+        else:
+            names = [f"worker{info.id}"]
+        self._test_barrier_helper(info, names)
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
