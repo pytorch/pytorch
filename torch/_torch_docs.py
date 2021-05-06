@@ -1880,7 +1880,7 @@ matrices.
 
     .. code:: python
 
-        U = torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)
+        U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
