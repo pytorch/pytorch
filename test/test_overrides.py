@@ -806,7 +806,6 @@ class TestGradCheckOverride(TestCase):
             # Tensor-likes.
             expected_used_attrs = {
                 'data',
-                'device',
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
@@ -817,8 +816,10 @@ class TestGradCheckOverride(TestCase):
                 'retain_grad',
                 'size',
                 'stride',
-                'is_complex',
             }
+            if fast_mode:
+                expected_used_attrs.add('is_complex')
+                expected_used_attrs.add('device')
             self.assertEqual(expected_used_attrs, total_used_attrs)
 
             expected_used_calls = {
@@ -830,8 +831,9 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.stride,
                 torch.autograd.grad,
                 torch.add,
-                torch.Tensor.is_complex,
             }
+            if fast_mode:
+                expected_used_calls.add(torch.Tensor.is_complex)
             self.assertEqual(expected_used_calls, total_used_calls)
         run_test(fast_mode=True)
         run_test(fast_mode=False)

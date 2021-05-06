@@ -4326,19 +4326,24 @@ class TestAutograd(TestCase):
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
+
+        def basic_mul(x):
+            return torch.view_as_real(x * 1j)
+        gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=False)
+        gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=True)
 
         # Test for one input and one output being complex
         x = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
 
         # Test for all inputs and outputs being complex
@@ -4346,9 +4351,9 @@ class TestAutograd(TestCase):
 
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
         gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+        with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"):
             gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
 
     def test_version_counter(self):

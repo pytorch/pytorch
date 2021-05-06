@@ -841,7 +841,7 @@
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: mul_tensor_backward(grad, other, self.scalar_type())
   other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: other_t * self_p.conj() + self_t * other_p.conj()
+  result: other_t * self_p + self_t * other_p
 
 - name: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: mul_tensor_backward(grad, other, self.scalar_type())
@@ -1268,9 +1268,11 @@
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
+  result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
   self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
