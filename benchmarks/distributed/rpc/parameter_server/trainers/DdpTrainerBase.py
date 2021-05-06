@@ -17,8 +17,8 @@ class DdpTrainerBase(TrainerBase):
     def hook(state, bucket):
         return
 
-    def record_hook_fut_start(self, key, metric_name, cuda=True):
-        self.record_start(self.HOOK_FUTURE_METRIC, key, metric_name, cuda)
+    def record_hook_fut_start(self, key, name, cuda=True):
+        self.record_start(self.HOOK_FUTURE_METRIC, key, name, cuda)
 
     def record_hook_fut_end(self, key):
         self.record_end(self.HOOK_FUTURE_METRIC, key)

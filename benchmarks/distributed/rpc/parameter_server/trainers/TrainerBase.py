@@ -78,14 +78,14 @@ class TrainerBase(ABC):
         )
 
     @staticmethod
-    def methodmetric(metric_name, metric_type="method_metric", cuda=True):
+    def methodmetric(name, type="method_metric", cuda=True):
         def decorator(function):
             @functools.wraps(function)
             def wrapper(self, *args):
                 key = time.time()
-                self.__metrics_logger.record_start(metric_type, key, metric_name, cuda)
+                self.__metrics_logger.record_start(type, key, name, cuda)
                 result = function(self, *args)
-                self.__metrics_logger.record_end(metric_type, key)
+                self.__metrics_logger.record_end(type, key)
                 return result
             return wrapper
         return decorator
