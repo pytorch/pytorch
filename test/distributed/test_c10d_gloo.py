@@ -1293,7 +1293,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, None, multi_device=True)
 
-    def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False):
+    def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False, static_graph=False):
         """
         By simulating a multi-task training, this test is to make sure:
         1) DDP does not touch the grad of globally unused parameters.
@@ -1342,6 +1342,8 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
+        if static_graph:
+            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1353,6 +1355,8 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
+        if static_graph:
+            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()
@@ -1364,6 +1368,11 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_grad_is_view(self):
         self._test_global_local_unused_params_grad(gradient_as_bucket_view=True)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_global_local_unused_params_grad_with_static_graph(self):
+        self._test_global_local_unused_params_grad(static_graph=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)

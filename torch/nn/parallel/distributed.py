@@ -440,7 +440,6 @@ class DistributedDataParallel(Module):
             self.process_group = process_group
 
         self.static_graph = False
-        self.num_iterations = 0
         self.dim = dim
         self.module = module
         self.device = list(self.module.parameters())[0].device
@@ -523,6 +522,7 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -583,6 +583,8 @@ class DistributedDataParallel(Module):
             param_to_name_mapping = {}
         # Builds reducer
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        if self.static_graph:
+            self._set_static_graph()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.

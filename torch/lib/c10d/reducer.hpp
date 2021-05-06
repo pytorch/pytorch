@@ -461,6 +461,9 @@ class Reducer {
   void initialize_local_used_map();
   // get current cuda stream
   const c10::Stream get_current_stream();
+  bool dynamic_graph_find_unused();
+  bool static_graph_first_iteration();
+  bool static_graph_after_first_iteration();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;

@@ -1066,135 +1066,6 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # No parameter should have their gradient set.
         check_no_grads()
 
-    def _test_accumulate_gradients_no_sync(
-            self, num_iters=2, ddp_comm_hook=None, gradient_as_bucket_view=False
-    ):
-        """
-        This is the recommended way to implement accumulate grads.
-        If ``ddp_comm_hook`` input was specified, it will also register that hook
-        to the ``ddp_model``. The hook fed into this function should not change
-        the resulting gradients.
-        """
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        global_batch_size = self.world_size
-        local_batch_size = len(devices)
-
-        model, ddp_model, input, target = self._prepare_single_device_module(
-            process_group, devices, devices, global_batch_size, gradient_as_bucket_view
-        )
-
-        if ddp_comm_hook is not None:
-            ddp_model.register_comm_hook(process_group, ddp_comm_hook)
-
-        def step_model(model, input, target):
-            model.train()
-            output = model(input)
-            loss = F.mse_loss(output, target.to(output.device))
-            loss.backward()
-
-        # ensure accumulate grads works with no_grad
-        with torch.no_grad():
-            with ddp_model.no_sync():
-                ddp_model.train()
-                ddp_model(input)
-
-        # check two model parameters over num_iters iterations
-        for iteration in range(num_iters):
-            # single cpu/gpu training
-            step_model(model, input, target)
-
-            ddp_input = input[
-                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
-            ]
-            ddp_target = target[
-                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
-            ]
-
-            if iteration % num_iters == 0:
-                # accumulate grads locally
-                with ddp_model.no_sync():
-                    step_model(ddp_model, ddp_input, ddp_target)
-            else:
-                # sync grads
-                step_model(ddp_model, ddp_input, ddp_target)
-
-            for i, j in zip(model.parameters(), ddp_model.parameters()):
-                if iteration % num_iters == 0:
-                    self.assertNotEqual(i.grad, j.grad)
-                else:
-                    self.assertEqual(i.grad, j.grad)
-
-            # Shuffle the input so that DDP input is different
-            torch.manual_seed(1337 + iteration)
-            input = input[torch.randperm(global_batch_size)]
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_accumulate_gradients_no_sync(self):
-        """
-        Runs _test_accumulate_gradients_no_sync using default inputs
-        """
-        self._test_accumulate_gradients_no_sync()
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_accumulate_gradients_no_sync_grad_is_view(self):
-        """
-        Runs _test_accumulate_gradients_no_sync using default inputs
-        """
-        self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_accumulate_gradients_no_sync_allreduce_hook(self):
-        """
-        Runs multiple iterations on _test_accumulate_gradients_no_sync
-        using allreduce hook and validates whether future result was properly
-        passed as gradients in reducer.
-        """
-
-        def allreduce_hook(
-                process_group: object, bucket: dist.GradBucket
-        ) -> torch._C.Future:
-            tensors = [bucket.get_tensor() / self.world_size]
-            return process_group.allreduce(tensors).get_future()
-
-        self._test_accumulate_gradients_no_sync(
-            num_iters=4, ddp_comm_hook=allreduce_hook
-        )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
-        """
-        Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
-        hook that also uses then callbacks. In first then callback result is multiplied
-        by 2, and the second callback divides the result by 2 * world_size. It validates
-        whether final result was properly passed as gradients in reducer.
-        """
-
-        def allreduce_with_then_hook(
-                process_group: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future:
-            fut = process_group.allreduce([bucket.get_tensor()]).get_future()
-
-            def mult(fut):
-                # Multiply the result by 2.
-                return [2 * t for t in fut.wait()]
-
-            def div(fut):
-                # Divide the result by 2 * world_size.
-                return [t / (2 * self.world_size) for t in fut.wait()]
-
-            return fut.then(mult).then(div)
-
-        self._test_accumulate_gradients_no_sync(
-            num_iters=4, ddp_comm_hook=allreduce_with_then_hook
-        )
-
     def _test_accumulate_gradients_module(self, gradient_as_bucket_view=False):
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
@@ -1527,7 +1398,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
                 )
 
     def _gpu_model_with_ddp_comm_hook(
-            self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+            self, process_group, hook=None, gradient_as_bucket_view=False, state=None, static_graph=False
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -1536,6 +1407,9 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             process_group=process_group,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
+
+        if static_graph:
+            gpu_model._set_static_graph()
 
         # Register a DDP communication hook if any.
         if hook is not None:
@@ -1560,7 +1434,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
-    def _test_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False):
+    def _test_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False, static_graph=False):
         """
         This unit test verifies whether a DDP communication hook that just calls
         allreduce gives the same result with the case of no hook registered.
@@ -1576,7 +1450,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(
-            process_group, allreduce_hook, gradient_as_bucket_view
+            process_group, allreduce_hook, gradient_as_bucket_view, static_graph
         )
 
         # check whether the grads are equal to what DDP without hook would return.
@@ -1699,6 +1573,10 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_hook_nccl_static_graph(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl(static_graph=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
