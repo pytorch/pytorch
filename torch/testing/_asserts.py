@@ -810,26 +810,31 @@ def assert_close(
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
     Examples:
+        >>> # tensor x tensor comparison
         >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
         >>> actual = torch.acos(torch.cos(expected))
         >>> torch.testing.assert_close(actual, expected)
 
+        >>> # scalar x scalar comparison
         >>> import math
         >>> expected = math.sqrt(2.0)
         >>> actual = 2.0 / math.sqrt(2.0)
         >>> torch.testing.assert_close(actual, expected)
 
+        >>> # array x array comparison
         >>> import numpy as np
         >>> expected = np.array([1e0, 1e-1, 1e-2])
         >>> actual = np.arccos(np.cos(expected))
         >>> torch.testing.assert_close(actual, expected)
 
+        >>> # sequence x sequence comparison
         >>> # The type of the sequences does not have to match. They only have to have the same
         >>> # length and their elements have to match.
         >>> expected = [torch.tensor([1.0]), 2.0, np.array(3.0)]
         >>> actual = tuple(expected)
         >>> torch.testing.assert_close(actual, expected)
 
+        >>> # mapping x mapping comparison
         >>> from collections import OrderedDict
         >>> import numpy as np
         >>> foo = torch.tensor(1.0)
@@ -841,30 +846,40 @@ def assert_close(
         >>> actual = {"baz": baz, "bar": bar, "foo": foo}
         >>> torch.testing.assert_close(actual, expected)
 
+        >>> # blub
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
-        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
+        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and
+            <class 'torch.Tensor'> instead.
 
-        >>> expected = torch.tensor(complex(float("Nan")))
+        >>> # NaN != NaN by default.
+        >>> expected = torch.tensor(float("Nan"))
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
         AssertionError: Tensors are not close!
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
 
-        >>> actual = torch.tensor(complex(float("NaN"), 0))
-        >>> expected = torch.tensor(complex(0, float("NaN")))
+        >>> # If equal_nan=True, the real and imaginary NaN's of complex inputs have to match.
+        >>> expected = torch.tensor(complex(float("NaN"), 0))
+        >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
         AssertionError: Tensors are not close!
+        >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if the
+        >>> # real or imaginary component is NaN.
         >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
+        >>> expected = torch.tensor([1.0, 2.0, 3.0])
+        >>> actual = torch.tensor([1.0, 4.0, 5.0])
+        >>> # The default mismatch message can be overwritten.
+        >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
+        AssertionError: Argh, the tensors are not close!
+        >>> # The error message can also created dynamically by passing a callable.
         >>> def custom_msg(actual, expected, diagnostic_info):
         ...     return (
         ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
         ...         f"That is {diagnostic_info.mismatch_ratio:.1%}!"
         ...     )
-        >>> actual = torch.tensor([1.0, 2.0, 3.0])
-        >>> expected = torch.tensor([1.0, 4.0, 5.0])
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
