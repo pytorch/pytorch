@@ -78,10 +78,10 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
-if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
-else
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
 fi
 
 # Don't build binaries or tests (only the library)
@@ -109,12 +109,6 @@ fi
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")
 CMAKE_ARGS+=("-DCMAKE_HAVE_THREADS_LIBRARY=1")
 CMAKE_ARGS+=("-DCMAKE_USE_PTHREADS_INIT=1")
-
-# Build lite interpreter, instead of full jit
-CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
-if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
-fi
 
 # Only toggle if VERBOSE=1
 if [ "${VERBOSE:-}" == '1' ]; then
