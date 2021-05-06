@@ -330,7 +330,7 @@
     CompositeExplicitAutograd: conj_physical_
 
 - func: _resolve_conj_neg(Tensor(a) self) -> Tensor(a)
-  variants: function, method
+  variants: function
   dispatch:
     CompositeExplicitAutograd: _resolve_conj_neg
 
@@ -343,7 +343,7 @@
 - func: neg_view(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: neg
+    CompositeExplicitAutograd: neg_view
 
 - func: acos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator

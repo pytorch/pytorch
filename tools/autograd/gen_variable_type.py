@@ -100,8 +100,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', '_view_as_real_physical', '_conj_physical',
-    '_resolve_conj', 'conj_physical_', '_resolve_conj_neg'
+    'index', 'masked_fill', 'cross', '_view_as_real_physical', '_conj_physical', 'conj_physical_',
+    '_resolve_conj_neg', 'neg_view'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

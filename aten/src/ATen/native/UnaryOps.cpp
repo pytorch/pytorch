@@ -358,7 +358,7 @@ Tensor neg_view(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real_physical(self);
+    auto real_tensor = at::_view_as_real_physical(self);
     auto true_real_tensor = self.is_conj() ? at::neg_view(real_tensor) : real_tensor;
     return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
   } else {
@@ -397,18 +397,12 @@ Tensor _resolve_conj_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
-  return at::_resolve_conj(self);
-}
-
-Tensor resolve_neg_(const Tensor& self) {
-  if (!self.is_neg()) { return self; }
-  self.set_neg(false);
-  return self.neg_();
+  return at::_resolve_conj_neg(self);
 }
 
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  return at::_resolve_conj(self);
+  return at::_resolve_conj_neg(self);
 }
 
 Tensor _conj(const Tensor& self) {
@@ -584,13 +578,6 @@ Tensor& fix_(Tensor& self) { return self.trunc_(); }
 Tensor positive(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
   return self;
-}
-
-// No op if the neg bit is not set
-Tensor& resolve_neg_(Tensor& self) {
-  if (!self.is_neg()) { return self; }
-  self.set_neg(false);
-  return unary_op_impl_(self, at::neg_out);
 }
 
 Tensor& negative_out(const Tensor& self, Tensor& result) { return at::neg_out(result, self); }
