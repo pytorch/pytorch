@@ -4997,7 +4997,9 @@ def multi_head_attention_forward(
         assert bias_k is None
         assert bias_v is None
 
-    # prep qkv: partition embeddings for mha and make em batch first
+    #
+    # reshape q, k, v for multihead attention and make em batch first
+    #
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
