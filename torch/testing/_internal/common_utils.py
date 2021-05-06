@@ -1930,7 +1930,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
     u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
-    s = torch.arange(1 / (k + 1), k / (k + 1), 1 / (k + 1), dtype=dtype, device=device)
+    s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
     if singular:
         # make matrix singular
         s[k - 1] = 0
