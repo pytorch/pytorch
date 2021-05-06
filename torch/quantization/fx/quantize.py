@@ -557,7 +557,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
         assert qconfig is not None
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
-        # TODO(before land): handle fixedqparamsquantizehandler
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
         arg_args_have_no_tensors = \
@@ -736,20 +735,17 @@ def maybe_insert_output_observer_for_node_rewrite(
             (not is_standalone_module)
 
         if should_insert_observer:
-            # TODO(before land): handle fixedqparamsquantizehandler
-            # TODO(before land): remove the mypy ignore and fix the bug
             act_post_process_ctr = qconfig.activation
             if activation_is_int8_quantized(qconfig):
                 act_post_process_ctr = \
                     get_default_output_activation_post_process_map().get(
                         matched_pattern,
                         act_post_process_ctr)
-            observer = act_post_process_ctr()  # type: ignore[union-attr]
+            observer = act_post_process_ctr()
             new_obs = insert_observer_rewrite(node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = \
                 node_name_to_target_dtype[node.name]
-            # new_obs.dtype = node.dtype
             return new_obs
 
     elif node.op == 'output':
@@ -762,19 +758,17 @@ def maybe_insert_output_observer_for_node_rewrite(
             node_dtype != torch.float
         )
         if should_insert_observer:
-            # TODO(before land): handle fixedqparamsquantizehandler
-            # TODO(before land): remove the mypy ignore and fix the bug
-            observer = qconfig.activation()  # type: ignore[union-attr]
+            assert qconfig is not None
+            observer = qconfig.activation()
             new_obs = insert_observer_rewrite(
                 prev_node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = node_dtype
-            # new_obs.dtype = node.dtype
             return new_obs
 
     return None
 
-def adjust_observers_for_cat(
+def adjust_observers_for_cat_rewrite(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
@@ -797,8 +791,7 @@ def adjust_observers_for_cat(
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
-        # TODO(before land): also assert for observer
-        assert output_obs_node.op == 'call_module'
+        assert is_activation_post_process_node(output_obs_node, modules)
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
 
@@ -927,7 +920,8 @@ def insert_observers_for_model_rewrite(
                             # to make all inputs and outputs use the first input's
                             # observer
                             if isinstance(qhandler, CatQuantizeHandler):
-                                adjust_observers_for_cat(new_node, model, modules)
+                                adjust_observers_for_cat_rewrite(
+                                    new_node, model, modules)
 
                 else:  # output
                     prev_node = new_node.args[0]
@@ -993,10 +987,13 @@ def run_prepare_fx_on_standalone_modules_rewrite(
     their observed versions.
     """
 
-    for node_name, (root_node, matched_nodes, pattern, qhandler, qconfig) in matches.items():
+    for (
+        node_name,
+        (root_node, matched_nodes, pattern, qhandler, qconfig),
+    ) in matches.items():
         if qhandler is None:
             continue
-        if not isinstance(qhandler, StandaloneModuleQuantizeHandler):
+        elif not isinstance(qhandler, StandaloneModuleQuantizeHandler):
             continue
 
         sm_qconfig_dict, sm_prepare_config_dict = \
