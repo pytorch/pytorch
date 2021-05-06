@@ -258,8 +258,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
     TORCH_CHECK(
         op_item.size() == 2, "There should be two parts in an operator name.");
     auto op_found = function->append_operator(
-        op_item[0].toString()->string(),
-        op_item[1].toString()->string());
+        op_item[0].toString()->string(), op_item[1].toString()->string());
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
