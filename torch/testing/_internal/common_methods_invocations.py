@@ -145,7 +145,6 @@ def _getattr_qual(obj, name, default=_NOTHING):
         else:
             raise
 
-
 # Classes and methods for the operator database
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
@@ -184,6 +183,11 @@ class OpInfo(object):
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
+                 supports_forward_ad=None,  # whether the operation support forward mode AD defaults to None
+                                            # If no value is specified, we test that forward grad is not implemented
+                                            # If the value is True, we check that the gradients are correct
+                                            # If the value is False, we skip all forward AD tests
+                                            # (this value is ignored if supports_autograd=False)
                  supports_sparse=False,  # whether the op supports sparse inputs
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
                  check_batched_grad=True,  # check batched grad when doing gradcheck
@@ -248,6 +252,7 @@ class OpInfo(object):
 
         self.gradcheck_wrapper = gradcheck_wrapper
         self.supports_gradgrad = supports_gradgrad
+        self.supports_forward_ad = supports_forward_ad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
@@ -3420,7 +3425,8 @@ foreach_unary_op_db: List[OpInfo] = [
                          dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                          dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
                          dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                         safe_casts_outputs=False)
+                         safe_casts_outputs=False,
+                         supports_forward_ad=True)
 ]
 
 def reference_sign(x):
@@ -3545,7 +3551,8 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble]),
                    ),
                    supports_inplace_autograd=False,
-                   assert_autodiffed=True),
+                   assert_autodiffed=True,
+                   supports_forward_ad=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    aliases=('arccos', ),
@@ -3609,11 +3616,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
-           supports_inplace_autograd=False),
+           supports_inplace_autograd=False,
+           supports_forward_ad=False),  # TODO fix the formula for complex forward AD
     OpInfo('mul',
            aliases=('multiply',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            assert_autodiffed=True,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
            aliases=('subtract',),
@@ -3897,6 +3906,7 @@ op_db: List[OpInfo] = [
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -3957,11 +3967,13 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    supports_out=False,
+                   supports_forward_ad=True,
                    ),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
+                   supports_forward_ad=False,  # TODO fix the formula for complex forward AD
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
@@ -3979,11 +3991,13 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('view_as_real',
            dtypes=complex_types(),
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_view_as_real,
            ),
     OpInfo('view_as_complex',
            dtypes=floating_types_and(torch.half),
            supports_out=False,
+           supports_forward_ad=True,
            skips=(
                # "sum_cpu/sum_cuda" not implemented for 'ComplexHalf'
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.half,)),
@@ -4374,6 +4388,7 @@ op_db: List[OpInfo] = [
            # got: vmap: Calling Tensor.as_strided is not supported
            # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
            check_batched_gradgrad=False,
+           supports_forward_ad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -4447,6 +4462,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_lstsq,
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # skip because `linalg_lstsq` is not differentiable
@@ -4951,6 +4967,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
+           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
            autodiff_nonfusible_nodes=['aten::add'],),
     OpInfo('__rdiv__',
            op=torch.Tensor.__rdiv__,
@@ -4967,6 +4984,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
+           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
            autodiff_nonfusible_nodes=['aten::mul'],),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
@@ -5095,19 +5113,23 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_hsplit,),
     OpInfo('vsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_vsplit,),
     OpInfo('dsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_dsplit,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
@@ -5557,6 +5579,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_inplace_autograd=False,
+           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
            op=torch.Tensor.__getitem__,
            sample_inputs_func=sample_inputs_getitem,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),

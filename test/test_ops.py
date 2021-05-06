@@ -99,7 +99,7 @@ class TestGradients(TestCase):
 
         return _fn
 
-    def _check_helper(self, device, dtype, op, variant, check):
+    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False):
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
@@ -139,8 +139,10 @@ class TestGradients(TestCase):
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
-                                          fast_mode=op.gradcheck_fast_mode))
+                                          fast_mode=op.gradcheck_fast_mode,
+                                          check_forward_ad=check_forward_ad))
             elif check == 'gradgradcheck':
+                self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
@@ -156,8 +158,8 @@ class TestGradients(TestCase):
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
-    def _grad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradcheck')
+    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False):
+        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
@@ -220,6 +222,21 @@ class TestGradients(TestCase):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_forward_ad is None:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward AD for an OP that has unspecified forward AD support did not "
+                        "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
+            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        elif op.supports_forward_ad:
+            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        else:
+            self.skipTest("Forward AD is not supported for this op.")
 
 
 # Tests operators for consistency between JIT and eager, also checks
