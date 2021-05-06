@@ -517,7 +517,7 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
         isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
     ):
         exc = AssertionError(
-            f"Except from scalars, type equality is required, but got {type(actual)} and {type(expected)} instead."
+            f"Except for scalars, type equality is required, but got {type(actual)} and {type(expected)} instead."
         )
         return exc, None
 
