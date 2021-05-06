@@ -7,6 +7,7 @@
 #include <functorch/csrc/VmapTransforms.h>
 #include <functorch/csrc/PythonKey.h>
 #include <functorch/csrc/BatchedFallback.h>
+#include <functorch/csrc/BatchRulesHelper.h>
 
 namespace at {
 namespace functorch {
@@ -186,6 +187,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
   m.def("dlevel", &at::functorch::dlevel, "add batch dim");
   m.def("dump_tensor", &at::functorch::dump_tensor, "add batch dim");
+  m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
+  m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
 
   m.def(
       "addPythonKey",
