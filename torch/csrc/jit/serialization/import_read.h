@@ -20,7 +20,7 @@ TORCH_API IValue readArchiveAndTensors(
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
     caffe2::serialize::PyTorchStreamReader& stream_reader,
-    std::shared_ptr<StorageContextTracker> storage_tracker = nullptr);
+    std::shared_ptr<StorageContext> storage_tracker = nullptr);
 
 } // namespace jit
 } // namespace torch
