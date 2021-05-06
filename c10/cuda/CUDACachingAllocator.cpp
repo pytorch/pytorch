@@ -1312,7 +1312,7 @@ static void uncached_delete(void* ptr) {
 // actually be publicly exposed
 struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
-    constexpr size_t one_exa_bytes = (1UL << 60UL);
+    constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
         CUDAOutOfMemoryError,
         size < one_exa_bytes,
