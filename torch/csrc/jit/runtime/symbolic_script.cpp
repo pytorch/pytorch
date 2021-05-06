@@ -1409,6 +1409,12 @@ const std::vector<std::string> functions = {
             return grad_output * mask, None
           return torch.hardshrink(self, lambd=lambd), backward
 
+        def hardtanh(self, min_val: number, max_val: number):
+          def backward(grad_output):
+            mask = ((self >= float(min_val)) * (self <= float(max_val))).type_as(self)
+            return grad_output * mask, None, None
+          return torch.hardtanh(self, min_val=min_val, max_val=max_val), backward
+
         def clamp_1(self,
                     min: Optional[number],
                     max: Optional[number]):
@@ -1577,8 +1583,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
+
 
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
