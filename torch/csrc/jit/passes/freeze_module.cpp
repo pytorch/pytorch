@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 
 #include <stack>
 
