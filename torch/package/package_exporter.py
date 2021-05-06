@@ -26,7 +26,6 @@ from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
-from .file_structure_representation import Directory, _create_directory_from_file_list
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
@@ -185,28 +184,6 @@ class PackageExporter:
                 is_package,
                 dependencies,
             )
-
-    def file_structure(
-        self, *, include: "GlobPattern" = "**", exclude: "GlobPattern" = ()
-    ) -> Directory:
-        """Creates and returns a :class:`Directory` file structure representation of package's zipfile.
-
-        Args:
-            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
-                a glob-style pattern, as described in :meth:`mock`
-
-            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
-
-        Returns:
-            :class:`Directory`
-        """
-        return _create_directory_from_file_list(
-            self.zip_file.archive_name(),
-            self.zip_file.get_all_written_records(),
-            include,
-            exclude,
-        )
 
     def get_unique_id(self) -> str:
         """Get an id. This id is guaranteed to only be handed out once for this package."""
