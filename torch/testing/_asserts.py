@@ -1,5 +1,6 @@
 import collections.abc
 import functools
+import numbers
 import sys
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 from types import SimpleNamespace
@@ -48,6 +49,57 @@ _DTYPE_PRECISIONS = {
 def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float, float]:
     dtype = actual.dtype if actual.dtype == expected.dtype else torch.promote_types(actual.dtype, expected.dtype)
     return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
+
+
+def _check_complex_components_individually(
+    check_tensor_values: Callable[..., Optional[Exception]]
+) -> Callable[..., Optional[Exception]]:
+    """Decorates real-valued tensor values check functions to handle complex components individually.
+
+    If the inputs are not complex, this decorator is a no-op.
+
+    Args:
+        check_tensor_values (Callable[..., Optional[Exception]]): Tensor check function for real-valued tensors.
+
+    Returns:
+        Optional[Exception]: Return value of :attr:`check_tensors`.
+    """
+
+    @functools.wraps(check_tensor_values)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+        if "equal_nan" in kwargs:
+            if kwargs["equal_nan"] == "relaxed":
+                relaxed_complex_nan = True
+                kwargs["equal_nan"] = True
+            else:
+                relaxed_complex_nan = False
+                kwargs["equal_nan"] = bool(kwargs["equal_nan"])
+        else:
+            relaxed_complex_nan = False
+
+        if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
+            return check_tensor_values(actual, expected, **kwargs,)
+
+        if relaxed_complex_nan:
+            actual, expected = [
+                t.clone().masked_fill(
+                    t.real.isnan() | t.imag.isnan(),
+                    complex(float("NaN"), float("NaN")),  # type: ignore[call-overload]
+                )
+                for t in (actual, expected)
+            ]
+
+        exc = check_tensor_values(actual.real, expected.real, **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the real part.")
+
+        exc = check_tensor_values(actual.imag, expected.imag, **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the imaginary part.")
+
+        return None
+
+    return wrapper
 
 
 def _check_supported_tensor(
@@ -186,6 +238,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
     )
 
 
+@_check_complex_components_individually
 def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
@@ -222,6 +275,7 @@ def _check_values_equal(
     return AssertionError(msg)
 
 
+@_check_complex_components_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -264,57 +318,6 @@ def _check_values_close(
     return AssertionError(msg)
 
 
-def _check_complex_components_individually(
-    check_tensors: Callable[[Tensor, Tensor], Optional[Exception]]
-) -> Callable[[Tensor, Tensor], Optional[Exception]]:
-    """Decorates real-valued tensor check functions to handle complex components individually.
-
-    If the inputs are not complex, this decorator is a no-op.
-
-    Args:
-        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for real-valued tensors.
-
-    Returns:
-        Optional[Exception]: Return value of :attr:`check_tensors`.
-    """
-
-    @functools.wraps(check_tensors)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
-        if "equal_nan" in kwargs:
-            if kwargs["equal_nan"] == "relaxed":
-                relaxed_complex_nan = True
-                kwargs["equal_nan"] = True
-            else:
-                relaxed_complex_nan = False
-                kwargs["equal_nan"] = bool(kwargs["equal_nan"])
-        else:
-            relaxed_complex_nan = False
-
-        if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, **kwargs)  # type: ignore[call-arg]
-
-        if relaxed_complex_nan:
-            actual, expected = [
-                t.clone().masked_fill(
-                    t.real.isnan() | t.imag.isnan(), complex(float("NaN"), float("NaN"))  # type: ignore[call-overload]
-                )
-                for t in (actual, expected)
-            ]
-
-        exc = check_tensors(actual.real, expected.real, **kwargs)  # type: ignore[call-arg]
-        if exc:
-            return _amend_error_message(exc, "{}\n\nThe failure occurred for the real part.")
-
-        exc = check_tensors(actual.imag, expected.imag, **kwargs)  # type: ignore[call-arg]
-        if exc:
-            return _amend_error_message(exc, "{}\n\nThe failure occurred for the imaginary part.")
-
-        return None
-
-    return wrapper
-
-
-@_check_complex_components_individually
 def _check_tensors_equal(
     actual: Tensor,
     expected: Tensor,
@@ -348,7 +351,6 @@ def _check_tensors_equal(
     return None
 
 
-@_check_complex_components_individually
 def _check_tensors_close(
     actual: Tensor,
     expected: Tensor,
@@ -506,7 +508,12 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
     """
     exc: Optional[Exception]
 
-    if type(actual) is not type(expected):
+    # We exclude numbers here, since numbers of different type, e.g. int vs. float, should be treated the same as
+    # tensors with different dtypes. Without user input, passing numbers of different types will still fail, but this
+    # can be disabled by setting `check_dtype=False`.
+    if type(actual) is not type(expected) and not (
+        isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
+    ):
         exc = UsageError(
             f"Apart from a containers type equality is required, but got {type(actual)} and {type(expected)} instead."
         )
