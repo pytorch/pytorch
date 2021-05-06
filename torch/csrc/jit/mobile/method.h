@@ -23,8 +23,8 @@ struct TORCH_API Method {
     return function_->name();
   }
 
-  int64_t get_debug_handle(size_t pc) const {
-    return function_->get_debug_handle(pc);
+  std::string get_module_debug_info(size_t pc) const {
+    return function_->get_module_debug_info(pc);
   }
 
   Function& function() const {

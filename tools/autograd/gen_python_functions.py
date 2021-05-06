@@ -759,11 +759,8 @@ def sort_overloads(
 ) -> Sequence[PythonSignatureGroup]:
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
-        # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
-        # discussed why it is important to prioritize int/int? over int[]
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
-                'Dimname' in str(t1) and 'Dimname' not in str(t2) or
-                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?'))
+                'Dimname' in str(t1) and 'Dimname' not in str(t2))
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

@@ -457,9 +457,6 @@ const c10::Stream Reducer::get_current_stream() {
 void Reducer::delay_all_reduce() {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
-  if (should_collect_runtime_stats()) {
-    record_backward_compute_end_time();
-  }
   // The autograd engine uses the default stream when running callbacks, so we
   // pass in the current CUDA stream in case it is not the default.
   const c10::Stream currentStream = get_current_stream();
@@ -467,6 +464,7 @@ void Reducer::delay_all_reduce() {
   c10::OptionalStreamGuard currentStreamGuard{currentStream};
 
   if (should_collect_runtime_stats()) {
+    record_backward_compute_end_time();
     record_backward_comm_start_time();
   }
 
@@ -689,8 +687,8 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
 
 void Reducer::mark_variable_ready(VariableIndex index) {
   // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
-  // find_unused_parameters_ is false, currently it does not support when
-  // there are unused parameters 3) this backward pass needs to run allreduce.
+  // static_graph_ is true or find_unused_parameters_ is false,
+  // 3) this backward pass needs to run allreduce.
   // Here, we just dump tensors and their parameter indices into
   // rebuilt_params_ and rebuilt_param_indices_ based on gradient arriving
   // order, and then at the end of finalize_backward(), buckets will be
@@ -1108,10 +1106,6 @@ void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
-
-  RECORD_FUNCTION(
-      "torch.distributed.ddp.reducer::search_unused_parameters",
-      std::vector<c10::IValue>());
 
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {

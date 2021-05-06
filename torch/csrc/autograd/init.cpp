@@ -82,8 +82,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
       .def("start_us", &LegacyEvent::cpuUs)
-      .def("flops", &LegacyEvent::flops)
-      .def("is_async", &LegacyEvent::isAsync);
+      .def("flops", &LegacyEvent::flops);
 
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
@@ -173,10 +172,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // compute flops
       .def("flops", [](const KinetoEvent& e) {
         return e.flops();
-      })
-      // Whether this is async event or not
-      .def("is_async", [](const KinetoEvent& e) {
-        return e.isAsync();
       });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")

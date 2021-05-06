@@ -283,13 +283,12 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
   // these need to be removed from "can_reuse" after analyzing all nodes
   std::unordered_set<const Value*> cannot_reuse;
   for (auto* n : graph->nodes()) {
-    bool can_reuse_inputs_outputs = canReuseInputsOutputs(n);
     for (const auto* v : n->inputs()) {
       if (!seen_values.count(v)) {
         all_values.emplace_back(v);
         seen_values.insert(v);
       }
-      if (can_reuse_inputs_outputs) {
+      if (canReuseInputsOutputs(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -298,7 +297,7 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
     for (const auto* v : n->outputs()) {
       all_values.emplace_back(v);
       seen_values.insert(v);
-      if (can_reuse_inputs_outputs) {
+      if (canReuseInputsOutputs(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -1089,7 +1088,7 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<const Value*> leaked_values;
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
-      if (pnode.has_out_variant()) {
+      if (canReuseInputsOutputs(pnode.node())) {
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (auto i = 0; i < pnode.outputs().size(); ++i) {
           const Value* out_v = pnode.node()->outputs()[i];
@@ -1230,18 +1229,14 @@ ProcessedNode::ProcessedNode(
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
+  if (enable_out_variant && canRunOutOfPlace(node)) {
+    fn_ = getOutOfPlaceOperation(node);
     VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-    return;
-  }
-  if (!fn_ && mayRunNatively(node)) {
+  } else if (canRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
-    if (native_fn_) {
-      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-      return;
-    }
-  }
-  if (node->kind() != prim::ListConstruct &&
+    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+  } else if (
+      node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
       node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
     const Operator& op = node->getOperator();

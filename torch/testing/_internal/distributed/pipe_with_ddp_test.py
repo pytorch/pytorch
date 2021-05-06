@@ -1,6 +1,5 @@
 import torch
 import torch.distributed as dist
-import unittest
 
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel

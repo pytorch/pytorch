@@ -222,8 +222,7 @@ void ProfilerThreadLocalState::pushRange(
         record_cuda,
         fn.handle(),
         std::move(shapes),
-        at::RecordFunction::getDefaultNodeId(),
-        fn.isAsync());
+        at::RecordFunction::getDefaultNodeId());
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
@@ -295,7 +294,7 @@ std::string ProfilerThreadLocalState::getNvtxStr(
     const char* msg,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes) const {
-  if (sequence_nr >= -1 || shapes.size() > 0) {
+  if (sequence_nr >= 0 || shapes.size() > 0) {
     std::stringstream s;
 #ifdef __HIP_PLATFORM_HCC__
     s << name.str();
@@ -305,12 +304,6 @@ std::string ProfilerThreadLocalState::getNvtxStr(
       s << msg << sequence_nr;
 #else
       s << name.str() << msg << sequence_nr;
-#endif
-    } else if (sequence_nr == -1) {
-#ifdef __HIP_PLATFORM_HCC__
-      s << msg;
-#else
-      s << name.str() << msg;
 #endif
     }
     if (shapes.size() > 0) {

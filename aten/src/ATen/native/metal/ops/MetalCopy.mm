@@ -23,7 +23,7 @@ Tensor copy_to_host(const Tensor& input) {
   auto&& sizes = [X sizes];
   MetalTensorImplStorage mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
-  mt.texture()->allocateStorage(sizes);
+  mt.texture()->allocateTextureStorage(sizes);
   MPSImage* Y = mt.texture()->image();
 
   id<MTLComputeCommandEncoder> encoder =
