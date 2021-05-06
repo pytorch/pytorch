@@ -223,9 +223,8 @@ CompilationUnit::CompilationUnit(const c10::IValue& value) {
 
 c10::IValue CompilationUnit::serialize() const {
   auto functions = c10::fmap(
-      functions_,
-      [](decltype(functions_)::const_reference func) {
-          return func.second->serialize();
+      functions_, [](decltype(functions_)::const_reference func) {
+        return func.second->serialize();
       });
   return Tup({kProducedNNCFileFormatVersion, Tup(std::move(functions))});
 }
