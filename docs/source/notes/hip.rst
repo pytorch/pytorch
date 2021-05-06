@@ -71,3 +71,36 @@ which version of PyTorch you are using, refer to this example below::
 
 .. |trade|  unicode:: U+02122 .. TRADEMARK SIGN
    :ltrim:
+
+.. _tf32_on_rocm:
+
+TensorFloat-32(TF32) on ROCm
+----------------------------
+
+TF32 is not supported on ROCm
+
+.. _rocm-memory-management:
+
+Memory management
+-----------------
+
+PyTorch uses a caching memory allocator to speed up memory allocations. This
+allows fast memory deallocation without device synchronizations. However, the
+unused memory managed by the allocator will still show as if used in
+``rocm-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
+:meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
+tensors, and use :meth:`~torch.cuda.memory_reserved` and
+:meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
+managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
+releases all **unused** cached memory from PyTorch so that those can be used
+by other GPU applications. However, the occupied GPU memory by tensors will not
+be freed so it can not increase the amount of GPU memory available for PyTorch.
+
+For more advanced users, we offer more comprehensive memory benchmarking via
+:meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
+complete snapshot of the memory allocator state via
+:meth:`~torch.cuda.memory_snapshot`, which can help you understand the
+underlying allocation patterns produced by your code.
+
+To debug memory errors, set
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
