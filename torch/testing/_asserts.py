@@ -1,5 +1,6 @@
 import collections.abc
 import functools
+import numbers
 import sys
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 from types import SimpleNamespace
@@ -50,6 +51,57 @@ def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float,
     return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
 
 
+def _check_complex_components_individually(
+    check_tensor_values: Callable[..., Optional[Exception]]
+) -> Callable[..., Optional[Exception]]:
+    """Decorates real-valued tensor values check functions to handle complex components individually.
+
+    If the inputs are not complex, this decorator is a no-op.
+
+    Args:
+        check_tensor_values (Callable[..., Optional[Exception]]): Tensor check function for real-valued tensors.
+
+    Returns:
+        Optional[Exception]: Return value of :attr:`check_tensors`.
+    """
+
+    @functools.wraps(check_tensor_values)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+        if "equal_nan" in kwargs:
+            if kwargs["equal_nan"] == "relaxed":
+                relaxed_complex_nan = True
+                kwargs["equal_nan"] = True
+            else:
+                relaxed_complex_nan = False
+                kwargs["equal_nan"] = bool(kwargs["equal_nan"])
+        else:
+            relaxed_complex_nan = False
+
+        if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
+            return check_tensor_values(actual, expected, **kwargs,)
+
+        if relaxed_complex_nan:
+            actual, expected = [
+                t.clone().masked_fill(
+                    t.real.isnan() | t.imag.isnan(),
+                    complex(float("NaN"), float("NaN")),  # type: ignore[call-overload]
+                )
+                for t in (actual, expected)
+            ]
+
+        exc = check_tensor_values(actual.real, expected.real, **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the real part.")
+
+        exc = check_tensor_values(actual.imag, expected.imag, **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the imaginary part.")
+
+        return None
+
+    return wrapper
+
+
 def _check_supported_tensor(
     input: Tensor,
 ) -> Optional[UsageError]:  # type: ignore[valid-type]
@@ -60,8 +112,6 @@ def _check_supported_tensor(
     Returns:
         (Optional[UsageError]): If check did not pass.
     """
-    if input.dtype in (torch.complex32, torch.complex64, torch.complex128):
-        return UsageError("Comparison for complex tensors is not supported yet.")
     if input.is_quantized:
         return UsageError("Comparison for quantized tensors is not supported yet.")
     if input.is_sparse:
@@ -188,6 +238,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
     )
 
 
+@_check_complex_components_individually
 def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
@@ -224,6 +275,7 @@ def _check_values_equal(
     return AssertionError(msg)
 
 
+@_check_complex_components_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -277,7 +329,8 @@ def _check_tensors_equal(
 ) -> Optional[Exception]:
     """Checks that the values of two tensors are bitwise equal.
 
-    Optionally, checks that some attributes of both tensors are equal.
+    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
+    some attributes of tensor pairs are equal.
 
     For a description of the parameters see :func:`assert_equal`.
 
@@ -321,7 +374,8 @@ def _check_tensors_close(
     If both tolerances, :attr:`rtol` and :attr:`rtol`, are ``0``, asserts that :attr:`actual` and :attr:`expected` are
     bitwise equal.
 
-    Optionally, checks that some attributes of both tensors are equal.
+    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
+    some attributes of tensor pairs are equal.
 
     For a description of the parameters see :func:`assert_equal`.
 
@@ -454,7 +508,12 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
     """
     exc: Optional[Exception]
 
-    if type(actual) is not type(expected):
+    # We exclude numbers here, since numbers of different type, e.g. int vs. float, should be treated the same as
+    # tensors with different dtypes. Without user input, passing numbers of different types will still fail, but this
+    # can be disabled by setting `check_dtype=False`.
+    if type(actual) is not type(expected) and not (
+        isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
+    ):
         exc = UsageError(
             f"Apart from a containers type equality is required, but got {type(actual)} and {type(expected)} instead."
         )
@@ -571,7 +630,8 @@ def assert_equal(
 ) -> None:
     """Asserts that the values of tensor pairs are bitwise equal.
 
-    Optionally, checks that some attributes of tensor pairs are equal.
+    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
+    some attributes of tensor pairs are equal.
 
     Also supports array-or-scalar-like inputs from which a :class:`torch.Tensor` can be constructed with
     :func:`torch.as_tensor`. Still, requires type equality, i.e. comparing a :class:`torch.Tensor` and a
@@ -598,8 +658,8 @@ def assert_equal(
     Raises:
         UsageError: If an array-or-scalar-like pair has different types.
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
-            will be relaxed in the future.
+        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
+            future.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
@@ -649,7 +709,7 @@ def assert_close(
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
-    equal_nan: bool = False,
+    equal_nan: Union[bool, str] = False,
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
@@ -663,7 +723,8 @@ def assert_close(
 
         \lvert a - b \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert b \rvert
 
-    Optionally, checks that some attributes of tensor pairs are equal.
+    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
+    some attributes of tensor pairs are equal.
 
     Also supports array-or-scalar-like inputs from which a :class:`torch.Tensor` can be constructed with
     :func:`torch.as_tensor`. Still, requires type equality, i.e. comparing a :class:`torch.Tensor` and a
@@ -679,7 +740,8 @@ def assert_close(
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
-        equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
+        equal_nan (Union[bool, str]): If ``True``, two ``NaN`` values will be considered equal. If ``"relaxed"``,
+            complex values are considered as ``NaN`` if either the real **or** imaginary component is ``NaN``.
         check_device (bool): If ``True`` (default), asserts that each tensor pair is on the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** it is not on the same
             :attr:`~torch.Tensor.device` memory, it is moved CPU memory before the values are compared.
@@ -695,8 +757,8 @@ def assert_close(
     Raises:
         UsageError: If an array-or-scalar-like pair has different types.
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
-            will be relaxed in the future.
+        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
+            future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
