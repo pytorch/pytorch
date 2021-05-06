@@ -153,3 +153,4 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
             torch._C._jit_pass_fold_frozen_conv_bn(mod.graph)
             torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
             torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
+    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
