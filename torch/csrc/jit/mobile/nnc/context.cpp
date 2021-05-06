@@ -244,7 +244,8 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
       "method '",
       fn->name().qualifiedName(),
       "' already defined.");
-  functions_.emplace(fn->name(), std::move(fn));
+  const auto& name = fn->name();
+  functions_.emplace(name, std::move(fn));
 }
 
 Function* CompilationUnit::find_function(const c10::QualifiedName& name) const {
