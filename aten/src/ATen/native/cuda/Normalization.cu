@@ -61,7 +61,7 @@ void batch_norm_elementwise(
           out, self, *weight, *bias, mean_, invstd_);
       return;
     }
-    [[fallthrough]];
+    C10_FALLTHROUGH;
   }
   case Impl::General: {
     const int64_t ndim = self.dim();
@@ -128,7 +128,7 @@ void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var
       });
       return;
     }
-    [[fallthrough]];
+    C10_FALLTHROUGH;
   }
   case Impl::General: {
     const int64_t ndim = self.dim();
