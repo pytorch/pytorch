@@ -776,8 +776,19 @@ def adjust_observers_for_cat_rewrite(
 ) -> None:
     # find the observer module to use
     first_arg = node.args[0]
-    assert isinstance(first_arg, list)
+    assert isinstance(first_arg, (list, tuple))
     first_arg_arg = first_arg[0]
+
+    # if we have a graph such as
+    #   observed_node -> non_observed_node -> cat
+    # we need to navigate up to the first observer
+    iteration_guard = 0
+    while not is_activation_post_process_node(first_arg_arg, modules):
+        first_arg_arg = first_arg_arg.args[0]
+        iteration_guard += 1
+        if iteration_guard > 10:
+            raise AssertionError('Unable to find observer of previous node')
+
     assert isinstance(first_arg_arg, Node)
     target_to_use = first_arg_arg.target
     assert isinstance(target_to_use, str)
@@ -787,6 +798,13 @@ def adjust_observers_for_cat_rewrite(
     for input_idx, input_arg in enumerate(first_arg):
         if input_idx == 0:
             continue
+        iteration_guard = 0
+        while not is_activation_post_process_node(input_arg, modules):
+            input_arg = input_arg.args[0]
+            iteration_guard += 1
+            if iteration_guard > 10:
+                raise AssertionError('Unable to find observer of previous node')
+
         parent_name, name = _parent_name(input_arg.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
 
