@@ -1320,10 +1320,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
     .. warning::
 
-        torch.norm is deprecated and may be removed in a future PyTorch release.
+        :func:`torch.norm` is deprecated and may be removed in a future PyTorch release.
         Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
         has a different signature and slightly different behavior that is
-        more consistent with NumPy's numpy.linalg.norm.
+        more consistent with NumPy's numpy.linalg.norm. Or preferably, use one of
+        :func:`torch.linalg.vector_norm` or :func:`torch.linalg.matrix_norm` depending
+        on which norm is desired.
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
