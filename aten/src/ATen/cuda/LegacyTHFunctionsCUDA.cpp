@@ -267,6 +267,9 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
       "the returned tuple, (it returns other information about the problem).\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
       "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
       "should be replaced with\n",
       "X = torch.linalg.lstsq(A, B).solution"
@@ -301,6 +304,9 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
       "the returned tuple, (it returns other information about the problem).\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
       "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
       "should be replaced with\n",
       "X = torch.linalg.lstsq(A, B).solution"

@@ -1173,7 +1173,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
    TORCH_WARN_ONCE(
     "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
     "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A, upper=False) (default)\n",
+    "L = torch.cholesky(A)\n",
     "should be replaced with\n",
     "L = torch.linalg.cholesky(A)\n",
     "and\n"
@@ -1212,7 +1212,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
    TORCH_WARN_ONCE(
     "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
     "removed in a future PyTorch release.\n",
-    "L = torch.cholesky(A, upper=False) (default)\n",
+    "L = torch.cholesky(A)\n",
     "should be replaced with\n",
     "L = torch.linalg.cholesky(A)\n",
     "and\n"
@@ -2263,7 +2263,7 @@ std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool up
   TORCH_WARN_ONCE(
     "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
     "PyTorch release.\n",
-    "L, _ = torch.symeig(A, eigenvectors=False) (default)\n",
+    "L, _ = torch.symeig(A)\n",
     "should be replaced with\n",
     "L = torch.linalg.eigvalsh(A)\n",
     "and\n",
@@ -2640,8 +2640,9 @@ std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tens
   TORCH_WARN_ONCE(
     "torch.eig is deprecated in favor of torch.linalg.eig and will be removed in a future ",
     "PyTorch release.\n",
-    "torch.linalg.eig returns complex tensors of dtype cfloat or cdouble rather than real tensors.\n",
-    "L, _ = torch.eig(A, eigenvectors=False) (default)\n",
+    "torch.linalg.eig returns complex tensors of dtype cfloat or cdouble rather than real tensors ",
+    "mimicking complex tensors.\n",
+    "L, _ = torch.eig(A)\n",
     "should be replaced with\n",
     "L_complex = torch.linalg.eigvals(A)\n",
     "and\n",

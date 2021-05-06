@@ -1870,7 +1870,7 @@ matrices.
     :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
     and will be removed in a future PyTorch release.
 
-    ``L = torch.cholesky(A, upper=False)`` (default) should be replaced with
+    ``L = torch.cholesky(A)`` should be replaced with
 
     .. code:: python
 
@@ -3012,9 +3012,9 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
     and will be removed in a future PyTorch release.
     :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble`
-    rather than real tensors.
+    rather than real tensors mimicking complex tensors.
 
-    ``L, _ = torch.eig(A, eigenvectors=False)`` (default) should be replaced with
+    ``L, _ = torch.eig(A)`` should be replaced with
 
     .. code :: python
 
@@ -4980,8 +4980,11 @@ remaining :math:`m - n` rows of that column.
     and will be removed in a future PyTorch release. :func:`torch.linalg.lstsq`
     has reversed arguments and does not return the QR decomposition in the returned tuple,
     (it returns other information about the problem).
+    The returned `solution` in :func:`torch.lstsq` stores the residuals of the solution in the
+    last `m - n` columns in the case `m > n`. In :func:`torch.linalg.lstsq`, the residuals
+    are in the field 'residuals' of the returned named tuple.
 
-    ``X, _ = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
+    Unpacking the solution as``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
 
     .. code:: python
 
@@ -8705,7 +8708,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
     :func:`torch.symeig` is deprecated in favor of :func:`torch.linalg.symeig`
     and will be removed in a future PyTorch release.
 
-    ``L, _ = torch.symeig(A, eigenvectors=False)`` (default) should be replaced with
+    ``L, _ = torch.symeig(A)`` should be replaced with
 
     .. code :: python
 
