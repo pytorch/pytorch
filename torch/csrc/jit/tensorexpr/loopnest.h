@@ -222,6 +222,39 @@ class TORCH_API LoopNest {
       const std::vector<For*>& loops,
       const std::vector<size_t>& permutation);
 
+  // Tile takes a 2d domain (x, y) and split it into small rectangular blocks
+  // each with shape (x_factor, y_factor). The traversal over the domain turns
+  // into an outter iteration over the blocks and an inner traversal over all
+  // points in the block.
+  // Note that if x dim % x_factor or y dim % y_factor does not equal to 0, the
+  // loop body will be guarded by boundary checks.
+  //
+  // For example, consider the following code:
+  //   for i: [0, 64)
+  //     for j: [0, 64)
+  //       for k: [0, 32)
+  //         A[i, j] = B[i, k] + C[j, k]
+  //
+  // tile(i, j, 4, 8) will return the following nested loop:
+  //   for i_outter: [0, 16)
+  //     for j_outter: [0, 8)
+  //       for i_inner: [0, 4)
+  //         for j_inner: [0, 8)
+  //           for k: [0, 32)
+  //             A[i_outter * 4 + i_inner, j_outter * 8 + j_inner] =
+  //             B[i_outter * 4 + i_inner, k] + C[j_outter * 8 + j_inner]
+  //
+  // tile(i, j, 4, 9) will return the following nested loop:
+  //   for i_outter: [0, 16)
+  //     for j_outter: [0, 8)
+  //       for i_inner: [0, 4)
+  //         for j_inner: [0, 9)
+  //           if (j_outter * 9 + j_inner < 64)
+  //             for k: (0, 32)
+  //               A[i_outter * 4 + i_inner, j_outter * 9 + j_inner] =
+  //               B[i_outter * 4 + i_inner, k] + C[j_outter * 9 + j_inner]
+  void tile(For* x, For* y, int x_factor, int y_factor);
+
   // Returns true if the given loops are perfectly nested, i.e., every loop
   // (except the innermost) should have exactly one statement in its body
   // and that statement must be the next inner loop.

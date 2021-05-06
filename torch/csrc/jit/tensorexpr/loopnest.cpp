@@ -1715,6 +1715,66 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
+void LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
+  auto parent = dynamic_cast<Block*>(x->get_parent());
+  if (parent == nullptr) {
+    throw malformed_input("parent of the loops must be a Block");
+  }
+  if ((x->body()->nstmts() != 1) || (x->body()->front() != y)) {
+    throw malformed_input("two loops must be perfectly nested");
+  }
+
+  // Split x, y axes by x_factor and y_factor
+  For *yo, *yi;
+  splitWithMask(y, y_factor, &yo, &yi);
+  For *xo, *xi;
+  splitWithMask(x, x_factor, &xo, &xi);
+
+  // Re-identify yo, yi
+  bool handle_conds = false;
+  ExprHandle conds;
+  if (auto* xcond = dynamic_cast<Cond*>(xi->body()->front())) {
+    conds = ExprHandle(xcond->condition());
+    handle_conds = true;
+    yo = dynamic_cast<For*>(xcond->true_stmt()->front());
+  } else {
+    yo = dynamic_cast<For*>(xi->body()->front());
+  }
+  CHECK(yo);
+  yi = dynamic_cast<For*>(yo->body()->front());
+  CHECK(yi);
+
+  // If x_factor is not a divisor of x dim, we'll need to sink the x boundary
+  // check
+  if (handle_conds) {
+    Cond* body_new = nullptr;
+    if (yi->body()->nstmts() == 1) {
+      if (auto ycond = dynamic_cast<Cond*>(yi->body()->front())) {
+        // yi body is an if-stmt. Add the x boundary check into the condition of
+        // the if-stmt
+        body_new = Cond::make(
+            conds && ExprHandle(ycond->condition()),
+            ycond->true_stmt(),
+            ycond->false_stmt());
+      } else {
+        // Construct a cond-stmt with the x boundary check and add the stmt in
+        // yi body as the true_branch of the cond-stmt
+        body_new = Cond::make(conds, yi->body()->front(), nullptr);
+      }
+    } else {
+      // If there are multiple stmts in yi body, add the stmt block(yi body)
+      // into the cond-stmt as the true_branch
+      body_new = Cond::make(conds, yi->body(), nullptr);
+    }
+    yi->setBody(body_new);
+  }
+
+  // Reorder the axes to be xo, yo, xi, yi
+  xi->setBody(yi);
+  yo->setBody(xi);
+  xo->setBody(yo);
+}
+
 bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
   if (loops.size() < 2) {
     return true;
