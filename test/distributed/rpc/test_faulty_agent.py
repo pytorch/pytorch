@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 import sys
+
+import torch
 import torch.distributed as dist
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_PYTORCH_CI, run_tests
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
     FaultyRpcAgentTestFixture,
 )
@@ -18,15 +20,18 @@ from torch.testing._internal.distributed.rpc_utils import (
 )
 
 
-globals().update(
-    generate_tests(
-        "Faulty",
-        FaultyRpcAgentTestFixture,
-        FAULTY_AGENT_TESTS,
-        MultiProcess.SPAWN,
-        __name__,
+# On CircleCI these tests are already run on CPU jobs, thus to save resources do
+# not run them on GPU jobs, since thet wouldn't provide additional test signal.
+if not (IS_PYTORCH_CI and torch.cuda.is_available()):
+    globals().update(
+        generate_tests(
+            "Faulty",
+            FaultyRpcAgentTestFixture,
+            FAULTY_AGENT_TESTS,
+            MultiProcess.SPAWN,
+            __name__,
+        )
     )
-)
 
 
 if __name__ == "__main__":

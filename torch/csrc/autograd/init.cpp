@@ -82,7 +82,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
       .def("start_us", &LegacyEvent::cpuUs)
-      .def("flops", &LegacyEvent::flops);
+      .def("flops", &LegacyEvent::flops)
+      .def("is_async", &LegacyEvent::isAsync);
 
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
@@ -139,6 +140,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           return std::vector<std::vector<int64_t>>();
         }
       })
+      .def("dtypes", [](const KinetoEvent& e) {
+        if (e.hasTypes()) {
+          return e.dtypes();
+        } else {
+          return std::vector<std::string>();
+        }
+      })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) {
         if (e.hasStack()) {
@@ -165,6 +173,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // compute flops
       .def("flops", [](const KinetoEvent& e) {
         return e.flops();
+      })
+      // Whether this is async event or not
+      .def("is_async", [](const KinetoEvent& e) {
+        return e.isAsync();
       });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
@@ -175,6 +187,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+  m.def("_add_metadata", addMetadata);
 #endif
 
   m.def("kineto_available", []() {
@@ -254,26 +267,6 @@ static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * set_forward_AD_enabled(PyObject* _unused, PyObject *arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  setForwardADEnabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * is_forward_AD_enabled(PyObject* _unused, PyObject *arg) {
-  HANDLE_TH_ERRORS
-  if (isForwardADEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
@@ -340,8 +333,6 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
-  {"_set_forward_AD_enabled", set_forward_AD_enabled, METH_O, nullptr},
-  {"_is_forward_AD_enabled", is_forward_AD_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
