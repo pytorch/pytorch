@@ -5404,8 +5404,9 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @skipCUDAIfRocm
+    @precisionOverride({torch.float: 1e-3})
     def test_lu_unpack(self, device, dtype):
         def run_test(pivot):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
@@ -5416,7 +5417,7 @@ class TestLinalg(TestCase):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
                           (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
                           (7, 5, 3, 5, 3), (7, 5, 3, 3, 5)):
-                a = make_tensor(shape, dtype=dtype, device=device, low=None, high=None)
+                a = make_tensor(shape, dtype=dtype, device=device, low=-0.1, high=+0.1)
                 a_lu, p = torch.lu(a, pivot=pivot)
                 p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
                 self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
