@@ -55,7 +55,7 @@ void testHelper(const std::string& prefix = "") {
 
     // Check compareSet, does not check return value
     c10d::test::compareSet(
-        *serverStore, "key0", "wrongCurrentValue", "newValue");
+        *serverStore, "key0", "wrongExpectedValue", "newValue");
     c10d::test::check(*serverStore, "key0", "value0");
     c10d::test::compareSet(*serverStore, "key0", "value0", "newValue");
     c10d::test::check(*serverStore, "key0", "newValue");

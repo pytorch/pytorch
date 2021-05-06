@@ -81,7 +81,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
 
 #ifdef IS_PYTHON_3_9_PLUS
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
-  if (_Py_IsFinalizing()) {
+  if (!Py_IsInitialized()) {
     no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
     gil.release();
