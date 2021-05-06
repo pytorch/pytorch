@@ -567,7 +567,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
