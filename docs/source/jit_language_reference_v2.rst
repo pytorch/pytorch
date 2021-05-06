@@ -25,7 +25,7 @@ TorchScript Language Reference
 ==============================
 
 This reference manual describes the syntax and core semantics of the TorchScript language.
-TorchScript is a statically typed subset of Python language. This document attempts to explain the supported features of
+TorchScript is a statically typed subset of the Python language. This document explains the supported features of
 Python in TorchScript and also how the language diverges from regular Python. Any features of Python that are not mentioned in
 this reference manual are not part of TorchScript. TorchScript focuses specifically on the features of Python that are needed to
 represent neural network models in PyTorch.
@@ -81,9 +81,9 @@ The TorchScript type system consists of ``TSType`` and ``TSModuleType`` as defin
 ``TSType`` refers to any of the following:
 
 * Meta Types, e.g., ``Any``
-* Primitive Types, e.g., ``int``, ``float``, ``str``
+* Primitive Types, e.g., ``int``, ``float``, and ``str``
 * Structural Types, e.g., ``Optional[int]`` or ``List[MyClass]``
-* Nominal Types (Python classes), e.g., ``MyClass`` (user-defined), ``torch.tensor`` (builtin)
+* Nominal Types (Python classes), e.g., ``MyClass`` (user-defined), ``torch.tensor`` (built-in)
 
 ``TSModuleType`` represents ``torch.nn.Module`` and its subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
 As such, instances of a ``TSModuleType`` may not follow the same static type schema. ``TSModuleType`` cannot be used as a TorchScript type annotation or be composed with ``TSType`` for type safety considerations.
@@ -97,8 +97,8 @@ Currently TorchScript defines one meta-type, ``Any``, that represents any TorchS
 ``Any`` Type
 """"""""""""
 
-The ``Any`` type represents any TorchScript type. ``Any`` specifies no type constraints, thus there is no type checking on ``Any``.
-As such it can be bound to any Python or TorchScript data types (e.g., int, TorchScript ``tuple``, or an arbitrary Python class that is not scripted).
+The ``Any`` type represents any TorchScript type. ``Any`` specifies no type constraints, thus there is no type-checking on ``Any``.
+As such it can be bound to any Python or TorchScript data types (e.g., ``int``, TorchScript ``tuple``, or an arbitrary Python class that is not scripted).
 
 ::
 
@@ -106,8 +106,8 @@ As such it can be bound to any Python or TorchScript data types (e.g., int, Torc
 
 Where:
 
-* ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
-* Since ``Any`` can represent any TorchScript type, the set of operators allowed to operate on values of this type on ``Any`` is limited.
+* ``Any`` is the Python class name from the typing module. Therefore, to use the ``Any`` type, you must import it from ``typing`` (e.g., ``from typing import Any``).
+* Since ``Any`` can represent any TorchScript type, the set of operators that are allowed to operate on values of this type on ``Any`` is limited.
 
 Operators Supported for ``Any`` Type
 """"""""""""""""""""""""""""""""""""
@@ -132,7 +132,7 @@ When we script a PyTorch module, we may encounter data that is not involved in t
 by a type schema. It is not only cumbersome to describe static types for unused data (in the context of the script), but also may lead to unnecessary
 scripting failures. ``Any`` is introduced to describe the type of the data where precise static types are not necessary for compilation.
 
-**Example**
+**Example 1**
 
 This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of any type. This is possible
 because ``x[1]`` is not involved in any computation that requires knowing its precise type.
@@ -158,15 +158,15 @@ The example above produces the following output:
 
     (2, 2.0)
     (2, (100, 200))
-    
+
 The second element of the tuple is of ``Any`` type, thus can bind to multiple types.
 For example, ``(1, 2.0)`` binds a float type to ``Any`` as in ``Tuple[int, Any]``,
 whereas ``(1, (100, 200))`` binds a tuple to ``Any`` in the second invocation.
 
 
-**Example**
+**Example 2**
 
-We can use ``isinstance`` to dynamically check the type of the data that is annotated as ``Any`` type.
+This example illustrates how we can use ``isinstance`` to dynamically check the type of the data that is annotated as ``Any`` type:
 
 .. testcode::
 
@@ -220,20 +220,19 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
     TSDict           ::= "Dict" "[" KeyType "," TSType "]"
     KeyType          ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
-Where
+Where:
 
-* ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names that are defined in the module ``typing``. To use these type names, you must import them frrom ``typing`` (e.g., ``from typing import Tuple)``.
-* ``namedtuple`` represents the Python class  ``collections.namedtuple`` or ``typing.NamedTuple`` .
-* ``Future`` and ``RRef`` represent the Python classes  ``torch.futures`` and ``torch.distributed.rpc``.
+* ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names that are defined in the module ``typing``. To use these type names, you must import them from ``typing`` (e.g., ``from typing import Tuple``).
+* ``namedtuple`` represents the Python class ``collections.namedtuple`` or ``typing.NamedTuple``.
+* ``Future`` and ``RRef`` represent the Python classes ``torch.futures`` and ``torch.distributed.rpc``.
 
 **Compared to Python**
 
+Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of the operators and methods of their Python counterparts.
 
-* Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of the operators and methods of their Python counterparts.
+**Example 1**
 
-**Example**
-
-This example uses ``typing.NamedTuple`` syntax:
+This example uses ``typing.NamedTuple`` syntax to define a tuple:
 
 .. testcode::
 
@@ -258,7 +257,9 @@ The example above produces the following output:
 
     TorchScript: (2, 3)
 
-This example uses ``collections.namedtuple`` syntax:
+**Example 2**
+
+This example uses ``collections.namedtuple`` syntax to define a tuple:
 
 .. testcode::
 
@@ -282,10 +283,10 @@ The example above produces the following output:
 
     (2, 3)
 
-**Example**
+**Example 3**
 
 This example illustrates a common mistake of annotating structural types, i.e., not importing the composite type
-classes from the ``typing`` module.
+classes from the ``typing`` module:
 
 ::
 
@@ -299,14 +300,14 @@ classes from the ``typing`` module.
     m = torch.jit.script(inc)
     print(m((1,2)))
 
-Running the above code yields the following scripting error.
+Running the above code yields the following scripting error:
 
 ::
 
     File "test-tuple.py", line 5, in <module>
         def inc(x: Tuple[int, int]):
     NameError: name 'Tuple' is not defined
-    
+
 The remedy is to add the line ``from typing import Tuple`` to the beginning of the code.
 
 Nominal Types
@@ -322,10 +323,10 @@ name and are compared using class names. Nominal classes are further classified 
 Among them, ``TSCustomClass`` and ``TSEnum`` must be compilable to TorchScript Intermediate Representation (IR). This is enforced by the type-checker.
 
 Built-in Class
-^^^^^^^^^^^^^
+^^^^^^^^^^^^^^
 
 Built-in nominal types are Python classes whose semantics are built into the TorchScript system (e.g., tensor types).
-TorchScript defines the semantics of these builtin nominal types, and often supports only a subset of the methods or
+TorchScript defines the semantics of these built-in nominal types, and often supports only a subset of the methods or
 attributes of its Python class definition.
 
 ::
@@ -336,7 +337,7 @@ attributes of its Python class definition.
                        "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
 
 
-Special note on torch.nn.ModuleList and torch.nn.ModuleDict
+Special Note on torch.nn.ModuleList and torch.nn.ModuleDict
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 Although ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict`` are defined as a list and dictionary in Python,
@@ -346,6 +347,8 @@ they behave more like tuples in TorchScript:
 * Code that iterates over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
 
 **Example**
+
+The following example highlights the use of a few built-in Torchscript classes (``torch.*``):
 
 ::
 
@@ -381,7 +384,7 @@ Unlike built-in classes, semantics of custom classes are user-defined and the en
 
 Where:
 
-* Classes must be new-style classes. Python 3 supports only new-style classes. In Python 2.x, a new-style class is specified by subclassing from object.
+* Classes must be new-style classes. Python 3 supports only new-style classes. In Python 2.x, a new-style class is specified by subclassing from the object.
 * Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method.
 * Method overloading is not supported (i.e., you cannot have multiple methods with the same method name).
 * ``MethodDefinition`` must be compilable to TorchScript IR and adhere to TorchScript’s type-checking rules, (i.e., all methods must be valid TorchScript functions and class attribute definitions must be valid TorchScript statements).
@@ -398,7 +401,7 @@ TorchScript custom classes are quite limited compared to their Python counterpar
 * Must initialize all its instance attributes in  ``__init__()``; this is because TorchScript constructs a static schema of the class by inferring attribute types in ``__init__()``.
 * Must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs.
 
-**Example**
+**Example 1**
 
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``, similar to how a TorchScript function would be declared:
 
@@ -413,7 +416,7 @@ Python classes can be used in TorchScript if they are annotated with ``@torch.ji
             self.x += val
 
 
-**Example**
+**Example 2**
 
 A TorchScript custom class type must "declare" all its instance attributes by assignments in ``__init__()``. If an instance attribute is not defined in ``__init__()`` but accessed in other methods of the class, the class cannot be compiled as a TorchScript class, as shown in the following example:
 
@@ -430,7 +433,7 @@ A TorchScript custom class type must "declare" all its instance attributes by as
     def assign_x(self):
         self.x = torch.rand(2, 3)
 
-The above class will fail to compile and issue the following error:
+The class will fail to compile and issue the following error:
 
 ::
 
@@ -440,9 +443,9 @@ The above class will fail to compile and issue the following error:
         self.x = torch.rand(2, 3)
         ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
-**Example**
+**Example 3**
 
-In this example, a TorchScript custom class defines a class variable name, which is not allowed.
+In this example, a TorchScript custom class defines a class variable name, which is not allowed:
 
 ::
 
@@ -487,11 +490,13 @@ Where:
 **Compared to Python**
 
 
-* TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``.
-* Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` types, whereas Python enum members can be of any type.
+* TorchScript supports only ``enum.Enum``. It does not support other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, and ``enum.auto``.
+* Values of TorchScript enum members must be of the same type and can only be ``int``, ``float``, or ``str`` types, whereas Python enum members can be of any type.
 * Enums containing methods are ignored in TorchScript.
 
-**Example**
+**Example 1**
+
+The following example defines the class ``Color`` as an ``Enum`` type:
 
 ::
 
@@ -512,9 +517,9 @@ Where:
     print("Eager: ", enum_fn(Color.RED, Color.GREEN))
     print("TorchScript: ", m(Color.RED, Color.GREEN))
 
-**Example**
+**Example 2**
 
-The following example shows the case of restricted enum subclassing, where ``BaseColor`` does not define any member, thus can be subclassed by ``Color``.
+The following example shows the case of restricted enum subclassing, where ``BaseColor`` does not define any member, thus can be subclassed by ``Color``:
 
 ::
 
@@ -532,17 +537,17 @@ The following example shows the case of restricted enum subclassing, where ``Bas
     def enum_fn(x: Color, y: Color) -> bool:
         if x == Color.RED:
             return True
-
         return x == y
 
     m = torch.jit.script(enum_fn)
+    
     print("TorchScript: ", m(Color.RED, Color.GREEN))
     print("Eager: ", enum_fn(Color.RED, Color.GREEN))
 
 TorchScript Module Class
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-``TSModuleType`` is a special class type that is inferred from object instances created outside TorchScript. ``TSModuleType`` is named by the Python class of the object instance. The ``__init__()`` method of the Python class is not considered a TorchScript method, so it does not have to comply with TorchScript’s type checking rules.
+``TSModuleType`` is a special class type that is inferred from object instances that are created outside TorchScript. ``TSModuleType`` is named by the Python class of the object instance. The ``__init__()`` method of the Python class is not considered a TorchScript method, so it does not have to comply with TorchScript’s type-checking rules.
 
 The type schema of a module instance class is constructed directly from an instance object (created outside the scope of TorchScript) rather than inferred from ``__init__()`` like custom classes. It is possible that two objects of the same instance class type follow two different type schemas.
 
@@ -551,7 +556,7 @@ In this sense, ``TSModuleType`` is not really a static type. Therefore, for type
 Module Instance Class
 ^^^^^^^^^^^^^^^^^^^^^
 
-TorchScript module type represents the type schema of a user-defined PyTorch module instance.  When scripting a PyTorch module, the module object is always created outside TorchScript (i.e., passed in as parameter to ``forward``). The Python module class is treated as a module instance class, so the ``__init__()`` method of the Python module class is not subject to the type checking rules of TorchScript.
+TorchScript module type represents the type schema of a user-defined PyTorch module instance.  When scripting a PyTorch module, the module object is always created outside TorchScript (i.e., passed in as parameter to ``forward``). The Python module class is treated as a module instance class, so the ``__init__()`` method of the Python module class is not subject to the type-checking rules of TorchScript.
 
 ::
 
@@ -560,11 +565,18 @@ TorchScript module type represents the type schema of a user-defined PyTorch mod
 
 Where:
 
-* ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type checking rules.
+* ``forward()`` and other methods decorated with ``@torch.jit.export`` must be compilable to TorchScript IR and subject to TorchScript’s type-checking rules.
 
 Unlike custom classes, only the forward method and other methods decorated with ``@torch.jit.export``  of the module type need to be compilable. Most notably, ``__init__()`` is not considered a TorchScript method. Consequently, module type constructors cannot be invoked within the scope of TorchScript. Instead, TorchScript module objects are always constructed outside and passed into ``torch.jit.script(ModuleObj)``.
 
-**Example**
+**Example 1**
+
+This example illustrates a few features of module types:
+
+*  The ``TestModule`` instance is created outside the scope of TorchScript (i.e., before invoking ``torch.jit.script``).
+* ``__init__()`` is not considered a TorchScript method, therefore, it does not have to be annotated and can contain arbitrary Python code. In addition, the ``__init__()`` method of an instance class cannot be invoked in TorchScript code. Because ``TestModule`` instances are instantiated in Python, in this example, ``TestModule(2.0)`` and ``TestModule(2)`` create two instances with different types for its data attributes. ``self.x`` is of type ``float`` for ``TestModule(2.0)``, whereas ``self.y`` is of type ``int`` for ``TestModule(2.0)``.
+* TorchScript automatically compiles other methods (e.g., ``mul()``) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods.
+* Entry-points to a TorchScript program are either ``forward()`` of a module type, functions annotated as ``torch.jit.script``, or methods annotated as ``torch.jit.export``.
 
 .. testcode::
 
@@ -583,7 +595,7 @@ Unlike custom classes, only the forward method and other methods decorated with 
 
     m = torch.jit.script(TestModule(torch.ones([5])))
     print(f"Second instance: {m(3)}")
-    
+
 The example above produces the following output:
 
 .. testoutput::
@@ -591,16 +603,9 @@ The example above produces the following output:
     First instance: 4
     Second instance: tensor([4., 4., 4., 4., 4.])
 
-This example illustrates a few features of module types:
+**Example 2**
 
-*  The ``TestModule`` instance is created outside the scope of TorchScript (i.e., before invoking ``torch.jit.script``).
-* ``__init__()`` is not considered a TorchScript method, therefore, it does not have to be annotated and can contain arbitrary Python code. In addition, the ``__init__()`` method of an instance class cannot be invoked in TorchScript code. Because ``TestModule`` instances are instantiated in Python, in this example, ``TestModule(2.0)`` and ``TestModule(2)`` create two instances with different types for it's data attributes. ``self.x is of type ``float`` for ``TestModule(2.0)``, whereas ``self.y`` is of type ``int`` for ``TestModule(2.0)``.
-* TorchScript automatically compiles other methods (e.g., ``mul()``) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods.
-* Entry-points to a TorchScript program are either ``forward()`` of a module type or functions annotated as ``torch.jit.script`` or methods annotated as ``torch.jit.export``.
-
-**Example**
-
-The following example shows an incorrect usage of module type. Specifically, this example invokes the constructor of ``TestModule`` inside the scope of TorchScript.
+The following example shows an incorrect usage of module type. Specifically, this example invokes the constructor of ``TestModule`` inside the scope of TorchScript:
 
 .. testcode::
 
@@ -641,7 +646,7 @@ In general, type annotations are only needed in places where static types cannot
 methods or functions). Types of local variables and data attributes are often automatically inferred from their assignment statements. Sometimes an inferred type
 may be too restrictive, e.g., ``x`` being inferred as ``NoneType`` through assignment ``x = None``, whereas ``x`` is actually used as an ``Optional``. In such
 cases, type annotations may be needed to overwrite auto inference, e.g., ``x: Optional[int] = None``. Note that it is always safe to type annotate a local variable
-or data attribute even if its type can be automatically inferred. The annotated type must be congruent with TorchScript’s type checking.
+or data attribute even if its type can be automatically inferred. The annotated type must be congruent with TorchScript’s type-checking.
 
 When a parameter, local variable, or data attribute is not type annotated and its type cannot be automatically inferred, TorchScript assumes it to be a
 default type of ``TensorType``, ``List[TensorType]``, or ``Dict[str, TensorType]``.
@@ -652,7 +657,7 @@ Since a parameter may not be automatically inferred from the body of the functio
 
 TorchScript supports two styles for method and function signature type annotation:
 
-* **Python3-style** annotates types directly on the signature. As such, it allows individual parameters be left unannotated (whose type will be the default type of ``TensorType``) , or allows the return type be left unannotated (whose type will be automatically inferred).
+* **Python3-style** annotates types directly on the signature. As such, it allows individual parameters to be left unannotated (whose type will be the default type of ``TensorType``), or allows the return type to be left unannotated (whose type will be automatically inferred).
 
 
 ::
@@ -662,7 +667,7 @@ TorchScript supports two styles for method and function signature type annotatio
     ParamAnnot        ::= Identifier [ ":" TSType ] ","
     ReturnAnnot       ::= "->" TSType
 
-Note that when using Python3 style the type ``self`` is automatically inferred and should not be annotated.
+Note that when using Python3 style, the type ``self`` is automatically inferred and should not be annotated.
 
 * **Mypy style** annotates types as a comment right below the function/method declaration. In the Mypy style, since parameter names do not appear in the annotation, all parameters have to be annotated.
 
@@ -755,16 +760,9 @@ via ``Final``.
 Where:
 
 * ``InstanceAttrIdentifier`` is the name of an instance attribute.
-* ``Final`` indicates that the attribute cannot be re-assigned outside
-of ``__init__`` or overridden in subclasses.
+* ``Final`` indicates that the attribute cannot be re-assigned outside of ``__init__`` or overridden in subclasses.
 
 **Example**
-
-In this example:
-
-* ``a`` is not annotated and assumes the default type of ``TensorType``.
-* ``b`` is annotated as type ``int``.
-* The return type is not annotated and is automatically inferred as type ``TensorType`` (based on the type of the value being returned).
 
 ::
 
@@ -792,7 +790,7 @@ the type of a module attribute in `__init__`; ``torch.jit.Attribute`` should be 
 
 **Example**
 
-In this example, ``[]`` is declared as a list of integers via ``torch.jit.annotate`` (instead of assuming ``[]`` to be the default type of ``List[TensorType]``).
+In this example, ``[]`` is declared as a list of integers via ``torch.jit.annotate`` (instead of assuming ``[]`` to be the default type of ``List[TensorType]``):
 
 ::
 
@@ -819,7 +817,7 @@ Type Annotation Appendix
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 TorchScript Type System Definition
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""""""""""""""""
 
 ::
 
@@ -891,7 +889,7 @@ There are a number of implicit type conversions that are performed in TorchScrip
 * The implicit conversion rules from the two bullet points above can be applied to instances of ``TupleType`` to produce instances of ``ListType`` with the appropriate contained type.
 
 
-Explicit conversions can be invoked using the ``float``, ``int``, ``bool``, ``str`` built-in functions
+Explicit conversions can be invoked using the ``float``, ``int``, ``bool``, and ``str`` built-in functions
 that accept primitive data types as arguments and can accept user-defined types if they implement
 ``__bool__``, ``__str__``, etc.
 
@@ -952,7 +950,7 @@ List and Dictionary Displays
 Lists and dicts can be constructed by either listing the container contents explicitly or by providing
 instructions on how to compute them via a set of looping instructions (i.e. a *comprehension*). A comprehension
 is semantically equivalent to using a for loop and appending to an ongoing list.
-Comprehensions implicitly create their own scope to make sure the items of the target list do not leak into the
+Comprehensions implicitly create their own scope to make sure that the items of the target list do not leak into the
 enclosing scope. In the case that container items are explicitly listed, the expressions in the expression list
 are evaluated left-to-right. If a key is repeated in a ``dict_display`` that has a ``key_datum_list``, the
 resultant dictionary uses the value from the rightmost datum in the list that uses the repeated key.
@@ -973,7 +971,7 @@ Attribute References
     attributeref ::=  primary '.' identifier
 
 
-The ``primary`` must evaluate to an object of a type that supports attribute references that has an attribute named
+The ``primary`` must evaluate to an object of a type that supports attribute references that have an attribute named
 ``identifier``.
 
 Subscriptions
@@ -986,15 +984,15 @@ Subscriptions
 
 The ``primary`` must evaluate to an object that supports subscription.
 
-* If it is a ``List`` , ``Tuple``, or ``str``, the expression list must evaluate to an integer or slice. 
-* If it is a ``Dict``, the expression list must evaluate to an object of the same type as the key type of the ``Dict``. 
-* If the primary is a ``ModuleList``, the expression list must be an ``integer`` literal. 
+* If the primary is a ``List``, ``Tuple``, or ``str``, the expression list must evaluate to an integer or slice.
+* If the primary is a ``Dict``, the expression list must evaluate to an object of the same type as the key type of the ``Dict``.
+* If the primary is a ``ModuleList``, the expression list must be an ``integer`` literal.
 * If the primary is a ``ModuleDict``, the expression must be a ``stringliteral``.
 
 
 Slicings
 """"""""
-A slicing selects a range of items in a ``str``, ``Tuple``, ``List`` or ``Tensor``. Slicings may be used as
+A slicing selects a range of items in a ``str``, ``Tuple``, ``List``, or ``Tensor``. Slicings may be used as
 expressions or targets in assignment or ``del`` statements.
 
 ::
@@ -1088,10 +1086,10 @@ Binary Bitwise Operations
     or_expr  ::=  xor_expr | or_expr '|' xor_expr
 
 
-The ``&`` operator computes the bitwise AND of its arguments, the ``^`` the bitwise XOR, and ``|`` the bitwise OR.
+The ``&`` operator computes the bitwise AND of its arguments, the ``^`` the bitwise XOR, and the ``|`` the bitwise OR.
 Both operands must be ``int`` or ``Tensor``, or the left operand must be ``Tensor`` and the right operand must be
 ``int``. When both operands are ``Tensor``, they must have the same shape. When the right operand is ``int``, and
-the left operand is ``Tensor`` , the right operand is logically broadcast to match the shape of the ``Tensor``.
+the left operand is ``Tensor``, the right operand is logically broadcast to match the shape of the ``Tensor``.
 
 Comparisons
 ^^^^^^^^^^^
@@ -1101,7 +1099,7 @@ Comparisons
     comparison    ::=  or_expr (comp_operator or_expr)*
     comp_operator ::=  '<' | '>' | '==' | '>=' | '<=' | '!=' | 'is' ['not'] | ['not'] 'in'
 
-A comparison yields a boolean value (``True`` or ``False``) or, if one of the operands is a ``Tensor``, a boolean
+A comparison yields a boolean value (``True`` or ``False``), or if one of the operands is a ``Tensor``, a boolean
 ``Tensor``. Comparisons can be chained arbitrarily as long as they do not yield boolean ``Tensors`` that have more
 than one element. ``a op1 b op2 c ...`` is equivalent to ``a op1 b and b op2 c and ...``.
 
@@ -1114,7 +1112,7 @@ Python:
 
 * Numbers are compared mathematically.
 * Strings are compared lexicographically.
-* ``Lists``, ``tuples``, and ``dicts`` can be compared only to other ``lists``, ``tuples``, and ``dicts`` of the same type and are compared using the comparison operator of corresponding elements
+* ``lists``, ``tuples``, and ``dicts`` can be compared only to other ``lists``, ``tuples``, and ``dicts`` of the same type and are compared using the comparison operator of corresponding elements.
 
 Membership Test Operations
 """"""""""""""""""""""""""
@@ -1173,7 +1171,7 @@ Simple Statements
 The following section describes the syntax of simple statements that are supported in TorchScript.
 It is modeled after `the simple statements chapter of the Python language reference <https://docs.python.org/3/reference/simple_stmts.html>`_.
 
-Expression statements
+Expression Statements
 ^^^^^^^^^^^^^^^^^^^^^^
 
 ::
@@ -1270,7 +1268,7 @@ The ``break`` Statement
 
     break_stmt ::= "break"
 
-The ``continue`` statement:
+The ``continue`` Statement:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
@@ -1298,7 +1296,7 @@ Basic ``if/else`` Statement
                 ("elif" assignment_expression ":" suite)
                 ["else" ":" suite]
 
-``elif`` statements can repeat for arbitrary number of times, but it needs to be before ``else`` statement.
+``elif`` statements can repeat for an arbitrary number of times, but it needs to be before ``else`` statement.
 
 Ternary ``if/else`` Statement
 """"""""""""""""""""""""""""""
@@ -1307,9 +1305,9 @@ Ternary ``if/else`` Statement
 
     if_stmt ::= return [expression_list] "if" assignment_expression "else" [expression_list]
 
-**Example**
+**Example 1**
 
-``Tensor`` with 1 dimension is promoted to ``bool``.
+A ``tensor`` with 1 dimension is promoted to ``bool``:
 
 .. testcode::
 
@@ -1328,9 +1326,9 @@ The example above produces the following output:
 
     True
 
-**Example**
+**Example 2**
 
-``Tensor`` with multi dimensions are not promoted to ``bool``.
+A ``tensor`` with multi dimensions are not promoted to ``bool``:
 
 ::
 
@@ -1363,7 +1361,9 @@ Running the above code yields the following ``RuntimeError``.
 
 If a conditional variable is annotated as ``final``, either the true or false branch is evaluated depending on the evaluation of the conditional variable.
 
-**Example**
+**Example 3**
+
+In this example, only the True branch is evaluated, since ``a`` is annotated as ``final`` and set to ``True``:
 
 ::
 
@@ -1376,7 +1376,6 @@ If a conditional variable is annotated as ``final``, either the true or false br
     else:
         return []
 
-Here, only the True branch is evaluated, since ``a`` is annotated as ``final`` and set to ``True``.
 
 The ``while`` Statement
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1397,9 +1396,9 @@ The ``for-in`` Statement
 
 ``for...else`` statements are not supported in Torchscript. It results in a ``RuntimeError``.
 
-For loops on tuples: these unroll the loop, generating a body for each member of the tuple.The body must type-check correctly for each member.
+**Example 1**
 
-**Example**
+For loops on tuples: these unroll the loop, generating a body for each member of the tuple. The body must type-check correctly for each member.
 
 .. testcode::
 
@@ -1426,9 +1425,9 @@ The example above produces the following output:
     [ CPUFloatType{4} ]
 
 
-For loops on lists: For loops over a ``nn.ModuleList`` will unroll the body of the loop at compile time, with each member of the module list.
+**Example 2**
 
-**Example**
+For loops on lists: for loops over a ``nn.ModuleList`` will unroll the body of the loop at compile time, with each member of the module list.
 
 ::
 
@@ -1462,9 +1461,7 @@ The ``with`` statement is used to wrap the execution of a block with methods def
     with_stmt ::=  "with" with_item ("," with_item) ":" suite
     with_item ::=  expression ["as" target]
 
-* If a target was included in the ``with`` statement, the return value from the context manager’s ``__enter__()`` 
-is assigned to it. Unlike python, if an exception caused the suite to be exited, its type, value, and traceback are 
-not passed as arguments to ``__exit__()``. Three ``None`` arguments are supplied.
+* If a target was included in the ``with`` statement, the return value from the context manager’s ``__enter__()`` is assigned to it. Unlike python, if an exception caused the suite to be exited, its type, value, and traceback are not passed as arguments to ``__exit__()``. Three ``None`` arguments are supplied.
 * ``try``, ``except``, and ``finally`` statements are not supported inside ``with`` blocks.
 *  Exceptions raised within ``with`` block cannot be suppressed.
 
@@ -1475,7 +1472,7 @@ The ``tuple`` Statement
 
     tuple_stmt ::= tuple([iterables])
 
-* Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``,``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+* Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList``, and ``torch.nn.ModuleDict``.
 * You cannot convert a List to Tuple by using this built-in function.
 
 Unpacking all outputs into a tuple is covered by:
@@ -1505,7 +1502,7 @@ The ``hasattr`` Statement
 
 * Attribute name must be a literal string.
 * Module type object is not supported (e.g., torch._C).
-* Custom Class object is not supported (e.g., torch.classes.*).
+* Custom class object is not supported (e.g., torch.classes.*).
 
 The ``zip`` Statement
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -1517,7 +1514,9 @@ The ``zip`` Statement
 * Arguments must be iterables.
 * Two iterables of same outer container type but different length are supported.
 
-**Example**
+**Example 1**
+
+Both the iterables must be of the same container type:
 
 .. testcode::
 
@@ -1525,9 +1524,9 @@ The ``zip`` Statement
     b = [2, 3, 4] # List
     zip(a, b) # works
 
-Both the iterables must be of the same container type.
+**Example 2**
 
-**Example**
+This example fails because the iterables are of different container types:
 
 ::
 
@@ -1542,9 +1541,9 @@ Running the above code yields the following ``RuntimeError``.
     RuntimeError: Can not iterate over a module list or
         tuple with a value that does not have a statically determinable length.
 
-Two iterables of the same container Type but different data type is supported.
+**Example 3**
 
-**Example**
+Two iterables of the same container Type but different data type is supported:
 
 .. testcode::
 
@@ -1552,7 +1551,7 @@ Two iterables of the same container Type but different data type is supported.
     b = [2, 3, 4]
     zip(a, b) # Works
 
-Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList``, and ``torch.nn.ModuleDict``.
 
 The ``enumerate`` Statement
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1574,7 +1573,7 @@ Python Values
 
 Resolution Rules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-When given a Python value, TorchScript attempts to resolve it in following five different ways:
+When given a Python value, TorchScript attempts to resolve it in the following five different ways:
 
 * Compilable Python Implementation:
     * When a Python value is backed by a Python implementation that can be compiled by TorchScript, TorchScript compiles and uses the underlying Python implementation.
@@ -1587,10 +1586,10 @@ When given a Python value, TorchScript attempts to resolve it in following five 
     * When matched, TorchScript generates a corresponding ``SugaredValue`` instance that contains lowering logic for these values.
     * Example: ``torch.jit.isinstance()``
 * Name Match:
-    * For Python built-in functions and constants, TorchScript identifies them by name, and creates a corresponding SugaredValue instance that implements their functionality.
+    * For Python built-in functions and constants, TorchScript identifies them by name, and creates a corresponding ``SugaredValue`` instance that implements their functionality.
     * Example: ``all()``
 * Value Snapshot:
-    * For Python values from unrecognized modules, TorchScript attempts to take a snapshot of the value and converts to a constant in the graph of the function(s) or method(s) that are being compiled.
+    * For Python values from unrecognized modules, TorchScript attempts to take a snapshot of the value and converts it to a constant in the graph of the function(s) or method(s) that are being compiled.
     * Example: ``math.pi``
 
 
@@ -1598,17 +1597,17 @@ When given a Python value, TorchScript attempts to resolve it in following five 
 .. _python-builtin-functions-support:
 
 Python Built-in Functions Support
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-.. list-table:: TorchScript Support for Python Builtin Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table:: TorchScript Support for Python Built-in Functions
    :widths: 25 25 50
    :header-rows: 1
 
-   * - Builtin Function
+   * - Built-in Function
      - Support Level
      - Notes
    * - ``abs()``
      - Partial
-     - Only supports ``Tensor``/``Int``/``Float`` type inputs | Doesn't honor ``__abs__`` override
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs. | Doesn't honor ``__abs__`` override.
    * - ``all()``
      - Full
      -
@@ -1620,10 +1619,10 @@ Python Built-in Functions Support
      -
    * - ``bin()``
      - Partial
-     - Only supports ``Int`` type input
+     - Only supports ``Int`` type input.
    * - ``bool()``
      - Partial
-     - Only supports ``Tensor``/``Int``/``Float`` type inputs
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs.
    * - ``breakpoint()``
      - None
      -
@@ -1638,7 +1637,7 @@ Python Built-in Functions Support
      -
    * - ``chr()``
      - Partial
-     - Only ASCII character set is supported
+     - Only ASCII character set is supported.
    * - ``classmethod()``
      - Full
      -
@@ -1674,16 +1673,16 @@ Python Built-in Functions Support
      -
    * - ``float()``
      - Partial
-     - Doesn't honor ``__index__`` override
+     - Doesn't honor ``__index__`` override.
    * - ``format()``
      - Partial
-     - Manual index specification not supported | Format type modifier not supported
+     - Manual index specification not supported. | Format type modifier not supported.
    * - ``frozenset()``
      - None
      -
    * - ``getattr()``
      - Partial
-     - Attribute name must be string literal
+     - Attribute name must be string literal.
    * - ``globals()``
      - None
      -
@@ -1692,22 +1691,22 @@ Python Built-in Functions Support
      -
    * - ``hash()``
      - Full
-     - ``Tensor``'s hash is based on identity not numeric value
+     - ``Tensor``'s hash is based on identity not numeric value.
    * - ``hex()``
      - Partial
-     - Only supports ``Int`` type input
+     - Only supports ``Int`` type input.
    * - ``id()``
      - Full
-     - Only supports ``Int`` type input
+     - Only supports ``Int`` type input.
    * - ``input()``
      - None
      -
    * - ``int()``
      - Partial
-     - ``base`` argument not supported | Doesn't honor ``__index__`` override
+     - ``base`` argument not supported. | Doesn't honor ``__index__`` override.
    * - ``isinstance()``
      - Full
-     - ``torch.jit.isintance`` provides better support when checking against container types like ``Dict[str, int]``
+     - ``torch.jit.isintance`` provides better support when checking against container types like ``Dict[str, int]``.
    * - ``issubclass()``
      - None
      -
@@ -1722,13 +1721,13 @@ Python Built-in Functions Support
      -
    * - ``ord()``
      - Partial
-     - Only ASCII character set is supported
+     - Only ASCII character set is supported.
    * - ``pow()``
      - Full
      -
    * - ``print()``
      - Partial
-     - ``separate``, ``end`` and ``file`` arguments are not supported
+     - ``separate``, ``end`` and ``file`` arguments are not supported.
    * - ``property()``
      - None
      -
@@ -1743,25 +1742,25 @@ Python Built-in Functions Support
      -
    * - ``round()``
      - Partial
-     - ``ndigits`` argument is not supported
+     - ``ndigits`` argument is not supported.
    * - ``set()``
      - None
      -
    * - ``setattr()``
      - None
-     - Partial
+     -
    * - ``slice()``
      - Full
      -
    * - ``sorted()``
      - Partial
-     - ``key`` argument is not supported
+     - ``key`` argument is not supported.
    * - ``staticmethod()``
      - Full
      -
    * - ``str()``
      - Partial
-     - ``encoding`` and ``errors`` arguments are not supported
+     - ``encoding`` and ``errors`` arguments are not supported.
    * - ``sum()``
      - Full
      -
@@ -1784,12 +1783,12 @@ Python Built-in Functions Support
 .. _python-builtin-values-support:
 
 Python Built-in Values Support
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-.. list-table:: TorchScript Support for Python Builtin Values
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table:: TorchScript Support for Python Built-in Values
    :widths: 25 25 50
    :header-rows: 1
 
-   * - Builtin Value
+   * - Built-in Value
      - Support Level
      - Notes
    * - ``False``
@@ -1812,7 +1811,7 @@ Python Built-in Values Support
 .. _torch_apis_in_torchscript:
 
 torch.* APIs
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. _torch_apis_in_torchscript_rpc:
 
@@ -1826,13 +1825,13 @@ Specifically, following APIs are fully supported:
 
 - ``torch.distributed.rpc.rpc_sync()``
     - ``rpc_sync()`` makes a blocking RPC call to run a function on a remote worker. RPC messages are sent and received in parallel to execution of Python code.
-    - More details about it's usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_sync`.
+    - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_sync`.
 
 - ``torch.distributed.rpc.rpc_async()``
     - ``rpc_async()`` makes a non-blocking RPC call to run a function on a remote worker. RPC messages are sent and received in parallel to execution of Python code.
     - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
 - ``torch.distributed.rpc.remote()``
-    - ``remote.()`` executes a remote call on a worker and gets a Remote Reference ``RRef`` as return value.
+    - ``remote.()`` executes a remote call on a worker and gets a Remote Reference ``RRef`` as the return value.
     - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.remote`.
 
 .. _torch_apis_in_torchscript_async:
@@ -1863,10 +1862,10 @@ TorchScript is statically-typed. It provides and supports a set of utilities to 
 
 - ``torch.jit.annotate()``
     - Provides a type hint to TorchScript where Python 3 style type hints do not work well.
-    - One common example is to annotate type for expressions like ``[]``. ``[]`` is treated as ``List[torch.Tensor]`` by default. When a different type is needed, you can use the following code to hint TorchScript: ``torch.jit.annotate(List[int], [])``.
+    - One common example is to annotate type for expressions like ``[]``. ``[]`` is treated as ``List[torch.Tensor]`` by default. When a different type is needed, you can use this code to hint TorchScript: ``torch.jit.annotate(List[int], [])``.
     - More details can be found in :meth:`~torch.jit.annotate`
 - ``torch.jit.Attribute``
-    - Common use cases include providing type hint for ``torch.nn.Module`` attributes. Because their ``__init__`` methods are not parsed by TorchScript, ``torch.jit.Attribute`` should be used instead of ``torch.jit.annotate`` in module's ``__init__`` methods.
+    - Common use cases include providing type hint for ``torch.nn.Module`` attributes. Because their ``__init__`` methods are not parsed by TorchScript, ``torch.jit.Attribute`` should be used instead of ``torch.jit.annotate`` in the module's ``__init__`` methods.
     - More details can be found in :meth:`~torch.jit.Attribute`
 - ``torch.jit.Final``
     - An alias for Python's ``typing.Final``. ``torch.jit.Final`` is kept only for backward compatibility reasons.
@@ -1880,8 +1879,8 @@ Meta Programming
 TorchScript provides a set of utilities to facilitate meta programming:
 
 - ``torch.jit.is_scripting()``
-    - Returns a boolean value indicating whether current program is compiled by ``torch.jit.script`` or not.
-    - When used in an ``assert`` or ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
+    - Returns a boolean value indicating whether the current program is compiled by ``torch.jit.script`` or not.
+    - When used in an ``assert`` or an ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
     - Its value can be evaluated statically at compile time, thus commonly used in ``if`` statements to stop TorchScript from compiling one of the branches.
     - More details and examples can be found in :meth:`~torch.jit.is_scripting`
 - ``@torch.jit.ignore``
@@ -1902,5 +1901,5 @@ Type Refinement
 ^^^^^^^^^^^^^^^
 
 - ``torch.jit.isinstance()``
-    - Returns a boolean indicating whether a variable is of specified type.
+    - Returns a boolean indicating whether a variable is of the specified type.
     - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.
