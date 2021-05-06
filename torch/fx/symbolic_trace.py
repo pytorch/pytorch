@@ -385,6 +385,7 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
+                assert(self.graph._pytree_info is not None)
                 self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
                 return tree_out
 

@@ -409,10 +409,11 @@ class Graph:
         return flat_args
 
     def unflatten_outs(self, out):
-        if self._pytree_info.out_spec is None:
+        if self._pytree_info is None:
             return out
         if not isinstance(out, list):
             out = [out]
+        assert(self._pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self._pytree_info.out_spec)
 
     def erase_node(self, to_erase : Node) -> None:
