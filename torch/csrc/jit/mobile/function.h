@@ -22,8 +22,7 @@ class Function {
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,
-      const std::string& overload_name,
-      int64_t model_version);
+      const std::string& overload_name);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 

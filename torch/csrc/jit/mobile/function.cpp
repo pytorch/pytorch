@@ -33,8 +33,7 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
 
 bool Function::append_operator(
     const std::string& name,
-    const std::string& overload_name,
-    int64_t model_version) {
+    const std::string& overload_name) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -52,19 +51,6 @@ bool Function::append_operator(
     } else {
       return false;
     }
-  }
-
-  if (model_version == 0x3LL &&
-      opname == c10::OperatorName("aten::_convolution", "")) {
-    // Since byte-code versions 0x4L, convolution has an additional
-    // default-value argument (allow_tf32=True, see
-    // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
-    // backward compatibility with models of byte-code version <= 0x3L, where
-    // this bool argument does not yet exist.
-    fn = [fn](Stack& stack) {
-      stack.push_back(true);
-      fn(stack);
-    };
   }
 
   code_->operators_.emplace_back(fn);
