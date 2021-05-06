@@ -1,4 +1,3 @@
-#import <ATen/native/metal/MetalDevice.h>
 #import <ATen/native/metal/MetalShaders.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 
@@ -12,10 +11,8 @@
 #import <Foundation/NSProcessInfo.h>
 #endif
 
-using namespace at::native::metal;
 @implementation MPSCNNContext {
   std::mutex _pipelineCacheMutex;
-  MetalDeviceInfo _deviceInfo;
   NSMutableDictionary<NSString*, id<MTLComputePipelineState>>* _pipelineCache;
 }
 
@@ -24,10 +21,12 @@ using namespace at::native::metal;
   static MPSCNNContext* instance = nil;
   dispatch_once(&onceToken, ^{
     instance = [[MPSCNNContext alloc] init];
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    instance->_device = device;
-    instance->_deviceInfo = createDeviceInfo(device);
-    instance->_library = nil;
+    instance->_device = MTLCreateSystemDefaultDevice();
+    NSError* compileError = nil;
+    instance->_library = [instance.device
+        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
+                     options:nil
+                       error:&compileError];
     instance->_commandQueue = [instance.device newCommandQueue];
     instance->_pipelineCache =
         [NSMutableDictionary<NSString*, id<MTLComputePipelineState>> new];
@@ -39,7 +38,6 @@ using namespace at::native::metal;
 #if !defined(__APPLE__)
   return false;
 #elif TARGET_IPHONE_SIMULATOR
-  // TODO[T90135707]: Enable Metal on iOS Simulators
   return false;
 #elif TARGET_OS_IPHONE
   if (!MPSSupportsMTLDevice(_device)) {
@@ -48,7 +46,8 @@ using namespace at::native::metal;
   if ([UIDevice currentDevice].systemVersion.floatValue < 10.2) {
     return false;
   }
-  if (![_device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
+  if (![MTLCreateSystemDefaultDevice()
+          supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     return false;
   }
 #elif TARGET_OS_MAC
@@ -60,15 +59,14 @@ using namespace at::native::metal;
           isOperatingSystemAtLeastVersion:supportedVer]) {
     return false;
   }
-  if (![_device supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
+  if (![MTLCreateSystemDefaultDevice()
+          supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
     return false;
   }
 #else
   return false;
 #endif
-  // Compile shader
-  NSError* error = [self compileProgram];
-  TORCH_CHECK(!error, error.localizedDescription.UTF8String);
+
   return _device && _library && _commandQueue;
 }
 
@@ -137,32 +135,6 @@ using namespace at::native::metal;
                               encoding:NSUTF8StringEncoding];
   _pipelineCache[kernel] = state;
   return state;
-}
-
-- (NSError*)compileProgram {
-  __block NSError* compilationError = nil;
-  // To ensure thread safety here.
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    NSError* localError = nil;
-    MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
-    [options setLanguageVersion:_deviceInfo.languageVersion];
-    [options setFastMathEnabled:YES];
-    _library = [_device
-        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
-                     options:options
-                       error:&localError];
-    compilationError = localError;
-  });
-  return compilationError;
-}
-
-- (NSString*)description {
-  NSString* desc =
-      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
-                                 _deviceInfo.name.c_str(),
-                                 _deviceInfo.languageVersion];
-  return desc;
 }
 
 @end
