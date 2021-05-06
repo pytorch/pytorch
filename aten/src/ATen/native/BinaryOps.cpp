@@ -73,8 +73,6 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);                 \
   }
 
-CREATE_BINARY_META_FUNC(maximum);
-CREATE_BINARY_META_FUNC(minimum);
 CREATE_BINARY_META_FUNC(logaddexp);
 CREATE_BINARY_META_FUNC(logaddexp2);
 CREATE_BINARY_META_FUNC(gcd);
@@ -83,6 +81,16 @@ CREATE_BINARY_META_FUNC(hypot);
 CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
 CREATE_BINARY_META_FUNC(nextafter);
+
+TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  build_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  build_binary_op(maybe_get_output(), self, other);
+}
 
 } // namespace meta
 
