@@ -570,7 +570,7 @@ void GraphTask::exec_post_processing() {
     for (const auto& opt_stream : caller_current_streams_) {
       if (opt_stream.has_value()) {
         caller_current_streams_filtered.push_back(*opt_stream);
-      } 
+      }
     }
   }
 
