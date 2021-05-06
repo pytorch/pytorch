@@ -190,8 +190,11 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
     return actual, expected
 
 
-def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> SimpleNamespace:
-    """Traces mismatches and returns diagnostics.
+DiagnosticInfo = SimpleNamespace
+
+
+def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> DiagnosticInfo:
+    """Traces mismatches and returns diagnostic information.
 
     Args:
         actual (Tensor): Actual tensor.
@@ -200,7 +203,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
             the location of mismatches.
 
     Returns:
-        (SimpleNamespace): Mismatch diagnostics with the following attributes:
+        (DiagnosticInfo): Mismatch diagnostics with the following attributes:
 
             - ``number_of_elements`` (int): Number of elements in each tensor being compared.
             - ``total_mismatches`` (int): Total number of mismatches.
@@ -751,7 +754,7 @@ def assert_close(
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
         check_stride (bool): If ``True`` (default), asserts that corresponding tensors have the same stride.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message to use if
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
             the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
             with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
 
