@@ -26,18 +26,19 @@ class ProcessedMetricsPrinter:
 
         Examples::
             >>> instance = ProcessedMetricsPrinter()
-            >>> list_1 = trainer1.get_processed_metrics()
-            >>> list_2 = trainer2.get_processed_metrics()
-            >>> print(list_1)
+            >>> dict_1 = trainer1.get_processed_metrics()
+            >>> dict_2 = trainer2.get_processed_metrics()
+            >>> print(dict_1)
             {
                 "forward_metric_type,forward_pass" : [.0429, .0888]
             }
-            >>> print(list_2)
+            >>> print(dict_2)
             {
                 "forward_metric_type,forward_pass" : [.0111, .0222]
             }
-            >>> list_3 = instance.combine_processed_metrics([list_1,list_2])
-            >>> print(list_3)
+            >>> processed_metrics_list = [dict_1, dict_2]
+            >>> result = instance.combine_processed_metrics(processed_metrics_list)
+            >>> print(result)
             {
                 "forward_metric_type,forward_pass" : [.0429, .0888, .0111, .0222]
             }
