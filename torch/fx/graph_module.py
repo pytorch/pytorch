@@ -97,7 +97,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
     CodeOnlyModule.forward = forward
     com = CodeOnlyModule(body)
 
-    if 'tracer' not in body:
+    tracer = body.get('tracer')
+    if not tracer:
         # For backwards compatibility with GraphModules that have been serialized and stored.
         from .symbolic_trace import Tracer
 
@@ -109,7 +110,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
 
         graph = KeepModules().trace(com)
     else:
-        graph = body['tracer'].trace(com)
+        graph = tracer.trace(com)
         del body['tracer']
 
     return GraphModule(com, graph)
@@ -240,9 +241,7 @@ class GraphModule(torch.nn.Module):
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
 
         self.graph = graph
-
-        if hasattr(self.graph, 'tracer'):
-            self.tracer = self.graph.tracer
+        self.tracer = getattr(self.graph, 'tracer', None)
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -530,6 +529,8 @@ class {module_name}(torch.nn.Module):
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
 
+        if self.tracer:
+            self.tracer.graph = None
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
         return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
@@ -545,6 +546,8 @@ class {module_name}(torch.nn.Module):
         dict_without_graph = self.__dict__.copy()
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
+        if self.tracer:
+            self.tracer.graph = None
         del dict_without_graph['_graph']
         return (reduce_graph_module, (dict_without_graph, import_block))
 
