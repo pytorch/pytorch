@@ -1992,9 +1992,21 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
     TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
   #endif
-  }
+}
 
-  REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
+void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+#if defined(USE_CUSOLVER)
+  ormqr_cusolver(input, tau, other, left, transpose);
+#else
+  TORCH_CHECK(false,
+      "Calling torch.ormqr on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#endif
+}
+
+REGISTER_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

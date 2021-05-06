@@ -742,6 +742,86 @@ void geqrf_cusolver(const Tensor& input, const Tensor& tau) {
 }
 
 /*
+  The ormqr function multiplies Q with another matrix from a sequence of
+  elementary reflectors, such as is produced by the geqrf function.
+
+  Args:
+  * `input`     - Tensor with elementary reflectors below the diagonal,
+                  encoding the matrix Q.
+  * `tau`       - Tensor containing the magnitudes of the elementary
+                  reflectors.
+  * `other`     - [in] Tensor containing the matrix to be multiplied.
+                  [out] result of the matrix multiplication with Q.
+  * `left`      - bool, determining whether `other` is left- or right-multiplied with Q.
+  * `transpose` - bool, determining whether to transpose (or conjugate transpose) Q before multiplying.
+
+  For further details, please see the cuSOLVER documentation for ORMQR and UNMQR.
+*/
+template <typename scalar_t>
+static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  auto side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
+  auto trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N;
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto other_data = other.data_ptr<scalar_t>();
+
+  auto input_matrix_stride = matrixStride(input);
+  auto other_matrix_stride = matrixStride(other);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(input);
+  auto m = cuda_int_cast(other.size(-2), "m");
+  auto n = cuda_int_cast(other.size(-1), "n");
+  auto k = cuda_int_cast(tau.size(-1), "k");
+  auto lda = std::max<int>(1, left ? m : n);
+  auto ldc = std::max<int>(1, m);
+
+  // get the optimal work size and allocate workspace tensor
+  int lwork;
+  at::cuda::solver::ormqr_bufferSize<scalar_t>(
+    at::cuda::getCurrentCUDASolverDnHandle(), side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &lwork);
+
+  auto info = at::zeros({1}, input.options().dtype(at::kInt));
+  auto info_data = info.data_ptr<int>();
+
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    // allocate workspace storage
+    auto& allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
+
+    at::cuda::solver::ormqr<scalar_t>(
+      handle, side, trans, m, n, k,
+      input_working_ptr,
+      lda,
+      tau_working_ptr,
+      other_working_ptr,
+      ldc,
+      static_cast<scalar_t*>(work_data.get()),
+      lwork,
+      info_data
+    );
+
+    // info from ormqr only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
+  }
+}
+
+// This is a type dispatching helper function for 'apply_ormqr'
+void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "orgmr_cuda", [&]{
+    apply_ormqr<scalar_t>(input, tau, other, left, transpose);
+  });
+}
+
+/*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
 

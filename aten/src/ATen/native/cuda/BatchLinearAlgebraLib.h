@@ -35,6 +35,7 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper);
 
 void geqrf_cusolver(const Tensor& input, const Tensor& tau);
+void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
