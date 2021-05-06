@@ -62,12 +62,14 @@ TORCH_META_FUNC(replication_pad1d_backward) (
 
   if (input.ndimension() == 3)
   {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     nbatch = input.size(0);
     dimw++;
     dimslices++;
   }
 
   /* sizes */
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
@@ -77,6 +79,53 @@ TORCH_META_FUNC(replication_pad1d_backward) (
       " Got: ", gradOutput.size(dimw));
 
   set_output(input.sizes(), input.options());
+}
+
+TORCH_META_FUNC(replication_pad2d) (
+  const Tensor& input, IntArrayRef paddingSize
+) {
+  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
+  int64_t pad_t = paddingSize[2];
+  int64_t pad_b = paddingSize[3];
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+
+  // allow 0 dim batch size and nothing else.
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
+  TORCH_CHECK(
+      (input.dim() == 3 && input.size(0) != 0 && valid_dims) ||
+      (input.dim() == 4 && valid_dims && input.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
+
+  if (input.dim() == 4)
+  {
+    nbatch = input.size(0);
+    dimw++;
+    dimh++;
+    dimslices++;
+  }
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t iheight = input.size(dimh);
+  int64_t iwidth = input.size(dimw);
+  int64_t oheight = iheight + pad_t + pad_b;
+  int64_t owidth  = iwidth + pad_l + pad_r;
+
+  TORCH_CHECK(owidth >= 1 || oheight >= 1,
+      "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
+      " Calculated output H: ", oheight, " W: ", owidth);
+
+  if (input.dim() == 3) {
+    set_output({nslices, oheight, owidth}, input.options());
+  } else {
+    set_output({nbatch, nslices, oheight, owidth}, input.options());
+  }
 }
 
 } // namespace meta
@@ -100,6 +149,7 @@ static inline void shapeCheck3d(
       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
       input.sizes());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     dimw++;
@@ -135,6 +185,7 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -144,6 +195,7 @@ TORCH_META_FUNC(replication_pad3d) (
 
   shapeCheck3d(input, pleft, pright, ptop, pbottom, pfront, pback);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -187,6 +239,7 @@ static void replication_pad1d_out_frame(
   int oStartX = std::max(0, pad_l);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
     for (auto k = start; k < end; k++)
     {
@@ -239,6 +292,7 @@ static void replication_pad1d_backward_out_frame(
   int oStartX = std::max(0, pad_l);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
     for (auto k = start; k < end; k++)
     {
@@ -295,6 +349,7 @@ static void replication_pad2d_out_frame(
   int oStartY = std::max(0, pad_t);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++)
     {
@@ -348,85 +403,6 @@ static void replication_pad2d_out_batch(
   });
 }
 
-void replication_pad2d_out_cpu_template(Tensor& output,
-    const Tensor& input_,
-    IntArrayRef paddingSize)
-{
-  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
-  int pad_l = paddingSize[0];
-  int pad_r = paddingSize[1];
-  int pad_t = paddingSize[2];
-  int pad_b = paddingSize[3];
-  int dimw = 2;
-  int dimh = 1;
-  int dimslices = 0;
-  int64_t nbatch = 1;
-
-  // allow 0 dim batch size and nothing else.
-  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
-  TORCH_CHECK(
-      (input_.dim() == 3 && input_.size(0) != 0 && valid_dims) ||
-      (input_.dim() == 4 && valid_dims && input_.size(3) != 0),
-      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-      input_.sizes());
-
-  if (input_.dim() == 4)
-  {
-    nbatch = input_.size(0);
-    dimw++;
-    dimh++;
-    dimslices++;
-  }
-
-  /* sizes */
-  int64_t nslices = input_.size(dimslices);
-  int64_t iheight = input_.size(dimh);
-  int64_t iwidth = input_.size(dimw);
-  int64_t oheight = iheight + pad_t + pad_b;
-  int64_t owidth  = iwidth + pad_l + pad_r;
-
-  TORCH_CHECK(owidth >= 1 || oheight >= 1,
-      "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
-      " Calculated output H: ", oheight, " W: ", owidth);
-
-
-  /* get contiguous input */
-  auto input = input_.contiguous();
-
-  /* resize output */
-  if (input.dim() == 3)
-  {
-    output.resize_({nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad2d_out_frame<scalar_t> (input_data, output_data,
-        nslices,
-        iwidth, iheight,
-        owidth, oheight,
-        pad_l, pad_r,
-        pad_t, pad_b);
-      }
-    );
-  }
-  else
-  {
-    output.resize_({nbatch, nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad2d_out_batch<scalar_t> (input_data, output_data,
-        nslices,
-        iwidth, iheight,
-        owidth, oheight,
-        pad_l, pad_r,
-        pad_t, pad_b,
-        nbatch);
-      }
-    );
-  }
-}
-
 template <typename scalar_t>
 static void replication_pad2d_backward_out_frame(
     scalar_t *ginput_p, scalar_t *goutput_p,
@@ -442,6 +418,7 @@ static void replication_pad2d_backward_out_frame(
   int oStartY = std::max(0, pad_t);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++)
     {
@@ -597,6 +574,7 @@ static void replication_pad3d_out_frame(
   int oStartZ = std::max(0, pfront);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
     for (auto k = start; k < end; k++) {
       for (int64_t z = 0; z < odepth; z++) {
@@ -682,6 +660,7 @@ static void replication_pad3d_backward_out_frame(
   int oStartZ = std::max(0, pfront);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
     for (auto k = start; k < end; k++) {
       for (int64_t z = 0; z < odepth; z++) {
@@ -761,6 +740,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int ptop = paddingSize[2];
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int pback = paddingSize[5];
   int dimw = 3;
   int dimh = 2;
@@ -768,6 +748,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int dimslices = 0;
   int64_t nbatch = 1;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -965,23 +946,63 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
   }
 }
 
-Tensor& replication_pad2d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
-{
-  replication_pad2d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
-}
+TORCH_IMPL_FUNC(replication_pad2d_out_cpu) (
+  const Tensor& input_, IntArrayRef paddingSize, const Tensor& output
+) {
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
+  int64_t pad_t = paddingSize[2];
+  int64_t pad_b = paddingSize[3];
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+  if (input_.dim() == 4) {
+    nbatch = input_.size(0);
+    dimw++;
+    dimh++;
+    dimslices++;
+  }
 
-Tensor replication_pad2d_cpu(
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  auto output = at::empty({0}, input.options());
-  replication_pad2d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
+  int64_t nslices = input_.size(dimslices);
+  int64_t iheight = input_.size(dimh);
+  int64_t iwidth = input_.size(dimw);
+  int64_t oheight = iheight + pad_t + pad_b;
+  int64_t owidth  = iwidth + pad_l + pad_r;
+
+  /* get contiguous input */
+  auto input = input_.contiguous();
+
+  /* resize output */
+  if (input.dim() == 3)
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad2d_out_frame<scalar_t> (input_data, output_data,
+        nslices,
+        iwidth, iheight,
+        owidth, oheight,
+        pad_l, pad_r,
+        pad_t, pad_b);
+      }
+    );
+  }
+  else
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad2d_out_batch<scalar_t> (input_data, output_data,
+        nslices,
+        iwidth, iheight,
+        owidth, oheight,
+        pad_l, pad_r,
+        pad_t, pad_b,
+        nbatch);
+      }
+    );
+  }
 }
 
 Tensor& replication_pad2d_backward_out_cpu(const Tensor& gradOutput,
@@ -1013,6 +1034,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -1023,6 +1045,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   /* get contiguous input */
   auto input = input_.contiguous();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5) {
     nbatch = input.size(0);
     dimw++;

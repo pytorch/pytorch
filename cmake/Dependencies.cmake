@@ -411,6 +411,12 @@ if(USE_QNNPACK)
     add_subdirectory(
       "${QNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+
+    # TODO: See https://github.com/pytorch/pytorch/issues/56285
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
+    endif()
+
     # We build static versions of QNNPACK and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -929,23 +935,18 @@ if(BUILD_PYTHON)
   # then these will just use "python", but at least they'll be consistent with
   # each other).
   if(NOT DEFINED PYTHON_INCLUDE_DIR)
-    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
-    # which sometimes outputs directories that do not exist
-    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    # TODO: Verify that sysconfig isn't inaccurate
+    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
       set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
     else()
-      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
-      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
-        set(PYTHON_INCLUDE_DIR "${_py_inc}")
-        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
-      endif()
+      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
     endif()
   endif(NOT DEFINED PYTHON_INCLUDE_DIR)
 
   if(NOT DEFINED PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
       if(MSVC)
@@ -1215,6 +1216,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+    list(APPEND HIP_CXX_FLAGS -DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     list(APPEND HIP_CXX_FLAGS -std=c++14)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1459,6 +1461,10 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx onnx_library)
     endif()
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
+    endif()
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
@@ -1578,7 +1584,9 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-  find_package(MAGMA)
+  if(USE_MAGMA)
+    find_package(MAGMA)
+  endif()
   if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
     include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
     if(USE_CUDA)
@@ -1602,8 +1610,14 @@ if(NOT INTERN_BUILD_MOBILE)
     message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
     message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
     message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+  elseif(USE_MAGMA)
+    message(WARNING
+      "Not compiling with MAGMA. Suppress this warning with "
+      "-DUSE_MAGMA=OFF.")
+    caffe2_update_option(USE_MAGMA OFF)
   else()
     message(STATUS "MAGMA not found. Compiling without MAGMA support")
+    caffe2_update_option(USE_MAGMA OFF)
   endif()
 
   # ARM specific flags
@@ -1808,14 +1822,6 @@ set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" F
 # ---[ Kineto
 if(USE_KINETO AND INTERN_BUILD_MOBILE)
   message(STATUS "Not using libkineto in a mobile build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND MSVC)
-  message(STATUS "Not using libkineto in a Windows build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND APPLE)
-  message(STATUS "Not using libkineto in a Mac build.")
   set(USE_KINETO OFF)
 endif()
 if(USE_KINETO AND (NOT USE_CUDA))

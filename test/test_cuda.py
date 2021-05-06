@@ -25,7 +25,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -384,7 +384,10 @@ class TestCuda(TestCase):
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device='cuda')
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 8000000000.00 GiB"):
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device='cuda')
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate more than 1EB memory"):
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
@@ -1913,7 +1916,7 @@ torch.cuda.synchronize()
                                                              inv_scale)
 
         if TEST_MULTIGPU:
-            with self.assertRaisesRegex(RuntimeError, r"scaled_grads must be on the same device."):
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
                                                                  found_inf,
                                                                  inv_scale)
@@ -1962,16 +1965,16 @@ torch.cuda.synchronize()
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
 
         # Simulates 2 consecutive unskipped iterations
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
         self.assertEqual(scale, 4.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
@@ -3417,6 +3420,120 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_record_stream(self):
+        # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
+        # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        potential_problem = torch.zeros((3,), device="cuda")
+        a = torch.zeros((3,), device="cuda")
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        g = torch.cuda._Graph()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(s0):
+            potential_problem.record_stream(s0)
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+            potential_problem.fill_(1.)
+        del potential_problem
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            # potential_problem's allocation should still be outstanding. if DeviceCachingAllocator::malloc
+            # mistakenly calls process_events, it will trigger cudaEventQueries on potential_problem's end-of-life
+            # event, which will cause the capture to error.
+            b = a.clone()
+
+            # Let's also see what happens if we record_stream on a tensor during capture.
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                b.fill_(1.)
+                b.record_stream(s2)  # dummy record_stream
+                del b
+            s1.wait_stream(s2)
+            g.capture_end()
+        torch.cuda.synchronize()
+
+        # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
+        c = torch.zeros((3,), device="cuda")
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    # If this test is the first in the process to try cudnn rnns with dropout, it'll initialize
+    # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
+    # as a memory leak unless we skip the leak check.
+    @skipCUDAMemoryLeakCheckIf(True)
+    def test_graph_cudnn_dropout(self):
+        # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
+        # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
+        # avoid syncing noncapturing streams with captured events or vice versa.
+        model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
+        x = torch.ones(100, 192, 512, device="cuda")
+
+        y = model(x)
+
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            y = model(x)
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        y = model(x)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_grad_scaling(self):
+        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+
+        weight = torch.ones((100,), device="cuda", requires_grad=True)
+        opt = torch.optim.SGD([weight], lr=0.1)
+        static_input = torch.ones_like(weight)
+        static_grad = torch.ones_like(weight)
+
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            # warmup
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # capture
+            g.capture_begin()
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # The above simulates a rudimentary backward pass.
+            # TODO: Once full-backward() capture is enabled (see https://github.com/pytorch/pytorch/pull/54227)
+            # change to
+            # loss = (w.half() * static_input).sum()
+            # scaler.scale(loss).backward()
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        input_vals = [5, 20000, 5, 40000]
+        # If the scale gets updated properly, these are the scale, growth tracker,
+        # and grad values we expect.
+        expected_scales = [4, 2, 2, 1]
+        expected_growth_trackers = [1, 0, 1, 0]
+        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
+
+        for data, scale, growth_tracker, grad_val in zip(input_vals,
+                                                         expected_scales,
+                                                         expected_growth_trackers,
+                                                         expected_grad_vals):
+            static_input.fill_(data)
+            g.replay()
+            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
+            scaler.step(opt)
+            scaler.update()
+            self.assertEqual(scaler._scale, scale)
+            self.assertEqual(scaler._growth_tracker, growth_tracker)
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -3792,16 +3909,16 @@ class TestCudaComm(TestCase):
     def test_matmul_device_mismatch(self):
         cpu = torch.rand((10, 10))
         cuda = cpu.cuda()
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cpu @ cuda
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cuda @ cpu
 
         for s, m1, m2 in product((cpu, cuda), repeat=3):
             if s.device == m1.device == m2.device:
                 torch.addmm(s, m1, m2)
             else:
-                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, m1, m2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")

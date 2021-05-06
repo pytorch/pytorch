@@ -1,5 +1,5 @@
 import unittest
-import onnxruntime  # noqa
+import onnxruntime  # noqa: F401
 import torch
 
 from torch.cuda.amp import autocast

@@ -9,7 +9,7 @@ import subprocess
 from typing import ClassVar
 from unittest import TestCase
 
-from etcd import EtcdKeyNotFound  # type: ignore
+from etcd import EtcdKeyNotFound
 
 from torch.distributed.elastic.rendezvous import RendezvousConnectionError, RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
