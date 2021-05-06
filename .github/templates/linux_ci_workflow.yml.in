@@ -204,6 +204,7 @@ jobs:
         name: Download PyTorch Test Reports
         with:
           name: test-reports
+          path: test/test-reports
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -214,8 +215,8 @@ jobs:
           pip install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py .
+          python tools/render_junit.py test
       - name: Display and upload test statistics (Click Me)
         run: |
           export PYTHONPATH=$PWD
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test-reports
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
