@@ -29,6 +29,18 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   // because many algorithms proceed by merging two sorted lists (of indices).
   bool coalesced_ = false;
 
+  // compute_numel with integer multiplication overflow check, see gh-57542
+  int64_t compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      TORCH_CHECK(
+          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
+          "numel: integer multiplication overflow");
+      n *= s;
+    }
+    return n;
+  }
+
 public:
   // Public for now...
   explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
