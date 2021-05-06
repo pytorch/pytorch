@@ -126,7 +126,7 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
 PyRRef::PyRRef(
     const py::object& value,
     const py::object& type_hint,
-    std::vector<c10::DeviceIndex> devices)
+    std::vector<c10::Device> devices)
     : PyRRef([&value, &type_hint, devices{std::move(devices)}]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(
