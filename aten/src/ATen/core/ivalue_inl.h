@@ -458,6 +458,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!eptr_);
+    return dataPtrs_;
+  }
+
   /**
    * Add a callback to the future.
    * The callbacks will be executed once the future completes.
@@ -486,9 +495,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * to know for sure when the callback has finished.
    */
   template<typename T>
-  c10::intrusive_ptr<Future> then(
-      T callback,
-      TypePtr type) {
+  c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<IValue, T, Future&>::value,
@@ -507,9 +514,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   template<typename T>
-  c10::intrusive_ptr<Future> thenAsync(
-      T callback,
-      TypePtr type) {
+  c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
@@ -529,8 +534,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             if (intermediateFut.hasError()) {
               childFut->setError(intermediateFut.exception_ptr());
             } else {
-              // FIXME Pass DataPtrs too.
-              childFut->markCompleted(intermediateFut.value());
+              childFut->markCompleted(
+                  intermediateFut.value(), intermediateFut.dataPtrs());
             }
           });
         });
@@ -570,6 +575,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   TypePtr elementType() const {
     return type_;
+  }
+
+  const std::vector<c10::Device>& devices() const {
+    return devices_;
   }
 
   // This method should be used when one intends to manually create a child
