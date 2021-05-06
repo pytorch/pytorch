@@ -41,9 +41,9 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
@@ -376,9 +376,9 @@ void initializeStreamsEvents(
     std::vector<at::cuda::CUDAEvent>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
-  for (const auto & tensorgroup : tensors) {
+  for (const auto& tensorgroup : tensors) {
     const auto device_id = tensorgroup[0].device().index();
-    for (const auto & tensor: tensorgroup) {
+    for (const auto& tensor : tensorgroup) {
       if (tensor.device().index() != device_id) {
         throw std::runtime_error(
             "tensors in the nested tensor vectors need to "
@@ -417,6 +417,28 @@ void initializeStreamsEvents(
 const auto kLoopbackAddress = "127.0.0.1";
 
 } // namespace
+
+// static
+void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
+  std::exception_ptr eptr;
+  try {
+    work->run();
+  } catch (...) {
+    eptr = std::current_exception();
+  }
+  work->finish(eptr);
+}
+
+std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
+  TORCH_CHECK(
+      isCompleted(),
+      "Work needs to be completed before calling result(). "
+      "Should call wait() before result().");
+  TORCH_CHECK(
+      outputTensors_.size() <= 1, "work result does not support list of lists.");
+  return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
+                                    : outputTensors_.at(0);
+}
 
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
@@ -732,7 +754,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:broadcast", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:broadcast", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -879,7 +901,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:all_reduce", inputs),
         context(context),
         inputs(inputs),
         reduceOp(reduceOp),
@@ -901,7 +923,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
-    outputs_ = inputs;
   }
 
   template <typename T>
@@ -916,17 +937,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
-
-  std::vector<at::Tensor> result() override {
-    TORCH_CHECK(
-        isCompleted(),
-        "Work needs to be completed before calling result(). "
-        "Should call wait() before result().");
-    return outputs_;
-  }
-
- protected:
-  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -967,7 +977,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:sparse_all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:sparse_all_reduce", inputs),
         context(context),
         inputs(inputs),
         tag(tag) {}
@@ -1110,7 +1120,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
-    for (auto & input : inputs) {
+    for (auto& input : inputs) {
       input.copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
@@ -1178,7 +1188,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
     size_t offset = 0;
-    for (const auto & i : metadata) {
+    for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = sparseDim * nnz;
       indices.push_back(
@@ -1223,7 +1233,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
     size_t offset = 0;
-    for (const auto & i : metadata) {
+    for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
       auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
@@ -1277,8 +1287,6 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
-
-    outputs_ = inputs;
   }
 
   void synchronize() override {
@@ -1493,7 +1501,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:reduce", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1658,7 +1666,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather", inputs),
+      : ProcessGroupGloo::AsyncWork(outputs, "gloo:all_gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -1688,7 +1696,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::allgather(opts);
 
     // Unflatten into output tensors.
-    for (auto & outputgroup : outputs) {
+    for (auto& outputgroup : outputs) {
       for (const auto j : c10::irange(outputgroup.size())) {
         outputgroup[j].copy_(flatOutputTensor[j]);
       }
@@ -1817,7 +1825,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
   assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
-  for (const auto & output : outputs) {
+  for (const auto& output : outputs) {
     assertTypeAndSizesMatch(invalidArgument, output, options, sizes);
   }
 
@@ -1859,7 +1867,10 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather", input_list),
+      : ProcessGroupGloo::AsyncWork(
+            output_lists,
+            "gloo:all_gather",
+            input_list),
         context(context),
         output_lists(output_lists),
         input_list(input_list),
@@ -1989,7 +2000,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:gather", inputs),
+      : ProcessGroupGloo::AsyncWork(outputs, "gloo:gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2195,6 +2206,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       int root,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
+            {outputs},
             "gloo:scatter",
             inputs.size() > 0
                 ? c10::optional<std::vector<at::Tensor>>(inputs[0])
@@ -2261,7 +2273,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     }
 
     tmpOutputs.reserve(outputs.size());
-    for (auto & output : outputs) {
+    for (auto& output : outputs) {
       tmpOutputs.push_back(pinnedLike(output));
     }
   }
@@ -2394,6 +2406,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& inputCounts,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
+            {{outputTensor}},
             "gloo:all_to_all",
             c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
@@ -2652,7 +2665,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:barrier", c10::nullopt),
+      : ProcessGroupGloo::AsyncWork({}, "gloo:barrier", c10::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}
@@ -2703,7 +2716,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
 void ProcessGroupGloo::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-      C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
+  C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
   // Use default timeout if no timeout was specified.
   auto monitoredBarrierTimeout =
       (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
@@ -2721,15 +2734,12 @@ void ProcessGroupGloo::monitoredBarrier(
       recvWork->wait();
     } catch (const std::exception& e) {
       const std::string error = c10::str(
-        "Rank ",
-        rank,
-        " successfully reached monitoredBarrier, but received errors while waiting",
-        " to be unblocked by rank 0. Please check rank 0 logs for faulty rank."
-      );
+          "Rank ",
+          rank,
+          " successfully reached monitoredBarrier, but received errors while waiting",
+          " to be unblocked by rank 0. Please check rank 0 logs for faulty rank.");
       logAndThrow(
-        error,
-        c10::str(error, "\n Original exception: \n", e.what())
-      );
+          error, c10::str(error, "\n Original exception: \n", e.what()));
     }
     return;
   }
@@ -2760,10 +2770,7 @@ void ProcessGroupGloo::monitoredBarrier(
                 startTime, monitoredBarrierTimeout, waitAllRanks);
             if (!waitAllRanks) {
               checkRemainingTime(
-                  monitoredBarrierTimeout,
-                  remainingTime,
-                  processedRanks,
-                  rank);
+                  monitoredBarrierTimeout, remainingTime, processedRanks, rank);
             }
             work.second->wait(remainingTime);
             rankResponded = true;
@@ -2822,8 +2829,7 @@ void ProcessGroupGloo::monitoredBarrier(
 
   auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - startTime);
-  LOG(INFO) << "All ranks passed monitoredBarrier in "
-            << elapsedTime.count()
+  LOG(INFO) << "All ranks passed monitoredBarrier in " << elapsedTime.count()
             << " ms.";
 }
 
@@ -2836,19 +2842,19 @@ void ProcessGroupGloo::setSequenceNumberForGroup() {
     store_->set(kSeqNumStoreKey, values);
   } else {
     // Read rank 0's sequence number from store.
-   sequenceNum_ = c10d::SequenceNum();
-   store_->wait({kSeqNumStoreKey}, options_->timeout);
-   std::vector<char> values = store_->get(kSeqNumStoreKey);
-   uint64_t num = c10d::fromVec<char>(values);
-   sequenceNum_->set(num);
-   }
+    sequenceNum_ = c10d::SequenceNum();
+    store_->wait({kSeqNumStoreKey}, options_->timeout);
+    std::vector<char> values = store_->get(kSeqNumStoreKey);
+    uint64_t num = c10d::fromVec<char>(values);
+    sequenceNum_->set(num);
+  }
 }
 
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
   TORCH_CHECK(
-    sequenceNum_ != c10::nullopt,
-    "Sequence number is not set for rank ", rank_
-  );
+      sequenceNum_ != c10::nullopt,
+      "Sequence number is not set for rank ",
+      rank_);
   return sequenceNum_->get();
 }
 
