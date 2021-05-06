@@ -22,6 +22,8 @@ if __name__ == '__main__':
 
 class TestTypesAndAnnotation(JitTestCase):
     def test_pep585_type(self):
+        # TODO add test to use PEP585 type annotation for return type after py3.9
+        # see: https://www.python.org/dev/peps/pep-0585/#id5
         def fn(x: torch.Tensor) -> Tuple[Tuple[torch.Tensor], Dict[str, int]]:
             xl: list[tuple[torch.Tensor]] = []
             xd: dict[str, int] = {}
