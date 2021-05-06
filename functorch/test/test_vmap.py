@@ -13,6 +13,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 import types
 
 from functorch import vmap
+from functorch._C import reshape_dim_into, reshape_dim_outof
 
 
 FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
@@ -877,6 +878,45 @@ class TestVmapAPI(TestCase):
         # backward. When this happens, we should modify this test to use a
         # different op (and/or create and use a dummy operator) to avoid bitrot.
         self._assert_uses_vmap_fallback([get_vjp], [v])
+
+    def test_reshape_dim_into(self):
+        x = torch.randn(2, 3, 5, 7)
+
+        y = reshape_dim_into(0, 0, x)
+        self.assertEqual(y, x.reshape(6, 5, 7))
+
+        y = reshape_dim_into(0, 1, x)
+        self.assertEqual(y, x.movedim(0, 1).reshape(3, 2 * 5, 7))
+
+        y = reshape_dim_into(0, 2, x)
+        self.assertEqual(y, x.movedim(0, 2).reshape(3, 5, 2 * 7))
+
+        y = reshape_dim_into(1, 2, x)
+        self.assertEqual(y, x.movedim(1, 2).reshape(2, 5, 3 * 7))
+
+        y = reshape_dim_into(0, -2, x)
+        self.assertEqual(y, x.movedim(0, 1).reshape(3, 2 * 5, 7))
+
+        y = reshape_dim_into(0, -1, x)
+        self.assertEqual(y, x.movedim(0, 2).reshape(3, 5, 2 * 7))
+
+        y = reshape_dim_into(-4, -1, x)
+        self.assertEqual(y, x.movedim(0, 2).reshape(3, 5, 2 * 7))
+
+    def test_reshape_dim_outof(self):
+        x = torch.randn(12, 12, 12).permute(2, 1, 0)
+
+        y = reshape_dim_outof(0, 2, x)
+        self.assertEqual(y, x.reshape(2, 6, 12, 12))
+
+        y = reshape_dim_outof(1, 4, x)
+        self.assertEqual(y, x.reshape(12, 4, 3, 12))
+
+        y = reshape_dim_outof(2, 6, x)
+        self.assertEqual(y, x.reshape(12, 12, 6, 2))
+
+        y = reshape_dim_outof(-1, 6, x)
+        self.assertEqual(y, x.reshape(12, 12, 6, 2))
 
 def slice_inputs(inputs, bdims, i):
     result = []
