@@ -13,7 +13,7 @@ import configparser
 
 from typing import List, Dict, Any, Optional, Tuple
 
-from mypy_wrapper import is_match
+from mypy_wrapper import is_match  # type: ignore[import]
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
