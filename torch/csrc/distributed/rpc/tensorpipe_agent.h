@@ -43,8 +43,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
-
 struct LazyStreamContext;
 
 using steady_clock_time_point =
@@ -202,6 +200,8 @@ class TensorPipeAgent : public RpcAgent {
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
+
+  const std::vector<c10::Device>& getDevices() const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
