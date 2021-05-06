@@ -12,7 +12,7 @@ namespace jit {
 namespace tensorexpr {
 
 // Returns true if the TE fuser supports this conv2d.
-bool conv2dIsSupported(const Node* node);
+bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
 template <typename T>
@@ -57,6 +57,7 @@ inline std::string getArgValueName(const ArgValue& a) {
     throw std::runtime_error("ArgValue type not handled in string conversion");
   }
 }
+
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
@@ -72,6 +73,11 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   }
   return res;
 }
+
+struct TensorInfo {
+  std::vector<int64_t> dims;
+  c10::ScalarType dtype;
+};
 
 enum ElementType {
   kAllTypes = 0,
@@ -164,8 +170,6 @@ class TORCH_API TensorExprKernel {
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
-
-  Tensor* computeConv2d(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
 

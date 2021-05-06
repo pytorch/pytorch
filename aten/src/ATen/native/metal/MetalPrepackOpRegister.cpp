@@ -16,7 +16,7 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
-  auto packedWeight = at::native::contiguous(weight, MemoryFormat::ChannelsLast);
+  auto packedWeight = weight.contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
       std::move(bias),
