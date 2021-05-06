@@ -1460,6 +1460,10 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
   return it->second;
 }
 
+const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
+  return devices_;
+}
+
 size_t TensorPipeAgent::timeoutMapSize() {
   std::unique_lock<std::mutex> lock(timeoutMapMutex_);
   return timeoutMap_.size();
