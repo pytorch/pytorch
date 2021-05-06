@@ -939,7 +939,7 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        # TODO: could use linalg.cholesky(X, upper=True) once it is implemented
+        # TODO: Consider reordering the operations to work with lower-triangular matrices
         R = torch.linalg.cholesky(((SBS * d_row) * d_col).transpose(-2, -1).conj()).transpose(-2, -1).conj()
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
