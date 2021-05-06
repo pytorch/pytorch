@@ -23,6 +23,37 @@ TORCH_API Tensor* conv2d_depthwise(
     int pad,
     int groups);
 
+TORCH_API Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    BufHandle bias,
+    ExprHandle N,
+    ExprHandle C,
+    ExprHandle H,
+    ExprHandle W,
+    ExprHandle K,
+    ExprHandle CperG,
+    ExprHandle R,
+    ExprHandle S,
+    ExprHandle stride,
+    ExprHandle pad,
+    ExprHandle groups);
+
+TORCH_API Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    ExprHandle N,
+    ExprHandle C,
+    ExprHandle H,
+    ExprHandle W,
+    ExprHandle K,
+    ExprHandle CperG,
+    ExprHandle R,
+    ExprHandle S,
+    ExprHandle stride,
+    ExprHandle pad,
+    ExprHandle groups);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
