@@ -102,6 +102,12 @@ TORCH_META_FUNC(floor) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(sign) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(),
+              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -144,6 +150,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
 CREATE_UNARY_TORCH_IMPL_FUNC(round)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign)
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
@@ -401,14 +408,6 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
-
-Tensor& sign_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(),
-              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  return unary_op_impl_out(result, self, sign_stub);
-}
-Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
-Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
 Tensor& sgn_out(const Tensor& self, Tensor& result) {
   if (self.is_complex()) {
