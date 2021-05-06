@@ -4729,9 +4729,8 @@ def _in_projection(
     r"""
     Performs the in-projection step of the attention operation. This is simply
     a triple of linear projections, with shape constraints on the weights which
-    ensure shape uniformity in the projected outputs. See Shape section below
-    for details.
-    Output is a list containing projections for query, key and value.
+    ensure embedding dimension uniformity in the projected outputs.
+    Output is a tensor list containing projections for query, key and value.
 
     Args:
         q, k, v: query, key and value tensors to be projected.
@@ -4740,11 +4739,11 @@ def _in_projection(
 
     Shape:
         Inputs:
-        - q: :math:`(Qdims..., Eq)` where Eq is the query embedding dimension and Qdims is any
+        - q: :math:`(Qdims..., Eq)` where Eq is the query embedding dimension and Qdims are any
             number of leading dimensions.
-        - k: :math:`(Kdims..., Ek)` where Ek is the key embedding dimension and Kdims is any
+        - k: :math:`(Kdims..., Ek)` where Ek is the key embedding dimension and Kdims are any
             number of leading dimensions.
-        - v: :math:`(Vdims..., Ev)` where Ev is the value embedding dimension and Vdims is any
+        - v: :math:`(Vdims..., Ev)` where Ev is the value embedding dimension and Vdims are any
             number of leading dimensions.
         - w_q: :math:`(Eq, Eq)`
         - w_k: :math:`(Eq, Ek)`
@@ -4753,19 +4752,19 @@ def _in_projection(
         - b_k: :math:`(Eq)`
         - b_v: :math:`(Eq)`
 
-        Output: in output list :math:`[q', k', v']`,
+        Output: in output triple :math:`(q', k', v')`,
          - q': :math:`[Qdims..., Eq]`
          - k': :math:`[Kdims..., Eq]`
          - v': :math:`[Vdims..., Eq]`
 
     """
     Eq, Ek, Ev = q.size(-1), k.size(-1), v.size(-1)
-    assert list(w_q.size()) == [Eq, Eq]
-    assert list(w_k.size()) == [Eq, Ek]
-    assert list(w_v.size()) == [Eq, Ev]
-    assert b_q is None or list(b_q.size()) == [Eq]
-    assert b_k is None or list(b_k.size()) == [Eq]
-    assert b_v is None or list(b_v.size()) == [Eq]
+    assert w_q.shape == (Eq, Eq), f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
+    assert w_k.shape == (Eq, Ek), f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
+    assert w_v.shape == (Eq, Ev), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
+    assert b_q is None or b_q.shape == (Eq,), f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+    assert b_k is None or b_k.shape == (Eq,), f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+    assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -4773,21 +4772,43 @@ def _scaled_dot_product_attention(
     q: Tensor,
     k: Tensor,
     v: Tensor,
-    attn_mask: Optional[Tensor],
-    drop: float = 0.0,
-    training: bool = True,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
 ) -> Tuple[Tensor, Tensor]:
-    # TODO docstr
-    B, Nq, E = q.shape
+    r"""Computes scaled dot product attention query, key, value tensors, using
+        an optional attention mask if passed, and applying dropout if a probability
+        greater than 0.0 is specified.
+        Returns a tensor pair containing attended values and attention weights.
+
+    Args:
+        q, k, v: query, key and value tensors. See Shape section for shape details.
+        attn_mask: optional float tensor containing mask values to be added to
+            calculated attention. May be 2D or 3D; see Shape section for details.
+        dropout_p: dropout probability. If greater than 0.0, dropout is applied.
+
+    Shape:
+        - q: :math:`(B, Nt, E)` where B is batch size, Nt is the target sequence length,
+            and E is embedding dimension.
+        - key: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
+            and E is embedding dimension.
+        - value: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
+            and E is embedding dimension.
+        - attn_mask: either a 3D tensor of shape :math:`(B, Nt, Ns)` or a 2D tensor of
+            shape :math:`(Nt, Ns)`.
+
+        - Output: attention values have shape :math:`(B, Nt, E)`; attention weights
+            have shape :math:`(B, Nt, Ns)`
+    """
+    B, Nt, E = q.shape
     q = q / math.sqrt(E)
-    # (B, Nq, E) x (B, E, Nk) -> (B, Nq, Nk)
+    # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
     attn = torch.bmm(q, k.transpose(-2, -1))
     if attn_mask is not None:
         attn += attn_mask
     attn = softmax(attn, dim=-1)
-    if drop > 0.0:
-        attn = dropout(attn, p=drop, training=training)
-    # (B, Nq, Nk) x (B, Nk, E) -> (B, Nq, E)
+    if dropout_p > 0.0:
+        attn = dropout(attn, p=dropout_p)
+    # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
     output = torch.bmm(attn, v)
     return output, attn
 
@@ -4917,11 +4938,13 @@ def multi_head_attention_forward(
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
         assert key.shape[:2] == value.shape[:2], \
-            f"key's [sequence, batch] dims {list(key.shape[:2])} do not match value's {list(value.shape[:2])}"
+            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
     else:
         assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
 
+    #
     # compute in-projection
+    #
     if not use_separate_proj_weight:
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
@@ -4944,14 +4967,14 @@ def multi_head_attention_forward(
                 f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
-            correct_size = [tgt_len, src_len]
-            if list(attn_mask.size()) != correct_size:
-                raise RuntimeError(f"The size of the 2D attn_mask is {list(attn_mask.size())}, but should be {correct_size}.")
+            correct_size = (tgt_len, src_len)
+            if attn_mask.shape != correct_size:
+                raise RuntimeError(f"The shape of the 2D attn_mask is {attn_mask.shape}, but should be {correct_size}.")
             attn_mask = attn_mask.unsqueeze(0)
         elif attn_mask.dim() == 3:
-            correct_size = [bsz * num_heads, tgt_len, src_len]
-            if list(attn_mask.size()) != correct_size:
-                raise RuntimeError(f"The size of the 3D attn_mask is {list(attn_mask.size())}, but should be {correct_size}.")
+            correct_size = (bsz * num_heads, tgt_len, src_len)
+            if attn_mask.shape != correct_size:
+                raise RuntimeError(f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_size}.")
         else:
             raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
 
@@ -4980,15 +5003,19 @@ def multi_head_attention_forward(
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_k.size(0) == bsz * num_heads, f"expecting static_k.size(0) of {bsz * num_heads}, got {static_k.size(0)}"
-        assert static_k.size(2) == head_dim, f"expecting static_k.size(2) of {head_dim}, got {static_k.size(2)}"
+        assert static_k.size(0) == bsz * num_heads, \
+            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+        assert static_k.size(2) == head_dim, \
+            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_v.size(0) == bsz * num_heads, f"expecting static_v.size(0) of {bsz * num_heads}, got {static_v.size(0)}"
-        assert static_v.size(2) == head_dim, f"expecting static_v.size(2) of {head_dim}, got {static_v.size(2)}"
+        assert static_v.size(0) == bsz * num_heads, \
+            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+        assert static_v.size(2) == head_dim, \
+            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
         v = static_v
 
     # add zero attention along batch dimension (now first)
@@ -5006,8 +5033,8 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert list(key_padding_mask.shape) == [bsz, src_len], \
-            f"expecting key_padding_mask shape of {[bsz, src_len]}, got {list(key_padding_mask.shape)}"
+        assert key_padding_mask.shape == (bsz, src_len), \
+            f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
         key_padding_mask = key_padding_mask.view(bsz, 1, 1, src_len).   \
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
@@ -5023,8 +5050,14 @@ def multi_head_attention_forward(
         new_attn_mask.masked_fill_(attn_mask, float("-inf"))
         attn_mask = new_attn_mask
 
-    # (deep breath) calculate attention
-    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, training)
+    # adjust dropout probability
+    if not training:
+        dropout_p = 0.0
+
+    #
+    # (deep breath) calculate attention and out projection
+    #
+    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
