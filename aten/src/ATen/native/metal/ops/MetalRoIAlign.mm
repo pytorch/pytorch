@@ -49,14 +49,14 @@ torch::Tensor RoIAlign(
       rois.size(0), features.size(1), aligned_height, aligned_width};
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(features);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
 
   NSUInteger scale = (NSUInteger)(spatial_scale * 10000);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:@"roi_align"
+      specializedPipelineState:"roi_align"
                      Constants:@[
                        @(scale),
                        @((NSUInteger)sampling_ratio),
