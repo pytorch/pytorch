@@ -1893,18 +1893,22 @@
 
 - func: floor(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: floor_out
 
