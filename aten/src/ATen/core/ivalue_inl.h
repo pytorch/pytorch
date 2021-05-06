@@ -538,6 +538,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return type_;
   }
 
+  const std::vector<c10::Device>& devices() const {
+    return devices_;
+  }
+
   // This method should be used when one intends to manually create a child
   // future, for example when implementing a customized version of then().
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
