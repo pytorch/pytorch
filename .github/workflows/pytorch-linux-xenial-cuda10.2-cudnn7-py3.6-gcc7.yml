@@ -230,7 +230,7 @@ jobs:
         # tools/print_test_stats.py to natively support GitHub Actions
         env:
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+          CIRCLE_JOB: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
