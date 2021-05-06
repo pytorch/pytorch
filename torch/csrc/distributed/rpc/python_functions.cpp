@@ -147,11 +147,6 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
         child->setError(future->exception_ptr());
       } else {
         const Message& message = *future->value().toCustomClass<Message>();
-        std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
-        dataPtrs.reserve(message.tensors().size());
-        for (const auto& tensor : message.tensors()) {
-          dataPtrs.emplace_back(tensor.storage().data_ptr());
-        }
 
         // toPyIValue might throw and we need to record the appropriate
         // exception.
@@ -163,7 +158,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
           return;
         }
 
-        child->markCompleted(ivalue, std::move(dataPtrs));
+        child->markCompleted(ivalue, future->dataPtrs());
       }
     }));
     return child;
