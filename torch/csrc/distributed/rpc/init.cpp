@@ -179,18 +179,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               value (object): The value to be wrapped by this RRef.
               type_hint (Type, optional): Python type that should be passed to
                   ``TorchScript`` compiler as type hint for ``value``.
-              devices (List[int], optional): CUDA devices used by the
-                  ``value``. When this is provided, this ``RRef`` will inspect
-                  the ``value``, get Tensor devices, and record an
-                  ``CUDAEvent`` for each device used by the ``value``. Later,
-                  when ``local_value()`` is called, this ``RRef`` will use
-                  recorded ``CUDAEvent`` objects to block current CUDA streams.
-                  Only use this argument when it is necessary for this ``RRef``
-                  to perform CUDA stream synchronizations. Note that
-                  ``CUDAEvent`` objects are only recorded once at ``RRef``
-                  construction time. If the ``value`` is later changed
-                  in-place, CUDA stream synchronizations need to be performed
-                  in application code.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -227,14 +215,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
-              py::init<
-                  const py::object&,
-                  const py::object&,
-                  std::vector<c10::DeviceIndex>>(),
+              py::init<const py::object&, const py::object&>(),
               py::arg("value"),
-              py::arg("type_hint") = py::none(),
-              py::kw_only(),
-              py::arg("devices") = std::vector<c10::DeviceIndex>())
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",

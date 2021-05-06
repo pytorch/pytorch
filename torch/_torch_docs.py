@@ -6695,22 +6695,40 @@ Alias for :func:`torch.linalg.householder_product`.
 
 add_docstr(torch.ormqr,
            r"""
-ormqr(input, input2, input3, left=True, transpose=False) -> Tensor
+ormqr(input, tau, other, left=True, transpose=False, *, out=None) -> Tensor
 
-Multiplies `mat` (given by :attr:`input3`) by the orthogonal `Q` matrix of the QR factorization
-formed by :func:`torch.geqrf` that is represented by `(a, tau)` (given by (:attr:`input`, :attr:`input2`)).
+Computes the matrix-matrix multiplication of a product of Householder matrices with a general matrix.
 
-This directly calls the underlying LAPACK function `?ormqr`.
-See `LAPACK documentation for ormqr`_ for further details.
+Multiplies a :math:`m \times n` matrix `C` (given by :attr:`other`) with a matrix `Q`,
+where `Q` is represented using Householder reflectors `(input, tau)`.
+See `Representation of Orthogonal or Unitary Matrices`_ for further details.
+
+If :attr:`left` is `True` then `op(Q)` times `C` is computed, otherwise the result is `C` times `op(Q)`.
+When :attr:`left` is `True`, the implicit matrix `Q` has size :math:`m \times m`.
+It has size :math:`n \times n` otherwise.
+If :attr:`transpose` is `True` then `op` is the conjugate transpose operation, otherwise it's a no-op.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+.. seealso::
+
+        :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
+        from the QR decomposition.
 
 Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-    input3 (Tensor): the matrix to be multiplied.
+    input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
+                    and `mn` equals to `m` or `n` depending on the :attr:`left`.
+    tau (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
+    other (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    left (bool): controls the order of multiplication.
+    transpose (bool): controls whether the matrix `Q` is conjugate transposed or not.
 
-.. _LAPACK documentation for ormqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+Keyword args:
+    out (Tensor, optional): the output Tensor. Ignored if `None`. Default: `None`.
 
+.. _Representation of Orthogonal or Unitary Matrices:
+    https://www.netlib.org/lapack/lug/node128.html
 """)
 
 add_docstr(torch.permute,
