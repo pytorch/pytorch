@@ -20,11 +20,8 @@ class PyTorchStreamReader;
 namespace torch {
 namespace jit {
 
-constexpr const char* kArchiveNameConstants = "constants";
 constexpr const char* kArchiveNameBytecode = "bytecode";
 constexpr const char* kArchiveNameVersion = "version";
-constexpr int64_t kBytecodeVersionV4 = 0x4L;
-constexpr int64_t kBytecodeVersionV5 = 0x5L;
 
 /*
 BackportManager manages a list of backport from n to n-1 function, and provides
