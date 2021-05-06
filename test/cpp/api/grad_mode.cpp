@@ -5,6 +5,7 @@
 using namespace torch::autograd;
 using namespace torch::test;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GradModeTest, TestRequiresGradFunctionalOp) {
   torch::AutoGradMode mode(false);
   for (bool requires_grad : {true, false}) {
@@ -16,6 +17,7 @@ TEST(GradModeTest, TestRequiresGradFunctionalOp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GradModeTest, TestRequiresGradInplaceOp) {
   torch::AutoGradMode mode(false);
   for (bool requires_grad : {true, false}) {
@@ -26,6 +28,7 @@ TEST(GradModeTest, TestRequiresGradInplaceOp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GradModeTest, TestRequiresGradViewOp) {
   torch::AutoGradMode mode(false);
   for (bool requires_grad : {true, false}) {
@@ -37,6 +40,7 @@ TEST(GradModeTest, TestRequiresGradViewOp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GradModeTest, TestRequiresGradViewOpExiting) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -45,7 +49,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     {
       torch::AutoGradMode mode(false);
-      view_out = a.view({2, 3});  // go through kernels: VariableType, InplaceOrView, CPU
+      view_out = a.view({2, 3});  // go through kernels: VariableType, ADInplaceOrView, CPU
       assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
@@ -60,8 +64,8 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
     }
 
     if (requires_grad) {
-      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, InplaceOrView, CPU
-        "A view was created in no_grad mode and is being modified inplace")
+      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, ADInplaceOrView, CPU
+        "A view was created in no_grad mode and is being modified inplace");
     } else {
         view_out.mul_(2);
     }

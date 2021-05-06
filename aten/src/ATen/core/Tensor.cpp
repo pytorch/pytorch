@@ -83,8 +83,9 @@ void Tensor::_backward(TensorList inputs,
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
-Tensor& Tensor::requires_grad_(bool _requires_grad) const {
-  return impl::GetVariableHooks()->requires_grad_(*this, _requires_grad);
+const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
+  impl::GetVariableHooks()->requires_grad_(*this, _requires_grad);
+  return *this;
 }
 
 // View Variables

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -421,24 +422,43 @@ static TypePtr getTensorType(const at::Tensor& t, bool complete) {
   return r;
 }
 
+static TypePtr inferShapeAndTypeForInput(
+    TypePtr input_type,
+    Stack::const_iterator& s_iter,
+    const Stack::const_iterator& s_iter_end,
+    bool complete);
+
 static TupleTypePtr getTupleTensorType(
-    const Stack::const_iterator& s_iter,
+    Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
     const TypePtr& tupleType,
     bool complete) {
-  AT_ASSERT(tupleType->kind() == TupleType::Kind);
-  AT_ASSERT(s_iter != s_iter_end);
-
+  TORCH_INTERNAL_ASSERT(tupleType->kind() == TupleType::Kind);
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
-    if (subType->kind() == TupleType::Kind) {
-      types.push_back(
-          getTupleTensorType(s_iter + 1, s_iter_end, subType, complete));
-    } else {
-      types.push_back(getTensorType(s_iter->toTensor(), complete));
-    }
+    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
+    types.emplace_back(
+        inferShapeAndTypeForInput(subType, s_iter, s_iter_end, complete));
   }
   return TupleType::create(types);
+}
+
+static TypePtr inferShapeAndTypeForInput(
+    TypePtr input_type,
+    Stack::const_iterator& s_iter,
+    const Stack::const_iterator& s_iter_end,
+    bool complete) {
+  if (input_type->kind() == TupleType::Kind) {
+    return getTupleTensorType(s_iter, s_iter_end, input_type, complete);
+  } else if (input_type->kind() == TensorType::Kind) {
+    auto type = getTensorType(s_iter->toTensor(), complete);
+    s_iter++;
+    return type;
+  } else {
+    // Primitive type, keep as is.
+    s_iter++;
+    return input_type;
+  }
 }
 
 static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
@@ -457,13 +477,8 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
         }
       }
     }
-    if (v->type()->kind() == TupleType::Kind) {
-      AT_ASSERT(v->node()->kind() == prim::Param);
-      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
-    } else {
-      v->setType(getTensorType(s_iter->toTensor(), complete));
-      s_iter++;
-    }
+    v->setType(
+        inferShapeAndTypeForInput(v->type(), s_iter, stack.end(), complete));
   }
 }
 
@@ -917,7 +932,11 @@ void initJitScriptBindings(PyObject* module) {
            return py::str("ScriptObject");
          }
          return invokeScriptMethodFromPython(
-             *method, std::move(args), std::move(kwargs));
+             *method,
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(args),
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(kwargs));
        }}};
 
   for (const char* mm_name : magic_method_names) {
@@ -932,7 +951,11 @@ void initJitScriptBindings(PyObject* module) {
               throw NotImplementedError();
             }
             return invokeScriptMethodFromPython(
-                *method, std::move(args), std::move(kwargs));
+                *method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(args),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
           });
     }
   }
@@ -1278,7 +1301,11 @@ void initJitScriptBindings(PyObject* module) {
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+                callee,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1370,7 +1397,11 @@ void initJitScriptBindings(PyObject* module) {
             Method& method = py::cast<Method&>(args[0]);
 
             return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), std::move(kwargs));
+                method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)
@@ -1501,7 +1532,13 @@ void initJitScriptBindings(PyObject* module) {
         if (cu->get_type(classname) != nullptr) {
           classname = cu->mangle(classname);
         }
-        auto classType = ClassType::create(classname, cu);
+
+        auto classType = ClassType::create(
+            classname,
+            cu,
+            /* is_module = */ false,
+            /* doc_string = */ "",
+            getUnresolvedClassAttributes(classDef));
         cu->register_type(classType);
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
@@ -1647,6 +1684,14 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return _load_for_mobile(in, optional_device);
+      });
+  m.def("_get_model_bytecode_version", [](const std::string& filename) {
+    return _get_model_bytecode_version(filename);
+  });
+  m.def(
+      "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
+        std::istringstream in(buffer);
+        return _get_model_bytecode_version(in);
       });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));

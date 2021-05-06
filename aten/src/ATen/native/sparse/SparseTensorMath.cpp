@@ -49,12 +49,6 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-static Tensor wrapped_scalar_tensor(const Scalar& s) {
-  auto tensor = scalar_to_tensor(s);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
@@ -126,6 +120,12 @@ SparseTensor& neg_out_sparse(const SparseTensor& t, SparseTensor& r) {
   // copy_sparse_ does not perform the copy if it is the same tensor
   copy_sparse_to_sparse_(r, t);
   r._values().neg_();
+  return r;
+}
+
+SparseTensor neg_sparse(const SparseTensor& t) {
+  SparseTensor r = get_result_tensor_for_unary_op(t);
+  neg_out_sparse(t, r);
   return r;
 }
 
@@ -255,7 +255,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -264,15 +264,16 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
+  // See note "Sparse Floor Division"
+  const bool should_coalesce = rounding_mode.has_value() && !t.is_coalesced();
   if (is_same_tensor(r, t)) {
-    // See note "Sparse Floor Division"
-    if (!r.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
+    if (should_coalesce) {
       coalesce_(r);
     }
-    r._values().div_(value);
+    r._values().div_(value, rounding_mode);
   } else {
     Tensor t_tmp = t;
-    if (!t.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
+    if (should_coalesce) {
       t_tmp = t.coalesce();
     }
     r.resize_as_(t_tmp);
@@ -280,11 +281,15 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
     indices.resize_as_(t_tmp._indices());
     indices.copy_(t_tmp._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
-    at::div_out(r_values, t_tmp._values(), value);
+    at::div_out(r_values, t_tmp._values(), value, rounding_mode);
     get_sparse_impl(r)->set_nnz_and_narrow(t_tmp._nnz());
     r._coalesced_(t_tmp.is_coalesced());
   }
   return r;
+}
+
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
+  return div_out_sparse_zerodim(t, value, /*rounding_mode=*/c10::nullopt, r);
 }
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
@@ -300,8 +305,25 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, value, self);
 }
 
-SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, const Scalar& value) {
+SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseTensor& r) {
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
+}
+
+Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
+  auto commonDtype = at::result_type(self, value);
+  if (c10::isIntegralType(commonDtype, /*include_bool=*/true) && !rounding_mode.has_value()) {
+    commonDtype = typeMetaToScalarType(at::get_default_dtype());
+  }
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  return div_out_sparse_zerodim(self, value, std::move(rounding_mode), result);
+}
+
+Tensor& div_sparse_(Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
+  return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
+}
+
+SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
+  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), std::move(rounding_mode), r);
 }
 
 // --------------------------------------------------------------------
@@ -819,6 +841,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
+
   if (cast_beta == 0) {
     r.zero_();
   } else if (cast_beta == 1) {
@@ -981,8 +1004,7 @@ Tensor _sparse_mm(
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm
 SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
-  const Tensor& dense
-,
+  const Tensor& dense,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
@@ -1600,6 +1622,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
           Tensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
           Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
 
           s_addmm_out_sparse_dense_worker<scalar_t>(
             sparse_nnz,
