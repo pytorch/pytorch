@@ -2,7 +2,6 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -31,6 +30,7 @@ struct TORCH_API InterpreterSession {
   Obj from_ivalue(at::IValue ivalue) {
     return impl_->from_ivalue(std::move(ivalue));
   }
+
   ReplicatedObj create_movable(Obj obj);
   Obj from_movable(const ReplicatedObj& obj);
 
@@ -164,14 +164,7 @@ struct TORCH_API ReplicatedObj {
   }
 
   at::IValue call_kwargs(
-      std::vector<at::IValue> args,
-      std::unordered_map<std::string, c10::IValue> kwargs) const {
-    auto I = acquire_session();
-    return I.self.call_kwargs(std::move(args), std::move(kwargs)).toIValue();
-  }
-
-  [[nodiscard]] at::IValue call_kwargs(
-      std::unordered_map<std::string, c10::IValue> kwargs) const {
+      std::vector<std::tuple<std::string, at::IValue>> kwargs) const {
     auto I = acquire_session();
     return I.self.call_kwargs(std::move(kwargs)).toIValue();
   }
@@ -184,7 +177,6 @@ struct TORCH_API ReplicatedObj {
   std::shared_ptr<ReplicatedObjImpl> pImpl_;
   friend struct Package;
   friend struct InterpreterSession;
-  friend struct InterpreterManager;
 };
 
 struct TORCH_API Package {
