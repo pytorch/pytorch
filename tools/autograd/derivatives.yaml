@@ -1154,9 +1154,6 @@
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
 
-- name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
-  self: non_differentiable
-
 - name: linalg_eigvals(Tensor self) -> Tensor
   self: non_differentiable
 
