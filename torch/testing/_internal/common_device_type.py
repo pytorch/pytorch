@@ -605,7 +605,7 @@ class skipIf(object):
         self.dep = dep
         self.reason = reason
         self.device_type = device_type
-        self.temp_enable = True
+        self.temp_enable = temp_enable
 
     def __call__(self, fn):
 

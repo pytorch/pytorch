@@ -73,8 +73,9 @@ class SkipInfo(DecorateInfo):
        The skip will only be checked if the active_if argument is True."""
 
     def __init__(self, cls_name=None, test_name=None, *,
-                 device_type=None, dtypes=None, active_if=True):
-        super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
+                 device_type=None, dtypes=None, active_if=True, temp_enable=False):
+        decorators = [skipIf(True, "Skipped!", temp_enable), slowTest] if temp_enable else [skipIf(True, "Skipped!")]
+        super().__init__(decorators=decorators, cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
 
