@@ -25,40 +25,22 @@ c10::IValue readArchive(
   c10::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
+
+  // TODO (T90180710): Simplify type_resolver and obj_loader when getting
+  // bytecode version from model
   auto type_resolver = [&](const c10::QualifiedName& qn) {
-    return typeResolverGeneral(qn, compilation_unit);
+    return typeResolverMobile(qn, compilation_unit);
   };
 
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderGeneral(type, input, mobile_compilation_unit);
+    return objLoaderMobile(type, input, mobile_compilation_unit);
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
       archive_name, type_resolver, obj_loader, device, stream_reader);
   return ivalues;
-}
-
-bool check_zip_file(std::shared_ptr<ReadAdapterInterface> rai) {
-  std::array<uint8_t, 2> first_short{};
-  static constexpr uint8_t first_slot = 0x80;
-  static constexpr uint8_t second_slot = 0x02;
-  rai->read(
-      /*pos=*/0,
-      /*buf=*/&first_short,
-      /*n=*/2,
-      /*what=*/"checking archive");
-  if (first_short[0] == first_slot && first_short[1] == second_slot) {
-    // NB: zip files by spec can start with any data, so technically they might
-    // start with 0x80 0x02, but in practice zip files start with a file entry
-    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
-    // files that do not start with the file entry, so it is relatively safe to
-    // perform this check.
-    TORCH_WARN("The zip file might be problematic. Please check it again.");
-    return false;
-  }
-  return true;
 }
 
 std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
@@ -84,6 +66,8 @@ int64_t _get_model_bytecode_version(const std::string& filename) {
 
 int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
+    TORCH_WARN(
+        "The input model might not be generated from _save_for_mobile()");
     return -1;
   }
   PyTorchStreamReader reader(std::move(rai));
