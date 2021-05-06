@@ -1865,6 +1865,23 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. warning::
+
+    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
+    and will be removed in a future PyTorch release.
+
+    ``L = torch.cholesky(A)`` should be replaced with
+
+    .. code:: python
+
+        L = torch.linalg.cholesky(A)
+
+    ``U = torch.cholesky(A, upper=True)`` should be replaced with
+
+    .. code:: python
+
+        U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()
+
 .. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
           Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
           parameter and instead always returns the lower triangular matrix.

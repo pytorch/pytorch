@@ -1153,6 +1153,17 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 DEFINE_DISPATCH(cholesky_stub);
 
 Tensor cholesky(const Tensor &self, bool upper) {
+   TORCH_WARN_ONCE(
+    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
+    "removed in a future PyTorch release.\n",
+    "L = torch.cholesky(A)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.cholesky(A)\n",
+    "and\n"
+    "U = torch.cholesky(A, upper=True)\n",
+    "should be replaced with\n",
+    "U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()"
+  );
   if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -1180,6 +1191,17 @@ Tensor cholesky(const Tensor &self, bool upper) {
 }
 
 Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
+   TORCH_WARN_ONCE(
+    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be ",
+    "removed in a future PyTorch release.\n",
+    "L = torch.cholesky(A)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.cholesky(A)\n",
+    "and\n"
+    "U = torch.cholesky(A, upper=True)\n",
+    "should be replaced with\n",
+    "U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()"
+  );
   checkSameDevice("cholesky", result, self);
   checkLinalgCompatibleDtype("cholesky", result, self);
   Tensor result_tmp = at::cholesky(self, upper);
