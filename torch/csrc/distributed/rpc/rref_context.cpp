@@ -313,7 +313,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type,
-    std::vector<c10::DeviceIndex> devices) {
+    std::vector<c10::Device> devices) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
@@ -369,7 +369,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
     const TypePtr& type,
-    std::vector<c10::DeviceIndex> devices) {
+    std::vector<c10::Device> devices) {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
@@ -395,6 +395,8 @@ c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
       // Note: The type passed into RRefType::create() does not matter here, as
       // the future is marked as completed with the RRef of the specific type
       // in getOrCreateOwnerRRef().
+      // Also no need to specify any devices because the RRef object itself
+      // doesn't contain any DataPtrs, it just provides means to retrieve them.
       auto futureOwner =
           c10::make_intrusive<JitFuture>(RRefType::create(c10::AnyType::get()));
       pendingOwners_[rrefId] = futureOwner;
@@ -408,6 +410,8 @@ c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
     auto owner = iter->second;
     auto rrefPtr = fromOwnerRRef(owner);
 
+    // No need to specify any devices because the RRef object itself doesn't
+    // contain any DataPtrs, it just provides means to retrieve them.
     auto futureOwner =
         c10::make_intrusive<JitFuture>(RRefType::create(owner->type()));
     futureOwner->markCompleted(IValue(rrefPtr));
