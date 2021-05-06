@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
 )
 
-
 logging.basicConfig(
     level=logging.INFO, format="[%(levelname)s] %(asctime)s %(module)s: %(message)s"
 )
@@ -39,7 +38,7 @@ def _stuck_function(rank, mp_queue):
         time.sleep(5)
 
 
-@unittest.skipIf(IS_WINDOWS or IS_MACOS, "timer is not supported on macos or windowns")
+@unittest.skipIf(IS_WINDOWS, "timer is not supported on macos or windowns")
 class LocalTimerExample(unittest.TestCase):
     """
     Demonstrates how to use LocalTimerServer and LocalTimerClient
