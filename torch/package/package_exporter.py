@@ -21,13 +21,14 @@ from urllib.parse import quote
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 
-from .file_structure_representation import Directory, _create_directory_from_file_list
-from .glob_group import GlobPattern, GlobGroup
+from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
+from .file_structure_representation import Directory, _create_directory_from_file_list
 from .find_file_dependencies import find_files_source_depends_on
+from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
 
@@ -106,6 +107,8 @@ class PackageExporter:
         self.serialized_storages: Dict[str, Any] = {}
         # Only a dict for uniquing and deterministic ordering, the value is meaningless
         self.extern_modules: Dict[str, bool] = {}
+
+        self.dependency_graph = DiGraph()
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
 
@@ -123,7 +126,6 @@ class PackageExporter:
             Tuple[Any, Callable[[str], None], bool]
         ] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.matched_patterns: Set[int] = set()
-        self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
 
     def save_source_file(
@@ -279,7 +281,7 @@ class PackageExporter:
         if dependencies:
             deps = self._get_dependencies(src, module_name, is_package)
             for dep in deps:
-                self.debug_deps.append((module_name, dep))
+                self.dependency_graph.add_edge(module_name, dep)
 
             for dep in deps:
                 self.require_module_if_not_provided(dep)
@@ -304,7 +306,7 @@ class PackageExporter:
             return False
 
     def _write_dep_graph(self, failing_module=None):
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
         failing = "" if failing_module is None else f'"{failing_module}" [color=red];'
         template = f"""\
 digraph G {{
@@ -426,7 +428,7 @@ node [shape=box];
                         all_dependencies.append(module)
 
             for dep in all_dependencies:
-                self.debug_deps.append((package + "." + resource, dep))
+                self.dependency_graph.add_edge(f"<{package}.{resource}>", dep)
 
             if self.verbose:
                 dep_string = "".join(f"  {dep}\n" for dep in all_dependencies)
