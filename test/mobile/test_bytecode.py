@@ -261,5 +261,21 @@ class testVariousModelVersions(TestCase):
         torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
 
 
+    def test_load_and_run_model(self):
+        script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
+
+        # Load model v4 and v5 and run forward method
+        jit_module_v4 = torch.jit.load(str(script_module_v4))
+        mobile_module_v4 = _load_for_lite_interpreter(str(script_module_v4))
+
+        module_input = 1
+        jit_module_v4_result = jit_module_v4(module_input)
+        mobile_module_v4_result = mobile_module_v4(module_input)
+
+        expected_result = 3 * torch.ones([2, 4], dtype=torch.float64)
+
+        torch.testing.assert_allclose(jit_module_v4_result, expected_result)
+        torch.testing.assert_allclose(mobile_module_v4_result, expected_result)
+
 if __name__ == '__main__':
     run_tests()
