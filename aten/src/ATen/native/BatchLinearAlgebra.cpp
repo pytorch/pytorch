@@ -733,6 +733,14 @@ std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
   TORCH_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
@@ -743,6 +751,14 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
   checkSameDevice("solve", solution, self, "solution");
   checkSameDevice("solve", lu, self, "lu");
   checkLinalgCompatibleDtype("solve", solution, self, "solution");

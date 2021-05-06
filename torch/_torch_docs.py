@@ -3618,6 +3618,19 @@ batched outputs `solution, LU`.
 
 Supports real-valued and complex-valued inputs.
 
+.. warning::
+
+    :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve` has its arguments reversed and does not return the
+    LU factorization of the input.
+
+    ``X = torch.solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve(A, B)
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
