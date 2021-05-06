@@ -3369,6 +3369,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    MkldnnCPU: mkldnn_gelu
     CPU: gelu_cpu
     CUDA: gelu_cuda
 
@@ -6313,12 +6314,12 @@
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ormqr_out
+    CPU, CUDA: ormqr_out
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ormqr
+    CPU, CUDA: ormqr
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -6392,14 +6393,15 @@
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: polygamma.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: polygamma
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9510,13 +9512,9 @@
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg
