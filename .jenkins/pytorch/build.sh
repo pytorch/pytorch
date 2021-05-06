@@ -204,6 +204,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   ./xla/scripts/apply_patches.sh
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+  export USE_GLOO_WITH_OPENSSL=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
