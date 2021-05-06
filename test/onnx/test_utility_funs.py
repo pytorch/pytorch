@@ -97,6 +97,26 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::SplitToSequence"
 
+    def test_output_list(self):
+        class PaddingLayer(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input_t):
+                # type: (Tensor) -> Tensor
+                for i in range(2):
+                    input_t = input_t * 2
+                return input_t
+
+        input_t = torch.ones(size=[10], dtype=torch.long)
+        model = torch.jit.script(PaddingLayer())
+        example_output = model(input_t)
+
+        with self.assertRaises(RuntimeError):
+            torch.onnx.export(model,
+                              (input_t, ),
+                              "test.onnx",
+                              opset_version=self.opset_version,
+                              example_outputs=[example_output])
+
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
