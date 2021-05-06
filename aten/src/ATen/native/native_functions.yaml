@@ -3369,6 +3369,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    MkldnnCPU: mkldnn_gelu
     CPU: gelu_cpu
     CUDA: gelu_cuda
 
@@ -3652,22 +3653,22 @@
     CompositeExplicitAutograd: split_with_sizes
 
 - func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
-  variants: function
+  variants: function, method
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -6382,14 +6383,15 @@
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: polygamma.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: polygamma
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9500,13 +9502,9 @@
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CompositeExplicitAutograd: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg
