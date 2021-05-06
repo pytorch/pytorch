@@ -4758,7 +4758,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink,
-           supports_gradgrad=False,
+           supports_gradgrad=True,
            supports_out=False,
            autodiff_fusible_nodes=["aten::hardshrink"]),
     OpInfo('mm',
