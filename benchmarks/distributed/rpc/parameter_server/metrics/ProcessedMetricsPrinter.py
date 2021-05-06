@@ -17,8 +17,8 @@ class ProcessedMetricsPrinter:
         of processed metrics.
 
         Args:
-            processed_metrics_list (dict): is dictionary recorded metrics as keys.
-                the values are lists of elapsed times.
+            processed_metrics_list (list): a list containing dictionaries with
+                recorded metrics as keys, and the values are lists of elapsed times.
 
         Returns::
             A merged dictionary that is created from the list of dictionaries passed
@@ -36,7 +36,7 @@ class ProcessedMetricsPrinter:
             {
                 "forward_metric_type,forward_pass" : [.0111, .0222]
             }
-            >>> list_3 = instance.combine_processed_metrics(list_1, list_2)
+            >>> list_3 = instance.combine_processed_metrics([list_1,list_2])
             >>> print(list_3)
             {
                 "forward_metric_type,forward_pass" : [.0429, .0888, .0111, .0222]
