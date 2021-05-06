@@ -5416,7 +5416,10 @@ class TestLinalg(TestCase):
                 self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
                           (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
-                          (7, 5, 3, 5, 3), (7, 5, 3, 3, 5)):
+                          (7, 5, 3, 5, 3), (7, 5, 3, 3, 5),
+                          # empty tensors
+                          (0, 0), (0, 0, 0), (0, 3, 3)
+                          ):
                 a = make_tensor(shape, dtype=dtype, device=device, low=-0.1, high=+0.1)
                 a_lu, p = torch.lu(a, pivot=pivot)
                 p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
