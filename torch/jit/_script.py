@@ -345,7 +345,7 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
         raise RuntimeError(
             "Loading ScriptObjects from a PackageImporter created from a "
             "directory is not supported. Use a package archive file instead."
-        ) 
+        )
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
