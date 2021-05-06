@@ -20,11 +20,14 @@ namespace at {
 namespace native {
 
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
-    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::exp2(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND_2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "exp2_cuda", 
+      [&]() {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::exp2(a);
+        });
+      });
 }
 
 void i0_kernel_cuda(TensorIteratorBase& iter) {
@@ -101,11 +104,14 @@ void erf_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void erfc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::erfc(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "erfc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::erfc(a);
+        });
+      });
 }
 
 void erfinv_kernel_cuda(TensorIteratorBase& iter) {

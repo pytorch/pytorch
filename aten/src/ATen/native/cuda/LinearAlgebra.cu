@@ -407,22 +407,25 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, self.scalar_type(), "dot", [&] {
-    Tensor result = at::empty({}, self.options());
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      self.scalar_type(), "dot",
+      [&] {
+        Tensor result = at::empty({}, self.options());    
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
-    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
-    at::cuda::blas::dot<scalar_t>(
-        handle,
-        n,
-        self.data_ptr<scalar_t>(),
-        incx,
-        other.data_ptr<scalar_t>(),
-        incy,
-        result.data_ptr<scalar_t>());
+        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
+        at::cuda::blas::dot<scalar_t>(
+            handle,
+            n,
+            self.data_ptr<scalar_t>(),
+            incx,
+            other.data_ptr<scalar_t>(),
+            incy,
+            result.data_ptr<scalar_t>());    
 
-    return result;
-  });
+        return result;
+      });
 }
 
 Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
