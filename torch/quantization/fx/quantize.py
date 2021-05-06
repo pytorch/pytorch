@@ -528,6 +528,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> Argument:
+    # TODO(before land): docblock
     # print('checking', node, arg)
 
     # for ops such as torch.cat([x0, x1]),
@@ -578,6 +579,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             # TODO(future PR): change this so a placeholder is inserted for
             # future dequants, to make the logic easier to understand
             (node_dtype != torch.float) and
+            # if arg is a bool tensor, do not insert observer
+            (arg_dtype != torch.bool) and
             (is_activation and activation_is_statically_quantized(qconfig))
         )
         # print(1, weight_needs_obs, 2, bias_needs_obs, 3, dtype_changes_and_second_dtype_not_float)
@@ -677,15 +680,11 @@ def maybe_insert_input_observers_for_node_rewrite(
     # match the current node's target dtype, insert an observer.
     # print('\nnew_node', new_node.format_node(), new_node.op)
     new_args = []
-    arg_idxs_to_skip = node_bool_tensor_arg_indexes(node)
-    for arg_idx, arg in enumerate(node.args):
-        if arg_idx not in arg_idxs_to_skip:
-            new_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
-                node, arg, qconfig, load_arg, model, modules, graph,
-                node_name_to_target_dtype, cache_for_no_tensor_check,
-                qhandler, prepare_custom_config_dict)
-        else:
-            new_arg = arg
+    for arg in node.args:
+        new_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
+            node, arg, qconfig, load_arg, model, modules, graph,
+            node_name_to_target_dtype, cache_for_no_tensor_check,
+            qhandler, prepare_custom_config_dict)
         new_args.append(new_arg)
 
     new_kwargs = {}
@@ -775,11 +774,42 @@ def maybe_insert_output_observer_for_node_rewrite(
 
     return None
 
+def maybe_propagate_dtype_for_node_rewrite(
+    node: Node,
+    target_dtype: DType,
+    node_name_to_target_dtype: Dict[str, DType],
+    matches: Dict[str, MatchResult],
+) -> None:
+    # TODO(before land): docblock
+    node_name_to_target_dtype[node.name] = target_dtype
+    # if this is a copy node, propagate to first arg
+    root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+        node.name, (None, None, None, None, None))
+    if isinstance(qhandler, CopyNodeQuantizeHandler):
+        prev_node = node.args[0]
+        if isinstance(prev_node, Node):
+            maybe_propagate_dtype_for_node_rewrite(
+                prev_node, target_dtype, node_name_to_target_dtype, matches)
+
+def propagate_dtypes_for_known_nodes_rewrite(
+    graph: Graph,
+    node_name_to_target_dtype: Dict[str, DType],
+    matches: Dict[str, MatchResult],
+) -> None:
+    # TODO(before land): docblock
+    for node in graph.nodes:
+        bool_arg_idxs = node_bool_tensor_arg_indexes(node)
+        for bool_arg_idx in bool_arg_idxs:
+            cur_node = node.args[bool_arg_idx]
+            maybe_propagate_dtype_for_node_rewrite(
+                cur_node, torch.bool, node_name_to_target_dtype, matches)
+
 def adjust_observers_for_cat_rewrite(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
 ) -> None:
+    # TODO(before land): docblock
     # find the observer module to use
     first_arg = node.args[0]
     assert isinstance(first_arg, (list, tuple))
@@ -873,6 +903,24 @@ def insert_observers_for_model_rewrite(
     outputs_seen_counter = 0
     results_node = None
 
+    # first, populate the dtype map based only on qconfig and qhandler
+    # this assumes:
+    # graph inputs are fp32 by default, and int8 where overriden
+    # other nodes output dtype is specified by the qconfig
+    for node in model.graph.nodes:
+        root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+            node.name, (None, None, None, None, None))
+        node_name_to_target_dtype[node.name] = get_target_dtype_for_node_rewrite(
+            node, qconfig, inputs_seen_counter, outputs_seen_counter,
+            input_quantized_idxs, output_quantized_idxs, qhandler)
+
+    # Second, for nodes with known input dtypes, propagate them throughout the
+    # graph. For example, if there is a call such as
+    #   x1 = x0.masked_fill(mask, 1)
+    # we propagate the type of mask to be torch.bool
+    propagate_dtypes_for_known_nodes_rewrite(
+        model.graph, node_name_to_target_dtype, matches)
+
     for node in model.graph.nodes:
         # print('\nobs graph', observed_graph, '\n')
         # print('\nenv', env)
@@ -887,11 +935,6 @@ def insert_observers_for_model_rewrite(
         root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
         # print('match results', root_node, matched_nodes, pattern, qhandler, qconfig)
-
-        # assign a target dtype to the current node
-        node_name_to_target_dtype[new_node.name] = get_target_dtype_for_node_rewrite(
-            node, qconfig, inputs_seen_counter, outputs_seen_counter,
-            input_quantized_idxs, output_quantized_idxs, qhandler)
 
         #
         # After this point, the current node and all of its arguments
