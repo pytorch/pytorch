@@ -8,8 +8,12 @@ import yaml
 import asyncio
 import shutil
 import re
+import shlex
+import configparser
+
 from typing import List, Dict, Any, Optional, Tuple
 
+from tools.mypy_wrapper import is_match
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -83,20 +87,24 @@ def print_results(job_name: str, passed: bool, streams: List[str]) -> None:
 
 
 async def shell_cmd(
-    cmd: str, env: Optional[Dict[str, Any]] = None
+    cmd: str, env: Optional[Dict[str, Any]] = None, redirect: bool = True
 ) -> Tuple[bool, str, str]:
     proc = await asyncio.create_subprocess_shell(
         cmd,
         shell=True,
         cwd=REPO_ROOT,
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE if redirect else None,
+        stderr=subprocess.PIPE if redirect else None,
         executable=shutil.which("bash"),
     )
     stdout, stderr = await proc.communicate()
 
-    return proc.returncode == 0, stdout.decode(), stderr.decode()
+    passed = proc.returncode == 0
+    if not redirect:
+        return passed, "", ""
+
+    return passed, stdout.decode(), stderr.decode()
 
 
 PASS = color(col.GREEN, "\N{check mark}")
@@ -108,11 +116,30 @@ def header(name: str, passed: bool) -> None:
     print(f"{icon} {color(col.BLUE, name)}")
 
 
+def get_flake_excludes() -> List[str]:
+    config = configparser.ConfigParser()
+    config.read(os.path.join(REPO_ROOT, ".flake8"))
+
+    excludes = config["flake8"]["exclude"].split("\n")
+    return [i.strip() for i in excludes if i.strip() != ""]
+
+
 async def run_flake8(files: Optional[List[str]], quiet: bool) -> bool:
     cmd = "flake8"
     if files is not None:
-        files_list = " ".join([f"'{f}'" for f in files])
-        cmd = f"flake8 {files_list}"
+        excludes = get_flake_excludes()
+        files = [
+            f
+            for f in files
+            if not any(is_match(pattern=exclude, filename=f) for exclude in excludes)
+        ]
+        if len(files) == 0:
+            print_results("flake8", True, [])
+            return True
+
+        # shlex.join is Python 3.8+, but we guard for that before getting here
+        # so ignore mypy
+        cmd = f"flake8 {shlex.join(files)}"  # type: ignore[attr-defined]
 
     passed, stdout, stderr = await shell_cmd(cmd)
     print_results("flake8", passed, [stdout, stderr])
@@ -144,16 +171,14 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
         return passed
 
     # Not running quicklint, so use lint.yml
-    _, stdout, _ = await shell_cmd(
-        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run autogen'"
+    _, _, _ = await shell_cmd(
+        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run autogen'",
+        redirect=False,
     )
-    print(stdout, end="")
-
-    passed, stdout, _ = await shell_cmd(
-        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run mypy'"
+    passed, _, _ = await shell_cmd(
+        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run mypy'",
+        redirect=False,
     )
-    print(stdout, end="")
-
     return passed
 
 
@@ -254,7 +279,7 @@ def main() -> None:
     parser.add_argument("--step", action="append", help="steps to run (in order)")
     args = parser.parse_args()
 
-    relevant_files = ""
+    relevant_files = None
     quiet = not args.no_quiet
 
     if args.changed_only:
@@ -287,7 +312,7 @@ def main() -> None:
         relevant_steps = grab_specific_steps(args.step, job)
         future = run_steps(relevant_steps, args.job, relevant_files, quiet)
 
-    if sys.version_info > (3, 7):
+    if sys.version_info >= (3, 8):
         loop = asyncio.get_event_loop()
         loop.run_until_complete(future)
     else:
