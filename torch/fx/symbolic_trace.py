@@ -341,6 +341,17 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
+
+    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+        if isinstance(attr_val, torch.nn.Parameter):
+            for n, p in self.root.named_parameters():
+                if attr_val is p:
+                    if n not in parameter_proxy_cache:
+                        parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                    return parameter_proxy_cache[n]
+        return attr_val
+
+
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -398,13 +409,7 @@ class Tracer(TracerBase):
         @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
             attr_val = _orig_module_getattr(mod, attr)
-            if isinstance(attr_val, torch.nn.Parameter):
-                for n, p in self.root.named_parameters():
-                    if attr_val is p:
-                        if n not in parameter_proxy_cache:
-                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
-                        return parameter_proxy_cache[n]
-            return attr_val
+            return self._module_getattr(attr, attr_val, parameter_proxy_cache)
 
         @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):
