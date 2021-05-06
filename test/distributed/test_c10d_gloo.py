@@ -240,6 +240,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         w.wait()
         output = w.result()
         self.assertEqual(0, output[0].numel())
+        self.assertEqualIgnoreType(xs[0], output[0])
 
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)

@@ -199,7 +199,7 @@ std::vector<std::vector<at::Tensor>> waitWork(
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
     }
-    outputTensors.emplace_back(works[i]->result());
+    outputTensors.emplace_back(std::move(works[i]->result()));
   }
   return copyTensors(outputTensors);
 }
