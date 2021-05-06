@@ -1314,6 +1314,20 @@ class TestCuda(TestCase):
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
+    def test_external_streams(self):
+        stream_a = torch.cuda.Stream()
+        ext_stream = torch.cuda.streams.ExternalStream(stream_a.cuda_stream)
+        self.assertEqual(stream_a.cuda_stream, ext_stream.cuda_stream)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_external_streams_multi_device(self):
+        device = torch.device('cuda:1')
+        stream_a = torch.cuda.Stream(device=device)
+        ext_stream = torch.cuda.streams.ExternalStream(
+            stream_a.cuda_stream, device=device)
+        self.assertEqual(stream_a.cuda_stream, ext_stream.cuda_stream)
+        self.assertEqual(ext_stream.device, device)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))

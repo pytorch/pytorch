@@ -64,10 +64,13 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
+static std::atomic<uint32_t> external_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
+static std::array<LeakyStreamInternals, kStreamsPerPool>
+    external_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,9 +80,10 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // zeros         StreamIdType  stream id index
 //
 // Where StreamIdType:
-//  00 = default stream
-//  01 = low priority stream
-//  10 = high priority stream
+//  000 = default stream
+//  001 = low priority stream
+//  010 = high priority stream
+//  100 = externally allocated stream
 //
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
@@ -100,6 +104,7 @@ enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
   LOW = 0x1,
   HIGH = 0x2,
+  EXT = 0x4,
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
@@ -112,6 +117,9 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
       break;
     case StreamIdType::HIGH:
       stream << "HIGH";
+      break;
+    case StreamIdType::EXT:
+      stream << "EXT";
       break;
     default:
       stream << static_cast<uint8_t>(s);
@@ -155,6 +163,13 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
   // Check if it's the default stream
   if (ptr == &default_streams[device_index]) {
     return makeStreamId(StreamIdType::DEFAULT, 0);
+  }
+
+  // Check if it was a externally allocated stream
+  if (pointer_within<LeakyStreamInternals>(
+          ptr, external_streams[device_index])) {
+    return makeStreamId(
+        StreamIdType::EXT, ptr - external_streams[device_index].data());
   }
 
   // Check if it's a low priority stream
@@ -282,6 +297,8 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
       return &low_priority_streams[device_index][si];
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
+    case StreamIdType::EXT:
+      return &external_streams[device_index][si];
     default:
       TORCH_INTERNAL_ASSERT(
           0,
@@ -332,6 +349,21 @@ CUDAStream getStreamFromPool(
 
   const auto idx = get_idx(low_priority_counters[device_index]);
   return CUDAStream_fromInternals(&low_priority_streams[device_index][idx]);
+}
+
+CUDAStream getStreamFromExternal(
+    uint64_t ext_stream,
+    DeviceIndex device_index) {
+  uint32_t idx = get_idx(external_counters[device_index]);
+  external_streams[device_index][idx].stream =
+      reinterpret_cast<cudaStream_t>(ext_stream);
+  external_streams[device_index][idx].device_index = device_index;
+  return CUDAStream(
+      CUDAStream::UNCHECKED,
+      Stream(
+          Stream::UNSAFE,
+          c10::Device(DeviceType::CUDA, device_index),
+          CUDAStream_getStreamId(&external_streams[device_index][idx])));
 }
 
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
