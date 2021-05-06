@@ -16,8 +16,7 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
-  auto packedWeight =
-      at::native::contiguous(weight, MemoryFormat::ChannelsLast);
+  auto packedWeight = weight.contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
       std::move(bias),
@@ -36,9 +35,8 @@ c10::intrusive_ptr<LinearOpContext> unpack(
     const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 2);
   // Don't need to do `weight.t()`
-  auto packedWeight = at::native::contiguous(
-      weight.view({weight.size(0), weight.size(1), 1, 1}),
-      MemoryFormat::ChannelsLast);
+  auto packedWeight = weight.view({weight.size(0), weight.size(1), 1, 1})
+                          .contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<LinearOpContext>(
       std::move(packedWeight), std::move(bias), output_min, output_max);
 }
