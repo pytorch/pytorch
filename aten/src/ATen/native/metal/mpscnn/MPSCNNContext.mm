@@ -66,9 +66,12 @@ using namespace at::native::metal;
 #else
   return false;
 #endif
-  // Compile shader
   NSError* error = [self compileProgram];
-  TORCH_CHECK(!error, error.localizedDescription.UTF8String);
+  if (error) {
+    std::string compilationError = error.localizedDescription.UTF8String;
+    std::string deviceInfo = self.description.UTF8String;
+    TORCH_CHECK(false, compilationError + "\n" + deviceInfo);
+  }
   return _device && _library && _commandQueue;
 }
 
@@ -141,7 +144,6 @@ using namespace at::native::metal;
 
 - (NSError*)compileProgram {
   __block NSError* compilationError = nil;
-  // To ensure thread safety here.
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     NSError* localError = nil;
@@ -161,7 +163,7 @@ using namespace at::native::metal;
   NSString* desc =
       [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
                                  _deviceInfo.name.c_str(),
-                                 _deviceInfo.languageVersion];
+                                 (unsigned long)_deviceInfo.languageVersion];
   return desc;
 }
 
