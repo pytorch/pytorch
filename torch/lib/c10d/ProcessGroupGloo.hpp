@@ -73,12 +73,12 @@ class ProcessGroupGloo : public ProcessGroup {
   // by a background thread.
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(
+    explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
         : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
-          outputTensors_(outputTensors) {
+          outputTensors_(std::move(outputTensors)) {
     }
 
     ~AsyncWork() override = default;

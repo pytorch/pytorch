@@ -193,13 +193,13 @@ std::vector<std::vector<at::Tensor>> copyTensors(
 std::vector<std::vector<at::Tensor>> waitWork(
     std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
-  for (int i = 0; i < works.size(); ++i) {
+  for (auto& work : works) {
     try {
-      works[i]->wait();
+      work->wait();
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
     }
-    outputTensors.emplace_back(works[i]->result());
+    outputTensors.emplace_back(work->result());
   }
   return copyTensors(outputTensors);
 }
