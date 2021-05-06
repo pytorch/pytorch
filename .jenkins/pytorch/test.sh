@@ -155,7 +155,7 @@ test_python() {
 
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/create_test_cert.sh"
-  time python test/run_test.py --include distributed/test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include distributed/test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM" -- ProcessGroupGlooTest
   unset GLOO_DEVICE_TRANSPORT
   unset GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY
   unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT
@@ -476,9 +476,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
-    test_python_gloo_with_tls
-  fi
   install_torchvision
   install_monkeytype
   test_python
@@ -491,6 +488,9 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+    test_python_gloo_with_tls
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
