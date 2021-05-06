@@ -24,6 +24,7 @@ Tensor max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   TORCH_CHECK(input.is_metal());
+  TORCH_CHECK(input.dim() == 3 || input.dim() == 4);
   TORCH_CHECK(
       dilation[0] == dilation[1] == 1, "dilation is not supported on MPSCNN");
   const int64_t iN = input.sizes()[0];
@@ -58,7 +59,7 @@ Tensor max_pool2d(
   std::vector<int64_t> outputSize{oN, oC, oH, oW};
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [pool encodeToCommandBuffer:commandBuffer.buffer
                   sourceImage:X
@@ -87,7 +88,7 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
       input.sizes()[0], input.sizes()[1], output_size[0], output_size[1]};
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [pool encodeToCommandBuffer:commandBuffer.buffer
                   sourceImage:X

@@ -266,7 +266,7 @@ The invocation however incurs RPC calls to the remote end and can be performed
 asynchronously if needed via additional APIs supported by RemoteModule.
 
 .. autoclass:: torch.distributed.nn.api.remote_module.RemoteModule
-    :members:
+    :members: remote_parameters, get_module_rref
 
 
 Distributed Autograd Framework

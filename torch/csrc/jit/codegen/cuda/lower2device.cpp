@@ -60,10 +60,12 @@ void GpuLower::replaceSymbolicSizes() {
       const Val* orig_size = id->extent();
 
       // Output sizes could have reduction axes, which isn't what gets output.
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (id->isReduction() ||
           (id->getIterType() == IterType::BroadcastWithoutStride)) {
         continue;
       } else if (
+          // NOLINTNEXTLINE(bugprone-branch-clone)
           (id->getIterType() == IterType::BroadcastWithStride) ||
           orig_size->isConstScalar()) {
         dim++;
@@ -225,6 +227,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
       TORCH_CHECK(lowered_node != nullptr);
       return lowered_node;
     }
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   }
 
  private:

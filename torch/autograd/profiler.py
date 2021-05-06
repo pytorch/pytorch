@@ -244,22 +244,7 @@ class EventList(list):
                             '"cat": "cpu_to_cuda", '
                             '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
                                                evt.thread, next_id))
-                    f.write('{"name": "%s", '
-                            '"ph": "f", '
-                            '"ts": %s, '
-                            '"tid": %s, '
-                            '"pid": "CUDA functions", '
-                            '"id": %s, '
-                            '"cat": "cpu_to_cuda", '
-                            '"args": {}}, ' % (k.name, k.interval.start, k.device, next_id))
-                    f.write('{"name": "%s", '
-                            '"ph": "X", '
-                            '"ts": %s, '
-                            '"dur": %s, '
-                            '"tid": %s, '
-                            '"pid": "CUDA functions", '
-                            '"args": {}}, ' % (k.name, k.interval.start,
-                                               k.interval.elapsed_us(), k.device))
+                    # Note: use torch.profiler to get device kernel trace
                     next_id += 1
 
             # remove trailing whitespace and comma
@@ -496,6 +481,8 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
             parsed_results = parse_kineto_results(self.kineto_results)
@@ -822,11 +809,11 @@ class FormattedTimesMixin(object):
 
     @property
     def cpu_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore[attr-defined]
 
     @property
     def cuda_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore[attr-defined]
 
 
 class Interval(object):
@@ -838,7 +825,7 @@ class Interval(object):
         return self.end - self.start
 
 
-Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
+Kernel = namedtuple('Kernel', ['name', 'device', 'duration'])
 
 
 class FunctionEvent(FormattedTimesMixin):
@@ -872,9 +859,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: Optional[float] = flops
 
-    def append_kernel(self, name, device, start, end):
+    def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
-        self.kernels.append(Kernel(name, device, Interval(start, end)))
+        self.kernels.append(Kernel(name, device, duration))
 
     def append_cpu_child(self, child):
         """Append a CPU child of type FunctionEvent.
@@ -932,11 +919,11 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == DeviceType.CPU:
             if not self.is_legacy:
                 # account for the kernels in the children ops
-                return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
+                return (sum(kinfo.duration for kinfo in self.kernels) +
                         sum(ch.cuda_time_total for ch in self.cpu_children))
             else:
                 # each legacy cpu events has a single (fake) kernel
-                return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
+                return sum(kinfo.duration for kinfo in self.kernels)
         else:
             assert self.device_type == DeviceType.CUDA
             return self.time_range.elapsed_us()
@@ -1153,7 +1140,9 @@ def parse_kineto_results(result):
                     cuda_memory_usage += mem_record[0].cuda_memory_usage()
                     mem_record[1] = True
 
-        is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        is_async = kineto_event.is_async() or (
+            kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        )
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
             name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
@@ -1189,8 +1178,7 @@ def parse_kineto_results(result):
                     fe.append_kernel(
                         f_evt.name,
                         f_evt.device_index,
-                        f_evt.time_range.start,
-                        f_evt.time_range.end)
+                        f_evt.time_range.end - f_evt.time_range.start)
                 elif f_evt.device_type == DeviceType.CPU:
                     # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
                     # with the 'thread' of the corresponding linked PyTorch event to properly track
@@ -1201,13 +1189,14 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
+            rel_start_us = mem_record[0].start_us() - start_record.start_us()
             fe = FunctionEvent(
                 id=mem_record[0].handle(),
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].thread_id(),
-                start_us=mem_record[0].start_us(),
-                end_us=mem_record[0].start_us(),  # no duration
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
                 fwd_thread=mem_record[0].fwd_thread_id(),
                 input_shapes=[],
                 stack=[],
@@ -1235,32 +1224,14 @@ def parse_legacy_records(thread_records):
 
     next_id = 0
     start_record = None
-    cuda_records = {}
     functions = []
     record_stack = []
-
-    # cuda start events and the overall profiler start event don't happen
-    # at exactly the same time because we need to record an event on each device
-    # and each record takes ~4us. So we adjust here by the difference
-    # adding the difference in CPU time between the profiler start event
-    # and the CPU time of the cuda start event for the device
-    def adjusted_time(cuda_record, cuda_records_map):
-        assert cuda_record.device() != -1
-        assert start_record is not None
-        cuda_time_0 = cuda_records_map[(cuda_record.node_id(), cuda_record.device())]
-        return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         name = record.name()
         if start_record is None and name == '__start_profile':
             start_record = record
-        elif '__cuda_start_event' in name:
-            # N.B.: Each CUDA device has its own __cuda_start_event.
-            assert record.device() != -1
-            # key for cuda_records is (node_id, device) in case of multiple nodes
-            # having the same device
-            cuda_records[(record.node_id(), record.device())] = record
 
     assert start_record is not None and not start_record.is_remote()
 
@@ -1308,7 +1279,9 @@ def parse_legacy_records(thread_records):
 
                 cpu_memory_usage = cpu_memory_allocs[record_key]
                 cuda_memory_usage = cuda_memory_allocs[record_key]
-                is_async = start.thread_id() != record.thread_id()
+                is_async = start.is_async() or (
+                    start.thread_id() != record.thread_id()
+                )
                 is_remote_event = record.is_remote()
                 start_flops = start.flops()
 
@@ -1335,14 +1308,12 @@ def parse_legacy_records(thread_records):
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
-                    cuda_start = adjusted_time(start, cuda_records)
-                    cuda_end = adjusted_time(record, cuda_records)
-                    if (cuda_end - cuda_start) > 0:
+                    duration = start.cuda_elapsed_us(record)
+                    if duration > 0:
                         fe.append_kernel(
                             start.name(),
                             start.device(),
-                            cuda_start,
-                            cuda_end)
+                            duration)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
@@ -1454,8 +1425,7 @@ def parse_nvprof_trace(path):
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,
-                          row['kernel_start'],
-                          row['kernel_end'])
+                          row['kernel_end'] - row['kernel_start'])
 
     functions.sort(key=lambda evt: evt.time_range.start)
     return functions
@@ -1567,6 +1537,16 @@ def build_table(
         assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
 
+    def flops_rate(evt):
+        US_IN_SECOND = 1000.0 * 1000.0
+        if evt.flops > 0:
+            if evt.cuda_time_total != 0:
+                return float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
+            else:
+                return float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
+        else:
+            return -1
+
     add_column(name_column_width)
     for _ in headers[1:]:
         add_column(DEFAULT_COLUMN_WIDTH)
@@ -1581,15 +1561,11 @@ def build_table(
 
     if with_flops:
         # Auto-scaling of flops header
-        US_IN_SECOND = 1000.0 * 1000.0  # cpu_time_total is in us
         raw_flops = []
         for evt in events:
-            if evt.flops > 0:
-                if evt.cuda_time_total != 0:
-                    evt.flops = float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
-                else:
-                    evt.flops = float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
-                raw_flops.append(evt.flops)
+            rate = flops_rate(evt)
+            if rate > 0:
+                raw_flops.append(rate)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
             headers.append(flops_header)
@@ -1600,7 +1576,7 @@ def build_table(
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
-    add_column = None  # type: ignore
+    add_column = None  # type: ignore[assignment]
 
     # Have to use a list because nonlocal is Py3 only...
     result = []
@@ -1693,10 +1669,11 @@ def build_table(
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
-            if evt.flops <= 0.0:
+            rate = flops_rate(evt)
+            if rate <= 0.0:
                 row_values.append("--")
             else:
-                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
+                row_values.append('{0:8.3f}'.format(rate * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

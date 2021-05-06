@@ -279,6 +279,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntimeCache {
 class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
  public:
   //! constructor where maximum cache size is fixed during init
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   explicit InputsIdLookup(size_t max_cache_size = 100)
       : max_cache_size_(max_cache_size){};
 
@@ -310,6 +311,7 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
   std::mutex mutex_;
 
   //! entry stored in `encoding_lookup_` to implement LRU
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct EncodingEntry {
     size_t id = 0;
     std::list<std::string>::iterator lru_iter;

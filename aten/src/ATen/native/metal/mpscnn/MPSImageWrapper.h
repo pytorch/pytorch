@@ -9,37 +9,29 @@ namespace at {
 namespace native {
 namespace metal {
 
-enum class TextureType {
-  TextureNone,
-  TextureType2D,
-  TextureType2DArray,
-};
-
 class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
-  operator bool() const {
-    return _image;
-  }
+  ~MPSImageWrapper();
   void copyDataFromHost(const float* inputData);
   void copyDataToHost(float* hostData);
-  void allocateTextureStorage(IntArrayRef sizes);
-  void allocateTemporaryTextureStorage(
+  void allocateStorage(IntArrayRef sizes);
+  void allocateTemporaryStorage(
       IntArrayRef sizes,
       MetalCommandBuffer* commandBuffer);
-  void copyFromTexture(MPSImage* image);
   void setCommandBuffer(MetalCommandBuffer* buffer);
   MetalCommandBuffer* commandBuffer() const;
-  TextureType textureType() const;
-  IntArrayRef textureSizes() const;
+  void setImage(MPSImage* image);
   MPSImage* image() const;
-  void recycleImage();
   void synchronize();
+  void prepare();
+  void release();
 
  private:
-  std::vector<int64_t> _textureSizes;
+  std::vector<int64_t> _imageSizes;
   MPSImage* _image = nullptr;
-  MetalCommandBuffer* _commandBuffer;
+  __weak MetalCommandBuffer* _commandBuffer;
+  id<PTMetalCommandBuffer> _delegate;
 };
 
 } // namespace metal

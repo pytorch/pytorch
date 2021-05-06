@@ -101,22 +101,22 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 }
 #endif
 
-void pow_tensor_tensor_kernel(TensorIterator& iter) {
-  if (isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
+  if (isComplexType(iter.common_dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return complex_pow_(base, exp);
       });
     });
-  } else if (isFloatingType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+  } else if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "pow_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return pow_(base, exp);
       });
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return native::powi(base, exp);
       });
     });
@@ -124,7 +124,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 template<typename Base_type, typename Exp_type>
-void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
+void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
   if (d_exp == 0.5) {
@@ -158,22 +158,22 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIterator& iter, const Scalar& exp_scalar) {
-  if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
+void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
+  if (isComplexType(iter.common_dtype()) || exp_scalar.isComplex()) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
         return complex_pow_(base, exp);
       });
     });
-  } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "pow_cuda", [&]() {
+  } else if (isFloatingType(iter.common_dtype()) || exp_scalar.isIntegral(false)) {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
     });
   } else {
     const auto exp = exp_scalar.to<float>();
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
     });
   }

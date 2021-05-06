@@ -98,10 +98,22 @@
 #define TORCH_API C10_IMPORT
 #endif
 
-// NB: For now, HIP is overloaded to use the same macro, but ideally
-// HIPify should translate TORCH_CUDA_API to TORCH_HIP_API
-// JX: I removed the || defined(TORCH_HIP_BUILD_MAIN_LIB) check for TORCH_CUDA_*_API
-// since TORCH_HIP_API seems properly initialized below
+// You may be wondering: Whose brilliant idea was it to split torch_cuda into
+// two pieces with confusing names?
+// Once upon a time, there _was_ only TORCH_CUDA_API. All was happy until we
+// tried to compile PyTorch for CUDA 11.1, which ran into relocation marker
+// issues when linking big binaries.
+// (https://github.com/pytorch/pytorch/issues/39968) We had two choices:
+//    (1) Stop supporting so many GPU architectures
+//    (2) Do something else
+// We chose #2 and decided to split the behemoth that was torch_cuda into two
+// smaller libraries, one with most of the core kernel functions (torch_cuda_cu)
+// and the other that had..well..everything else (torch_cuda_cpp). The idea was
+// this: instead of linking our static libraries (like the hefty
+// libcudnn_static.a) with another huge library, torch_cuda, and run into pesky
+// relocation marker issues, we could link our static libraries to a smaller
+// part of torch_cuda (torch_cuda_cpp) and avoid the issues.
+
 // libtorch_cuda_cu.so
 #ifdef TORCH_CUDA_CU_BUILD_MAIN_LIB
 #define TORCH_CUDA_CU_API C10_EXPORT
@@ -116,7 +128,8 @@
 #define TORCH_CUDA_CPP_API C10_IMPORT
 #endif
 
-// libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the same api)
+// libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the
+// same api)
 #ifdef TORCH_CUDA_BUILD_MAIN_LIB
 #define TORCH_CUDA_CPP_API C10_EXPORT
 #define TORCH_CUDA_CU_API C10_EXPORT

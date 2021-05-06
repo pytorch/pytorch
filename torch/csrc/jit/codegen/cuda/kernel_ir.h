@@ -370,6 +370,7 @@ class TORCH_CUDA_CU_API Expr : public Node {
 
 class TORCH_CUDA_CU_API NamedScalar final : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   NamedScalar(Passkey passkey, std::string name, DataType dtype)
       : Val(passkey, dtype), name_(name) {}
 

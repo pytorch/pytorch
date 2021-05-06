@@ -26,23 +26,31 @@ static void defaultErrorHandlerFunction(const char *msg, void *data)
   throw std::runtime_error(msg);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static void *defaultErrorHandlerData;
+// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THErrorHandlerFunction threadErrorHandler = NULL;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void *threadErrorHandlerData;
 
 void _THError(const char *file, const int line, const char *fmt, ...)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   char msg[2048];
   va_list args;
 
   /* vasprintf not standard */
   /* vsnprintf: how to handle if does not exists? */
   va_start(args, fmt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n = vsnprintf(msg, 2048, fmt, args);
   va_end(args);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if(n < 2048) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
   }
 
@@ -54,9 +62,11 @@ void _THError(const char *file, const int line, const char *fmt, ...)
 }
 
 void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   char msg[1024];
   va_list args;
   va_start(args, fmt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vsnprintf(msg, 1024, fmt, args);
   va_end(args);
   _THError(file, line, "Assertion `%s' failed. %s", exp, msg);
@@ -85,24 +95,32 @@ static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void 
   throw std::runtime_error(new_error.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static void *defaultArgErrorHandlerData;
+// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THArgErrorHandlerFunction threadArgErrorHandler = NULL;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void *threadArgErrorHandlerData;
 
 void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...)
 {
   if(!condition) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
     char msg[2048];
     va_list args;
 
     /* vasprintf not standard */
     /* vsnprintf: how to handle if does not exists? */
     va_start(args, fmt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int n = vsnprintf(msg, 2048, fmt, args);
     va_end(args);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if(n < 2048) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
     }
 
@@ -129,7 +147,9 @@ void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *da
   defaultArgErrorHandlerData = data;
 }
 
+// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void (*torchGCFunction)(void *data) = NULL;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void *torchGCData;
 
 /* Optional hook for integrating with a garbage-collected frontend.
@@ -164,16 +184,19 @@ void* THRealloc(void *ptr, ptrdiff_t size)
   if(size == 0)
   {
     THFree(ptr);
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     return NULL;
   }
 
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   void *newptr = realloc(ptr, size);
 
   if(!newptr && torchGCFunction) {
     torchGCFunction(torchGCData);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     newptr = realloc(ptr, size);
   }
 
@@ -192,7 +215,9 @@ THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;
-  int i, n = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t i;
+  int64_t n = 0;
   n += snprintf(str, L-n, "[");
 
   for (i = 0; i < ndim; i++) {
@@ -206,6 +231,7 @@ THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   if (n < L - 2) {
     snprintf(str+n, L-n, "]");
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     snprintf(str+L-5, 5, "...]");
   }
 

@@ -31,8 +31,10 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
 #ifdef __HIP_PLATFORM_HCC__
+#if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
+#endif
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
@@ -220,7 +222,7 @@ at::Tensor inferAndAlloc(
   } else {
     c10::IntArrayRef isizes(inferred_sizes);
     // Non Variable type guard for empty_cuda call
-    at::AutoNonVariableTypeMode non_variable_type_mode;
+    at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     return at::native::empty_cuda(
         isizes, at_type, c10::nullopt, options.device, c10::nullopt);
   }

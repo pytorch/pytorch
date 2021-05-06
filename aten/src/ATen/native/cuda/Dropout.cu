@@ -25,14 +25,12 @@ namespace {
 const int UNROLL = 4;
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims,
-          int VEC>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 4)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int VEC>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
@@ -114,14 +112,12 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
 }
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims,
-          int BDims=ADims>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 4)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int BDims = ADims>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void

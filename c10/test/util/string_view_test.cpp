@@ -7,9 +7,9 @@ using c10::string_view;
 namespace {
 namespace testutils {
 constexpr bool string_equal(const char* lhs, const char* rhs, size_t size) {
-  return (size == 0)
-      ? true
-      : (*lhs != *rhs) ? false : string_equal(lhs + 1, rhs + 1, size - 1);
+  return (size == 0)   ? true
+      : (*lhs != *rhs) ? false
+                       : string_equal(lhs + 1, rhs + 1, size - 1);
 }
 static_assert(string_equal("hi", "hi", 2), "");
 static_assert(string_equal("", "", 0), "");
@@ -58,6 +58,7 @@ static_assert(string_view() == string_view(""), "");
 namespace test_constchar_constructor {
 static_assert(string_view("").size() == 0, "");
 constexpr string_view hello = "hello";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == hello.size(), "");
 static_assert(string_equal("hello", hello.data(), hello.size()), "");
 } // namespace test_constchar_constructor
@@ -71,6 +72,7 @@ static_assert(string_equal("hell", hell.data(), hell.size()), "");
 
 namespace test_string_constructor {
 void test_conversion_is_implicit(string_view a) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testStringConstructor) {
   std::string empty;
   EXPECT_EQ(0, string_view(empty).size());
@@ -84,6 +86,7 @@ TEST(StringViewTest, testStringConstructor) {
 } // namespace test_string_constructor
 
 namespace test_conversion_to_string {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testConversionToString) {
   string_view empty;
   EXPECT_EQ(0, std::string(empty).size());
@@ -97,6 +100,7 @@ TEST(StringViewTest, testConversionToString) {
 namespace test_copy_constructor {
 constexpr string_view hello = "hello";
 constexpr string_view copy = hello;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == copy.size(), "");
 static_assert(string_equal("hello", copy.data(), copy.size()), "");
 } // namespace test_copy_constructor
@@ -107,16 +111,21 @@ constexpr string_view assign(string_view value) {
   result = value; // this is the assignment we're testing
   return result;
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testCopyAssignment) {
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
   {
     constexpr string_view hello = assign("hello");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     static_assert(5 == hello.size(), "");
     static_assert(string_equal("hello", hello.data(), hello.size()), "");
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     static_assert(5 == (string_view() = "hello").size(), "");
     static_assert(
-        string_equal("hello", (string_view() = "hello").data(), 5), "");
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        string_equal("hello", (string_view() = "hello").data(), 5),
+        "");
   }
 #endif
   const string_view hello = assign("hello");
@@ -148,6 +157,7 @@ static_assert('e' == *(hello.begin() + 1), "");
 static_assert('l' == *(hello.begin() + 2), "");
 static_assert('l' == *(hello.begin() + 3), "");
 static_assert('o' == *(hello.begin() + 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(hello.end() == hello.begin() + 5, "");
 } // namespace test_forward_iteration
 
@@ -158,6 +168,7 @@ static_assert('l' == *(hello.rbegin() + 1), "");
 static_assert('l' == *(hello.rbegin() + 2), "");
 static_assert('e' == *(hello.rbegin() + 3), "");
 static_assert('h' == *(hello.rbegin() + 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(hello.rend() == hello.rbegin() + 5, "");
 } // namespace test_reverse_iteration
 
@@ -175,6 +186,7 @@ static_assert('l' == hello.at(2), "");
 static_assert('l' == hello.at(3), "");
 static_assert('o' == hello.at(4), "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
       [] { string_view("")[1]; },
@@ -185,18 +197,22 @@ TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
       "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
 
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello")[5]; },
       "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello").at(5); },
       "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello")[100]; },
       "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
 
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello").at(100); },
       "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
 
@@ -216,14 +232,17 @@ static_assert('o' == string_view("hello").back(), "");
 } // namespace test_front_back
 
 namespace test_data {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_equal("hello", string_view("hello").data(), 5), "");
-}
+} // namespace test_data
 
 namespace test_size_length {
 static_assert(0 == string_view("").size(), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("hello").size(), "");
 
 static_assert(0 == string_view("").length(), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("hello").length(), "");
 } // namespace test_size_length
 
@@ -239,12 +258,14 @@ CONSTEXPR_EXCEPT_GCC5 string_view remove_prefix(string_view input, size_t len) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(
       remove_prefix(string_view("hello"), 0) == string_view("hello"), "");
   static_assert(
       remove_prefix(string_view("hello"), 1) == string_view("ello"), "");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   static_assert(remove_prefix(string_view("hello"), 5) == string_view(""), "");
 #endif
 
@@ -253,8 +274,10 @@ TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
   EXPECT_EQ(remove_prefix(string_view("hello"), 5), string_view(""));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingTooLargePrefix_thenThrows) {
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { remove_prefix(string_view("hello"), 6); },
       "basic_string_view::remove_prefix: out of range. PrefixLength: 6, size: 5");
 }
@@ -266,12 +289,14 @@ CONSTEXPR_EXCEPT_GCC5 string_view remove_suffix(string_view input, size_t len) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(
       remove_suffix(string_view("hello"), 0) == string_view("hello"), "");
   static_assert(
       remove_suffix(string_view("hello"), 1) == string_view("hell"), "");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   static_assert(remove_suffix(string_view("hello"), 5) == string_view(""), "");
 #endif
 
@@ -280,8 +305,10 @@ TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
   EXPECT_EQ(remove_suffix(string_view("hello"), 5), string_view(""));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingTooLargeSuffix_thenThrows) {
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { remove_suffix(string_view("hello"), 6); },
       "basic_string_view::remove_suffix: out of range. SuffixLength: 6, size: 5");
 }
@@ -294,6 +321,7 @@ CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
   swap(first, second);
   return std::make_pair(first, second);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testSwapFunction) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(string_view("second") == get().first, "");
@@ -312,6 +340,7 @@ CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
   first.swap(second);
   return std::make_pair(first, second);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testSwapMethod) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(string_view("second") == get().first, "");
@@ -324,41 +353,55 @@ TEST(StringViewTest, testSwapMethod) {
 } // namespace test_swap_method
 
 namespace test_copy {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingFullStringView_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[5];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t num_copied = data.copy(result, 5);
   EXPECT_EQ(5, num_copied);
   EXPECT_TRUE(string_equal("hello", result, 5));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingSubstr_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   size_t num_copied = data.copy(result, 2, 2);
   EXPECT_EQ(2, num_copied);
   EXPECT_TRUE(string_equal("ll", result, 2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingTooMuch_thenJustCopiesLess) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[100];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t num_copied = data.copy(result, 100, 2);
   EXPECT_EQ(3, num_copied);
   EXPECT_TRUE(string_equal("llo", result, 3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingJustAtRange_thenDoesntCrash) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[1];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t num_copied = data.copy(result, 2, 5);
   EXPECT_EQ(0, num_copied);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingOutOfRange_thenThrows) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
       [&] { data.copy(result, 2, 6); },
       "basic_string_view::copy: out of range. Index: 6, size: 5");
 }
@@ -372,6 +415,7 @@ static_assert(string_view("").substr(0, 0) == string_view(""), "");
 static_assert(string_view("hello").substr() == string_view("hello"), "");
 static_assert(string_view("hello").substr(0) == string_view("hello"), "");
 static_assert(string_view("hello").substr(1) == string_view("ello"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view("hello").substr(5) == string_view(""), "");
 
 static_assert(string_view("hello").substr(0, 0) == string_view(""), "");
@@ -379,16 +423,22 @@ static_assert(string_view("hello").substr(0, 2) == string_view("he"), "");
 static_assert(string_view("hello").substr(1, 2) == string_view("el"), "");
 static_assert(string_view("hello").substr(4, 1) == string_view("o"), "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view("hello").substr(0, 100) == string_view("hello"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view("hello").substr(1, 100) == string_view("ello"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view("hello").substr(5, 100) == string_view(""), "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCallingSubstrWithPosOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello").substr(6); },
       "basic_string_view::substr parameter out of bounds. Index: 6, size: 5");
 
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       [] { string_view("hello").substr(6, 0); },
       "basic_string_view::substr parameter out of bounds. Index: 6, size: 5");
 }
@@ -445,9 +495,11 @@ static_assert(
     0 > string_view("hello").compare(2, 2, string_view("hello"), 2, 3),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     0 < string_view("hello").compare(2, 2, string_view("hellola"), 5, 2),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     0 > string_view("hello").compare(2, 2, string_view("hellolz"), 5, 2),
     "");
 } // namespace test_compare_overload3
@@ -488,7 +540,9 @@ static_assert(0 == string_view("").compare(0, 0, "", 0, 0), "");
 static_assert(0 == string_view("hello").compare(2, 2, "hello", 2, 2), "");
 static_assert(0 < string_view("hello").compare(2, 2, "hello", 2, 1), "");
 static_assert(0 > string_view("hello").compare(2, 2, "hello", 2, 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(0 < string_view("hello").compare(2, 2, "hellola", 5, 2), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(0 > string_view("hello").compare(2, 2, "hellolz", 5, 2), "");
 } // namespace test_compare_overload6
 
@@ -686,6 +740,7 @@ static_assert(2 == string_view("abc").find('c'), "");
 static_assert(2 == string_view("abc").find('c', 1), "");
 static_assert(2 == string_view("abc").find('c', 2), "");
 static_assert(string_view::npos == string_view("abc").find('c', 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view::npos == string_view("abc").find('a', 100), "");
 static_assert(string_view::npos == string_view("abc").find('z'), "");
 static_assert(0 == string_view("ababa").find('a'), "");
@@ -694,6 +749,7 @@ static_assert(2 == string_view("ababa").find('a', 1), "");
 static_assert(2 == string_view("ababa").find('a', 2), "");
 static_assert(4 == string_view("ababa").find('a', 3), "");
 static_assert(4 == string_view("ababa").find('a', 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_view::npos == string_view("ababa").find('a', 5), "");
 } // namespace test_find_overload2
 
@@ -780,6 +836,7 @@ static_assert(string_view::npos == string_view("abc").rfind('c', 0), "");
 static_assert(string_view::npos == string_view("abc").rfind('c', 1), "");
 static_assert(2 == string_view("abc").rfind('c', 2), "");
 static_assert(2 == string_view("abc").rfind('c', 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(0 == string_view("abc").rfind('a', 100), "");
 static_assert(string_view::npos == string_view("abc").rfind('z'), "");
 static_assert(4 == string_view("ababa").rfind('a'), "");
@@ -788,6 +845,7 @@ static_assert(0 == string_view("ababa").rfind('a', 1), "");
 static_assert(2 == string_view("ababa").rfind('a', 2), "");
 static_assert(2 == string_view("ababa").rfind('a', 3), "");
 static_assert(4 == string_view("ababa").rfind('a', 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(4 == string_view("ababa").rfind('a', 5), "");
 } // namespace test_rfind_overload2
 
@@ -872,6 +930,7 @@ static_assert(
     string_view::npos == string_view("").find_first_of(string_view("a"), 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_first_of(string_view("abc"), 100),
     "");
 static_assert(
@@ -892,6 +951,7 @@ static_assert(
     4 == string_view("abcabc").find_first_of(string_view("b"), 3),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_first_of(string_view("c"), 5),
     "");
 static_assert(
@@ -919,6 +979,7 @@ static_assert(
     string_view::npos == string_view("abc").find_first_of('c', 3),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("abc").find_first_of('a', 100),
     "");
 static_assert(string_view::npos == string_view("abc").find_first_of('z'), "");
@@ -929,6 +990,7 @@ static_assert(2 == string_view("ababa").find_first_of('a', 2), "");
 static_assert(4 == string_view("ababa").find_first_of('a', 3), "");
 static_assert(4 == string_view("ababa").find_first_of('a', 4), "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("ababa").find_first_of('a', 5),
     "");
 } // namespace test_find_first_of_overload2
@@ -966,6 +1028,7 @@ static_assert(
     string_view::npos == string_view("").find_first_of("abc", 1, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_first_of("abcdef", 100, 3),
     "");
 static_assert(
@@ -980,6 +1043,7 @@ static_assert(
 
 static_assert(3 == string_view("abcabc").find_first_of("abc", 1, 1), "");
 static_assert(4 == string_view("abcabc").find_first_of("bac", 3, 1), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_first_of("cab", 5, 1), "");
 static_assert(4 == string_view("abcabc").find_first_of("bccda", 3, 2), "");
 static_assert(4 == string_view("abcabc").find_first_of("cbdab", 4, 3), "");
@@ -1002,6 +1066,7 @@ static_assert(1 == string_view("abcabc").find_first_of("cbd"), "");
 static_assert(string_view::npos == string_view("").find_first_of("", 1), "");
 static_assert(string_view::npos == string_view("").find_first_of("a", 1), "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_first_of("abc", 100),
     "");
 static_assert(string_view::npos == string_view("abc").find_first_of("", 1), "");
@@ -1014,6 +1079,7 @@ static_assert(
 
 static_assert(3 == string_view("abcabc").find_first_of("a", 1), "");
 static_assert(4 == string_view("abcabc").find_first_of("b", 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_first_of("c", 5), "");
 static_assert(4 == string_view("abcabc").find_first_of("bc", 3), "");
 static_assert(4 == string_view("abcabc").find_first_of("cbd", 4), "");
@@ -1041,8 +1107,11 @@ static_assert(
 
 static_assert(3 == string_view("abcabc").find_last_of(string_view("a")), "");
 static_assert(4 == string_view("abcabc").find_last_of(string_view("b")), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of(string_view("c")), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of(string_view("bc")), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of(string_view("cbd")), "");
 
 static_assert(
@@ -1052,6 +1121,7 @@ static_assert(
     string_view::npos == string_view("").find_last_of(string_view("a"), 0),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_last_of(string_view("abc"), 100),
     "");
 static_assert(
@@ -1088,6 +1158,7 @@ static_assert(string_view::npos == string_view("abc").find_last_of('c', 0), "");
 static_assert(string_view::npos == string_view("abc").find_last_of('c', 1), "");
 static_assert(2 == string_view("abc").find_last_of('c', 2), "");
 static_assert(2 == string_view("abc").find_last_of('c', 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(0 == string_view("abc").find_last_of('a', 100), "");
 static_assert(string_view::npos == string_view("abc").find_last_of('z'), "");
 static_assert(4 == string_view("ababa").find_last_of('a'), "");
@@ -1096,6 +1167,7 @@ static_assert(0 == string_view("ababa").find_last_of('a', 1), "");
 static_assert(2 == string_view("ababa").find_last_of('a', 2), "");
 static_assert(2 == string_view("ababa").find_last_of('a', 3), "");
 static_assert(4 == string_view("ababa").find_last_of('a', 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(4 == string_view("ababa").find_last_of('a', 5), "");
 } // namespace test_find_last_of_overload2
 
@@ -1132,12 +1204,15 @@ static_assert(
     4 == string_view("abcabc").find_last_of("bca", string_view::npos, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_of("cab", string_view::npos, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_of("bcab", string_view::npos, 2),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_of("cbdac", string_view::npos, 3),
     "");
 
@@ -1148,6 +1223,7 @@ static_assert(
     string_view::npos == string_view("").find_last_of("abc", 0, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_last_of("abcdef", 100, 3),
     "");
 static_assert(
@@ -1177,13 +1253,17 @@ static_assert(string_view::npos == string_view("abc").find_last_of("def"), "");
 
 static_assert(3 == string_view("abcabc").find_last_of("a"), "");
 static_assert(4 == string_view("abcabc").find_last_of("b"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of("c"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of("bc"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_of("cbd"), "");
 
 static_assert(string_view::npos == string_view("").find_last_of("", 1), "");
 static_assert(string_view::npos == string_view("").find_last_of("a", 0), "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_last_of("abc", 100),
     "");
 static_assert(string_view::npos == string_view("abc").find_last_of("", 1), "");
@@ -1249,6 +1329,7 @@ static_assert(
     "");
 static_assert(
     string_view::npos ==
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         string_view("").find_first_not_of(string_view("abc"), 100),
     "");
 static_assert(
@@ -1274,6 +1355,7 @@ static_assert(
     4 == string_view("abcabc").find_first_not_of(string_view("ac"), 4),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_first_not_of(string_view("ab"), 5),
     "");
 static_assert(
@@ -1306,6 +1388,7 @@ static_assert(
     string_view::npos == string_view("abc").find_first_not_of('c', 3),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("abc").find_first_not_of('a', 100),
     "");
 static_assert(1 == string_view("ababa").find_first_not_of('a'), "");
@@ -1317,6 +1400,7 @@ static_assert(
     string_view::npos == string_view("ababa").find_first_not_of('a', 4),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("ababa").find_first_not_of('a', 5),
     "");
 } // namespace test_find_first_not_of_overload2
@@ -1338,6 +1422,7 @@ static_assert(
     string_view::npos == string_view("abc").find_first_not_of("acdbef", 0, 4),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("abc").find_first_not_of("defabcas", 0, 6),
     "");
 
@@ -1355,6 +1440,7 @@ static_assert(
     string_view::npos == string_view("").find_first_not_of("abc", 1, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_first_not_of("abcdef", 100, 3),
     "");
 static_assert(
@@ -1364,12 +1450,14 @@ static_assert(
     string_view::npos == string_view("abc").find_first_not_of("acdbef", 3, 4),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("abc").find_first_not_of("defabcas", 2, 6),
     "");
 
 static_assert(1 == string_view("abcabc").find_first_not_of("bca", 1, 0), "");
 static_assert(3 == string_view("abcabc").find_first_not_of("bca", 1, 2), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("acb", 4, 2), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_first_not_of("abc", 5, 2), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("abac", 3, 1), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("dadab", 4, 2), "");
@@ -1405,6 +1493,7 @@ static_assert(
     string_view::npos == string_view("").find_first_not_of("a", 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_first_not_of("abc", 100),
     "");
 static_assert(
@@ -1420,6 +1509,7 @@ static_assert(
 static_assert(1 == string_view("abcabc").find_first_not_of("", 1), "");
 static_assert(3 == string_view("abcabc").find_first_not_of("bc", 1), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("ac", 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_first_not_of("ab", 5), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("a", 3), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("da", 4), "");
@@ -1448,6 +1538,7 @@ static_assert(
         string_view("abc").find_last_not_of(string_view("defabc")),
     "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_not_of(string_view("")), "");
 static_assert(
     3 == string_view("abcabc").find_last_not_of(string_view("bc")),
@@ -1456,6 +1547,7 @@ static_assert(
     4 == string_view("abcabc").find_last_not_of(string_view("ac")),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_not_of(string_view("ab")),
     "");
 static_assert(
@@ -1473,6 +1565,7 @@ static_assert(
     "");
 static_assert(
     string_view::npos ==
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         string_view("").find_last_not_of(string_view("abc"), 100),
     "");
 static_assert(
@@ -1525,6 +1618,7 @@ static_assert(0 == string_view("abc").find_last_not_of('c', 0), "");
 static_assert(1 == string_view("abc").find_last_not_of('c', 1), "");
 static_assert(1 == string_view("abc").find_last_not_of('c', 2), "");
 static_assert(1 == string_view("abc").find_last_not_of('c', 3), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(2 == string_view("abc").find_last_not_of('a', 100), "");
 static_assert(3 == string_view("ababa").find_last_not_of('a'), "");
 static_assert(
@@ -1534,6 +1628,7 @@ static_assert(1 == string_view("ababa").find_last_not_of('a', 1), "");
 static_assert(1 == string_view("ababa").find_last_not_of('a', 2), "");
 static_assert(3 == string_view("ababa").find_last_not_of('a', 3), "");
 static_assert(3 == string_view("ababa").find_last_not_of('a', 4), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(3 == string_view("ababa").find_last_not_of('a', 5), "");
 } // namespace test_find_last_not_of_overload2
 
@@ -1560,10 +1655,12 @@ static_assert(
     "");
 static_assert(
     string_view::npos ==
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         string_view("abc").find_last_not_of("defabcas", string_view::npos, 6),
     "");
 
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_not_of("cab", string_view::npos, 0),
     "");
 static_assert(
@@ -1573,6 +1670,7 @@ static_assert(
     4 == string_view("abcabc").find_last_not_of("acb", string_view::npos, 2),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5 == string_view("abcabc").find_last_not_of("abc", string_view::npos, 2),
     "");
 static_assert(
@@ -1589,6 +1687,7 @@ static_assert(
     string_view::npos == string_view("").find_last_not_of("abc", 0, 1),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_last_not_of("abcdef", 100, 3),
     "");
 static_assert(
@@ -1598,6 +1697,7 @@ static_assert(
     string_view::npos == string_view("abc").find_last_not_of("acdbef", 3, 4),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("abc").find_last_not_of("defabcas", 2, 6),
     "");
 
@@ -1623,9 +1723,11 @@ static_assert(
     string_view::npos == string_view("abc").find_last_not_of("defabc"),
     "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_not_of(""), "");
 static_assert(3 == string_view("abcabc").find_last_not_of("bc"), "");
 static_assert(4 == string_view("abcabc").find_last_not_of("ac"), "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(5 == string_view("abcabc").find_last_not_of("ab"), "");
 static_assert(4 == string_view("abcabc").find_last_not_of("c"), "");
 static_assert(4 == string_view("abcabc").find_last_not_of("ca"), "");
@@ -1635,6 +1737,7 @@ static_assert(
     string_view::npos == string_view("").find_last_not_of("a", 0),
     "");
 static_assert(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     string_view::npos == string_view("").find_last_not_of("abc", 100),
     "");
 static_assert(
@@ -1663,6 +1766,7 @@ void testOutputIterator(const std::string& str) {
   EXPECT_EQ(str, actual);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testOutputOperator) {
   testOutputIterator("");
   testOutputIterator("abc");
@@ -1670,6 +1774,7 @@ TEST(StringViewTest, testOutputOperator) {
 } // namespace test_output_operator
 
 namespace test_hash {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testHash) {
   EXPECT_EQ(
       std::hash<string_view>()(string_view()), std::hash<string_view>()(""));

@@ -538,7 +538,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     }
     InlineAutodiffSubgraphs(
         copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
     RemoveProfilingNodes(copy);
     GRAPH_DEBUG(

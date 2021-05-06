@@ -19,12 +19,9 @@ Tensor neuronKernel(const Tensor& input, MPSCNNNeuron* neuron) {
   MPSImage* X = imageFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
   std::vector<int64_t> textureSize = outputSize;
-  if (input.dim() == 2) {
-    textureSize = {outputSize[0], outputSize[1], 1, 1};
-  }
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [neuron encodeToCommandBuffer:commandBuffer.buffer
                     sourceImage:X
@@ -37,9 +34,6 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
   MPSImage* X = imageFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
   std::vector<int64_t> textureSize = outputSize;
-  if (input.dim() == 2) {
-    textureSize = {outputSize[0], outputSize[1], 1, 1};
-  }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MPSImage* Y = createTemporaryImage(commandBuffer, input.sizes().vec());
   [neuron encodeToCommandBuffer:commandBuffer.buffer
@@ -47,7 +41,7 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
                destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 
