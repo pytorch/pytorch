@@ -212,15 +212,11 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
-        # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
+        # cases m < n are only supported on CPU
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (cusolver_available or device == 'cpu')
-        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
+        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if device == 'cpu' else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
         # that is why we use `cond=1.0`, the mean to cut roughly half of all
@@ -390,11 +386,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'parameter `driver` should be one of \(gels, gelsy, gelsd, gelss\)'):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
 
-        # cuSOLVER path supports underdetermined systems
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
-        if device != 'cpu' and not cusolver_available:
+        if device != 'cpu':
             a = torch.rand(2, 3, dtype=dtype, device=device)
             b = torch.rand(2, 1, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, r'only overdetermined systems'):
