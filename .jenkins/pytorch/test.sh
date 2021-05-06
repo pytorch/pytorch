@@ -155,7 +155,7 @@ test_python() {
 
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/create_test_cert.sh"
-  time python test/run_test.py --include test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include distributed/test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM"
   unset GLOO_DEVICE_TRANSPORT
   unset GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY
   unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT
