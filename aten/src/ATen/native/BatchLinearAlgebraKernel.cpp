@@ -846,6 +846,63 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
   });
 }
 
+/*
+  Solves the matrix equation A X = B
+  X and B are n-by-nrhs matrices, A is represented using the LU factorization.
+  This is an in-place routine, content of `b` is overwritten.
+
+  Args:
+  * `b` -  [in] the right hand side matrix B
+           [out] the solution matrix X
+  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
+  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+
+  For further details, please see the LAPACK documentation for GETRS.
+*/
+template <typename scalar_t>
+void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.lu_solve on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  char trans = 'N';
+  auto b_data = b.data_ptr<scalar_t>();
+  auto lu_data = lu.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto b_stride = matrixStride(b);
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots.size(-1);
+  auto batch_size = batchCount(b);
+
+  auto n = lu.size(-2);
+  auto nrhs = b.size(-1);
+  auto leading_dimension = std::max<int64_t>(1, n);
+
+  int info = 0;
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* b_working_ptr = &b_data[i * b_stride];
+    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+
+    lapackLuSolve<scalar_t>(trans, n, nrhs, lu_working_ptr, leading_dimension, pivots_working_ptr,
+                            b_working_ptr, leading_dimension, &info);
+
+    // info from lapackLuSolve only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_lu_solve'
+void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(b, lu, pivots);
+  });
+}
+
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -927,5 +984,10 @@ REGISTER_AVX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+
+REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
+REGISTER_AVX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
 }} // namespace at::native
