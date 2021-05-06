@@ -104,3 +104,11 @@ underlying allocation patterns produced by your code.
 
 To debug memory errors, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
+
+.. _hipfft-plan-cache:
+
+hipFFT/rocFFT plan cache
+------------------------
+
+Setting the size of the cache for hipFFT/rocFFT plans is not supported.
+
