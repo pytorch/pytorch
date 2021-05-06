@@ -3617,7 +3617,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False,
-           supports_forward_ad=False),  # TODO fix the formula for complex forward AD
+           supports_forward_ad=True),
     OpInfo('mul',
            aliases=('multiply',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4967,7 +4967,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
-           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
+           supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::add'],),
     OpInfo('__rdiv__',
            op=torch.Tensor.__rdiv__,
@@ -4984,7 +4984,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
-           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
+           supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::mul'],),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
@@ -5579,7 +5579,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_inplace_autograd=False,
-           supports_forward_ad=False,  # TODO fix the formula for complex forward AD
            op=torch.Tensor.__getitem__,
            sample_inputs_func=sample_inputs_getitem,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
