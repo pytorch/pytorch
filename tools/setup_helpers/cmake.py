@@ -348,5 +348,7 @@ class CMake:
         if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
             build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
         else:
-            build_args += ['--', '-v', '-j', max_jobs]
+            build_args += ['--', '-j', max_jobs]
+        if USE_NINJA:
+            build_args += ['-v']
         self.run(build_args, my_env)
