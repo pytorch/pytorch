@@ -329,20 +329,20 @@ Vec256<float> Vec256<float>::frac() const {
 // either input is a NaN.
 template <>
 Vec256<float> inline maximum(const Vec256<float>& a, const Vec256<float>& b) {
+  // Use the fact that _mm256_max_ps returns b if either a or b is NaN.
   Vec256<float> max = _mm256_max_ps(a, b);
-  Vec256<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
-  // Exploit the fact that all-ones is a NaN.
-  return _mm256_or_ps(max, isnan);
+  Vec256<float> isnan = _mm256_cmp_ps(b, b, _CMP_UNORD_Q);
+  return Vec256<float>::blendv(max, a, isnan);
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
 Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
+  // Use the fact that _mm256_min_ps returns b if either a or b is NaN.
   Vec256<float> min = _mm256_min_ps(a, b);
-  Vec256<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
-  // Exploit the fact that all-ones is a NaN.
-  return _mm256_or_ps(min, isnan);
+  Vec256<float> isnan = _mm256_cmp_ps(b, b, _CMP_UNORD_Q);
+  return Vec256<float>::blendv(min, a, isnan);
 }
 
 template <>

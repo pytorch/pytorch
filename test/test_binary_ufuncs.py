@@ -1273,8 +1273,10 @@ class TestBinaryUfuncs(TestCase):
         # if one of the elements being compared is a NaN, then that element is returned.
         ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
                (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
-        a_vals = (float('inf'), -float('inf'), float('nan'), float('inf'), float('nan'), float('nan'), 1, float('nan'))
-        b_vals = (-float('inf'), float('inf'), float('inf'), float('nan'), float('nan'), 0, float('nan'), -5)
+        a_vals = (-1, float('nan'), float('inf'), -float('inf'), float('nan'),
+                  float('inf'), float('nan'), float('nan'), 1, float('nan'))
+        b_vals = (float('nan'), -1, -float('inf'), float('inf'), float('inf'),
+                  float('nan'), float('nan'), 0, float('nan'), -5)
         if dtype == torch.bfloat16:
             a_np = np.array(a_vals, dtype=np.float64)
             b_np = np.array(b_vals, dtype=np.float64)
@@ -1297,11 +1299,21 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(alias_result, tensor_result)
 
             if dtype == torch.bfloat16:
-                self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
-                self.assertEqual(out, numpy_result, exact_dtype=False)
+                self.assertEqual(tensor_result, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'),
+                                 exact_dtype=False)
+                self.assertEqual(out, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'),
+                                 exact_dtype=False)
             else:
-                self.assertEqual(tensor_result, numpy_result)
-                self.assertEqual(out, numpy_result)
+                self.assertEqual(tensor_result, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'))
+                self.assertEqual(out, numpy_result,
+                                 (f'a: {a_vals}, b: {b_vals}\n'
+                                  f'Tensor result: {tensor_result}, NumPy result: {numpy_result}'))
 
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
     def test_maximum_minimum_complex(self, device, dtypes):
