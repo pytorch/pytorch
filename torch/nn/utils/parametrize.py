@@ -341,9 +341,17 @@ def remove_parametrizations(
         )
 
     # Fetch the original tensor
-    original = module.parametrizations[tensor_name].original  # type: ignore[index, union-attr]
+    parametrizations = module.parametrizations[tensor_name]  # type: ignore[index, union-attr]
+    original = parametrizations.original  # type: ignore[union-attr]
     if leave_parametrized:
-        t = getattr(module, tensor_name)
+        # Call getattr in eval mode so that parametrizations that
+        # compute weight iteratively won't perform another iteration
+        training = parametrizations.training   # type: ignore[union-attr]
+        parametrizations.eval()  # type: ignore[union-attr]
+        with torch.no_grad():
+            t = getattr(module, tensor_name)
+        parametrizations.train(training)  # type: ignore[union-attr]
+
         # If they have the same dtype, we reuse the original tensor.
         # We do this so that the parameter does not to change the id()
         # This way the user does not need to update the optimizer
