@@ -504,8 +504,9 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
 
     Returns:
         (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will not and vice versa. Returns a :class:`UsageError` if :attr:`actual` and :attr:`expected` do
-            not have the same type or no :class:`~torch.Tensor` can be constructed from them.
+            the second will not and vice versa. Returns a :class:`AssertionError` if :attr:`actual` and
+            :attr:`expected` do not have the same type and a :class:`UsageError` if no :class:`~torch.Tensor` can be
+            constructed from them.
     """
     exc: Optional[Exception]
 
@@ -515,8 +516,8 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
     if type(actual) is not type(expected) and not (
         isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
     ):
-        exc = UsageError(
-            f"Apart from a containers type equality is required, but got {type(actual)} and {type(expected)} instead."
+        exc = AssertionError(
+            f"Except from scalars, type equality is required, but got {type(actual)} and {type(expected)} instead."
         )
         return exc, None
 
@@ -759,11 +760,11 @@ def assert_close(
             with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
 
     Raises:
-        UsageError: If corresponding array-or-scalar-likes have different types.
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
         UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
             future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
+        AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
@@ -810,47 +811,52 @@ def assert_close(
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
     Examples:
-        >>> # tensor x tensor comparison
+        >>> # tensor to tensor comparison
         >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
         >>> actual = torch.acos(torch.cos(expected))
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # scalar x scalar comparison
+        >>> # scalar to scalar comparison
         >>> import math
         >>> expected = math.sqrt(2.0)
         >>> actual = 2.0 / math.sqrt(2.0)
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # array x array comparison
+        >>> # numpy array to numpy array comparison
         >>> import numpy as np
         >>> expected = np.array([1e0, 1e-1, 1e-2])
         >>> actual = np.arccos(np.cos(expected))
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # sequence x sequence comparison
-        >>> # The type of the sequences does not have to match. They only have to have the same
+        >>> # sequence to sequence comparison
+        >>> import numpy as np
+        >>> # The types of the sequences do not have to match. They only have to have the same
         >>> # length and their elements have to match.
         >>> expected = [torch.tensor([1.0]), 2.0, np.array(3.0)]
         >>> actual = tuple(expected)
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # mapping x mapping comparison
+        >>> # mapping to mapping comparison
         >>> from collections import OrderedDict
         >>> import numpy as np
         >>> foo = torch.tensor(1.0)
         >>> bar = 2.0
         >>> baz = np.array(3.0)
-        >>> # The type and a possible ordering of mappings does not have to match. They only
+        >>> # The types and a possible ordering of mappings do not have to match. They only
         >>> # have to have the same set of keys and their elements have to match.
         >>> expected = OrderedDict([("foo", foo), ("bar", bar), ("baz", baz)])
         >>> actual = {"baz": baz, "bar": bar, "foo": foo}
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # blub
+        >>> # Different input types are never considered close.
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
-        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.  # noqa: B950
+        AssertionError: Except for scalars, type equality is required, but got
+        <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
+        >>> # Scalars of different types are an exception and can be compared with
+        >>> # check_dtype=False.
+        >>> torch.testing.assert_close(1.0, 1, check_dtype=False)
 
         >>> # NaN != NaN by default.
         >>> expected = torch.tensor(float("Nan"))
@@ -864,8 +870,8 @@ def assert_close(
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
         AssertionError: Tensors are not close!
-        >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if the
-        >>> # real or imaginary component is NaN.
+        >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
+        >>> # of the real or imaginary component is NaN.
         >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
@@ -873,7 +879,7 @@ def assert_close(
         >>> # The default mismatch message can be overwritten.
         >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
         AssertionError: Argh, the tensors are not close!
-        >>> # The error message can also created dynamically by passing a callable.
+        >>> # The error message can also created at runtime by passing a callable.
         >>> def custom_msg(actual, expected, diagnostic_info):
         ...     return (
         ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
