@@ -6054,7 +6054,8 @@ class DistributedTest:
                 def __init__(self):
                     super().__init__()
                     self.lin = nn.Linear(10, 10)
-                    # Is not tracked by DDP and should not show up in
+                    # Is not tracked by DDP and should not show up in param to
+                    # name mapping.
                     self.lin.bias.requires_grad_(False)
 
                 def forward(self, x):
