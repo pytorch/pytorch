@@ -284,6 +284,24 @@ pytorch_params: &pytorch_params
     BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
 
+pytorch_android_params: &pytorch_android_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    op_list:
+      type: string
+      default: ""
+    lite_interpreter:
+      type: string
+      default: "0"
+  environment:
+    BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+    DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+    PYTHON_VERSION: "3.6"
+    SELECTED_OP_LIST: << parameters.op_list >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
+
 pytorch_ios_params: &pytorch_ios_params
   parameters:
     build_environment:
@@ -1616,10 +1634,7 @@ jobs:
         destination: artifacts.tgz
 
   pytorch_android_gradle_custom_build_single:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-      PYTHON_VERSION: "3.6"
+    <<: *pytorch_android_params
     resource_class: large
     machine:
       image: ubuntu-1604:202007-01
@@ -1646,7 +1661,7 @@ jobs:
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
           export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          export COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # Skip docker push as this job is purely for size analysis purpose.
@@ -6469,6 +6484,16 @@ workflows:
                 - /gh\/.*\/head/
                 - /pull\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+          requires:
+            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      - pytorch_android_gradle_custom_build_single:
+          filters:
+            branches:
+              only:
+                - /gh\/.*\/head/
+                - /pull\/.*/
+          lite_interpreter: "1"
+          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single_lite_interpreter
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_android_gradle_build:
