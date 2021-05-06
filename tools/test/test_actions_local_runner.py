@@ -50,7 +50,7 @@ if __name__ == '__main__':
                 }
                 f = io.StringIO()
                 with contextlib.redirect_stdout(f):
-                    await actions_local_runner.run_steps([fake_step], "test", None)
+                    await actions_local_runner.run_steps([fake_step], "test", None, True)
 
                 result = f.getvalue()
                 self.assertIn("say hello", result)
