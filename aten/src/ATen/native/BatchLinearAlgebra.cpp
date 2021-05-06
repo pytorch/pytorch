@@ -75,6 +75,12 @@ extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda
 extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
+// ormqr
+extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info);
+extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
+extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
+extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
+
 // syev
 extern "C" void zheev_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *info);
 extern "C" void cheev_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *info);
@@ -366,6 +372,22 @@ template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, dou
 
 template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float *tau, float *work, int lwork, int *info) {
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+}
+
+template<> void lapackOrmqr<c10::complex<double>>(char side, char trans, int m, int n, int k, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *c, int ldc, c10::complex<double> *work, int lwork, int *info) {
+  zunmqr_(&side, &trans, &m, &n, &k, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(c), &ldc, reinterpret_cast<std::complex<double>*>(work), &lwork, info);
+}
+
+template<> void lapackOrmqr<c10::complex<float>>(char side, char trans, int m, int n, int k, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *c, int ldc, c10::complex<float> *work, int lwork, int *info) {
+  cunmqr_(&side, &trans, &m, &n, &k, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(c), &ldc, reinterpret_cast<std::complex<float>*>(work), &lwork, info);
+}
+
+template<> void lapackOrmqr<double>(char side, char trans, int m, int n, int k, double *a, int lda, double *tau, double *c, int ldc, double *work, int lwork, int *info) {
+  dormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
+}
+
+template<> void lapackOrmqr<float>(char side, char trans, int m, int n, int k, float *a, int lda, float *tau, float *c, int ldc, float *work, int lwork, int *info) {
+  sormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
 }
 
 template<> void lapackSymeig<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int *info) {
@@ -1963,6 +1985,149 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
 
 Tensor orgqr(const Tensor& input, const Tensor& tau) {
   return at::linalg_householder_product(input, tau);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(ormqr_stub);
+
+void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other.dim() >= 2);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other.size(left ? -2 : -1) >= tau.size(-1));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other.size(left ? -2 : -1) == input.size(-2));
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == tau.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == tau.device());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == other.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == other.device());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
+
+  // if 'result' has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, other.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  }
+
+  // 'result' tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(other.sizes()));
+
+  // 'tau' tensor must be contiguous
+  Tensor tau_ = tau;
+  if (!tau.is_contiguous()) {
+    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
+    tau_.copy_(tau);
+  }
+
+  // 'input' tensor must be Fortran contiguous
+  Tensor input_ = input;
+  if (!input.transpose(-2, -1).is_contiguous()) {
+    input_ = at::empty(input.transpose(-2, -1).sizes(), input.options(), MemoryFormat::Contiguous);
+    input_.transpose_(-2, -1);
+    input_.copy_(input);
+  }
+
+  // ormqr_stub (apply_ormqr) performs calculations in-place and 'result' must be a copy of 'other'
+  result.copy_(other);
+
+  ormqr_stub(result.device().type(), input_, tau_, result, left, transpose);
+}
+
+Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose, Tensor& result) {
+  TORCH_CHECK(input.dim() >= 2, "torch.ormqr: input must have at least 2 dimensions.");
+  TORCH_CHECK(other.dim() >= 2, "torch.ormqr: other must have at least 2 dimensions.");
+
+  int64_t left_size_condition = left ? -2 : -1;
+  TORCH_CHECK(
+      other.size(left_size_condition) >= tau.size(-1),
+      "torch.ormqr: other.shape[",
+      left_size_condition,
+      "] must be greater than or equal to tau.shape[-1]");
+
+  TORCH_CHECK(
+      other.size(left_size_condition) == input.size(-2),
+      "torch.ormqr: other.shape[",
+      left_size_condition,
+      "] must be equal to input.shape[-2]");
+
+  TORCH_CHECK(
+      input.dim() - tau.dim() == 1,
+      "torch.ormqr: ",
+      "Expected tau to have one dimension less than input, but got tau.ndim equal to ",
+      tau.dim(),
+      " and input.ndim is equal to ",
+      input.dim());
+  TORCH_CHECK(
+      input.dim() == other.dim(),
+      "torch.ormqr: ",
+      "Expected other to have the same number of dimensions as input, but got other.ndim equal to ",
+      other.dim(),
+      " and input.ndim is equal to ",
+      input.dim());
+
+  if (input.dim() > 2) {
+    auto expected_batch_shape = IntArrayRef(input.sizes().data(), input.dim() - 2); // input.shape[:-2]
+    auto actual_batch_tau_shape = IntArrayRef(tau.sizes().data(), tau.dim() - 1); // tau.shape[:-1]
+    TORCH_CHECK(
+        actual_batch_tau_shape.equals(expected_batch_shape),
+        "torch.ormqr: Expected batch dimensions of tau to be equal to input.shape[:-2], but got ",
+        actual_batch_tau_shape);
+
+    auto actual_batch_other_shape = IntArrayRef(other.sizes().data(), other.dim() - 2); // other.shape[:-2]
+    TORCH_CHECK(
+        actual_batch_other_shape.equals(expected_batch_shape),
+        "torch.ormqr: Expected batch dimensions of other to be equal to input.shape[:-2], but got ",
+        actual_batch_other_shape);
+  }
+
+  TORCH_CHECK(
+      tau.scalar_type() == input.scalar_type(),
+      "torch.ormqr: Expected input and tau to have the same dtype, but input has dtype", input.scalar_type(),
+      " and tau has dtype ", tau.scalar_type());
+  TORCH_CHECK(
+      other.scalar_type() == input.scalar_type(),
+      "torch.ormqr: Expected input and other to have the same dtype, but input has dtype", input.scalar_type(),
+      " and other has dtype ", other.scalar_type());
+  TORCH_CHECK(
+      result.scalar_type() == input.scalar_type(),
+      "torch.ormqr: Expected input and result to have the same dtype, but input has dtype", input.scalar_type(),
+      " and result has dtype ", result.scalar_type());
+
+  checkSameDevice("torch.ormqr", tau, input, "tau");
+  checkSameDevice("torch.ormqr", other, input, "other");
+  checkSameDevice("torch.ormqr", result, input);
+
+  bool result_equal_expected_shape = result.sizes().equals(other.sizes());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    ormqr_out_helper(input, tau, other, result_tmp, left, transpose);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {
+    // use result's storage directly
+    ormqr_out_helper(input, tau, other, result, left, transpose);
+  }
+
+  return result;
+}
+
+Tensor ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::native::ormqr_out(input, tau, other, left, transpose, result);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

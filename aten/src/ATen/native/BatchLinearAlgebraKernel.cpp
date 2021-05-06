@@ -711,6 +711,86 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 }
 
 /*
+  The ormqr function multiplies Q with another matrix from a sequence of
+  elementary reflectors, such as is produced by the geqrf function.
+
+  Args:
+  * `input`     - Tensor with elementary reflectors below the diagonal,
+                  encoding the matrix Q.
+  * `tau`       - Tensor containing the magnitudes of the elementary
+                  reflectors.
+  * `other`     - [in] Tensor containing the matrix to be multiplied.
+                  [out] result of the matrix multiplication with Q.
+  * `left`      - bool, determining whether `other` is left- or right-multiplied with Q.
+  * `transpose` - bool, determining whether to transpose (or conjugate transpose) Q before multiplying.
+
+  For further details, please see the LAPACK documentation.
+*/
+template <typename scalar_t>
+void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(false, "Calling torch.ormqr on a CPU tensor requires compiling ",
+    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  char side = left ? 'L' : 'R';
+  char trans = transpose ? (input.is_complex() ? 'C' : 'T') : 'N';
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto other_data = other.data_ptr<scalar_t>();
+
+  auto input_matrix_stride = matrixStride(input);
+  auto other_matrix_stride = matrixStride(other);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(input);
+  auto m = other.size(-2);
+  auto n = other.size(-1);
+  auto k = tau.size(-1);
+  auto lda = std::max<int64_t>(1, left ? m : n);
+  auto ldc = std::max<int64_t>(1, m);
+  int info = 0;
+
+  // LAPACK's requirement
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY((left ? m : n) >= k);
+
+  // Query for the optimal size of the workspace tensor
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackOrmqr<scalar_t>(side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &wkopt, lwork, &info);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, input.options());
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
+    // now compute the actual result
+    lapackOrmqr<scalar_t>(
+        side, trans, m, n, k,
+        input_working_ptr, lda,
+        tau_working_ptr,
+        other_working_ptr, ldc,
+        work.data_ptr<scalar_t>(), lwork, &info);
+
+    // info from lapackOrmqr only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_ormqr'
+void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "ormqr_cpu", [&]{
+    apply_ormqr<scalar_t>(input, tau, other, left, transpose);
+  });
+}
+
+/*
 Solves the matrix equation op(A) X = B
 X and B are n-by-nrhs matrices, A is a unit, or non-unit, upper or lower triangular matrix
 and op(A) is one of op(A) = A or op(A) = A^T or op(A) = A^H.
@@ -823,6 +903,14 @@ REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX_DISPATCH(ormqr_stub, &ormqr_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX2_DISPATCH(ormqr_stub, &ormqr_kernel);
+REGISTER_VSX_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel);
