@@ -9,27 +9,13 @@ from .api import rendezvous_handler_registry as handler_registry
 from .dynamic_rendezvous import create_handler
 
 
-def _create_static_handler(params: RendezvousParameters) -> RendezvousHandler:
-    from . import static_tcp_rendezvous
-
-    return static_tcp_rendezvous.create_rdzv_handler(params)
-
-
-def _create_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
+def _create_etcd_v1_handler(params: RendezvousParameters) -> RendezvousHandler:
     from . import etcd_rendezvous
 
     return etcd_rendezvous.create_rdzv_handler(params)
 
 
-def _create_c10d_handler(params: RendezvousParameters) -> RendezvousHandler:
-    from .c10d_rendezvous_backend import create_backend
-
-    backend = create_backend(params)
-
-    return create_handler(backend.store, backend, params)
-
-
-def _create_expr_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
+def _create_etcd_v2_handler(params: RendezvousParameters) -> RendezvousHandler:
     from .etcd_rendezvous_backend import create_backend
     from .etcd_store import EtcdStore
 
@@ -40,10 +26,24 @@ def _create_expr_etcd_handler(params: RendezvousParameters) -> RendezvousHandler
     return create_handler(store, backend, params)
 
 
+def _create_c10d_handler(params: RendezvousParameters) -> RendezvousHandler:
+    from .c10d_rendezvous_backend import create_backend
+
+    backend = create_backend(params)
+
+    return create_handler(backend.store, backend, params)
+
+
+def _create_static_handler(params: RendezvousParameters) -> RendezvousHandler:
+    from . import static_tcp_rendezvous
+
+    return static_tcp_rendezvous.create_rdzv_handler(params)
+
+
 def _register_default_handlers() -> None:
-    handler_registry.register("etcd", _create_etcd_handler)
-    handler_registry.register("c10d-experimental", _create_c10d_handler)
-    handler_registry.register("etcd-experimental", _create_expr_etcd_handler)
+    handler_registry.register("etcd", _create_etcd_v1_handler, aliases=["etcd-v1"])
+    handler_registry.register("etcd-v2", _create_etcd_v2_handler)
+    handler_registry.register("c10d", _create_c10d_handler)
     handler_registry.register("static", _create_static_handler)
 
 
