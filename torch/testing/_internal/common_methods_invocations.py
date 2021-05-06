@@ -21,7 +21,7 @@ from torch.testing import \
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, onlyCPU)
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -4827,7 +4827,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_ormqr,
-           decorators=[onlyCPU, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('permute',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
