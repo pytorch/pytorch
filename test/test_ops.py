@@ -203,7 +203,7 @@ class TestGradients(TestCase):
         if op.supports_gradgrad:
             self.skipTest("Skipped! Operation does support gradgrad")
 
-        err_msg = r"the derivative for '.*' is not implemented\."
+        err_msg = r"derivative for .* is not implemented"
         with self.assertRaisesRegex(RuntimeError, err_msg):
             self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
