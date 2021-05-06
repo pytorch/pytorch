@@ -541,6 +541,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
     case aten::log:
@@ -1847,6 +1848,20 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(a, zero, zero, a, kLT);
           });
     } break;
+
+    case aten::gelu: {
+      return computeOneOperand(
+          "aten_gelu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            auto one = Cast::make(a.dtype(), 1.);
+            auto point_five = Cast::make(a.dtype(), .5);
+            return a * point_five * (one + erf(a * m_sqrt1_2));
+          });
+    } break;
     case aten::batch_norm: {
       bool hasWeight = true;
       bool hasBias = true;
@@ -2482,6 +2497,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::isnan:
     case aten::relu:
     case aten::hardswish:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::log:
     case aten::log10:
