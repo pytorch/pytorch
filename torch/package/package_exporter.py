@@ -104,7 +104,8 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_storages: Dict[str, Any] = {}
-        self.extern_modules: List[str] = []
+        # Only a dict for uniquing and deterministic ordering, the value is meaningless
+        self.extern_modules: Dict[str, bool] = {}
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
 
@@ -541,8 +542,7 @@ node [shape=box];
 
         Prefer using :meth:`extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        if module_name not in self.extern_modules:
-            self.extern_modules.append(module_name)
+        self.extern_modules[module_name] = True
 
     def save_mock_module(self, module_name: str):
         """Add `module_name` to the package, implemented it with a mocked out version that
