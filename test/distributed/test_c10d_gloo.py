@@ -2077,17 +2077,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             c10d.barrier(device_ids=[self.rank])
 
 
-@requires_gloo()
-class WrongTransportTest(TestCase):
-    def setUp(self):
-        self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.store = c10d.FileStore(self.file.name, 1)
-
-    def test_wrong_transport(self):
-        os.environ["GLOO_DEVICE_TRANSPORT"] = "XYZ"
-        self.process_group = c10d.ProcessGroupGloo(self.store, 0, 1)
-
-
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized

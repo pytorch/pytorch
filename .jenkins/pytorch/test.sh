@@ -488,7 +488,7 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc7_test || "${BUILD_ENVIRONMENT}" == pytorch_linux_xenial_py3_6_gcc5_4_test ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
     test_python_gloo_with_tls
   fi
 fi
