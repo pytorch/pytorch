@@ -6336,12 +6336,6 @@
   dispatch:
     CompositeExplicitAutograd: lu_solve
 
-- func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _lu_solve_helper_cpu
-    CUDA: _lu_solve_helper_cuda
-
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:

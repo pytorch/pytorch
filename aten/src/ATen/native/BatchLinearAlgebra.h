@@ -159,6 +159,9 @@ void lapackLstsq(
       iwork);
 }
 
+template <class scalar_t>
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
+
 #endif
 
 using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
@@ -212,5 +215,11 @@ using triangular_solve_fn = void (*)(
     bool /*conjugate_transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
+
+using lu_solve_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/);
+DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
 }} // namespace at::native
