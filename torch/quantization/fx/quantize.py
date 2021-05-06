@@ -532,7 +532,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
 
     # for ops such as torch.cat([x0, x1]),
     # traverse through the list
-    if isinstance(arg, list):
+    if isinstance(arg, (list, tuple)):
         new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
