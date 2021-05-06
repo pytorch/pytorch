@@ -1028,7 +1028,7 @@ class TensorExprFuser {
     }
 
     if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupported(node)) {
+      if (!tensorexpr::conv2dIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
         return false;
       }
