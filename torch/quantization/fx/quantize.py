@@ -977,14 +977,7 @@ def insert_observers_for_model_rewrite(
                 # if we skipped observation and we have a copy node,
                 # assign the dtype to the dtype of the previous node
                 # new_node.dtype = new_node.args[0].dtype
-                if (qhandler is not None and (
-                    isinstance(qhandler, CopyNodeQuantizeHandler)
-                )):
-                    prev_node = new_node.args[0]
-                    if isinstance(prev_node, Node):
-                        node_name_to_target_dtype[new_node.name] = \
-                            node_name_to_target_dtype[prev_node.name]
-                elif args_have_no_tensors:
+                if args_have_no_tensors or is_getitem:
                     node_name_to_target_dtype[new_node.name] = \
                         torch.float
 
