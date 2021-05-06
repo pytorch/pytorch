@@ -27,10 +27,12 @@ namespace jit {
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
+namespace interpreter {
+struct CodeImpl;
+}
 
 struct Node;
 struct GraphExecutor;
-struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
@@ -41,7 +43,7 @@ using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
-  explicit Code(CodeImpl* pImpl);
+  explicit Code(interpreter::CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
   // `prim::BailOut`s to control the maximum depth of bailout chains
@@ -69,7 +71,7 @@ struct TORCH_API Code {
   size_t register_size() const;
 
  private:
-  std::shared_ptr<CodeImpl> pImpl;
+  std::shared_ptr<interpreter::CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
 };
