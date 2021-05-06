@@ -34,6 +34,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 // This is a dummy comment in order to run A/A tests on torchbenchmark.
+// Second dummy comment!
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
