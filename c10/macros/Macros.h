@@ -84,6 +84,18 @@
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
+#ifdef __has_attribute
+#define C10_HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#define C10_HAS_ATTRIBUTE(x) (0)
+#endif
+
+#ifdef __has_cpp_attribute
+#define C10_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#define C10_HAS_CPP_ATTRIBUTE(x) (0)
+#endif
+
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 
 // Technically, we should check if __cplusplus > 201402L here, because
@@ -208,6 +220,14 @@ using namespace c10::hip;
 #define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #else
 #define C10_ALWAYS_INLINE inline
+#endif
+
+#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
+#define C10_FALLTHROUGH [[fallthrough]]
+#elif C10_HAS_ATTRIBUTE(fallthrough)
+#define C10_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define C10_FALLTHROUGH
 #endif
 
 #include <sstream>
