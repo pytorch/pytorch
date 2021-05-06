@@ -44,6 +44,7 @@ class device:
 class Stream:
     _cdata: _int  # Stream handle
     device: device # The device of the stream
+    stream_ptr: _int  # Pointer to external stream
 
     ...
 
