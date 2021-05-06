@@ -341,7 +341,11 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
-    assert(isinstance(importer.zip_reader, torch._C.PyTorchFileReader))
+    if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
+        raise RuntimeError(
+            "Loading ScriptObjects from a PackageImporter created from a "
+            "directory is not supported. Use a package archive file instead."
+        ) 
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
