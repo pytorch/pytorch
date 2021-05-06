@@ -198,7 +198,7 @@ class TORCH_API CompilationUnit {
  private:
   C10_NODISCARD Function* find_function(const c10::QualifiedName& qn) const;
 
-  std::vector<std::unique_ptr<Function>> functions_;
+  std::unordered_map<c10::QualifiedName, std::unique_ptr<Function>> functions_;
 };
 
 } // namespace nnc
