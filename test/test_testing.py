@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA)
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
+     deviceCountAtLeast)
 from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
@@ -768,8 +769,10 @@ def make_assert_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
         (actual, expected),
         ((actual,), (expected,)),
         ([actual], [expected]),
+        ((actual,), [expected]),
         ({"t": actual}, {"t": expected}),
         (collections.OrderedDict([("t", actual)]), collections.OrderedDict([("t", expected)])),
+        ({"t": actual}, collections.OrderedDict([("t", expected)])),
     ]
 
 
@@ -1069,11 +1072,12 @@ class TestAsserts(TestCase):
             fn()
 
     def test_scalar(self):
-        tensor = torch.rand(1)
-        actual = expected = tensor.item()
+        number = torch.randint(10, size=()).item()
+        for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
+            check_dtype = type(actual) is type(expected)
 
-        for fn in assert_fns_with_inputs(actual, expected):
-            fn()
+            for fn in assert_fns_with_inputs(actual, expected):
+                fn(check_dtype=check_dtype)
 
     def test_msg_str(self):
         msg = "Custom error message!"
@@ -1099,30 +1103,31 @@ class TestAsserts(TestCase):
                 fn(msg=make_msg)
 
 
-def device_combinations():
-    """Yields all possible combinations of the CPU and all available CUDA devices.
+def device_permutations(cuda_devices: List[str]) -> Iterator[Tuple[str, str]]:
+    """Yields all possible permutations of the CPU and the passed CUDA devices.
 
     Yields:
         Tuple[str, str]: Device combinations
     """
-    if not torch.cuda.is_available():
+    if not cuda_devices:
         return
 
-    devices = ("cpu", *[f"cuda:{idx}" for idx in range(torch.cuda.device_count())])
-    yield from itertools.permutations(devices, 2)
+    yield from itertools.permutations(("cpu", *cuda_devices), 2)
 
 
 class TestAssertsMultiDevice(TestCase):
-    def test_mismatching_device(self, _):
-        for actual_device, expected_device in device_combinations():
+    @deviceCountAtLeast(1)
+    def test_mismatching_device(self, devices):
+        for actual_device, expected_device in device_permutations(devices):
             actual = torch.empty((), device=actual_device)
             expected = actual.clone().to(expected_device)
             for fn in assert_fns_with_inputs(actual, expected):
                 with self.assertRaisesRegex(AssertionError, "device"):
                     fn()
 
-    def test_mismatching_device_no_check(self, _):
-        for actual_device, expected_device in device_combinations():
+    @deviceCountAtLeast(1)
+    def test_mismatching_device_no_check(self, devices):
+        for actual_device, expected_device in device_permutations(devices):
             actual = torch.rand((), device=actual_device)
             expected = actual.clone().to(expected_device)
             for fn in assert_fns_with_inputs(actual, expected):

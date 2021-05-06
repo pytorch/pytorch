@@ -95,13 +95,12 @@ inline void fastResizeToZero(at::Tensor& t) {
 
 bool opIsRegistered(const c10::Symbol& op_name);
 
-bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
 bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 
-bool canRunNatively(Node* n);
+bool mayRunNatively(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
 
 inline std::string PrintNode(const Node* node) {
