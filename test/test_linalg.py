@@ -7481,7 +7481,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 # actual rank is known only for dense input
                 detect_rank = (s.abs() > 1e-5).sum(axis=-1)
                 self.assertEqual(actual_rank * torch.ones(batches, device=device, dtype=torch.int64), detect_rank)
-                U, S, V = torch.svd(A2)
+                S = torch.linalg.svdvals(A2)
                 self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
 
         all_batches = [(), (1,), (3,), (2, 3)]

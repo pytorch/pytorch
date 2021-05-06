@@ -157,18 +157,17 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   if (input.numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
-    Tensor U, S, V;
-    // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
-    std::tie(U, S, V) = input.svd();
+    Tensor U, S, Vh;
+    std::tie(U, S, Vh) = at::linalg_svd(input, false);
+    Tensor V = Vh.conj().transpose(-2, -1);
     return at::matmul(V * S.reciprocal().unsqueeze(-2), U.conj().transpose(-2, -1));
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    Tensor U, S, V;
-    // TODO: replace input.svd with linalg_svd
-    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
-    std::tie(U, S, V) = input.svd();
+    Tensor U, S, Vh;
+    std::tie(U, S, Vh) = at::linalg_svd(input, false);
+    Tensor V = Vh.conj().transpose(-2, -1);
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
@@ -347,9 +346,7 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   // that are above max(atol, rtol * max(S)) threshold
   Tensor S, max_S;
   if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    S = at::linalg_svdvals(input);
     // singular values are sorted in descending order
     max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   } else {
@@ -2192,7 +2189,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
     auto permutation_reverse = create_reverse_permutation(permutation);
 
-    result_ = std::get<1>(self_.permute(permutation).svd()).abs();
+    result_ = at::linalg_svdvals(self_.permute(permutation));
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {

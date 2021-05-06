@@ -8530,9 +8530,23 @@ Supports :attr:`input` of float, double, cfloat and cdouble data types.
 The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: :func:`torch.svd` is deprecated. Please use
-             :func:`torch.linalg.svd` instead, which is similar to NumPy's
-             `numpy.linalg.svd`.
+.. warning::
+
+    :func:`torch.svd` is deprecated in favor of :func:`torch.linalg.svd`
+    and will be removed in a future PyTorch release.
+
+    ``U, S, V = torch.svd(A, some=some, compute_uv=True)`` (default) should be replaced with
+
+    .. code:: python
+
+        U, S, Vh = torch.linalg.svd(A, full_matrices=not some)
+        V = Vh.transpose(-2, -1).conj()
+
+    ``_, S, _ = torch.svd(A, some=some, compute_uv=False)`` should be replaced with
+
+    .. code:: python
+
+        S = torch.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 

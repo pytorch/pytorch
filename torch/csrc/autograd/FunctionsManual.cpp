@@ -2501,8 +2501,9 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
@@ -2554,8 +2555,9 @@ Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
-    Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
@@ -2609,9 +2611,9 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
-    Tensor u, sigma, v;
-    // TODO: replace self.svd with linalg_svd
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
