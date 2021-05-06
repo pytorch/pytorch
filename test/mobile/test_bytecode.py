@@ -101,12 +101,9 @@ SCRIPT_MODULE_BYTECODE_PKL = {
     4: {
         "bytecode_pkl": SCRIPT_MODULE_V4_BYTECODE_PKL,
         "model_name": "script_module_v4.ptl"},
-    5: {
-        "bytecode_pkl": SCRIPT_MODULE_V5_BYTECODE_PKL,
-        "model_name": "script_module_v5.ptl"},
 }
 
-# The minimum version a model can be backport to
+# The minimum version a model can be backported to
 # Need to be updated when a bytecode version is completely retired
 MINIMUM_TO_VERSION = 4
 
@@ -211,31 +208,35 @@ class testVariousModelVersions(TestCase):
         script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / SCRIPT_MODULE_BYTECODE_PKL[
             maximum_checked_in_model_version]["model_name"]
 
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            tmp_backport_model_path = Path(tmpdirname, "tmp_script_module_v5_backported_to_v4.ptl")
-            # backport from file
-            success = _backport_for_mobile(script_module_v5_path, tmp_backport_model_path, 4)
-            assert(success)
+        if (maximum_checked_in_model_version > MINIMUM_TO_VERSION):
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                tmp_backport_model_path = Path(tmpdirname, "tmp_script_module_v5_backported_to_v4.ptl")
+                # backport from file
+                success = _backport_for_mobile(
+                    script_module_v5_path,
+                    tmp_backport_model_path,
+                    maximum_checked_in_model_version - 1)
+                assert(success)
 
-            buf = io.StringIO()
-            torch.utils.show_pickle.main(
-                ["", tmpdirname + "/" + tmp_backport_model_path.name + "@*/bytecode.pkl"],
-                output_stream=buf)
-            output = buf.getvalue()
+                buf = io.StringIO()
+                torch.utils.show_pickle.main(
+                    ["", tmpdirname + "/" + tmp_backport_model_path.name + "@*/bytecode.pkl"],
+                    output_stream=buf)
+                output = buf.getvalue()
 
-            expected_result = SCRIPT_MODULE_V4_BYTECODE_PKL
-            acutal_result_clean = "".join(output.split())
-            expect_result_clean = "".join(expected_result.split())
-            isMatch = fnmatch.fnmatch(acutal_result_clean, expect_result_clean)
-            assert(isMatch)
+                expected_result = SCRIPT_MODULE_V4_BYTECODE_PKL
+                acutal_result_clean = "".join(output.split())
+                expect_result_clean = "".join(expected_result.split())
+                isMatch = fnmatch.fnmatch(acutal_result_clean, expect_result_clean)
+                assert(isMatch)
 
-            # Load model v4 and run forward method
-            mobile_module = _load_for_lite_interpreter(str(tmp_backport_model_path))
-            module_input = 1
-            mobile_module_result = mobile_module(module_input)
-            expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-            torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
-            shutil.rmtree(tmpdirname)
+                # Load model v4 and run forward method
+                mobile_module = _load_for_lite_interpreter(str(tmp_backport_model_path))
+                module_input = 1
+                mobile_module_result = mobile_module(module_input)
+                expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
+                torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+                shutil.rmtree(tmpdirname)
 
     # Check just the _backport_for_mobile_to_buffer mechanism but not the function implementations
     def test_backport_bytecode_from_file_to_buffer(self):
@@ -243,22 +244,24 @@ class testVariousModelVersions(TestCase):
         script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / SCRIPT_MODULE_BYTECODE_PKL[
             maximum_checked_in_model_version]["model_name"]
 
-        # Backport model to v4
-        script_module_v4_buffer = _backport_for_mobile_to_buffer(script_module_v5_path, 4)
-        buf = io.StringIO()
+        if (maximum_checked_in_model_version > MINIMUM_TO_VERSION):
+            # Backport model to v4
+            script_module_v4_buffer = _backport_for_mobile_to_buffer(
+                script_module_v5_path, maximum_checked_in_model_version - 1)
+            buf = io.StringIO()
 
-        # Check version of the model v4 from backport
-        bytesio = io.BytesIO(script_module_v4_buffer)
-        backport_version = _get_model_bytecode_version(bytesio)
-        assert(backport_version == maximum_checked_in_model_version - 1)
+            # Check version of the model v4 from backport
+            bytesio = io.BytesIO(script_module_v4_buffer)
+            backport_version = _get_model_bytecode_version(bytesio)
+            assert(backport_version == maximum_checked_in_model_version - 1)
 
-        # Load model v4 from backport and run forward method
-        bytesio = io.BytesIO(script_module_v4_buffer)
-        mobile_module = _load_for_lite_interpreter(bytesio)
-        module_input = 1
-        mobile_module_result = mobile_module(module_input)
-        expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-        torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+            # Load model v4 from backport and run forward method
+            bytesio = io.BytesIO(script_module_v4_buffer)
+            mobile_module = _load_for_lite_interpreter(bytesio)
+            module_input = 1
+            mobile_module_result = mobile_module(module_input)
+            expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
+            torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
 
 
     def test_load_and_run_model(self):
