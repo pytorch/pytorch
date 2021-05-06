@@ -1,5 +1,5 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-from torch.utils._pytree import TreeSpec
+import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
@@ -234,7 +234,8 @@ class _PyTreeInfo(NamedTuple):
     Contains extra info stored when we're using Pytrees
     """
     orig_args: List[str]
-    in_spec: TreeSpec
+    in_spec: pytree.TreeSpec
+    out_spec: Optional[pytree.TreeSpec]
 
 class Graph:
     """
@@ -402,6 +403,15 @@ class Graph:
         self._insert(n)
         self._len += 1
         return n
+
+    def flatten_inps(self, *args):
+        flat_args, args_spec = pytree.tree_flatten(args)
+        return flat_args
+
+    def unflatten_outs(self, out):
+        if self._pytree_info.out_spec is None:
+            return out
+        return pytree.tree_unflatten(out, self._pytree_info.out_spec)
 
     def erase_node(self, to_erase : Node) -> None:
         """

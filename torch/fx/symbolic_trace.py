@@ -330,7 +330,7 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
-            if concrete_args is not None and name in concrete_args:
+            if concrete_args is not None and name in concrete_args :
                 cnt = 0
 
                 def replace_ph(x):
@@ -340,7 +340,7 @@ class Tracer(TracerBase):
                     if x == PH:
                         return out
 
-                    if type(x) in base_types:
+                    if type(x) in base_types and type(x) != torch.Tensor:
                         torch._assert(out == x, f"{name} has been specialized to have value {x}")
                     else:
                         torch.warnings.warn(
@@ -359,8 +359,11 @@ class Tracer(TracerBase):
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
-
-        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
+        arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
+        if isinstance(concrete_args, tuple):
+            assert(len(arg_names) == len(concrete_args))
+            concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
+        args.extend(proxy_placeholder(names) for names in arg_names)
 
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -376,14 +379,16 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec)
+            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec, None)
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
-                return root_fn(*tree_args)
+                tree_out = root_fn(*tree_args)
+                out_args, out_spec = pytree.tree_flatten(tree_out)
+                self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
+                return tree_out
 
             return flatten_fn, flat_args
-
         return root_fn, args
 
 
