@@ -40,7 +40,7 @@ install_ubuntu() {
 
     ROCM_REPO="ubuntu"
     if [[ $(ver $ROCM_VERSION) -lt $(ver 4.2) ]]; then
-		ROCM_REPO="xenial"
+        ROCM_REPO="xenial"
     fi
 
     # Add rocm repository
