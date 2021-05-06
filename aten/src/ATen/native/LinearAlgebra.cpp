@@ -347,9 +347,7 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   // that are above max(atol, rtol * max(S)) threshold
   Tensor S, max_S;
   if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    S = at::linalg_svdvals(input);
     // singular values are sorted in descending order
     max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   } else {
@@ -2151,7 +2149,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
     auto permutation_reverse = create_reverse_permutation(permutation);
 
-    result_ = std::get<1>(self_.permute(permutation).svd()).abs();
+    result_ = at::linalg_svdvals(self_.permute(permutation));
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {

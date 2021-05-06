@@ -2857,6 +2857,21 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
+  // TODO: uncomment the following when svd is deprecated not only in docs
+  // torch/xla is blocking the transition from at::svd to at::linalg_svd in at::linalg_pinv code
+  // see https://github.com/pytorch/xla/issues/2755
+  // TORCH_WARN_ONCE(
+  //     "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
+  //     "removed in a future PyTorch release.\n",
+  //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
+  //     "should be replaced with\n",
+  //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
+  //     "V = Vh.transpose(-2, -1).conj()\n",
+  //     "and\n",
+  //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
+  //     "should be replaced with\n",
+  //     "S = torch.linalg.svdvals(A)");
+
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
@@ -2873,7 +2888,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
   checkLinalgCompatibleDtype("svd", S.scalar_type(), real_dtype, "S");
 
   Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
+  std::tie(U_tmp, S_tmp, V_tmp) = at::native::svd(self, some, compute_uv);
 
   at::native::resize_output(U, U_tmp.sizes());
   at::native::resize_output(S, S_tmp.sizes());
