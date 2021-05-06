@@ -95,7 +95,7 @@ def symeig(A: Tensor, largest: Optional[bool] = False, eigenvectors: Optional[bo
         largest = False
     if eigenvectors is None:
         eigenvectors = True
-    E, Z = torch.linalg.symeig(A, eigenvectors, UPLO='U')
+    E, Z = torch.linalg.eigh(A, eigenvectors, UPLO='U')
     # assuming that E is ordered
     if largest:
         E = torch.flip(E, dims=(-1,))

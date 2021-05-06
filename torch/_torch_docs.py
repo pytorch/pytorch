@@ -8621,7 +8621,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. warning::
 
-    :func:`torch.symeig` is deprecated in favor of :func:`torch.linalg.symeig`
+    :func:`torch.symeig` is deprecated in favor of :func:`torch.linalg.eigh`
     and will be removed in a future PyTorch release. The default behavior has changed
     from using the upper triangular portion of the matrix by default to using the
     lower triangular portion. This should only matter if this function is used with
