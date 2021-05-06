@@ -19,20 +19,20 @@ class TestIgnorableArgs(JitTestCase):
     def test_slice_ignorable_args_for_slice(self):
         graph_str = """graph():
             %15 : int = prim::Constant[value=9223372036854775807]()
-            %13 : int = prim::Constant[value=0]() # test/test_jit.py:4068:19
+            %13 : int = prim::Constant[value=0]()
             %10 : bool = prim::Constant[value=0]()
             %8 : NoneType = prim::Constant()
-            %0 : int = prim::Constant[value=1]() # test/test_jit.py:4067:33
-            %1 : int = prim::Constant[value=2]() # test/test_jit.py:4067:36
-            %2 : int = prim::Constant[value=3]() # test/test_jit.py:4067:39
-            %3 : int = prim::Constant[value=4]() # test/test_jit.py:4067:42
-            %4 : int = prim::Constant[value=9]() # test/test_jit.py:4067:45
+            %0 : int = prim::Constant[value=1]()
+            %1 : int = prim::Constant[value=2]()
+            %2 : int = prim::Constant[value=3]()
+            %3 : int = prim::Constant[value=4]()
+            %4 : int = prim::Constant[value=9]()
             %5 : int[] = prim::ListConstruct(%0, %1, %2, %3, %4, %4)
             %6 : int[] = prim::ListConstruct(%0, %1, %2, %3, %4, %4)
             %7 : int[][] = prim::ListConstruct(%5, %6)
-            %val.1 : Tensor = aten::tensor(%7, %8, %8, %10) # test/test_jit.py:4067:18
-            %16 : Tensor = aten::slice(%val.1, %13, %1, %15, %0) # test/test_jit.py:4068:19
-            %20 : Tensor = aten::slice(%16, %0, %13, %0, %0) # test/test_jit.py:4068:19
+            %val.1 : Tensor = aten::tensor(%7, %8, %8, %10)
+            %16 : Tensor = aten::slice(%val.1, %13, %1, %15, %0)
+            %20 : Tensor = aten::slice(%16, %0, %13, %0, %0)
             return (%20)"""
         graph = parse_ir(graph_str)
         function = self.createFunctionFromGraph(graph)

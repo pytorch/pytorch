@@ -1162,13 +1162,13 @@ struct PythonPrintImpl {
         // details.
         size_t necessary_args =
             CalculateNecessaryArgs(schema.arguments(), node->inputs());
-        for (size_t index = 0; index < necessary_args; ++index) {
-          if (index > 0)
+        for (size_t i = 0; i < necessary_args; ++i) {
+          if (i > 0)
             stmt << ", ";
-          auto v = useOf(node->inputs().at(index));
+          auto v = useOf(node->inputs().at(i));
           // print the kwarg name if it is a kwarg only argument.
-          if (index < schema.arguments().size()) {
-            auto arg = schema.arguments().at(index);
+          if (i < schema.arguments().size()) {
+            auto arg = schema.arguments().at(i);
             if (arg.kwarg_only()) {
               stmt << arg.name() << "=";
             }

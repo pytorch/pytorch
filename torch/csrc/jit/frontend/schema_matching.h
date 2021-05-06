@@ -18,10 +18,6 @@ struct MatchedSchema {
   c10::OptNameList return_field_names;
 };
 
-TORCH_API size_t CalculateNecessaryArgs(
-    const std::vector<Argument>& schema_args,
-    at::ArrayRef<Value*> actual_inputs);
-
 TORCH_API MatchedSchema matchSchema(
     const ::c10::FunctionSchema& schema,
     const SourceRange& loc,
