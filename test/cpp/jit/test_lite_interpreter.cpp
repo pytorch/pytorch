@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/backport_factory.h>
+#include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -629,119 +629,105 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v4.append("script_module_v4.ptl");
 
-  auto test_model_file_v5 =
-      filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  test_model_file_v5.append("script_module_v5.ptl");
-
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
-
-  auto version_v5 = _get_model_bytecode_version(test_model_file_v5);
-  AT_ASSERT(version_v5 == 5);
-}
-
-TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV4ToV3) {
-  std::string filePath(__FILE__);
-  auto test_model_file_v4 =
-      filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  test_model_file_v4.append("script_module_v4.ptl");
-
-  // Load check in model: script_module_v4.ptl
-  auto from_version = _get_model_bytecode_version(test_model_file_v4);
-  AT_ASSERT(from_version == 4);
-
-  // Backport script_module_v5.ptl to an older version
-  std::ostringstream oss;
-  const int64_t to_version_3 = 3;
-  bool backPortSuccess =
-      _backport_for_mobile(test_model_file_v4, oss, to_version_3);
-  AT_ASSERT(!backPortSuccess);
 }
 
 namespace {
-void runTorchScriptModel(Module m) {
-  // Run the backport model, then compare the result with expect
-  // result
-  auto input_data = std::vector<IValue>({IValue(1)});
-  auto actual_result = m.forward(input_data).toTensor();
-  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
+void runAndCheckBytecodeModel(
+    std::stringstream& input_model_stream,
+    std::vector<IValue>& input_data,
+    std::vector<Tensor>& expect_result_list,
+    const int64_t expect_version) {
+  auto actual_version = _get_model_bytecode_version(input_model_stream);
+  AT_ASSERT(actual_version == expect_version);
 
-  AT_ASSERT(actual_result.equal(expected_result));
+  // Load and run the backport model, then compare the result with expect
+  // result
+  mobile::Module m_mobile = _load_for_mobile(input_model_stream);
+
+  auto actual_result = m_mobile.forward(input_data);
+  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
+  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
 }
 
-void runByteCodeModel(mobile::Module m) {
-  // Run the backport model, then compare the result with expect
-  // result
-  auto input_data = std::vector<IValue>({IValue(1)});
-  auto actual_result = m.forward(input_data).toTensor();
-  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
-
-  AT_ASSERT(actual_result.equal(expected_result));
-}
-
-void backportBasicCheck(
-    std::string test_model_file,
+void backportAllVersionCheck(
+    std::stringstream& test_model_file_stream,
+    std::vector<IValue>& input_data,
+    std::vector<Tensor>& expect_result_list,
     const int64_t expect_from_version) {
-  auto from_version = _get_model_bytecode_version(test_model_file);
+  auto from_version = _get_model_bytecode_version(test_model_file_stream);
   AT_ASSERT(from_version == expect_from_version);
 
   // Backport script_module_v5.ptl to an older version
   constexpr int64_t minimum_to_version = 4;
   int64_t current_to_version = from_version - 1;
 
-  AT_ASSERT(current_to_version >= minimum_to_version);
-
-  // Verify all candidate to_version work as expected.
+  std::ostringstream oss;
+  // Verify all candidate to_version work as expected. All backport to version
+  // larger than minimum_to_version should success.
   while (current_to_version >= minimum_to_version) {
-    std::ostringstream oss;
+    oss.clear();
     bool backPortSuccess =
-        _backport_for_mobile(test_model_file, oss, current_to_version);
+        _backport_for_mobile(test_model_file_stream, oss, current_to_version);
     AT_ASSERT(backPortSuccess);
 
     // Check backport model version
-    std::istringstream iss(oss.str());
+    std::stringstream iss(oss.str());
     auto backport_version = _get_model_bytecode_version(iss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
-    mobile::Module m_mobile = _load_for_mobile(iss);
-    runByteCodeModel(m_mobile);
-
-    Module m_torch_script = load(iss);
-    runTorchScriptModel(m_torch_script);
+    runAndCheckBytecodeModel(
+        iss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
   }
+  //  backport to minimum version - 1 should fail
+  oss.clear();
+  bool backPortSuccess =
+      _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
+  AT_ASSERT(!backPortSuccess);
 }
+
 } // namespace
 
-TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV5ToV4) {
-  std::string filePath(__FILE__);
-  auto test_model_file_v5 =
-      filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  test_model_file_v5.append("script_module_v5.ptl");
+TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
+  torch::jit::Module module("m");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  module.register_parameter("bias", torch::ones({20}), false);
+  module.define(R"(
+    def forward(self, input):
+      x1 = torch.zeros(2, 2)
+      x2 = torch.empty_like(torch.empty(2, 2))
+      x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+      return (x1, x2, x3)
+  )");
 
-  // Run basic check for backport from v5 to v4
-  backportBasicCheck(test_model_file_v5, kBytecodeVersionV5);
-}
+  torch::jit::Module module_freeze = freeze(module);
 
-TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
-  // Test current runtime can load and run bytecode version 4 and 5.
-  std::string file_path(__FILE__);
-  auto test_model_file_v5 =
-      file_path.substr(0, file_path.find_last_of("/\\") + 1);
-  auto test_model_file_v4 = test_model_file_v5;
-  test_model_file_v4.append("script_module_v4.ptl");
-  test_model_file_v5.append("script_module_v5.ptl");
-  Module ts_module_v4 = load(test_model_file_v4);
-  Module ts_module_v5 = load(test_model_file_v5);
-  mobile::Module mobile_module_v4 = _load_for_mobile(test_model_file_v4);
-  mobile::Module mobile_module_v5 = _load_for_mobile(test_model_file_v4);
-  runByteCodeModel(mobile_module_v4);
-  runByteCodeModel(mobile_module_v5);
-  runTorchScriptModel(ts_module_v4);
-  runTorchScriptModel(ts_module_v5);
+  std::stringstream input_model_stream;
+  module_freeze._save_for_mobile(input_model_stream);
+  std::vector<IValue> input_data =
+      std::vector<IValue>({torch::ones({1, 1, 28, 28})});
+  std::vector<Tensor> expect_result_list;
+  expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float) * 0);
+  expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
+  expect_result_list.emplace_back(
+      at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
+  backportAllVersionCheck(
+      input_model_stream,
+      input_data,
+      expect_result_list,
+      caffe2::serialize::kProducedBytecodeVersion);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
