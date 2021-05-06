@@ -7002,18 +7002,23 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
-             instead.
+.. warning::
 
-             **Differences with** ``torch.linalg.qr``:
+    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
+    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
+    replaced with a string parameter :attr:`mode`.
 
-             * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
+    ``Q, R = torch.qr(A)`` should be replaced with
 
-               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
-                 default
+    .. code:: python
 
-               - ``some=False`` is equivalent of ``mode='complete'``.
+        Q, R = torch.linalg.qr(A)
 
+    ``Q, R = torch.qr(A, some=False)`` should be replaced with
+
+    .. code:: python
+
+        Q, R = torch.linalg.qr(A, mode="complete")
 
 .. warning::
           If you plan to backpropagate through QR, note that the current backward implementation

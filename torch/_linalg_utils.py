@@ -82,7 +82,7 @@ def basis(A):
     """
     if A.is_cuda:
         # torch.orgqr is not available in CUDA
-        Q, _ = torch.qr(A, some=True)
+        Q = torch.linalg.qr(A).Q
     else:
         Q = torch.orgqr(*torch.geqrf(A))
     return Q
