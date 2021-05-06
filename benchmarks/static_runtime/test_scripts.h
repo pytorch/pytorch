@@ -121,6 +121,24 @@ const auto sigmoid_out_script = R"JIT(
       return (b)
 )JIT";
 
+const auto logit_script_1 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp)
+      return (a)
+)JIT";
+
+const auto logit_script_2 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp, 1e-6)
+      return (a)
+)JIT";
+
+const auto logit_script_3 = R"JIT(
+  def forward(self, inp: Tensor, eps: float):
+      a = torch.logit(inp, eps)
+      return (a)
+)JIT";
+
 // b is in_contiguous
 const auto reshape_incontiguous_script = R"JIT(
   def forward(self, a: Tensor, shape: List[int]):
@@ -280,6 +298,11 @@ const std::string layer_norm_without_weights = R"JIT(
       return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False)
 )JIT";
 
+const auto norm_2arg = R"JIT(
+  def forward(self, a: Tensor, p: int):
+      return torch.norm(a, p)
+)JIT";
+
 const auto norm_3arg = R"JIT(
   def forward(self, a: Tensor, p: int, dtype: int):
       return torch.norm(a, p, dtype=dtype)
@@ -293,4 +316,9 @@ const auto norm_4arg = R"JIT(
 const auto norm_5arg = R"JIT(
   def forward(self, a: Tensor, p: int, dim: List[int], keepdim: bool, dtype: int):
       return torch.norm(a, p, dim, keepdim, dtype=dtype)
+)JIT";
+
+const auto aten_matmul = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.matmul(a, b)
 )JIT";
