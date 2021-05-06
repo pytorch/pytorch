@@ -179,6 +179,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   void add_done_callback(py::function cb) {
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
         [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
           try {
@@ -251,12 +252,11 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
 inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(
-        ConstantString::create(py::cast<std::string>(key)),
-        StringType::create());
+        ConstantString::create(py::cast<std::string>(key)), StringType::get());
   } else if (py::isinstance<py::int_>(key)) {
-    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+    return TypedIValue(py::cast<int64_t>(key), IntType::get());
   } else if (py::isinstance<py::float_>(key)) {
-    return TypedIValue(py::cast<double>(key), FloatType::create());
+    return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
@@ -299,6 +299,7 @@ inline InferredType tryToInferType(py::handle input) {
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::int_>(input)) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
@@ -566,7 +567,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
@@ -951,6 +952,7 @@ inline py::object runAndInsertCall(
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
     for (Value* v : input_values) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 
@@ -986,7 +988,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName qualname) {
-  std::vector<py::handle> args_vec = {callee};
+  std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
   }
@@ -1020,12 +1022,12 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   if (overloaded_args.size() > 0) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            qualname.name().c_str(),
-            args[0].ptr(),
-            qualname.prefix().c_str()));
+            /*overloaded_args=*/overloaded_args,
+            /*args=*/args.ptr(),
+            /*kwargs=*/kwargs.ptr(),
+            /*func_name=*/qualname.name().c_str(),
+            /*torch_api_function=*/callee.ptr(),
+            /*module_name=*/qualname.prefix().c_str()));
   }
 
   return c10::nullopt;

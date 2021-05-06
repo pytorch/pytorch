@@ -170,12 +170,12 @@ struct Capsule {
 ///   std::cout << my_ivalue << "\n";
 ///
 ///   // Unwrap the IValue
-///   int64_t my_int = my_ivalue.toInt()
+///   int64_t my_int = my_ivalue.toInt();
 ///   std::cout << my_int << "\n";
 ///
 ///   // This will throw an error!
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
-///   torch::Tensor my_tensor = my_ivalue.toTensor()
+///   torch::Tensor my_tensor = my_ivalue.toTensor();
 /// \endrst
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
@@ -687,13 +687,17 @@ struct TORCH_API IValue final {
       *this = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
-    } else {
+    } else if (s.isBoolean()) {
+      *this = s.toBool();
+    } else if (s.isIntegral(false)) {
       *this = s.toLong();
+    } else {
+      TORCH_CHECK(false, "Unknown type in Scalar");
     }
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble();
+    return isDouble() || isInt() || isComplexDouble() || isBool();
   }
 
   at::Scalar toScalar() const {
@@ -703,6 +707,8 @@ struct TORCH_API IValue final {
       return toInt();
     else if (isComplexDouble())
       return toComplexDouble();
+    else if (isBool())
+      return toBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 

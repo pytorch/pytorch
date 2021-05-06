@@ -47,8 +47,7 @@ class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
                     # Add a reference of the source zipfile into extracted_fobj, so the source
                     # zipfile handle won't be released until all the extracted file objs are destroyed.
-                    # Add `# type: ignore` to silence mypy's type checker
-                    extracted_fobj.source_zipfile_ref = zips  # type: ignore
+                    extracted_fobj.source_zipfile_ref = zips  # type: ignore[attr-defined]
                     # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:

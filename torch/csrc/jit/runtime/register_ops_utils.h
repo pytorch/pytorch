@@ -91,6 +91,7 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
@@ -105,15 +106,18 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 TORCH_API void checkDoubleInRange(double a);
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
 }
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t ceil(double a) {
   checkDoubleInRange(a);
   return std::ceil(a);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t r = a % b;
@@ -137,6 +141,7 @@ double degrees(double x);
 double radians(double x);
 
 // reference function THPVariable_to in python_variable_methods.cpp
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static at::Tensor to_dispatch(
     at::Tensor self,
     c10::optional<at::Device> device,
@@ -370,6 +375,7 @@ template <typename T>
 void listContains(Stack* stack) {
   auto key = pop(stack).to<T>();
   auto list = pop(stack).to<c10::List<T>>();
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const T& item : list) {
     if (item == key) {
       push(stack, true);
@@ -528,7 +534,7 @@ void listSetItem(Stack* stack);
 // it's necessary to register this overload following
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
-#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(                  \
+#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(                  \
     aten_op, int_op, float_op, result, string_val)                \
   OperatorGenerator(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
@@ -561,7 +567,10 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(aten_op, int_op, float_op, result, "")
+  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(aten_op, int_op, float_op, result, "")
+
+#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(aten_op, int_op, float_op, result) \
+  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(aten_op, int_op, float_op, result, ".Scalar_Scalar")
 
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
@@ -765,7 +774,7 @@ void listSetItem(Stack* stack);
           },                                                              \
           aliasAnalysisFromSchema())
 
-#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION(     \
+#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC(     \
     aten_op, int_op, float_op, complex_op, result, string_val)    \
   OperatorGenerator(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
@@ -856,7 +865,7 @@ void listSetItem(Stack* stack);
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(           \
     aten_op, int_op, float_op, complex_op, result)      \
-  DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION( \
+  DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC( \
       aten_op, int_op, float_op, complex_op, result, "")
 
 #define DEFINE_BINARY_OP_WITH_COMPLEX(aten_op, op)                          \
