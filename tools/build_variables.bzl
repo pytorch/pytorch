@@ -397,6 +397,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/optim/sgd.cpp",
     "torch/csrc/jit/mobile/sequential.cpp",
+    "torch/csrc/jit/mobile/nnc/context.cpp",
+    "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
