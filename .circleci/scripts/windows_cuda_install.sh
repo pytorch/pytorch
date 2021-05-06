@@ -5,7 +5,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/maps.sh"
 
 cuda_major_version=${CUDA_VERSION%.*}
 
-# cuda_installer_name
 declare -a installers=(
     "10.1:cuda_10.1.243_426.00_win10"
     "11.1:cuda_11.1.0_456.43_win10"
@@ -13,24 +12,11 @@ declare -a installers=(
     "11.3:cuda_11.3.0_465.89_win10"
 )
 
-map_get_value $CUDA_VERSION "${installers[@]}"
-cuda_installer_name=$map_return_value
-
-if [ -z $cuda_installer_name ]; then
-    echo "CUDA_VERSION $CUDA_VERSION is not supported yet"
-    exit 1
-fi
-
-# msbuild_project_dir
 declare -a build_dirs=(
     "10:CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
     "11:visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
 )
 
-map_get_value $cuda_major_version "${build_dirs[@]}"
-msbuild_project_dir=$map_return_value
-
-# cuda_install_packages
 # https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html#install-cuda-software
 cuda10_packages_template="nvcc cuobjdump nvprune cupti cublas cublas_dev cudart cufft cufft_dev curand curand_dev cusolver cusolver_dev cusparse cusparse_dev nvgraph nvgraph_dev npp npp_dev nvrtc nvrtc_dev nvml_dev"
 
@@ -43,6 +29,20 @@ declare -a install_packages=(
     "11.3:${cuda11_packages_template} thrust"
 )
 
+# cuda_installer_name
+map_get_value $CUDA_VERSION "${installers[@]}"
+cuda_installer_name=$map_return_value
+
+if [ -z $cuda_installer_name ]; then
+    echo "CUDA_VERSION $CUDA_VERSION is not supported yet"
+    exit 1
+fi
+
+# msbuild_project_dir
+map_get_value $cuda_major_version "${build_dirs[@]}"
+msbuild_project_dir=$map_return_value
+
+# cuda_install_packages
 map_get_value $CUDA_VERSION "${install_packages[@]}"
 packages_template=$map_return_value
 read -ra package_array <<< "$packages_template"
