@@ -108,6 +108,13 @@ TORCH_META_FUNC(sign) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(ceil) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "ceil is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -128,6 +135,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh)
 CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not)
+CREATE_UNARY_TORCH_IMPL_FUNC(ceil)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma)
@@ -378,16 +386,6 @@ Tensor conj(const Tensor& self) {
   }
   return at::_conj(self);
 }
-
-Tensor& ceil_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "ceil is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, ceil_stub);
-}
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
-Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 // special_exp2, alias for exp2
 Tensor& special_exp2_out(const Tensor& self, Tensor& result) { return at::exp2_out(result, self); }

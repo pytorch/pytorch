@@ -946,18 +946,22 @@
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: ceil_out
 
