@@ -1882,10 +1882,6 @@ matrices.
 
         U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()
 
-.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
-          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
-          parameter and instead always returns the lower triangular matrix.
-
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
