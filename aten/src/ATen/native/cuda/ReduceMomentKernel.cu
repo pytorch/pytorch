@@ -19,7 +19,7 @@ void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
 }
 
 static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  auto input_dtype = iter.dtype(iter.num_outputs());
+  const auto input_dtype = iter.input_dtype();
   if (input_dtype == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     std_var_kernel_impl<at::Half, float>(iter, unbiased, take_sqrt);
