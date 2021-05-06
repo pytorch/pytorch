@@ -1585,7 +1585,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     // std::cout << "Looking for " << schema_str << std::endl;
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
-
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
