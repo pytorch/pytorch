@@ -340,7 +340,7 @@ ReductionParams OuterNormalizationHeuristic(
     // the number of blocks.  The warp should be reduced at a minimum
     // to the granularity that an SM would pull a unique portion of a
     // cacheline from the memory system or else there is no
-    // benefit from speading the work to a different block.
+    // benefit from spreading the work to a different block.
     // This is dependent on the data size of elements.
     const int64_t cache_sector_bytes = 32;
     int64_t min_outputs_per_block =

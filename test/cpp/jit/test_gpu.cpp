@@ -14741,8 +14741,6 @@ TEST(NVFuserTest, FusionBNBackwardRepro_CUDA) {
 }
 
 // TODO: We only changed inputs, merge this with the test above.
-// TODO: Enable test
-#if 0
 TEST(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -14838,7 +14836,6 @@ TEST(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
       input0, input1, input2, input3, input4, input5, input6, input7};
   auto outputs = fec.runFusionWithInputs(inputs);
 }
-#endif
 
 TEST(NVFuserTest, FusionBNRepro_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
