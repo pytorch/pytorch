@@ -666,6 +666,11 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor chain_matmul(TensorList matrices) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
@@ -679,6 +684,11 @@ Tensor chain_matmul(TensorList matrices) {
 }
 
 Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
