@@ -12,14 +12,14 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int inSize,
     int outSize,
     at::ScalarType dType,
-    std::vector<int64_t> inSplitSizes,
-    std::vector<int64_t> outSplitSizes) :
+    std::vector<int64_t>&& inSplitSizes,
+    std::vector<int64_t>&& outSplitSizes) :
       rank_(rank),
       columnName_(colName),
       inMessageSize_(inSize),
       outMessageSize_(outSize),
       dType_(dType),
-      inputSplitSizes_(std::move(inSplitSizes)),
-      outputSplitSizes_(std::move(outSplitSizes)) {}
+      inputSplitSizes_(inSplitSizes),
+      outputSplitSizes_(outSplitSizes) {}
 
 } // namespace torch
