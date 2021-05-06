@@ -1,6 +1,7 @@
 #!/bin/bash
 
-TMP_CERT_DIR=$(python create_test_cert.py)
+CREATE_TEST_CERT="$(dirname "${BASH_SOURCE[0]}")/create_test_cert.py"
+TMP_CERT_DIR=$(python $CREATE_TEST_CERT)
 
 openssl verify -CAfile "${TMP_CERT_DIR}/ca.pem" "${TMP_CERT_DIR}/cert.pem"
 
