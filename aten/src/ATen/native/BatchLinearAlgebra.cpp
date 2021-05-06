@@ -227,9 +227,6 @@ template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
                value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 
-template<class scalar_t>
-void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
-
 template<> void lapackSolve<c10::complex<double>>(int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
   zgesv_(&n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
@@ -3401,57 +3398,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("lu_solve: LAPACK library not found in compilation");
-#else
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
-  auto pivots_data = pivots.data_ptr<int>();
-  auto b_stride = matrixStride(b);
-  auto lu_stride = matrixStride(lu);
-  auto pivots_stride = pivots.size(-1);
-  auto batch_size = batchCount(b);
-
-  auto n = lu.size(-2);
-  auto nrhs = b.size(-1);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* b_working_ptr = &b_data[i * b_stride];
-    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-    lapackLuSolve<scalar_t>('N', n, nrhs, lu_working_ptr, n, pivots_working_ptr,
-                            b_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
-Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
-  auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
-  std::vector<int64_t> infos(batchCount(self), 0);
-
-  if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
-    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "lu_solve_cpu");
-  } else {
-    singleCheckErrors(infos[0], "lu_solve_cpu");
-  }
-  return self_working_copy;
-}
+DEFINE_DISPATCH(lu_solve_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
@@ -3482,7 +3429,18 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   // Now, we need to broadcast pivots too for the batch dimensions to match
   IntArrayRef new_pivots_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.dim() - 1);
   Tensor LU_pivots_broadcasted = LU_pivots.expand(new_pivots_sizes);
-  return at::_lu_solve_helper(self_broadcasted, LU_data_broadcasted, LU_pivots_broadcasted);
+
+  // lu_solve_stub (apply_lu_solve) requires batched column major (Fortran-contiguous) tensors
+  // 'result' tensor is modified in-place and must be a copy of 'self_broadcasted'
+  Tensor result = cloneBatchedColumnMajor(self_broadcasted);
+
+  // if LU_data is Fortran-contiguous no need to make a copy
+  bool is_LU_data_batched_column_major = LU_data_broadcasted.transpose(-2, -1).is_contiguous();
+  Tensor LU_data_working_copy = is_LU_data_batched_column_major ? LU_data_broadcasted : cloneBatchedColumnMajor(LU_data_broadcasted);
+  Tensor LU_pivots_working_copy = LU_pivots_broadcasted.is_contiguous() ? LU_pivots_broadcasted : LU_pivots_broadcasted.contiguous();
+
+  lu_solve_stub(self.device().type(), result, LU_data_working_copy, LU_pivots_working_copy);
+  return result;
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
