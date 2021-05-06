@@ -1046,23 +1046,34 @@ void initJITBindings(PyObject* module) {
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
-  py::class_<StorageContextTracker, std::shared_ptr<StorageContextTracker>>(
-      m, "StorageContextTracker")
+  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
+      m, "StorageContext")
       .def(py::init<>())
       .def(
-          "get_tensor_impl",
-          [](StorageContextTracker& self, const std::string& name) {
-            auto tensor_impl = self.getStorage(name);
-            return at::Tensor(std::move(tensor_impl));
+          "get_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             size_t numel,
+             py::object data_type_obj) {
+            c10::Storage storage = self.getStorage(name);
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+
+            return at::Tensor(std::move(ptr));
           })
       .def(
-          "add_tensor_impl",
-          [](StorageContextTracker& self,
+          "add_storage",
+          [](StorageContext& self,
              const std::string& name,
              const at::Tensor& tensor) {
-            self.addStorage(name, tensor.getIntrusivePtr());
+            self.addStorage(name, tensor.storage());
           })
-      .def("has_tensor_impl", &StorageContextTracker::hasStorage);
+      .def("has_storage", &StorageContext::hasStorage);
 
   m.def(
       "_jit_get_operation",

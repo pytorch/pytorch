@@ -18,13 +18,11 @@ namespace torch {
 namespace jit {
 
 // used in torch.package deserialization
-class TORCH_API StorageContextTracker {
+class TORCH_API StorageContext {
  public:
-  explicit StorageContextTracker() = default;
+  explicit StorageContext() = default;
 
-  void addStorage(
-      const std::string& name,
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl> storage) {
+  void addStorage(const std::string& name, c10::Storage storage) {
     storage_map_.insert({name, storage});
   }
 
@@ -32,18 +30,14 @@ class TORCH_API StorageContextTracker {
     return storage_map_.find(name) != storage_map_.end();
   }
 
-  c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl> getStorage(
-      const std::string& name) {
+  c10::Storage getStorage(const std::string& name) {
     TORCH_INTERNAL_ASSERT(hasStorage(name));
     return storage_map_.find(name)->second;
   }
-  ~StorageContextTracker() = default;
+  ~StorageContext() = default;
 
  private:
-  std::map<
-      std::string,
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>>
-      storage_map_;
+  std::map<std::string, c10::Storage> storage_map_;
 };
 
 TORCH_API Module import_ir_module(
@@ -71,7 +65,7 @@ TORCH_API Module import_ir_module(
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
-    std::shared_ptr<torch::jit::StorageContextTracker> storage_tracker,
+    std::shared_ptr<torch::jit::StorageContext> storage_tracker,
     c10::optional<at::Device> device,
     std::string ts_id /* torchscript identifier inside package */);
 
