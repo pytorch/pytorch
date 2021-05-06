@@ -48,6 +48,7 @@ _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
+_register_custom_builtin('device', 'from torch import device', torch.device)
 
 
 def _is_magic(x: str) -> bool:
@@ -791,7 +792,7 @@ class Graph:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj):
+            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -802,7 +803,6 @@ class Graph:
             if global_name in globals_:
                 assert globals_[global_name] is obj
                 return global_name
-
             globals_[global_name] = obj
             return global_name
 
