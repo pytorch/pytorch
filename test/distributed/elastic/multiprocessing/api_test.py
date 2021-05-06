@@ -593,7 +593,7 @@ class StartProcessesListTest(StartProcessesTest):
 
 
 @unittest.skipIf(
-    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_PYTORCH_CI,
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS,
     "tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows",
 )
 class StartProcessesNotCITest(StartProcessesTest):
