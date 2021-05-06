@@ -252,6 +252,18 @@ class RendezvousHandlerRegistryTest(TestCase):
 
         self.assertIs(handler.params, self._params)
 
+    def test_create_handler_returns_handler_if_backend_name_is_an_alias(self) -> None:
+        self._registry.register("dummy_backend", self._create_handler, aliases=["dummy_alias"])
+
+        self._params.backend = "dummy_alias"
+
+        handler = self._registry.create_handler(self._params)
+
+        self.assertIsInstance(handler, _DummyRendezvousHandler)
+
+        self.assertIs(handler.params, self._params)
+
+
     def test_create_handler_raises_error_if_backend_is_not_registered(self) -> None:
         with self.assertRaisesRegex(
             ValueError,

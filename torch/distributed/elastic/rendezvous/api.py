@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from torch.distributed import Store
 
@@ -211,12 +211,19 @@ RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 class RendezvousHandlerRegistry:
     """Represents a registry of :py:class:`RendezvousHandler` backends."""
 
-    _registry: Dict[str, RendezvousHandlerCreator]
+    _creators: Dict[str, RendezvousHandlerCreator]
+    _aliases: Dict[str, str]
 
     def __init__(self) -> None:
-        self._registry = {}
+        self._creators = {}
+        self._aliases = {}
 
-    def register(self, backend: str, creator: RendezvousHandlerCreator) -> None:
+    def register(
+        self,
+        backend: str,
+        creator: RendezvousHandlerCreator,
+        aliases: List[str] = None,
+    ) -> None:
         """Registers a new rendezvous backend.
 
         Args:
@@ -225,13 +232,15 @@ class RendezvousHandlerRegistry:
             creater:
                 The callback to invoke to construct the
                 :py:class:`RendezvousHandler`.
+            aliases:
+                The list of aliases for the backend name.
         """
         if not backend:
             raise ValueError("The rendezvous backend name must be a non-empty string.")
 
         current_creator: Optional[RendezvousHandlerCreator]
         try:
-            current_creator = self._registry[backend]
+            current_creator = self._creators[backend]
         except KeyError:
             current_creator = None
 
@@ -241,25 +250,34 @@ class RendezvousHandlerRegistry:
                 f"is already registered with '{current_creator}'."
             )
 
-        self._registry[backend] = creator
+        self._creators[backend] = creator
+
+        if aliases:
+            for alias in aliases:
+                self._aliases[alias] = backend
 
     def create_handler(self, params: RendezvousParameters) -> RendezvousHandler:
         """Creates a new :py:class:`RendezvousHandler`."""
         try:
-            creator = self._registry[params.backend]
+            backend = self._aliases[params.backend]
+        except KeyError:
+            backend = params.backend
+
+        try:
+            creator = self._creators[backend]
         except KeyError:
             raise ValueError(
-                f"The rendezvous backend '{params.backend}' is not registered. Did you forget "
-                f"to call `{self.register.__name__}`?"
+                f"The rendezvous backend '{backend}' is not registered. Did you forget to call "
+                f"`{self.register.__name__}`?"
             )
 
         handler = creator(params)
 
         # Do some sanity check.
-        if handler.get_backend() != params.backend:
+        if handler.get_backend() != backend:
             raise RuntimeError(
                 f"The rendezvous backend '{handler.get_backend()}' does not match the requested "
-                f"backend '{params.backend}'."
+                f"backend '{backend}'."
             )
 
         return handler
