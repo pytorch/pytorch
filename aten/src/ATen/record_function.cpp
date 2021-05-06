@@ -20,14 +20,18 @@ RecordFunctionHandle next_unique_record_function_handle() {
   return RecordFunctionHandle(unique_rf_id++);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local RecordFunctionTLS rf_tls_;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> defaultNodeId(-1);
 
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint64_t> next_thread_id_ {0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
@@ -43,6 +47,7 @@ struct CoinflipTLS {
 
 CoinflipTLS::CoinflipTLS()
     : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
@@ -73,6 +78,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
@@ -83,6 +89,7 @@ class CallbackManager {
       at::bumpRecordAllFunctions();
     }
     auto handle = next_unique_callback_handle();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
@@ -189,12 +196,16 @@ class CallbackManager {
   // to be executed and whether any of them need inputs
   inline void init(RecordFunction& rec_fn, RecordScope scope, bool pre_sampled) {
     bool found_needs_inputs = false;
+    bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
     for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
+        }
+        if (cb.first.needsOutputs()) {
+          found_needs_outputs = true;
         }
         if (cb.first.needsIds()) {
           found_needs_ids = true;
@@ -210,6 +221,9 @@ class CallbackManager {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
+        }
+        if (cb.first.needsOutputs()) {
+          found_needs_outputs = true;
         }
         if (cb.first.needsIds()) {
           found_needs_ids = true;
@@ -230,6 +244,7 @@ class CallbackManager {
     rec_fn.state_->global_ctx_.resize(rec_fn.state_->sorted_active_global_handles_.size());
 
     rec_fn.state_->needs_inputs = found_needs_inputs;
+    rec_fn.state_->needs_outputs = found_needs_outputs;
     if (found_needs_ids) {
       rec_fn.setHandle(next_unique_record_function_handle());
     }
@@ -366,11 +381,13 @@ bool hasThreadLocalCallbacks() {
 
 CallbackHandle addThreadLocalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addThreadLocalCallback(std::move(cb));
 }
 
 CallbackHandle addGlobalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addGlobalCallback(std::move(cb));
 }
 
@@ -452,6 +469,8 @@ void RecordFunction::before(
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_ = op.operator_name();
+  state_->op_input_size = op.schema().arguments().size();
+  state_->op_output_size = op.schema().returns().size();
   state_->name_ = StringView(op.schema().name());
 
   manager().runStartCallbacks(*this);
@@ -477,10 +496,24 @@ void RecordFunction::end() {
   }
 }
 
+void RecordFunction::_setAsync() {
+  if (isActive()) {
+    state_->is_async_ = true;
+  }
+}
+
+bool RecordFunction::isAsync() const {
+  if (isActive()) {
+    return state_->is_async_;
+  }
+  return false;
+}
+
 // RecordFunction pre-sampling
 namespace {
 // Whether to try to create RecordFunction on each call (>0) or
 // use pre-sampling (=0)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> global_record_all_functions_ {0};
 }
 

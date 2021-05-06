@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -27,10 +28,11 @@ class TORCH_API Unpickler {
   // to resolve any JIT type. class_resolver and type_resolver are not merged
   // here because some use cases need to get strong class type that
   // type_resolver_ can not return.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
-      const std::vector<at::Tensor>* tensor_table)
+      c10::ArrayRef<at::Tensor> tensor_table)
       : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
@@ -39,6 +41,7 @@ class TORCH_API Unpickler {
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -47,10 +50,11 @@ class TORCH_API Unpickler {
       c10::optional<at::Device> device,
       bool use_storage_device = false)
       : reader_(std::move(reader)),
-        tensor_table_(nullptr),
+        tensor_table_(),
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
@@ -116,6 +120,7 @@ class TORCH_API Unpickler {
   // remember the position. Don't call reader_ directly.
   std::function<size_t(char*, size_t)> reader_;
   // Small buffer to avoid calling reader_ on a per-byte basis.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 256> buffer_;
   size_t buffer_pos_{0};
   size_t buffer_remaining_{0};
@@ -127,7 +132,7 @@ class TORCH_API Unpickler {
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  const std::vector<at::Tensor>* tensor_table_;
+  c10::ArrayRef<at::Tensor> tensor_table_;
 
   // When deserializing types on lists and dicts, cache the type here
   // so we don't have to parse the same type multiple times. Strings

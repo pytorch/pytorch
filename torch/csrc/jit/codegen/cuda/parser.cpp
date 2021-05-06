@@ -1364,6 +1364,7 @@ class IrParser {
 
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {
         cg_val = new Double(ival.value());
@@ -1374,6 +1375,7 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<int64_t>(val)) {
         cg_val = new Int(ival.value());
@@ -1384,6 +1386,7 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<bool>(val)) {
         cg_val = new Bool(ival.value());
@@ -1406,6 +1409,7 @@ class IrParser {
   }
 
   bool registerTensor(const JitValue* val) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CgValue cg_val;
     // Don't register if we don't support the type
     if (auto tensor_type = val->type()->cast<c10::TensorType>()) {

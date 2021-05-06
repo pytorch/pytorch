@@ -4,6 +4,7 @@
 
 #include <nvToolsExt.h>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <chrono>
 

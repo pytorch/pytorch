@@ -63,6 +63,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // TODO: strides would also be important when we handle permutations in
   //       codegen.
   //
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;

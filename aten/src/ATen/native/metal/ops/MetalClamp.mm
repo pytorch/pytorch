@@ -12,7 +12,6 @@ namespace at {
 namespace native {
 namespace metal {
 
-// API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
@@ -26,7 +25,7 @@ Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 

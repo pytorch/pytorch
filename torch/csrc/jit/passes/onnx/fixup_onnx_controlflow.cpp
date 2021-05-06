@@ -118,6 +118,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   auto* loop_node = node;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   auto* graph = loop_node->owningGraph();
 
   TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
@@ -218,7 +219,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
   TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
   auto* sub_block = node->blocks().at(0);
   Value* cond = sub_block->insertInput(1, "cond");
-  cond->setType(BoolType::create());
+  cond->setType(BoolType::get());
 
   Value* i = sub_block->inputs().at(0);
   i->setType(TensorType::fromNumberType(IntType::get()));
@@ -236,6 +237,11 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
+
+  // Copy type of block output to node output.
+  for (size_t i = 0; i < node->outputs().size(); ++i) {
+    node->output(i)->setType(node->blocks().at(0)->outputs().at(i + 1)->type());
+  }
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;
 }
@@ -342,6 +348,27 @@ void ONNXFixupUninitializedOutput(Node* node) {
           graph, else_block, else_block_output, then_block_output);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
     }
+    auto then_tensor_type =
+        then_block->outputs().at(i)->type()->castRaw<TensorType>();
+    auto else_tensor_type =
+        else_block->outputs().at(i)->type()->castRaw<TensorType>();
+    if (then_tensor_type && else_tensor_type) {
+      const auto& then_shape = then_tensor_type->symbolic_sizes();
+      const auto& else_shape = else_tensor_type->symbolic_sizes();
+      std::vector<::c10::ShapeSymbol> dims;
+      if (then_shape.rank() && else_shape.rank() &&
+          then_shape.rank() == else_shape.rank()) {
+        for (size_t j = 0; j < then_shape.rank().value(); ++j) {
+          if (then_shape[j] == else_shape[j]) {
+            dims.emplace_back(then_shape[j]);
+          } else {
+            dims.emplace_back(::c10::ShapeSymbol::newSymbol());
+          }
+        }
+        if_node->output(i)->setType(
+            then_tensor_type->withSymbolicShapes(::c10::SymbolicShape(dims)));
+      }
+    }
   }
 }
 
@@ -351,9 +378,15 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   auto* graph = if_node->owningGraph();
-  FixupONNXSubblockOutputs(if_node);
+  FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
+  // Copy type of block output to node output.
+  for (size_t i = 0; i < node->outputs().size(); ++i) {
+    node->output(i)->setType(node->blocks().at(0)->outputs().at(i)->type());
+  }
+
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
 }

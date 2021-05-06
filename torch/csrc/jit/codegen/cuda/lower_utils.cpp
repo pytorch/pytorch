@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -191,7 +192,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
   auto loops_it = loops.begin();
   // Look at each axis individually in out's domain
-  for (int64_t tv_i = 0; tv_i < (int64_t)tv->getComputeAtPosition(); tv_i++) {
+  for (const auto tv_i : c10::irange((int64_t)tv->getComputeAtPosition())) {
     // Grab the axis ID
 
     auto local_id = tv->axis(tv_i);

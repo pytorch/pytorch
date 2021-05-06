@@ -10479,8 +10479,8 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::manual_seed(0);
-  c10::IntArrayRef input_shape{6, 512, 4096};
-  c10::IntArrayRef bias_shape{4096};
+  std::vector<int64_t> input_shape{6, 512, 4096};
+  std::vector<int64_t> bias_shape{4096};
 
   auto at_input = at::randn(input_shape, options);
   auto at_bias = at::randn(bias_shape, options);
@@ -10551,8 +10551,8 @@ TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::manual_seed(1);
-  c10::IntArrayRef input_shape{6, 512, 4096};
-  c10::IntArrayRef bias_shape{4096};
+  std::vector<int64_t> input_shape{6, 512, 4096};
+  std::vector<int64_t> bias_shape{4096};
   auto at_input = at::randn(input_shape, options);
   auto at_bias = at::randn(bias_shape, options);
   auto at_grad = at::randn(input_shape, options);
@@ -11118,7 +11118,7 @@ TEST(NVFuserTest, Issue329_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  c10::IntArrayRef t0_shape{17, 19};
+  std::vector<int64_t> t0_shape{17, 19};
   auto aten_input = at::randn(t0_shape, options);
   auto t2 = (aten_input + 1).to(at::kDouble).sum({1});
   auto t3 = (aten_input + 1).to(at::kDouble).sum({1});
@@ -11197,7 +11197,7 @@ TEST(NVFuserTest, Issue507_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  c10::IntArrayRef t0_shape{17, 19};
+  std::vector<int64_t> t0_shape{17, 19};
   auto aten_input = at::randn(t0_shape, options);
   auto t1 = (aten_input + 1);
   auto aten_output = (t1 + 1);
@@ -13214,7 +13214,7 @@ TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  c10::IntArrayRef shape{17, 19};
+  std::vector<int64_t> shape{17, 19};
 
   auto tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);

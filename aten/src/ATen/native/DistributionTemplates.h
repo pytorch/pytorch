@@ -38,6 +38,7 @@ int64_t update_from(int64_t from) {
     int64_t from_ = std::abs(from + 1);
     int n = 0;
     while (from_ >>= 1) ++n;
+    // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
     from = from_plus_1 + (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return from;
@@ -54,6 +55,7 @@ int64_t update_to(int64_t to) {
     int64_t to_ = std::abs(to - 1);
     int n = 0;
     while (to_ >>= 1) ++n;
+    // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
     to = to_minus_1 - (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return to;
@@ -196,7 +198,7 @@ static bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean,
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  TORCH_CHECK(std >= 0.0, "normal_ expects std >= 0.0, but found std=", std);
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
@@ -218,6 +220,9 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::opt
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
+  TORCH_CHECK(
+    std.min().ge(0).item<bool>(),
+    "normal expects all elements of std >= 0.0");
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   auto mean_tensor = at::full({}, mean, output.options());
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
@@ -232,6 +237,9 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
+  TORCH_CHECK(
+    std.min().ge(0).item<bool>(),
+    "normal expects all elements of std >= 0.0");
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.

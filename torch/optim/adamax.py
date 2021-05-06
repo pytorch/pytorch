@@ -1,4 +1,5 @@
 import torch
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -50,12 +51,25 @@ class Adamax(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_infs = []
+            state_steps = []
+
+            beta1, beta2 = group['betas']
+            eps = group['eps']
+            lr = group['lr']
+            weight_decay = group['weight_decay']
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad
-                if grad.is_sparse:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
                     raise RuntimeError('Adamax does not support sparse gradients')
+                grads.append(p.grad)
+
                 state = self.state[p]
 
                 # State initialization
@@ -64,27 +78,21 @@ class Adamax(Optimizer):
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                exp_avg, exp_inf = state['exp_avg'], state['exp_inf']
-                beta1, beta2 = group['betas']
-                eps = group['eps']
+                exp_avgs.append(state['exp_avg'])
+                exp_infs.append(state['exp_inf'])
 
                 state['step'] += 1
+                state_steps.append(state['step'])
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(p, alpha=group['weight_decay'])
-
-                # Update biased first moment estimate.
-                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                # Update the exponentially weighted infinity norm.
-                norm_buf = torch.cat([
-                    exp_inf.mul_(beta2).unsqueeze(0),
-                    grad.abs().add_(eps).unsqueeze_(0)
-                ], 0)
-                torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
-
-                bias_correction = 1 - beta1 ** state['step']
-                clr = group['lr'] / bias_correction
-
-                p.addcdiv_(exp_avg, exp_inf, value=-clr)
+            F.adamax(params_with_grad,
+                     grads,
+                     exp_avgs,
+                     exp_infs,
+                     state_steps,
+                     eps=eps,
+                     beta1=beta1,
+                     beta2=beta2,
+                     lr=lr,
+                     weight_decay=weight_decay)
 
         return loss

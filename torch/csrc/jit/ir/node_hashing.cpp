@@ -170,7 +170,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
     switch (lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(c)
       COMPARE_ATTRIBUTEVALUE(fs)
+      COMPARE_ATTRIBUTEVALUE(cs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
@@ -213,6 +215,10 @@ size_t HashNode::operator()(const Node* k) const {
         type->isSubtypeOf(NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::c) {
+      constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

@@ -1,24 +1,31 @@
-
-from multiprocessing import Manager
 from contextlib import contextmanager
+from datetime import timedelta
+from enum import Enum
+import faulthandler
+from multiprocessing import Manager
 from io import StringIO
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import logging
 import traceback
 import types
 
-from typing import NamedTuple
+from typing import NamedTuple, Optional, Union
 from functools import wraps
 
 import torch
 import torch.distributed as c10d
+import torch.cuda.nccl
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA, find_free_port, retry_on_connect_failures
+
+logger = logging.getLogger(__name__)
+
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -63,20 +70,6 @@ def skip_if_small_worldsize(func):
     return wrapper
 
 
-def skip_if_not_multigpu(func):
-    """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
-                return func(*args, **kwargs)
-            message = "Need at least {} CUDA devices".format(2)
-            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
-        return wrapper
-
-    return decorator
-
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
         @wraps(func)
@@ -91,6 +84,7 @@ def require_n_gpus_for_nccl_backend(n, backend):
 
     return decorator
 
+
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
@@ -104,11 +98,98 @@ def skip_if_lt_x_gpu(x):
 
     return decorator
 
+
+# This decorator helps avoiding initializing cuda while testing other backends
+def nccl_skip_if_lt_x_gpu(backend, x):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if backend != "nccl":
+                return func(*args, **kwargs)
+            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+                return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(x)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+        return wrapper
+
+    return decorator
+
+
+def with_nccl_blocking_wait(func):
+    """
+    Convenience decorator to set/unset NCCL_BLOCKING_WAIT flag. Note that use of
+    this decorator will override the setting of NCCL_ASYNC_ERROR_HANDLING for
+    the particular test. After the test, both NCCL_BLOCKING_WAIT and
+    NCCL_ASYNC_ERROR_HANDLING will be restored to their original values.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Save and unset NCCL_ASYNC_ERROR_HANDLING
+        try:
+            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+                "NCCL_ASYNC_ERROR_HANDLING"
+            ]
+            del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+        except KeyError:
+            # NCCL_ASYNC_ERROR_HANDLING was unset
+            cached_nccl_async_error_handling = None
+
+        # Save val of NCCL_BLOCKING_WAIT and set it.
+        try:
+            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+                "NCCL_BLOCKING_WAIT"
+            ]
+        except KeyError:
+            cached_nccl_blocking_wait = None
+        finally:
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+
+        try:
+            ret = func(*args, **kwargs)
+            return ret
+        finally:
+            # restore old values.
+            if cached_nccl_async_error_handling is not None:
+                os.environ[
+                    "NCCL_ASYNC_ERROR_HANDLING"
+                ] = cached_nccl_async_error_handling
+
+            if cached_nccl_blocking_wait is not None:
+                os.environ["NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
+
+    return wrapper
+
+
+def with_dist_debug_levels(levels):
+    """
+    Runs a test for each distributed debug level specified in levels.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
+            for level in levels:
+                os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                ret = func(*args, **kwargs)
+                if old_level is not None:
+                    os.environ["TORCH_DISTRIBUTED_DEBUG"] = old_level
+            # Only returns test return for last test, but since these are
+            # unittests the return value is not really used and earlier tests
+            # would've raised had they failed.
+            return ret
+
+        return wrapper
+
+    return decorator
+
+
 def requires_gloo():
     return unittest.skipUnless(
         c10d.is_gloo_available(),
         "c10d was not compiled with the Gloo backend",
     )
+
 
 def requires_nccl_version(version, msg):
     if not c10d.is_nccl_available():
@@ -123,6 +204,7 @@ def requires_nccl_version(version, msg):
                 torch.cuda.nccl.version(), msg),
         )
 
+
 def requires_nccl():
     return unittest.skipUnless(
         c10d.is_nccl_available(),
@@ -136,6 +218,7 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+
 def skip_if_rocm_single_process(func):
     """Skips a test for ROCm in a single process environment"""
     func.skip_if_rocm = True
@@ -147,6 +230,7 @@ def skip_if_rocm_single_process(func):
         raise unittest.SkipTest("Test skipped for ROCm")
 
     return wrapper
+
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
@@ -160,11 +244,27 @@ def skip_if_rocm(func):
 
     return wrapper
 
+
 def skip_if_win32():
     return unittest.skipIf(
         sys.platform == 'win32',
         "This unit test case is not supportted on Windows platform",
     )
+
+
+@retry_on_connect_failures
+def create_tcp_store(addr="localhost", world_size=1, is_master=True, timeout=timedelta(minutes=5),
+                     wait_for_workers=True, jit_class=False):
+    """
+    Creates a TCP store. Retries if the chosen port is already in use.
+    """
+    port = find_free_port()
+    if jit_class:
+        timeout_millisecond = int(timeout / timedelta(milliseconds=1))
+        return torch.classes.dist_c10d.TCPStore(addr, port, world_size, is_master, timeout_millisecond)
+    else:
+        return c10d.TCPStore(addr, port, world_size, is_master, wait_for_workers=wait_for_workers)
+
 
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
@@ -177,8 +277,9 @@ def create_device(interface=None):
         return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
-def get_timeout(test_id):
+def get_timeout(test_id) -> int:
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
+
 
 @contextmanager
 def captured_output():
@@ -190,13 +291,14 @@ def captured_output():
     finally:
         sys.stdout, sys.stderr = old_out, old_err
 
-def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
+
+def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
     """
     Generate a number of basic test cases for sparse reduction.
     These cover tensors with a varying number of sparse dimensions and a varying
     number of dense dimensions. The only reduction operation we support is sum.
     """
-    def generate(rank, world_size, sparse_dims=1, dense_dims=0):
+    def generate(rank: int, world_size: int, sparse_dims: int = 1, dense_dims: int = 0):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
@@ -208,7 +310,7 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
 
-    def compute_sum(fn, world_size):
+    def compute_sum(fn, world_size: int):
         return reduce(lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)])
 
     return [
@@ -232,8 +334,9 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         ]
     ]
 
-tmp_dir = None
-def initialize_temp_directories(init_method=None):
+tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+
+def initialize_temp_directories(init_method: Optional[str] = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
     os.environ["TEMP_DIR"] = tmp_dir.name
@@ -249,7 +352,7 @@ def initialize_temp_directories(init_method=None):
             init_dir_path, "shared_init_file"
         )
 
-def cleanup_temp_dir():
+def cleanup_temp_dir() -> None:
     if tmp_dir is not None:
         tmp_dir.cleanup()
 
@@ -263,6 +366,8 @@ def cleanup_temp_dir():
 # then use the provided test function name to retrieve the function attribute
 # from the test instance and run it. The main process simply waits for all
 # subprocesses to join.
+
+
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and
@@ -272,11 +377,11 @@ class MultiProcessTestCase(TestCase):
     TEST_ERROR_EXIT_CODE = 10
 
     # do not early terminate for distributed tests.
-    def _should_stop_test_suite(self):
+    def _should_stop_test_suite(self) -> bool:
         return False
 
     @property
-    def world_size(self):
+    def world_size(self) -> int:
         return 4
 
     def join_or_run(self, fn):
@@ -292,23 +397,23 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name: str = 'runTest') -> None:
         super().__init__(method_name)
         fn = getattr(self, method_name)
         setattr(self, method_name, self.join_or_run(fn))
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
-        self.skip_return_code_checks = []
-        self.processes = []
+        self.skip_return_code_checks = []  # type: ignore[var-annotated]
+        self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
         # pid to pipe consisting of error message from process.
-        self.pid_to_pipe = {}
+        self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         for p in self.processes:
             p.terminate()
@@ -318,11 +423,11 @@ class MultiProcessTestCase(TestCase):
         # processes to prevent an effective file descriptor leak.
         self.processes = []
 
-    def _current_test_name(self):
+    def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def _start_processes(self, proc):
+    def _start_processes(self, proc) -> None:
         test_skips_manager = Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
@@ -337,29 +442,67 @@ class MultiProcessTestCase(TestCase):
                 name='process ' + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn))
             process.start()
-            logging.info('Started process {} with pid {}'.format(rank, process.pid))
+            logger.info(f'Started process {rank} with pid {process.pid}')
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
-    def _fork_processes(self):
+    def _fork_processes(self) -> None:
         proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
-    def _spawn_processes(self):
+    def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
+    class Event(Enum):
+        GET_TRACEBACK = 1
+
+    @staticmethod
+    def _event_listener(pipe, rank: int):
+        logger.info(f'Starting event listener thread for {rank}')
+        while True:
+            if pipe.poll(None):
+
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, stopping event listener thread')
+                    return
+
+                event = pipe.recv()
+                logger.info(f'Received event {event} on process {rank}')
+
+                if event == MultiProcessTestCase.Event.GET_TRACEBACK:
+                    # Return traceback to the parent process.
+                    with tempfile.NamedTemporaryFile(mode='r+') as tmp_file:
+                        faulthandler.dump_traceback(tmp_file)
+                        # Flush buffers and seek to read from the beginning
+                        tmp_file.flush()
+                        tmp_file.seek(0)
+                        pipe.send(tmp_file.read())
+
+                        logger.info(f'Process {rank} sent traceback')
+
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank: int, test_name: str, file_name: str, pipe) -> None:
         self = cls(test_name)
+
+        # Start event listener thread.
+        threading.Thread(
+            target=MultiProcessTestCase._event_listener,
+            args=(pipe, rank),
+            daemon=True).start()
+
         self.rank = rank
         self.file_name = file_name
-
         self.run_test(test_name, pipe)
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name, pipe):
+    def run_test(self, test_name: str, pipe) -> None:
+        if sys.platform != 'win32' and sys.platform != 'darwin':
+            # Register signal handler to dump stack traces on FATALs.
+            # Windows and MacOS do not support the signal handlers.
+            torch._C._set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
+
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
@@ -367,16 +510,39 @@ class MultiProcessTestCase(TestCase):
             # Close pipe after done with test.
             pipe.close()
         except Exception as e:
-            logging.error(
-                'Caught exception: \n{}exiting process with exit code: {}'
-                .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
-            )
+            logger.error(
+                f'Caught exception: \n{traceback.format_exc()} exiting '
+                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
             pipe.send(traceback.format_exc())
             pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
-    def _join_processes(self, fn):
+    def _get_timedout_process_traceback(self) -> None:
+        pipes = []
+        for i, process in enumerate(self.processes):
+            if process.exitcode is None:
+                pipe = self.pid_to_pipe[process.pid]
+                try:
+                    pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
+                    pipes.append((i, pipe))
+                except BrokenPipeError as e:
+                    logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
+
+        # Wait for results.
+        for rank, pipe in pipes:
+            # Wait for traceback
+            if pipe.poll(5):
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                    continue
+
+                traceback = pipe.recv()
+                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
+            else:
+                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
+
+    def _join_processes(self, fn) -> None:
         timeout = get_timeout(self.id())
         start_time = time.time()
         subprocess_error = False
@@ -387,7 +553,7 @@ class MultiProcessTestCase(TestCase):
                     # This is the exit code processes exit with if they
                     # encountered an exception.
                     if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                        print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
+                        print(f'Process {i} terminated with exit code {p.exitcode}, terminating remaining processes.')
                         active_children = torch.multiprocessing.active_children()
                         for ac in active_children:
                             ac.terminate()
@@ -401,17 +567,16 @@ class MultiProcessTestCase(TestCase):
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
-                    print(
-                        "Timing out after {} seconds and killing subprocesses.".format(
-                            timeout
-                        )
-                    )
+                    self._get_timedout_process_traceback()
+                    print(f'Timing out after {timeout} seconds and killing subprocesses.')
                     for p in self.processes:
                         p.terminate()
                     break
                 # Sleep to avoid excessive busy polling.
                 time.sleep(0.1)
+
             elapsed_time = time.time() - start_time
+
             if fn in self.skip_return_code_checks:
                 self._check_no_test_errors(elapsed_time)
             else:
@@ -424,7 +589,7 @@ class MultiProcessTestCase(TestCase):
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
 
-    def _check_no_test_errors(self, elapsed_time):
+    def _check_no_test_errors(self, elapsed_time) -> None:
         """
         Checks that we didn't have any errors thrown in the child processes.
         """
@@ -433,7 +598,7 @@ class MultiProcessTestCase(TestCase):
                 raise RuntimeError('Process {} timed out after {} seconds'.format(i, elapsed_time))
             self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, elapsed_time) -> None:
         """
         Checks that the return codes of all spawned processes match, and skips
         tests if they returned a return code indicating a skipping condition.
@@ -481,5 +646,5 @@ class MultiProcessTestCase(TestCase):
         )
 
     @property
-    def is_master(self):
+    def is_master(self) -> bool:
         return self.rank == 0

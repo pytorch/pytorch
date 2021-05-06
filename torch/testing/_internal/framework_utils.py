@@ -1,12 +1,11 @@
 from typing import Dict, Tuple, List
 
-def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tuple[float, int]]) -> List[Tuple[float, List[str]]]:
+def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, float]) -> List[Tuple[float, List[str]]]:
     filtered_job_times: Dict[str, float] = dict()
     unknown_jobs : List[str] = []
     for test in tests:
         if test in job_times:
-            avg_time, _ = job_times[test]
-            filtered_job_times[test] = avg_time
+            filtered_job_times[test] = job_times[test]
         else:
             unknown_jobs.append(test)
 

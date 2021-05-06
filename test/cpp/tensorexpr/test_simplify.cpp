@@ -72,9 +72,12 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->op_type(), kRand);                  \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldSimple) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
   ExprHandle f = (a + b);
 
@@ -86,11 +89,16 @@ TEST(Simplify, ConstantFoldSimple) {
   ASSERT_EQ(eval.value<float>(), 5.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldTwoLayer) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle d(5.0f);
   ExprHandle f = (a + b) - (c + d);
 
@@ -102,8 +110,10 @@ TEST(Simplify, ConstantFoldTwoLayer) {
   ASSERT_EQ(eval.value<float>(), -4.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldShifts) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(7);
   ExprHandle b(2);
   ExprHandle c(3);
@@ -117,10 +127,14 @@ TEST(Simplify, ConstantFoldShifts) {
   ASSERT_EQ(eval.value<int>(), 7 << (4 - 3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldBitwise) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(59);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(22);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(101);
   ExprHandle f = (a ^ b) & c;
 
@@ -132,13 +146,20 @@ TEST(Simplify, ConstantFoldBitwise) {
   ASSERT_EQ(eval.value<int>(), (59 ^ 22) & 101);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMultiOp) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle d(5.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle e(6.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle f(7.0f);
   ExprHandle fn = ((a / e) - (c + d)) * (f / b);
 
@@ -151,16 +172,21 @@ TEST(Simplify, ConstantFoldMultiOp) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMinMax) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(12.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(15.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(17.0f);
 
   // x = max(12, min(15, 17)).
   ExprHandle minHandle = Min::make(b, c, true);
   ExprHandle fn = Max::make(a, minHandle, false);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ASSERT_EQ(fn.dtype().scalar_type(), ScalarType::Float);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
@@ -170,10 +196,14 @@ TEST(Simplify, ConstantFoldMinMax) {
   ASSERT_EQ(eval.value<float>(), 15.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldIntrinsics) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
   ExprHandle powHandle = Intrinsics::make(kPow, a, b);
   ExprHandle sinHandle = Intrinsics::make(kSin, powHandle);
@@ -192,6 +222,7 @@ TEST(Simplify, ConstantFoldIntrinsics) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldCastToBool) {
   KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
@@ -200,6 +231,7 @@ TEST(Simplify, ConstantFoldCastToBool) {
   ASSERT_EQ(eval.value<bool>(), false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldWithVar) {
   KernelScope kernel_scope;
   {
@@ -218,6 +250,7 @@ TEST(Simplify, ConstantFoldWithVar) {
 
   {
     VarHandle x("x", kFloat);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = x * (ExprHandle(2.f) + ExprHandle(4.f));
 
     ExprHandle newF = IRSimplifier::simplify(body);
@@ -226,15 +259,20 @@ TEST(Simplify, ConstantFoldWithVar) {
     ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
     SimpleIRExprEval eval(newF);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     eval.bindVar(x, ExprHandle(3.f));
     ASSERT_EQ(eval.value<float>(), 3 * (2 + 4));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldSimple) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(4.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(3.0f);
   {
     ExprHandle f = (a > b);
@@ -278,10 +316,14 @@ TEST(Simplify, ConditionalSelectFoldSimple) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(2.0f);
   ExprHandle d(1.0f);
   {
@@ -326,9 +368,11 @@ TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldWithVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle f = x < 4.f;
 
   ExprHandle newF = IRSimplifier::simplify(f);
@@ -337,20 +381,24 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
 
   {
     SimpleIRExprEval eval(newF);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     eval.bindVar(x, ExprHandle(3.f));
     ASSERT_EQ(eval.value<int>(), 1);
   }
   {
     SimpleIRExprEval eval(newF);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     eval.bindVar(x, ExprHandle(5.f));
     ASSERT_EQ(eval.value<int>(), 0);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, UnFoldableExpr) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
 
   ExprHandle newF = IRSimplifier::simplify(body);
@@ -360,15 +408,20 @@ TEST(Simplify, UnFoldableExpr) {
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
   SimpleIRExprEval eval(newF);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(x, ExprHandle(3.f));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(y, ExprHandle(2.f));
   ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashSimple) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
   ExprHandle f = a + b * x;
 
@@ -386,6 +439,7 @@ TEST(Simplify, HashSimple) {
   ASSERT_NE(hash_a, hash_f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalence) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -423,6 +477,7 @@ TEST(Simplify, HashEquivalence) {
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceRand) {
   KernelScope kernel_scope;
   ExprHandle f =
@@ -443,11 +498,15 @@ TEST(Simplify, HashEquivalenceRand) {
   ASSERT_NE(hash_l, hash_r);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceAfterFolding) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(5.0f);
 
   ExprHandle f1 = ((a + b) * x);
@@ -469,6 +528,7 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
   ASSERT_EQ(hash_l_n, hash_r_n);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
@@ -478,6 +538,7 @@ TEST(Simplify, HashDifferenceTypes) {
   immediates.push_back(new DoubleImm(1));
   immediates.push_back(new FloatImm(1));
   immediates.push_back(new HalfImm(1));
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
   immediates.push_back(new BoolImm(1));
   immediates.push_back(new CharImm(1));
   immediates.push_back(new ByteImm(1));
@@ -493,6 +554,7 @@ TEST(Simplify, HashDifferenceTypes) {
   }
 
   // But coerced immediates are if they are the same type:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle f1 = ExprHandle(2.f) + CharImm::make(1);
   ExprHandle f2 = Cast::make(kFloat, IntImm::make(3));
 
@@ -502,6 +564,7 @@ TEST(Simplify, HashDifferenceTypes) {
   ASSERT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashLargeExpression) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -524,10 +587,7 @@ TEST(Simplify, HashLargeExpression) {
   BufHandle d("D", {1}, kInt);
   BufHandle e("E", {1}, kInt);
   auto store_ramp_stmt = Store::make(
-      e,
-      {Ramp::make(0, 1, 4)},
-      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
-      Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
+      e, {Ramp::make(0, 1, 4)}, Load::make(d, {Ramp::make(0, 1, 4)}));
 
   auto if_stmt = Cond::make(
       CompareSelect::make(
@@ -549,6 +609,7 @@ TEST(Simplify, HashLargeExpression) {
   ASSERT_NE(hash_t, hash_f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashForLoopOptions) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -591,14 +652,19 @@ TEST(Simplify, HashForLoopOptions) {
 }
 
 /// (2 + x) + 4 => x + 6
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdd) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle m("m", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n("n", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n_1("n_1", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
@@ -613,6 +679,7 @@ TEST(Simplify, SimplifyAdd) {
 }
 
 /// (2 - x) - 4 => -2 - x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySub) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -630,6 +697,7 @@ TEST(Simplify, SimplifySub) {
 }
 
 /// 2 * (1 - x) - 4 => 2 * (-3 - x)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiLayer) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -643,6 +711,7 @@ TEST(Simplify, SimplifyMultiLayer) {
 }
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiTerm) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -661,6 +730,7 @@ TEST(Simplify, SimplifyMultiTerm) {
 }
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyCasts) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -679,6 +749,7 @@ TEST(Simplify, SimplifyCasts) {
 }
 
 /// (x + 0) * 1 => x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesNoOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -691,10 +762,12 @@ TEST(Simplify, SimplifyEliminatesNoOps) {
 }
 
 /// Cannot simplify this.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = x * 24 + y * 34;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
@@ -714,6 +787,7 @@ TEST(Simplify, SimplifyMultiVar) {
 }
 
 // x + 2 + y => x + y + 2
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_SimplifyReorderings) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -731,6 +805,7 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
 }
 
 /// y + x * 0 => y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -741,6 +816,7 @@ TEST(Simplify, SimplifyEliminatesVar) {
   IS_VAR_WITH_NAME(simplified.node(), "y");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdds) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -812,6 +888,7 @@ TEST(Simplify, SimplifyAdds) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMuls) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -932,6 +1009,7 @@ TEST(Simplify, SimplifyMuls) {
 }
 
 // Sub an expr from itself will result in zero.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySubs) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1036,6 +1114,7 @@ TEST(Simplify, SimplifySubs) {
   {
     // (x + y + 5) * (x - x) => 0
     // Cancelling out one side of Mul cancels both.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x + y + 5) * (x - x);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1098,6 +1177,7 @@ TEST(Simplify, SimplifySubs) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDiv) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1117,6 +1197,7 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMod) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1125,8 +1206,10 @@ TEST(Simplify, SimplifyMod) {
 
   {
     // Constant folding works.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
 
@@ -1216,6 +1299,7 @@ TEST(Simplify, SimplifyMod) {
   {
     // Sanity check true with scalars that are multiples.
     // 12 * x % 4 => 0
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x * 12) % 4;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 0);
@@ -1224,6 +1308,7 @@ TEST(Simplify, SimplifyMod) {
   {
     // Sanity check not true if the smaller scalar is on LHS.
     // 4 * x % 12 => 4 * x % 12
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x * 4) % 12;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -1236,6 +1321,7 @@ TEST(Simplify, SimplifyMod) {
   {
     // Both scalar and symbolic in multiple.
     // (6 * x * y) % (3 * x * y) => 0
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (ExprHandle(6) * x * y) % (x * y * 3);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 0);
@@ -1243,6 +1329,7 @@ TEST(Simplify, SimplifyMod) {
 }
 
 // Test that mixing ops together simplifies as expected.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiOp) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1312,6 +1399,7 @@ TEST(Simplify, SimplifyMultiOp) {
 }
 
 // Test that chaining many ops together works as expected.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyManyOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1360,6 +1448,7 @@ TEST(Simplify, SimplifyManyOps) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorization) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1397,6 +1486,7 @@ TEST(Simplify, SimplifyFactorization) {
   {
     // Factorization attempt without a common divider.
     // (2 * x) + (5 * y) =>  (5 * y) + (2 * x)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (ExprHandle(2) * x + ExprHandle(5) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1415,6 +1505,7 @@ TEST(Simplify, SimplifyFactorization) {
     // Factorization after merging.
     // (2 * x) + (4 * y) + (8 * x + 6 * y) => 10 * (x + y)
     ExprHandle body = (ExprHandle(2) * x + ExprHandle(4) * y) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (ExprHandle(8) * x + ExprHandle(6) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1472,9 +1563,12 @@ TEST(Simplify, SimplifyFactorization) {
     VarHandle g("g", kInt);
     VarHandle h("h", kInt);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(0) + (ExprHandle(1024) * a) +
         (ExprHandle(-1) * b) + (ExprHandle(-1) * c) + (ExprHandle(1) * d) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (ExprHandle(1) * e) + (ExprHandle(32) * f) + (ExprHandle(-1024) * g) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (ExprHandle(-32) * h);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1488,6 +1582,7 @@ TEST(Simplify, SimplifyFactorization) {
 }
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorizeUneven) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1515,6 +1610,7 @@ TEST(Simplify, SimplifyFactorizeUneven) {
 
 // (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
 // This is kind of a placeholder test for variable factorization.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1539,6 +1635,7 @@ TEST(Simplify, SimplifyDeeperTerms) {
 
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1553,6 +1650,7 @@ TEST(Simplify, SimplifyDeeperDifference) {
 
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFoldComplexDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1568,11 +1666,13 @@ TEST(Simplify, SimplifyFoldComplexDifference) {
   IS_IMM_WITH_VAL(Int, simplified.node(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyIfComponents) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = IfThenElse::make(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ((ExprHandle(5) - ExprHandle(4)) * x) > y,
       ExprHandle(2) * x - x,
       ExprHandle(2) * y - y);
@@ -1590,6 +1690,7 @@ TEST(Simplify, SimplifyIfComponents) {
   IS_VAR_WITH_NAME(ifexpr->false_value(), "y");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOpaqueTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1616,12 +1717,14 @@ TEST(Simplify, SimplifyOpaqueTerms) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicMinMax) {
   KernelScope kernel_scope;
 
   {
     // Minimum with constant difference between terms.
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Min::make(x + 3, x + 7, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1633,6 +1736,7 @@ TEST(Simplify, SimplifySymbolicMinMax) {
   {
     // Maximum with constant difference between terms.
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(x + 3, x + 7, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1645,6 +1749,7 @@ TEST(Simplify, SimplifySymbolicMinMax) {
     // Can't simplify multiples because of signedness of variable component.
     // TODO: maybe we could for unsigned types?
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(x * 3, x * 7, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1652,6 +1757,7 @@ TEST(Simplify, SimplifySymbolicMinMax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMax) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1663,6 +1769,7 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle body = Max::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
   }
 
@@ -1785,6 +1892,7 @@ TEST(Simplify, SimplifyNestedMax) {
 
   {
     // Max(5, Max(x, 8)) => Max(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(5, Max::make(x, 8, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1794,6 +1902,7 @@ TEST(Simplify, SimplifyNestedMax) {
 
   {
     // Max(8, Max(x, 5)) => Max(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(8, Max::make(x, 5, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1803,6 +1912,7 @@ TEST(Simplify, SimplifyNestedMax) {
 
   {
     // Max(Max(x, 8), 5) => Max(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(Max::make(x, 8, true), 5, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1812,6 +1922,7 @@ TEST(Simplify, SimplifyNestedMax) {
 
   {
     // Max(Max(x, 5), 8) => Max(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Max::make(Max::make(x, 5, true), 8, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -1822,7 +1933,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(5, Max(x, Max(y, Max(z, 8)))) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        5, Max::make(x, Max::make(y, Max::make(z, 8, true), true), true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(x, Max::make(y, Max::make(z, 8, true), true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1836,7 +1951,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(8, Max(Max(y, Max(z, 5)), x)) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        8, Max::make(Max::make(y, Max::make(z, 5, true), true), x, true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(y, Max::make(z, 5, true), true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1850,7 +1969,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(5, Max(Max(Max(z, 8), y), x)) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        5, Max::make(Max::make(Max::make(z, 8, true), y, true), x, true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(Max::make(z, 8, true), y, true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1864,7 +1987,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(Max(x, Max(y, Max(5, z))), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        Max::make(x, Max::make(y, Max::make(5, z, true), true), true), 8, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(x, Max::make(y, Max::make(5, z, true), true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1878,7 +2005,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(Max(Max(y, Max(8, z)), x), 5) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true), 5, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1892,7 +2023,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(Max(Max(Max(5, z), y), x), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true), 8, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1908,7 +2043,9 @@ TEST(Simplify, SimplifyNestedMax) {
     // Do not simplify when all the Max ops do not have the same
     // propagate_nans.
     ExprHandle body = Max::make(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         Max::make(Max::make(Max::make(z, 5, true), y, false), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
@@ -1929,7 +2066,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(8, Max(Max(x, 5), Max(y, z))) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        8, Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1943,7 +2084,11 @@ TEST(Simplify, SimplifyNestedMax) {
   {
     // Max(Max(Max(x, 5), Max(y, z)), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
-        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), 8, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1955,6 +2100,7 @@ TEST(Simplify, SimplifyNestedMax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMin) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1966,6 +2112,7 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle body = Min::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
   }
 
@@ -2088,6 +2235,7 @@ TEST(Simplify, SimplifyNestedMin) {
 
   {
     // Min(5, Min(x, 8)) => Min(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Min::make(5, Min::make(x, 8, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2097,6 +2245,7 @@ TEST(Simplify, SimplifyNestedMin) {
 
   {
     // Min(8, Min(x, 5)) => Min(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Min::make(8, Min::make(x, 5, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2106,6 +2255,7 @@ TEST(Simplify, SimplifyNestedMin) {
 
   {
     // Min(Min(x, 8), 5) => Min(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Min::make(Min::make(x, 8, true), 5, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2115,6 +2265,7 @@ TEST(Simplify, SimplifyNestedMin) {
 
   {
     // Min(Min(x, 5), 8) => Min(x, 8)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = Min::make(Min::make(x, 5, true), 8, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2125,7 +2276,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(5, Min(x, Min(y, Min(z, 8)))) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        5, Min::make(x, Min::make(y, Min::make(z, 8, true), true), true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(x, Min::make(y, Min::make(z, 8, true), true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2139,7 +2294,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(5, Min(Min(y, Min(z, 8)), x)) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        5, Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2153,7 +2312,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(5, Min(Min(Min(z, 8), y), x)) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        5, Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2167,7 +2330,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(Min(x, Min(y, Min(8, z))), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        Min::make(x, Min::make(y, Min::make(8, z, true), true), true), 5, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(x, Min::make(y, Min::make(8, z, true), true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2181,7 +2348,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(Min(Min(y, Min(8, z)), x), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), 5, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2195,7 +2366,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(Min(Min(Min(8, z), y), x), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), 5, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2211,7 +2386,9 @@ TEST(Simplify, SimplifyNestedMin) {
     // Do not simplify when all the Min ops do not have the same
     // propagate_nans.
     ExprHandle body = Min::make(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         Min::make(Min::make(Min::make(z, 5, true), y, false), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
@@ -2232,7 +2409,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(8, Min(Min(x, 5), Min(y, z))) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        8, Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2246,7 +2427,11 @@ TEST(Simplify, SimplifyNestedMin) {
   {
     // Min(Min(Min(x, 5), Min(y, z)), 8) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
-        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), 8, true);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2258,6 +2443,7 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyWontReorderFloat) {
   KernelScope kernel_scope;
 
@@ -2330,7 +2516,9 @@ TEST(Simplify, SimplifyWontReorderFloat) {
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(3.f) * (ExprHandle(3) * x) -
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ExprHandle(3) * (ExprHandle(3.f) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2370,6 +2558,7 @@ TEST(Simplify, SimplifyWontReorderFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPattern) {
   KernelScope kernel_scope;
 
@@ -2578,6 +2767,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2598,6 +2788,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
     // 32 * (x/8) + 4 * (x % 8) => 4 * x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(32) * (x / 8) + ExprHandle(4) * (x % 8);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2610,7 +2801,9 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
     // Factorization requiring constant folding.
     // 20 * (x  / (16 / 2)) * 2 + (11 % 6) * (x % (7+1)) => 5 * x.
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(40) * (x / (ExprHandle(16) / 2)) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (ExprHandle(11) % 6) * (x % (ExprHandle(7) + 1));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
@@ -2620,6 +2813,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 
   {
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x / 5) * 10 + ExprHandle(2) * (x % 5);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
@@ -2629,6 +2823,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 
   {
     VarHandle x("x", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x / 10) * 0 + x % 5;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2637,6 +2832,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
@@ -2645,7 +2841,9 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
     // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => y + x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x / ExprHandle(8) * ExprHandle(8)) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (y / ExprHandle(5) * ExprHandle(5)) + (x % 8) + (y % 5);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
@@ -2660,6 +2858,7 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
     ExprHandle body =
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (y / ExprHandle(8) * ExprHandle(8)) + (x % 8) + (y % 8) + (z % 8);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
@@ -2681,7 +2880,9 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = x + (z + ExprHandle(512) * y) % ExprHandle(16) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
@@ -2694,12 +2895,14 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPattern) {
   KernelScope kernel_scope;
 
   {
     // t/7 % 9 * 7 + t % 7 => t%63
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / 7 % 9) * 7 + t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2710,6 +2913,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   {
     // 2*t/7 % 9 * 7 + 2*t % 7 => 2*t % 63
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (ExprHandle(2) * t / 7 % 9) * 7 + ExprHandle(2) * t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2788,6 +2992,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2795,6 +3000,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
     // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
     VarHandle t("t", kInt);
     ExprHandle body =
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ExprHandle(2) * ((t / 7 % 9) * 7) + ExprHandle(2) * (t % 7);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
@@ -2807,6 +3013,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   {
     // t /7 % 9 * 14 + 2* (t % 7) => 2* (t % 63)
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / 7 % 9) * 14 + ExprHandle(2) * (t % 7);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
@@ -2819,6 +3026,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   {
     // t/14 % 9 * 7 + t/2 % 7 => t/2 % 63
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / 14 % 9) * 7 + t / 2 % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2831,7 +3039,9 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   {
     // t/(7*3) % 9 * 7*3 + t % (7*3) => t % 189
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / (ExprHandle(7) * ExprHandle(3)) % 9) * 7 * 3 +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         t % (ExprHandle(7) * ExprHandle(3));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
@@ -2857,12 +3067,14 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
   {
     // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / 7 % 9) * 7 + t % 7 + t;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
@@ -2875,6 +3087,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   {
     // t/7 % 9 * 7 + t/8 % 9 * 8 + t % 7 + t % 8  => t % 63 + t % 72
     VarHandle t("t", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / 7 % 9) * 7 + (t / 8 % 9) * 8 + t % 7 + t % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
@@ -2932,6 +3145,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
     // => io_flat
     VarHandle t("io_flat", kInt);
     ExprHandle body =
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ExprHandle(7) * (t / 7 % 9) + t % 7 + ExprHandle(63) * (t / 63);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_VAR_WITH_NAME(simplified.node(), "io_flat");
@@ -2943,8 +3157,11 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
     // (i0_flat / 7 % 9)  * 7 +
     // i0_flat % 7 => io_flat
     VarHandle t("io_flat", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (t / (ExprHandle(11) * 10 * 9 * 7)) * (7 * 9 * 10 * 11) +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (t / (ExprHandle(10) * 9 * 7) % 11) * 7 * 9 * 10 +
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (t / (ExprHandle(9) * 7) % 10) * 7 * 9 + (t / 7 % 9) * 7 + t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_VAR_WITH_NAME(simplified.node(), "io_flat");
@@ -2979,6 +3196,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
   KernelScope kernel_scope;
 
@@ -2987,6 +3205,7 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
     // 8x / 4y => 2x / y.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x * 8) / (y * 4);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Div, simplified.node(), div);
@@ -3000,6 +3219,7 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
     // Don't change anything if we can't factorize.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x * 7) / (y * 4);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Div, simplified.node(), div);
@@ -3015,6 +3235,7 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
     // Don't reorder floats.
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = (x * 8) / (y * 4);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Div, simplified.node(), div);
@@ -3051,6 +3272,7 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantBranches) {
   KernelScope kernel_scope;
 
@@ -3109,6 +3331,7 @@ TEST(Simplify, SimplifyConstantBranches) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantCond) {
   KernelScope kernel_scope;
 
@@ -3118,8 +3341,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Cond* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3134,8 +3357,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3151,8 +3374,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3167,8 +3390,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, x, 1);
+    Stmt* true_val = Store::make(a, {0}, x);
+    Stmt* false_val = Store::make(a, {0}, x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3183,8 +3406,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
-    Stmt* false_val = Store::make(a, {0}, x + x, 1);
+    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x);
+    Stmt* false_val = Store::make(a, {0}, x + x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3199,8 +3422,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+    Stmt* true_val = Store::make(a, {0}, x);
+    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3221,6 +3444,7 @@ TEST(Simplify, SimplifyConstantCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyCond) {
   KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
@@ -3249,6 +3473,7 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantComparisons) {
   KernelScope kernel_scope;
 
@@ -3290,11 +3515,13 @@ TEST(Simplify, SimplifyConstantComparisons) {
   ComparisonTest(2, 1, kNE, 1);
 
   // With specified results:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = CompareSelect::make(2, 2, 5, 42, kNE);
   ExprHandle simplified = IRSimplifier::simplify(body);
   IS_IMM_WITH_VAL(Int, simplified.node(), 42);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicComparisons) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -3317,6 +3544,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 
   // x == x * 2 cannot simplify since we don't know x is nonzero.
   body = CompareSelect::make(x, x * 2, kEQ);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
 
   // x == x * 1 => 1
@@ -3335,6 +3563,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 
   {
     // x == 5 => x == 5
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     body = CompareSelect::make(x, 5, kEQ);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
@@ -3432,6 +3661,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
   TookFalseBranch(IRSimplifier::simplify(body));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   KernelScope kernel_scope;
 
@@ -3492,6 +3722,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOneLoopFor) {
   KernelScope kernel_scope;
 
@@ -3561,6 +3792,7 @@ TEST(Simplify, SimplifyOneLoopFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   KernelScope kernel_scope;
 
@@ -3570,6 +3802,7 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     LoopOptions options;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     options.set_gpu_block_index(12);
     auto body =
         For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})), options);
@@ -3580,6 +3813,7 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultilevelFor) {
   KernelScope kernel_scope;
 
@@ -3639,14 +3873,18 @@ TEST(Simplify, SimplifyMultilevelFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForCleansUp) {
   KernelScope kernel_scope;
 
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder a("a", kFloat, {1, 12, 1});
     VarHandle x("x", kInt);
     Tensor* b = Compute(
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         "x",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{1, "i"}, {12, "m"}, {1, "n"}},
         [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
           return i + m + n;
@@ -3668,14 +3906,17 @@ TEST(Simplify, SimplifyForCleansUp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyFor) {
   KernelScope kernel_scope;
 
   {
     // Flatten many layers around an empty block to an empty block.
     Stmt* last = new Block({});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 11; ++i) {
       VarHandle loopVar("loopVar", kInt);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       last = For::make(loopVar, 0, 10, last);
     }
 
@@ -3685,6 +3926,7 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFlattenBlock) {
   KernelScope kernel_scope;
 
@@ -3692,8 +3934,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store1, store2});
     Block* block2 = new Block({block1});
@@ -3715,8 +3957,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store1});
     Block* block2 = new Block({store2});
@@ -3738,8 +3980,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store2});
     Block* block2 = new Block({block1});
@@ -3760,6 +4002,7 @@ TEST(Simplify, SimplifyFlattenBlock) {
   {
     // Flatten many layers around an empty block to an empty block.
     Stmt* last = new Block({});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 11; ++i) {
       last = new Block({last});
     }
@@ -3770,6 +4013,7 @@ TEST(Simplify, SimplifyFlattenBlock) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   KernelScope kernel_scope;
 
@@ -3844,6 +4088,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DontSimplifyRand) {
   KernelScope kernel_scope;
 
@@ -3878,6 +4123,7 @@ TEST(Simplify, DontSimplifyRand) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyReorderForCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -3893,6 +4139,7 @@ TEST(Simplify, SimplifyReorderForCond) {
         0,
         4,
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
@@ -3910,6 +4157,7 @@ TEST(Simplify, SimplifyReorderForCond) {
         0,
         4,
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
@@ -3928,7 +4176,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(c, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -3945,7 +4196,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(b, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(b, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -3963,7 +4217,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(a, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -3982,6 +4239,7 @@ TEST(Simplify, SimplifyReorderForCond) {
         Block::make(
             {Let::make(j, 3),
              Cond::make(
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
                  Store::make(c, {0}, Load::make(a, {i})),
                  nullptr)}));
@@ -4001,8 +4259,12 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(a, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Cond::make(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
                 Store::make(c, {0}, Load::make(a, {i})),
                 nullptr),
@@ -4025,8 +4287,12 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(a, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Cond::make(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
                 Store::make(c, {0}, Load::make(a, {i})),
                 nullptr),
@@ -4048,6 +4314,7 @@ TEST(Simplify, SimplifyReorderForCond) {
         0,
         4,
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             Store::make(c, {0}, 0)));
@@ -4067,7 +4334,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+                Load::make(c, {0}),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {1}, Load::make(a, {i})),
             nullptr));
 
@@ -4077,6 +4347,7 @@ TEST(Simplify, SimplifyReorderForCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFuseConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -4089,15 +4360,18 @@ TEST(Simplify, SimplifyFuseConditions) {
     // if (A) { X }; if (A) { Y }; => if (A) { X; Y }
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4110,10 +4384,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse, conditions are not identical in lhs (i != j).
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(j, 10, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
@@ -4136,10 +4412,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse, conditions are not identical in rhs (10 != 11).
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 11, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
@@ -4163,10 +4441,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse, conditions are not identical in operation (LT vs GT).
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kGT),
              Store::make(a, {1}, i),
              nullptr)});
@@ -4194,6 +4474,7 @@ TEST(Simplify, SimplifyFuseConditions) {
         {Cond::make(
              CompareSelect::make(
                  i,
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  10,
                  new IntImm(1),
                  new IntImm(0),
@@ -4203,6 +4484,7 @@ TEST(Simplify, SimplifyFuseConditions) {
          Cond::make(
              CompareSelect::make(
                  j,
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  10,
                  new IntImm(2),
                  new IntImm(0),
@@ -4229,10 +4511,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can fuse with false stmt only.
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
              Store::make(a, {0}, i)),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
              Store::make(a, {1}, i))});
@@ -4250,10 +4534,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can fuse with both true and false stmt.
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              Store::make(b, {0}, i)),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              Store::make(b, {1}, i))});
@@ -4272,10 +4558,12 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can fuse with mismatched true / false stmt existing
     auto body = Block::make(
         {Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
              Store::make(b, {1}, i))});
@@ -4310,18 +4598,22 @@ TEST(Simplify, SimplifyFuseConditions) {
 
     auto body = Block::make({
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, j),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, i),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {1}, i),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 11, CompareSelectOperation::kLT),
             Store::make(a, {1}, j),
             nullptr),
@@ -4341,18 +4633,22 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can fuse longer sequences of identical conditions.
     auto body = Block::make({
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, j),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, i),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {1}, i),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {1}, j),
             nullptr),
@@ -4370,19 +4666,23 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse through a non condition.
     auto body = Block::make({
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, j),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {0}, i),
             nullptr),
         Store::make(b, {1}, i + j),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {1}, i),
             nullptr),
         Cond::make(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
             Store::make(a, {1}, j),
             nullptr),
@@ -4411,6 +4711,7 @@ TEST(Simplify, SimplifyFuseConditions) {
         {Cond::make(
              CompareSelect::make(
                  i * 2,
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  ExprHandle(87) % ExprHandle(11),
                  CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
@@ -4418,6 +4719,7 @@ TEST(Simplify, SimplifyFuseConditions) {
          Cond::make(
              CompareSelect::make(
                  i * 2,
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  ExprHandle(300) / ExprHandle(30),
                  CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
@@ -4481,10 +4783,12 @@ TEST(Simplify, SimplifyFuseConditions) {
         4,
         Block::make(
             {Cond::make(
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
                  Store::make(a, {1}, Load::make(b, {0})),
                  nullptr),
              Cond::make(
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
                  Store::make(a, {2}, Load::make(b, {0})),
                  nullptr)}));
@@ -4496,6 +4800,7 @@ TEST(Simplify, SimplifyFuseConditions) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySyncThreads) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -4504,10 +4809,11 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge two inner SyncThreads.
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+         Store::make(a, {1}, 0)});
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
@@ -4520,7 +4826,7 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Eliminate outer SyncThreads.
     auto body = Block::make(
-        {new SyncThreads(), Store::make(a, {1}, 0, 1), new SyncThreads()});
+        {new SyncThreads(), Store::make(a, {1}, 0), new SyncThreads()});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4532,13 +4838,13 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge many inner SyncThreads.
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+         Store::make(a, {1}, 0)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4554,7 +4860,7 @@ TEST(Simplify, SimplifySyncThreads) {
     auto body = Block::make(
         {new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
+         Store::make(a, {1}, 0),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
@@ -4570,15 +4876,15 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge multiple sections;
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
-         Store::make(a, {2}, 0, 1),
+         Store::make(a, {1}, 0),
+         Store::make(a, {2}, 0),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {3}, 0, 1)});
+         Store::make(a, {3}, 0)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4593,10 +4899,13 @@ TEST(Simplify, SimplifySyncThreads) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRampSubBroadcast) {
   KernelScope kernel_scope;
   int num_lanes = 4;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
   ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
   Ramp* newRamp = simplified.AsNode<Ramp>();
@@ -4607,8 +4916,10 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
   ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyBroadcastTermExpander) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_lanes = 8;
   ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);
   ExprHandle bc1 = Broadcast::make(ExprHandle(1), num_lanes);
@@ -4620,17 +4931,143 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   BufHandle buf("buf", {num_lanes}, kInt);
   // The result isn't fully simplified currently and thus would be brittle to
   // match. Observe its value instead.
-  auto store = Store::make(
-      buf,
-      {Ramp::make(0, 1, num_lanes)},
-      simplified,
-      Broadcast::make(ExprHandle(1), num_lanes));
+  auto store = Store::make(buf, {Ramp::make(0, 1, num_lanes)}, simplified);
   SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);
   for (int i = 0; i < num_lanes; ++i) {
     ASSERT_EQ(output[i], 2);
   }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = n < 1 ? 0.f : 1.f;
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  Placeholder b("b", kFloat, {N});
+  VarHandle n("n", kInt);
+  Stmt* s = For::make(
+      n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  Placeholder b("b", kFloat, {N});
+  VarHandle n("n", kInt);
+  Stmt* s =
+      For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
+  // This test mimics the unpadded region of a conv2d.  We want to remove any
+  // conditional that is provably satisfied (or unsatisfied) by the entire loop
+  // range.
+  // Before:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, 1.f);
+  // After:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = 1.f;
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  Placeholder b("b", kFloat, {N, N});
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  Stmt* s = b.store({i, j}, IfThenElse::make(csel, 0.f, 1.0f));
+  s = For::make(j, 1, N - 1, s);
+  s = For::make(i, 1, N - 1, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, DISABLED_SimplifyLoopBounds) {
+  // This test mimics the padded region of a conv2d.  We want to adjust the
+  // loop bounds such that the condition will be always met.  Note that this
+  // could be solved by peeling, and applying the range-based conditional
+  // simplification in the previous tests.
+  // Before:
+  //   for (int i = 0; i < 3; i++) {
+  //     for (int j = 0; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + (IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, a[i, j]));
+  // After:
+  //   for (int i = 1; i < 3; i++) {
+  //     for (int j = 1; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + 1.f;
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  constexpr int K = 3;
+  Placeholder a("a", kFloat, {N, N});
+  Placeholder b("b", kFloat, {N, N});
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  Stmt* s = b.store(
+      {i, j}, b.load({i, j}) + IfThenElse::make(csel, 0.f, a.load({i, j})));
+  s = For::make(j, 0, K, s);
+  s = For::make(i, 0, K, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: for (int i = 1; i < 3; i++) {
+# CHECK: for (int j = 1; j < 3; j++) {
+# CHECK-NOT: IfThenElse
+)IR",
+      oss.str());
 }
 
 } // namespace jit

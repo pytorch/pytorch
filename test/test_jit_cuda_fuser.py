@@ -986,7 +986,6 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")

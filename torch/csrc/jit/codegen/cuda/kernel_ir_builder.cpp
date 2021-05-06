@@ -23,12 +23,14 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
   auto result = newResult(lhs->dtype());
   create<BinaryOp>(op_type, result, lhs, rhs);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
 
 Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   auto result = create<Bool>(c10::nullopt);
   create<BinaryOp>(op_type, result, lhs, rhs);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
 

@@ -231,6 +231,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     print_inline_ = true;
     auto result = gen(node);
     print_inline_ = saved_inline;
+    // NOLINTNEXTLINE(performance-no-automatic-move)
     return result;
   }
 

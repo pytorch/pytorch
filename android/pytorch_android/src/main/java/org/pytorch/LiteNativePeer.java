@@ -3,6 +3,7 @@ package org.pytorch;
 import com.facebook.jni.HybridData;
 import com.facebook.soloader.nativeloader.NativeLoader;
 import com.facebook.soloader.nativeloader.SystemDelegate;
+import java.util.Map;
 
 class LiteNativePeer implements INativePeer {
   static {
@@ -15,10 +16,11 @@ class LiteNativePeer implements INativePeer {
 
   private final HybridData mHybridData;
 
-  private static native HybridData initHybrid(String moduleAbsolutePath, int deviceJniCode);
+  private static native HybridData initHybrid(
+      String moduleAbsolutePath, Map<String, String> extraFiles, int deviceJniCode);
 
-  LiteNativePeer(String moduleAbsolutePath, Device device) {
-    mHybridData = initHybrid(moduleAbsolutePath, device.jniCode);
+  LiteNativePeer(String moduleAbsolutePath, Map<String, String> extraFiles, Device device) {
+    mHybridData = initHybrid(moduleAbsolutePath, extraFiles, device.jniCode);
   }
 
   /**

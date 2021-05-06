@@ -18,7 +18,9 @@ struct TensorArgCodegen {
   };
 
   T* data;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t size[N];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t stride[N];
   constexpr int nDims() {
     return N;
@@ -50,6 +52,7 @@ struct TensorArgCodegen<T, 0> {
 };
 
 struct ArgAbstract {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~ArgAbstract() {}
   virtual void* arg() = 0;
 };
@@ -57,6 +60,7 @@ struct ArgAbstract {
 struct PhiloxCudaStateArg : public ArgAbstract {
   at::PhiloxCudaState val_;
   PhiloxCudaStateArg(at::PhiloxCudaState _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -65,6 +69,7 @@ struct PhiloxCudaStateArg : public ArgAbstract {
 struct LongArg : public ArgAbstract {
   int64_t val_;
   explicit LongArg(int64_t _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -73,6 +78,7 @@ struct LongArg : public ArgAbstract {
 struct DoubleArg : public ArgAbstract {
   double val_;
   explicit DoubleArg(double _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -81,12 +87,14 @@ struct DoubleArg : public ArgAbstract {
 struct BoolArg : public ArgAbstract {
   bool val_;
   explicit BoolArg(bool _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
 };
 
 struct TensorArgAbstract : ArgAbstract {
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~TensorArgAbstract(){};
   virtual void setSize(int i, int64_t size) = 0;
   virtual void setStride(int i, int64_t stride) = 0;
@@ -126,13 +134,21 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
       return std::make_unique<TensorArg<TensorArgCodegen<T, 3>>>();
     case (4):
       return std::make_unique<TensorArg<TensorArgCodegen<T, 4>>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (5):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 5>>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (6):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 6>>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (7):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 7>>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (8):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 8>>>();
     default:
       TORCH_INTERNAL_ASSERT(

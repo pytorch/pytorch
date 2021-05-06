@@ -54,8 +54,8 @@ static inline HOST_DEVICE T powi(T a, T b) {
   return powi_impl(a, b);
 }
 
-using pow_tensor_tensor_fn = void (*)(TensorIterator&);
-using pow_tensor_scalar_fn = void (*)(TensorIterator&, const Scalar&);
+using pow_tensor_tensor_fn = void (*)(TensorIteratorBase&);
+using pow_tensor_scalar_fn = void (*)(TensorIteratorBase&, const Scalar&);
 
 DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub);
 DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub);

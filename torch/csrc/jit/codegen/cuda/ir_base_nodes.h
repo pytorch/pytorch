@@ -130,7 +130,9 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   void print() const;
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   StmtNameType name_ = kInvalidStmName;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Fusion* fusion_ = nullptr;
 };
 
@@ -231,6 +233,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   //! Returns true when other is a consumer of this
   bool isConsumerOf(const Val* other) const;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,clang-diagnostic-inconsistent-missing-override,modernize-use-override)
   virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();
@@ -256,7 +259,9 @@ class TORCH_CUDA_CU_API Val : public Statement {
  protected:
   friend Fusion;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ValType vtype_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const DataType dtype_;
 
   // Following is managed by Fusion and can change.

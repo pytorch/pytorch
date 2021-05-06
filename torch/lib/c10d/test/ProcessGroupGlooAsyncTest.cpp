@@ -1,4 +1,3 @@
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 
@@ -49,9 +48,9 @@ class AsyncTest {
     auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
-    ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
-    options.devices.push_back(
+    auto options = ::c10d::ProcessGroupGloo::Options::create();
+    options->timeout = std::chrono::milliseconds(50);
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
@@ -95,7 +94,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   }
 
   void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
 
@@ -103,7 +102,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     std::vector<at::Tensor> outputs(gpu_tensors.size());
 
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (unsigned i = 0; i < gpu_tensors.size(); i++) {
@@ -133,7 +132,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;
@@ -159,7 +158,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;

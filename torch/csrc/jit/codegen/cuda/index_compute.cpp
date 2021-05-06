@@ -322,6 +322,7 @@ void IndexCompute::handle(Merge* merge) {
     }
 
     index_map_[gpu_lower->lowerValue(*(input_ids.end() - 1))
+                   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                    ->as<kir::IterDomain>()] = out_ind;
     return;
   }
@@ -942,6 +943,7 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
   for (auto loop : loops) {
     kir::Val* idx = nullptr;
     // See also LoopNestGenerator::pushAlloc.
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
       if ((loop->iter_domain()->isThreadDim() && is_shared) ||
           (loop->iter_domain()->isThread() && is_global)) {
@@ -963,6 +965,7 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
       within_alloc = true;
     }
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return loop_to_ind_map;
 }
 
