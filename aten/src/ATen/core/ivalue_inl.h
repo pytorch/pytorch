@@ -458,6 +458,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!eptr_);
+    return dataPtrs_;
+  }
+
   /**
    * Add a callback to the future.
    * The callbacks will be executed once the future completes.

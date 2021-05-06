@@ -231,7 +231,8 @@ void RpcAgent::rpcRetryCallback(
     }
   } else {
     // This try succeeded, so we can make the original future as complete.
-    earliestRpc->originalFuture_->markCompleted(jitFuture->value());
+    earliestRpc->originalFuture_->markCompleted(
+        jitFuture->value(), jitFuture->dataPtrs());
   }
 }
 
