@@ -534,7 +534,7 @@ void listSetItem(Stack* stack);
 // it's necessary to register this overload following
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
-#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(                  \
+#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(          \
     aten_op, int_op, float_op, result, string_val)                \
   OperatorGenerator(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
@@ -567,10 +567,13 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(aten_op, int_op, float_op, result, "")
+  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(                 \
+      aten_op, int_op, float_op, result, "")
 
-#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(aten_op, int_op, float_op, result) \
-  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(aten_op, int_op, float_op, result, ".Scalar_Scalar")
+#define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(   \
+    aten_op, int_op, float_op, result)             \
+  DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC( \
+      aten_op, int_op, float_op, result, ".Scalar_Scalar")
 
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
@@ -774,52 +777,52 @@ void listSetItem(Stack* stack);
           },                                                              \
           aliasAnalysisFromSchema())
 
-#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC(     \
-    aten_op, int_op, float_op, complex_op, result, string_val)    \
-  OperatorGenerator(                                              \
-      TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
-                             "(Scalar a, Scalar b) -> " #result), \
-      [](Stack* stack) {                                          \
-        IValue x, y;                                              \
-        pop(stack, x, y);                                         \
-        if (x.isComplexDouble()) {                                \
-          c10::complex<double> a = x.toComplexDouble();           \
-          if (y.isComplexDouble()) {                              \
-            c10::complex<double> b = y.toComplexDouble();         \
-            push(stack, complex_op);                              \
-          } else if (y.isDouble()) {                              \
-            double b = y.toDouble();                              \
-            push(stack, complex_op);                              \
-          } else {                                                \
-            int64_t b = y.toInt();                                \
-            push(stack, complex_op);                              \
-          }                                                       \
-        } else if (x.isDouble()) {                                \
-          double a = x.toDouble();                                \
-          if (y.isComplexDouble()) {                              \
-            c10::complex<double> b = y.toComplexDouble();         \
-            push(stack, complex_op);                              \
-          } else if (y.isDouble()) {                              \
-            double b = y.toDouble();                              \
-            push(stack, float_op);                                \
-          } else {                                                \
-            int64_t b = y.toInt();                                \
-            push(stack, float_op);                                \
-          }                                                       \
-        } else {                                                  \
-          int64_t a = x.toInt();                                  \
-          if (y.isComplexDouble()) {                              \
-            c10::complex<double> b = y.toComplexDouble();         \
-            push(stack, complex_op);                              \
-          } else if (y.isDouble()) {                              \
-            double b = y.toDouble();                              \
-            push(stack, float_op);                                \
-          } else {                                                \
-            int64_t b = y.toInt();                                \
-            push(stack, int_op);                                  \
-          }                                                       \
-        }                                                         \
-      },                                                          \
+#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC( \
+    aten_op, int_op, float_op, complex_op, result, string_val)        \
+  OperatorGenerator(                                                  \
+      TORCH_SELECTIVE_SCHEMA(#aten_op string_val                      \
+                             "(Scalar a, Scalar b) -> " #result),     \
+      [](Stack* stack) {                                              \
+        IValue x, y;                                                  \
+        pop(stack, x, y);                                             \
+        if (x.isComplexDouble()) {                                    \
+          c10::complex<double> a = x.toComplexDouble();               \
+          if (y.isComplexDouble()) {                                  \
+            c10::complex<double> b = y.toComplexDouble();             \
+            push(stack, complex_op);                                  \
+          } else if (y.isDouble()) {                                  \
+            double b = y.toDouble();                                  \
+            push(stack, complex_op);                                  \
+          } else {                                                    \
+            int64_t b = y.toInt();                                    \
+            push(stack, complex_op);                                  \
+          }                                                           \
+        } else if (x.isDouble()) {                                    \
+          double a = x.toDouble();                                    \
+          if (y.isComplexDouble()) {                                  \
+            c10::complex<double> b = y.toComplexDouble();             \
+            push(stack, complex_op);                                  \
+          } else if (y.isDouble()) {                                  \
+            double b = y.toDouble();                                  \
+            push(stack, float_op);                                    \
+          } else {                                                    \
+            int64_t b = y.toInt();                                    \
+            push(stack, float_op);                                    \
+          }                                                           \
+        } else {                                                      \
+          int64_t a = x.toInt();                                      \
+          if (y.isComplexDouble()) {                                  \
+            c10::complex<double> b = y.toComplexDouble();             \
+            push(stack, complex_op);                                  \
+          } else if (y.isDouble()) {                                  \
+            double b = y.toDouble();                                  \
+            push(stack, float_op);                                    \
+          } else {                                                    \
+            int64_t b = y.toInt();                                    \
+            push(stack, int_op);                                      \
+          }                                                           \
+        }                                                             \
+      },                                                              \
       aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
@@ -863,8 +866,8 @@ void listSetItem(Stack* stack);
       },                                                                   \
       aliasAnalysisFromSchema())
 
-#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(           \
-    aten_op, int_op, float_op, complex_op, result)      \
+#define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(                   \
+    aten_op, int_op, float_op, complex_op, result)              \
   DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC( \
       aten_op, int_op, float_op, complex_op, result, "")
 
