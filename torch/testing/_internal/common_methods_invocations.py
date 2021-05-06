@@ -3565,6 +3565,7 @@ op_db: List[OpInfo] = [
                    # "rsqrt_cpu" not implemented for 'BFloat16'
                    backward_dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    assert_autodiffed=True,
+                   supports_forward_ad=True,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
@@ -3592,6 +3593,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
+                   supports_forward_ad=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -3640,6 +3642,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
@@ -3651,6 +3654,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1)),
@@ -3661,6 +3665,7 @@ op_db: List[OpInfo] = [
                                            *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            skips=(
                # issue may fix: https://github.com/pytorch/pytorch/issues/55589
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
@@ -3674,6 +3679,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
+           supports_forward_ad=True,
            skips=(
                # addbmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
@@ -3739,6 +3745,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
@@ -3749,6 +3756,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
+           supports_forward_ad=True,
            supports_inplace_autograd=False,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
@@ -3758,6 +3766,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
@@ -3781,6 +3790,7 @@ op_db: List[OpInfo] = [
                    ref=np.arcsin,
                    domain=(-1, 1),
                    supports_sparse=True,
+                   supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -3813,6 +3823,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
+                   supports_forward_ad=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -3834,6 +3845,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    assert_autodiffed=True,
+                   supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
                    skips=(
@@ -3869,6 +3881,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    supports_inplace_autograd=False,
+                   supports_forward_ad=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -3973,7 +3986,7 @@ op_db: List[OpInfo] = [
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
-                   supports_forward_ad=False,  # TODO fix the formula for complex forward AD
+                   supports_forward_ad=True,
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
@@ -5275,6 +5288,7 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
+                   supports_forward_ad=True,
                    supports_complex_to_float=True),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
