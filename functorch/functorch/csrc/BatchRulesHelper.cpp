@@ -1,4 +1,5 @@
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <ATen/WrapDimUtils.h>
 
 namespace at { namespace functorch {
 
@@ -33,6 +34,26 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
     return wrapped_dim + 1;
   }
   return wrapped_dim;
+}
+
+Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x) {
+  auto x_dim = x.dim();
+  src = maybe_wrap_dim(src, x_dim);
+  dst = maybe_wrap_dim(dst, x_dim - 1); // Returned Tensor has one fewer dim
+  VmapDimVector new_shape(x.sizes().begin(), x.sizes().end());
+  new_shape.erase(new_shape.begin() + src);
+  new_shape[dst] *= x.sizes()[src];
+  return at::reshape(x.movedim(src, dst), new_shape);
+}
+
+Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
+  src = maybe_wrap_dim(src, x.dim());
+  VmapDimVector shape(x.sizes().begin(), x.sizes().end());
+  TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
+  int64_t size2 = shape[src] / size1;
+  shape[src] = size1;
+  shape.insert(shape.begin() + src + 1, size2);
+  return at::reshape(x, shape);
 }
 
 }}
