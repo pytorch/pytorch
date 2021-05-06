@@ -873,8 +873,15 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
+static void norm_deprecation_warning() {
+  TORCH_WARN_ONCE(
+      "torch.norm is deprecated and may be removed in a future PyTorch release. ",
+      "Use torch.linalg.vector_norm for vector norms and torch.linalg.matrix_norm for matrix norms.");
+}
+
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  norm_deprecation_warning();
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
@@ -902,6 +909,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
 }
 
 static inline Tensor _norm(const Tensor &self, const Scalar& p) {
+  norm_deprecation_warning();
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
@@ -930,6 +938,7 @@ Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim,
 
 static Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
+  norm_deprecation_warning();
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
