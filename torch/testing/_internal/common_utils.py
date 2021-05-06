@@ -580,7 +580,13 @@ def slowTest(fn):
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
         else:
+            start = time.time()
             fn(*args, **kwargs)
+            end = time.time()
+            with open("recordedWithArgsAllSlowTests.txt", "a") as _file:
+                _file.write(
+                        fn.__name__ + ', *args: ' + str([x for x in list(*args)]) + ', **kwargs: ' + str([x for x in list(**kwargs)]) + ', time taken: ' + end-start + ' s'
+                )
     wrapper.__dict__['slow_test'] = True
     return wrapper
 
