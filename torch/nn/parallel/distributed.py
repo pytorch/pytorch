@@ -650,7 +650,7 @@ class DistributedDataParallel(Module):
                 fqn = f"{module_name}.{param_name}"
                 # Bypass ignored parameters since those are not reduced by DDP
                 # to begin with.
-                if fqn not in self.parameters_to_ignore:
+                if fqn not in self.parameters_to_ignore and param.requires_grad:
                     if param not in param_set:
                         raise ValueError(
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
