@@ -184,6 +184,37 @@ async def run_steps(
     return all(await asyncio.gather(*coros))
 
 
+def relevant_changed_files(file_filters: Optional[List[str]]) -> Optional[List[str]]:
+    changed_files: Optional[List[str]] = None
+    try:
+        changed_files = find_changed_files()
+    except Exception:
+        # If the git commands failed for some reason, bail out and use the whole list
+        print(
+            "Could not query git for changed files, falling back to testing all files instead",
+            file=sys.stderr,
+        )
+        return None
+
+    if changed_files is None:
+        print(
+            "Did not find any changed files, falling back to testing all files instead",
+            file=sys.stderr,
+        )
+        return None
+
+    if file_filters is None:
+        return changed_files
+    else:
+        relevant_files = []
+        for f in changed_files:
+            for file_filter in file_filters:
+                if f.endswith(file_filter):
+                    relevant_files.append(f)
+                    break
+        return relevant_files
+
+
 def grab_specific_steps(
     steps_to_grab: List[str], job: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -206,7 +237,9 @@ def main() -> None:
     )
     parser.add_argument("--file", help="YAML file with actions")
     parser.add_argument(
-        "--file-filter", help="only pass through files with this extension", default=""
+        "--file-filter",
+        help="only pass through files with this extension",
+        nargs="*",
     )
     parser.add_argument(
         "--changed-only",
@@ -221,27 +254,11 @@ def main() -> None:
     parser.add_argument("--step", action="append", help="steps to run (in order)")
     args = parser.parse_args()
 
-    relevant_files = None
+    relevant_files = ""
     quiet = not args.no_quiet
 
-    # Find changed files and filter them via the --file-filter argument
     if args.changed_only:
-        changed_files: Optional[List[str]] = None
-        try:
-            changed_files = find_changed_files()
-        except Exception:
-            # If the git commands failed for some reason, bail out and use the whole list
-            print(
-                "Could not query git for changed files, falling back to testing all files instead",
-                file=sys.stderr,
-            )
-        if changed_files is not None:
-            relevant_files = []
-            for f in changed_files:
-                for file_filter in args.file_filter:
-                    if f.endswith(file_filter):
-                        relevant_files.append(f)
-                        break
+        relevant_files = relevant_changed_files(args.file_filter)
 
     if args.file is None:
         # If there is no .yml file provided, fall back to the list of known
