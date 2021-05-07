@@ -28,7 +28,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const std::function<void(Message)>& markComplete,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
-  bool processScriptCallOp(
+  void processScriptCallOp(
       ScriptCall& scriptCall,
       const std::function<void(Message)>& markComplete,
       std::vector<at::IValue>& stack) const;
@@ -52,7 +52,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const std::function<void(Message)>& markComplete,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
-  bool processScriptRemoteCallOp(
+  void processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
       std::vector<at::IValue>& stack,

@@ -147,7 +147,8 @@ void RequestCallbackImpl::processScriptCall(
     const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
-  if (processScriptCallOp(scriptCall, markComplete, stack)) {
+  if (scriptCall.hasOp()) {
+    processScriptCallOp(scriptCall, markComplete, stack);
     return;
   }
 
@@ -246,8 +247,9 @@ void RequestCallbackImpl::processScriptRemoteCall(
     const std::function<void(void)>& postProcessing,
     std::vector<at::IValue>& stack,
     const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
-  if (processScriptRemoteCallOp(
-          scriptRemoteCall, postProcessing, stack, ownerRRef)) {
+  if (scriptRemoteCall.hasOp()) {
+    processScriptRemoteCallOp(
+        scriptRemoteCall, postProcessing, stack, ownerRRef);
     return;
   }
 
