@@ -330,8 +330,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         x = torch.tensor([self.rank + 1.0])
         work = pg.broadcast(x, root=0)
         work.wait()
-        output = work.result()
-        self.assertEqual(torch.tensor([1.0]), output[0])
+        result = work.result()
+        self.assertEqual(torch.tensor([1.0]), result[0])
 
     def test_broadcast_basics(self):
         self._test_broadcast_basics(lambda t: t.clone())
@@ -400,9 +400,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
-            output = work.result()
+            result = work.result()
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, output[0])
+            self.assertEqualIgnoreType(expected, result[0])
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)

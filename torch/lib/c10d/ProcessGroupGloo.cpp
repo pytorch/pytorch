@@ -420,12 +420,11 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 // static
 void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
-  std::exception_ptr eptr;
   try {
     work->run();
   } catch (...) {
-    eptr = std::current_exception();
-    work->finishWorkGlooError(eptr);
+    work->finishWorkGlooError(std::current_exception());
+    return;
   }
   work->finishWorkGloo();
 }
@@ -458,6 +457,10 @@ c10::intrusive_ptr<c10::ivalue::Future> CreateFutureForOutput(
 void ReturnFutureWithOutput(
     c10::intrusive_ptr<c10::ivalue::Future> future,
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() == 0) {
+    future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
+    return;
+  }
   if (outputTensors.size() > 1) {
     future->markCompleted(c10::IValue(outputTensors));
     return;
