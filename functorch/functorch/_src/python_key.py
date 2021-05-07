@@ -159,3 +159,13 @@ def nnc_jit(f):
         cached = compiled_f
         return cached(*args)
     return compiled
+
+def make_nnc(f):
+    @functools.wraps(f)
+    def wrapped(*args):
+        fx_model = make_fx(f)(*args)
+        fx_model.graph.lint()
+        compiled_f = nnc_compile(fx_model, args, get_loopnest=True)
+        return compiled_f
+
+    return wrapped
