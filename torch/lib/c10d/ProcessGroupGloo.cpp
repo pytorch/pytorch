@@ -984,7 +984,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
-  std::vector<at::Tensor> outputs;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
@@ -1111,21 +1110,18 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           indices[i], values[i], input.sizes(), input.options());
     }
 
-    // This might be not necessary, e.g. (quote from FB diff)
-    // If the participants contribute values that are known to not overlap
-    // (or hardly overlap), then coalescing may not be needed. To always
-    // coalesce regardless means performance overhead. The caller can always
-    // call coalesce themselves if it needed.
+    // Coalesce for good measure.
     return output.coalesce();
   }
 
   void run() override {
     auto output = allreduce(inputs);
 
-    // Can we avoid copy here in common case where input.size() == 1?
-    outputs.reserve(inputs.size());
-    for (auto& input : inputs) {
-      input.copy_(output);
+    // Can we avoid copy here?
+    // This copy is needed when we run a multi-gpu version of reduce (multiple
+    // inputs per rank).
+    for (int i = 0; i < inputs.size(); ++i) {
+      inputs[i].copy_(output);
     }
   }
 
@@ -1334,7 +1330,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
+      inputs[i].copy_(output, /*non_blocking=*/true);
       events[i].record(streams[i]);
     }
   }
@@ -1345,12 +1341,6 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
-    }
-
-    // Copy outputs back to inputs after synchronization, so that users can
-    // access all reduce results from input tensors
-    for (size_t i = 0; i < inputs.size(); i++) {
-      inputs[i].copy_(outputs[i]);
     }
   }
 
