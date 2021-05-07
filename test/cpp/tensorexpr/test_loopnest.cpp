@@ -4526,6 +4526,60 @@ TEST(LoopNest, OptimizeConditionalsMultipleStores) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 50; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //     B[j] = IfThenElse(j<30 ? 1 : 0, C[j], D[j])
+  //   }
+  // Only the first conditional, in the write to A, will be optimized.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {100}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto storeA = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  auto storeB = Store::make(
+      b_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 30, kLT),
+          Load::make(c_buf, {i}),
+          Load::make(d_buf, {i})));
+  auto forI = For::make(i, 0, 50, Block::make({storeA, storeB}));
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node()});
+  nest.optimizeConditionals();
+
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i] = B[i]
+# CHECK-NEXT: B[i] = IfThenElse(i<30 ? 1 : 0, C[i], D[i])
+# CHECK: for (int i = 0; i < 45
+# CHECK-NEXT: A[i + 5] = C[i]
+# CHECK-NEXT: B[i + 5] = IfThenElse(i + 5<30 ? 1 : 0, C[i + 5], D[i + 5])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
   KernelScope kernel_scope;
 

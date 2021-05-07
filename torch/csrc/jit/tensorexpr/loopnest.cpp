@@ -1005,57 +1005,83 @@ bool isConditionOptimizable(
   return false;
 }
 
+// Checks if the given if-then-else expression is a conditional that is
+// generated from `aten::cat`.
+//
+// The expected format of conditionals is:
+//     IfThenElse(var < val1? 1 : 0,
+//       IfThenElse (var < val2? 1 : 0,
+//         IfThenElse (var < val3? 1 : 0,
+//           sub-expr1,
+//           sub-expr2),
+//         sub-expr3),
+//       sub-expr4)
+//
+// If such a conditional is found, this function also sets:
+//   * cond_var to the condition variable found in this expression.
+//   * comp_values to the list of compared values in the condition expressions.
+//   * sub_exprs to the list of sub-expressions that are the result of this
+//     if-then-else expression.
+bool isConditionalFromCat(
+    const IfThenElse* ite,
+    const Var** cond_var,
+    std::vector<const Expr*>* comp_values,
+    std::vector<const Expr*>* sub_exprs) {
+  const Var* var = nullptr;
+  const Expr* comp_value;
+  if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
+    if (*cond_var == nullptr) {
+      *cond_var = var;
+    } else if (*cond_var != var) {
+      // Different condition variables found in nested if-then-else
+      // expressions. Can not optimize such cases.
+      return false;
+    }
+    auto true_ite = dynamic_cast<const IfThenElse*>(ite->true_value());
+    if (true_ite) {
+      if (!isConditionalFromCat(true_ite, cond_var, comp_values, sub_exprs)) {
+        return false;
+      }
+    } else {
+      sub_exprs->push_back(ite->true_value());
+    }
+    auto false_ite = dynamic_cast<const IfThenElse*>(ite->false_value());
+    if (false_ite) {
+      return false;
+    }
+    comp_values->push_back(comp_value);
+    sub_exprs->push_back(ite->false_value());
+    return true;
+  }
+  return false;
+}
+
 } // namespace
 
 bool LoopNest::optimizeConditionals() {
   // Consider every store in the root_stmt_ and try to optimize the
   // conditionals in that store.
   auto stores = NodeFinder<Store>::find(root_stmt_);
+  std::unordered_set<For*> split_fors;
   for (auto store : stores) {
-    auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
     const Var* cond_var = nullptr;
-    std::vector<const Expr*> conds;
-    std::vector<const Expr*> comp_values;
-    std::vector<const Expr*> cond_exprs;
-    bool optimizable = true;
-    for (auto i : ifthenelse_exprs) {
-      const Var* var;
-      const Expr* comp_value;
-      if (!isConditionOptimizable(i->condition(), &var, &comp_value)) {
-        optimizable = false;
-        break;
-      }
-      if (cond_var != nullptr && cond_var != var) {
-        // Different condition variables found in nested if-then-else
-        // expressions. Can not optimize such cases.
-        optimizable = false;
-        break;
-      }
-      cond_var = var;
-      conds.push_back(i->condition());
-      comp_values.push_back(comp_value);
-
-      // Collect the true and false sub-expressions, only if they are not
-      // if-then-else expressions themselves. Note that, we collect the
-      // false sub-expression before the true sub-expression because of the
-      // expected structure of the conditionals.
-      auto i_false = dynamic_cast<const IfThenElse*>(i->false_value());
-      if (!i_false) {
-        cond_exprs.push_back(i->false_value());
-      }
-      auto i_true = dynamic_cast<const IfThenElse*>(i->true_value());
-      if (!i_true) {
-        cond_exprs.push_back(i->true_value());
-      }
-    }
-    if (!optimizable || comp_values.empty()) {
-      // This store does not have conditionals in the format needed for this
-      // optimization.
+    // `comp_values` represent the list of compared values that will be
+    // collected as we check for the expected pattern. Since that will
+    // only include the RHS of the conditions in the if-then-else expressions
+    // we need to start with `0` which is the initial bound, given that we
+    // only handle normalized loops (check for this is done below).
+    std::vector<const Expr*> comp_values = {new IntImm(0)};
+    std::vector<const Expr*> sub_exprs;
+    auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
+    // We only check if the first if-then-else expression in this store
+    // corresponds to a conditional of the required format. If there are more
+    // than one such conditional, optimizing them requires checking if the
+    // conditions are exactly the same across them and handling all of them
+    // together. Currently, this is not handled.
+    if (!isConditionalFromCat(
+            ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
       continue;
     }
-
-    std::reverse(comp_values.begin(), comp_values.end());
-    std::reverse(cond_exprs.begin(), cond_exprs.end());
 
     auto fors = getLoopStmtsFor(store);
     if (cond_var != fors.back()->var()) {
@@ -1076,35 +1102,39 @@ bool LoopNest::optimizeConditionals() {
       // refers to a loop that is not normalized.
       continue;
     }
-    comp_values.push_back(for_to_split->stop());
-
-    // The comp_values gathered from the if-then-else expressions are
-    // cumulative. We need to compute the bounds for each sub-expression.
-    std::vector<const Expr*> comp_values_abs;
-    const Expr* prev_comp_value = new IntImm(0);
-    for (auto c : comp_values) {
-      comp_values_abs.push_back(new Sub(c, prev_comp_value));
-      prev_comp_value = c;
+    if (split_fors.count(for_to_split)) {
+      // This loop has already been split while optimizing conditionals
+      // earlier.
+      //
+      // Optimizing multiple conditionals that require splitting the same loop
+      // is tricky. It requires checking if the conditions are exactly the same
+      // across them and handling all of them together by splitting the loop
+      // exactly once.
+      //
+      // Currently, this case is not supported.
+      continue;
     }
+    split_fors.insert(for_to_split);
+
+    // `comp_values` needs to include the end bound, which is `for_to_split`
+    // stop value.
+    comp_values.push_back(for_to_split->stop());
 
     // Remove all the if-then-else expressions from this store and create
     // one loop per sub-expression.
     std::vector<Stmt*> split_loops;
     auto cond_to_replace = ifthenelse_exprs.front();
-    for (size_t i = 0; i < cond_exprs.size(); ++i) {
-      IfThenElseReplacer ifthenelseReplacer(cond_to_replace, cond_exprs[i]);
+    for (size_t i = 0; i < sub_exprs.size(); ++i) {
+      IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
       auto new_store = store->accept_mutator(&ifthenelseReplacer);
-      auto new_store_w_updated_indices = Substitute(
-          new_store,
-          {{cond_var,
-            new Add(cond_var, i == 0 ? new IntImm(0) : comp_values[i - 1])}});
-      auto new_for_body = for_to_split->body()->clone_and_replace(
-          store, new_store_w_updated_indices);
+      auto new_for_body =
+          for_to_split->body()->clone_and_replace(store, new_store);
       auto new_for = new For(
           for_to_split->var(),
-          for_to_split->start(),
-          comp_values_abs[i],
+          comp_values[i],
+          comp_values[i + 1],
           new_for_body);
+      LoopNest::normalize(new_for);
       split_loops.push_back(new_for);
     }
     auto par = dynamic_cast<Block*>(for_to_split->get_parent());
