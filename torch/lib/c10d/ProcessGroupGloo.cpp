@@ -489,7 +489,7 @@ void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
 }
 
 void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
-  // ReturnFutureWithOutput(future_, outputTensors_);
+  ReturnFutureWithOutput(future_, outputTensors_);
   finish();
 }
 
