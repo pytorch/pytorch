@@ -663,6 +663,13 @@ FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
 
     // Cache the new instance
     insertEntry(dev_id, tag, std::move(new_rt));
+
+    // Make sure new runtime created in profiling mode is in
+    //  profiling mode.
+    if (profiling_) {
+      rt->profile(true);
+    }
+
   } else {
     // In the case of heuristics hit, the launch constraints still need to be
     // updated

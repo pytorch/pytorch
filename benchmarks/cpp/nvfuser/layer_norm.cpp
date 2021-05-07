@@ -84,12 +84,10 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
   // outputs
   std::vector<at::Tensor> outputs;
 
-  auto reduction_params =
-      getNormalizationHeuristics(&fusion, inputs);
+  auto reduction_params = getNormalizationHeuristics(&fusion, inputs);
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(
-      &fusion, reduction_params.value());
+  scheduleNormalization(&fusion, reduction_params.value());
 
   FusionExecutor executor;
   executor.setMeasureKernelTimeFlag(true);
@@ -129,12 +127,12 @@ static void MagicScheduler_LayerNorm_Baseline(
 
 BENCHMARK(MagicScheduler_LayerNorm)
     ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 13}})
+    ->Ranges({{8, 8 << 12}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(MagicScheduler_LayerNorm_Baseline)
     ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 13}})
+    ->Ranges({{8, 8 << 12}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

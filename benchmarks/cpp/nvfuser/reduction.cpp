@@ -21,7 +21,6 @@ static std::pair<TensorView*, TensorView*> setupReduction(
     Fusion* fusion,
     DataType dtype,
     int red_axis) {
-
   FusionGuard fg(fusion);
 
   bool is_fp16 = dtype == DataType::Half;
@@ -55,19 +54,20 @@ static std::pair<TensorView*, TensorView*> setupReduction(
   return {tv1, output_of_reduction};
 }
 
-static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
-  FusionExecutorCache* fusion_executor_cache,
-  DataType dtype,
-  int reduction_dim) {
-
+static void MagicScheduler_Reduction(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    DataType dtype,
+    int reduction_dim) {
   auto reduction_size = benchmark_state.range(0);
   auto iter_size = benchmark_state.range(1);
 
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor aten_input =
-      (reduction_dim ?  at::randn({iter_size, reduction_size}, options)
-                      : at::randn({reduction_size, iter_size}, options));
+      (reduction_dim ? at::randn({iter_size, reduction_size}, options)
+                     : at::randn({reduction_size, iter_size}, options));
 
   fusion_executor_cache->profile(true);
   fusion_executor_cache->runFusionWithInputs({aten_input});
@@ -80,24 +80,23 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
   auto lparams = compile_log.launch_constraints.value();
 
   std::stringstream ss;
-  if(rparams.fastest_dim){
+  if (rparams.fastest_dim) {
     ss << "Fastest dim";
   } else {
     ss << "Slow dim";
   }
-  if(rparams.cross_block){
+  if (rparams.cross_block) {
     ss << "/cross block";
   }
-  if(rparams.multiple_reds_per_blk){
+  if (rparams.multiple_reds_per_blk) {
     ss << "/multiple reductions per block ";
   }
-  if(rparams.cross_grid){
+  if (rparams.cross_grid) {
     ss << "/cross grid";
   }
-  if(rparams.loop_unroll > 1){
+  if (rparams.loop_unroll > 1) {
     ss << "/Unroll "
-       << (rparams.reduction_unroll ? "reduction dim "
-                                                     : "iter dim ")
+       << (rparams.reduction_unroll ? "reduction dim " : "iter dim ")
        << rparams.loop_unroll;
   }
   ss << "/Launch (" << (rparams.fastest_dim ? lparams.gdimx() : lparams.gdimy())
@@ -111,7 +110,8 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs({aten_input});
-    benchmark_state.SetIterationTime(executor_instance->kernelTimeMs() / 1000.0);
+    benchmark_state.SetIterationTime(
+        executor_instance->kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
@@ -122,10 +122,30 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
       (iter_size * reduction_size + iter_size) * int64_t(dataTypeSize(dtype)));
 }
 
-NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp32_Outer_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Float, 0);
-NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp16_Outer_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Half, 0);
-NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp32_Inner_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Float, 1);
-NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp16_Inner_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Half, 1);
+NVFUSER_BENCHMARK_DEFINE(
+    MagicScheduler_fp32_Outer_Reduction,
+    setupReduction,
+    MagicScheduler_Reduction,
+    DataType::Float,
+    0);
+NVFUSER_BENCHMARK_DEFINE(
+    MagicScheduler_fp16_Outer_Reduction,
+    setupReduction,
+    MagicScheduler_Reduction,
+    DataType::Half,
+    0);
+NVFUSER_BENCHMARK_DEFINE(
+    MagicScheduler_fp32_Inner_Reduction,
+    setupReduction,
+    MagicScheduler_Reduction,
+    DataType::Float,
+    1);
+NVFUSER_BENCHMARK_DEFINE(
+    MagicScheduler_fp16_Inner_Reduction,
+    setupReduction,
+    MagicScheduler_Reduction,
+    DataType::Half,
+    1);
 
 NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(8)

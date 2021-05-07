@@ -321,7 +321,8 @@ void IndexCompute::handle(Merge* merge) {
       index_map_[gpu_lower->lowerValue(root_id)->as<kir::IterDomain>()] = zero;
     }
 
-    index_map_[gpu_lower->lowerValue(*(input_ids.end() - 1))
+    index_map_[gpu_lower
+                   ->lowerValue(*(input_ids.end() - 1))
                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                    ->as<kir::IterDomain>()] = out_ind;
     return;
