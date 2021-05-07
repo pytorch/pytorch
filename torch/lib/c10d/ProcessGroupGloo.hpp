@@ -86,6 +86,8 @@ class ProcessGroupGloo : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
    protected:
     friend class ProcessGroupGloo;
 

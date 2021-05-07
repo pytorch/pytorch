@@ -435,9 +435,15 @@ std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
       "Work needs to be completed before calling result(). "
       "Should call wait() before result().");
   TORCH_CHECK(
-      outputTensors_.size() <= 1, "work result does not support list of lists.");
+      outputTensors_.size() <= 1,
+      "work result does not support list of lists, use .getFuture() and value()");
   return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
                                     : outputTensors_.at(0);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
+    getFuture() {
+  return future_;
 }
 
 namespace {
@@ -483,7 +489,7 @@ void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
 }
 
 void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
-  ReturnFutureWithOutput(future_, outputTensors_);
+  // ReturnFutureWithOutput(future_, outputTensors_);
   finish();
 }
 
@@ -1175,10 +1181,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
       }
     }
-  }
-
-  std::vector<at::Tensor> result() override {
-    return outputs;
   }
 
  private:

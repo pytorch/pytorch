@@ -204,6 +204,30 @@ std::vector<std::vector<at::Tensor>> waitWork(
   return copyTensors(outputTensors);
 }
 
+std::vector<std::vector<at::Tensor>> waitFuture(
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+  std::vector<std::vector<at::Tensor>> outputTensors;
+  for (auto& work : works) {
+    auto fut = work->getFuture();
+    try {
+      fut->wait();
+    } catch (const std::exception& ex) {
+      std::cerr << "Exception received: " << ex.what() << std::endl;
+    }
+    LOG(ERROR) << "ask value";
+    auto result = fut->value();
+    LOG(ERROR) << "got value";
+    if (result.isNone()) {
+      outputTensors.emplace_back();
+    } else if (result.isTensorList()) {
+      outputTensors.emplace_back(result.toTensorVector());
+    } else {
+      throw std::runtime_error("future result should be tensor list or none");
+    }
+  }
+  return outputTensors;
+}
+
 void checkProfiledEvents(
     const thread_event_lists& event_lists,
     const char* expected_profile_str,
@@ -251,6 +275,11 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   }
   // Wait for work to complete
   auto outputs = waitWork(work);
+  LOG(ERROR) << outputs.size();
+  LOG(ERROR) << outputs[0].size();
+  LOG(ERROR) << outputs[1].size();
+  LOG(ERROR) << outputs[2].size();
+  LOG(ERROR) << outputs[3].size();
 
   auto event_lists = disableProfilerLegacy();
   checkProfiledEvents(
@@ -259,12 +288,16 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
   for (auto i = 0; i < size; i++) {
-    auto& tensor = outputs[i][0];
+    auto& tensor = inputs[i][0];
+    LOG(ERROR) << tensor;
     auto data = tensor.data_ptr<float>();
+    LOG(ERROR) << tensor.numel();
     for (auto j = 0; j < tensor.numel(); j++) {
+      LOG(ERROR) << j << data[j];
       EXPECT_EQ(data[j], expected);
     }
   }
+  LOG(ERROR) << "done";
 }
 
 void testBroadcast(const std::string& path, const at::DeviceType b) {
@@ -308,7 +341,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       }
 
       // Wait for work to complete
-      auto outputs = waitWork(work);
+      auto outputs = waitFuture(work);
 
       auto event_lists = disableProfilerLegacy();
       checkProfiledEvents(
@@ -425,7 +458,7 @@ void testBarrier(const std::string& path) {
   }
 
   // Wait for work to complete
-  waitWork(work);
+  waitFuture(work);
 
   auto event_lists = disableProfilerLegacy();
   const char * GLOO_STR = "gloo:barrier";
