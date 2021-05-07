@@ -540,7 +540,7 @@ The following example shows the case of restricted enum subclassing, where ``Bas
         return x == y
 
     m = torch.jit.script(enum_fn)
-    
+
     print("TorchScript: ", m(Color.RED, Color.GREEN))
     print("Eager: ", enum_fn(Color.RED, Color.GREEN))
 
