@@ -54,11 +54,11 @@ test_python_all() {
   # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
   # CIRCLE_PULL_REQUEST comes from CircleCI
   # GITHUB_HEAD_REF comes from Github Actions
-  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
-  if [ -n "$IN_PULL_REQUEST" ]; then
-    DETERMINE_FROM=$(mktemp)
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
+  # IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+  # if [ -n "$IN_PULL_REQUEST" ]; then
+  #   DETERMINE_FROM=$(mktemp)
+  #   file_diff_from_base "$DETERMINE_FROM"
+  # fi
 
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
