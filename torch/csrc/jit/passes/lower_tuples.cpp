@@ -29,7 +29,7 @@ std::unordered_set<Symbol> supported_ops = {
     aten::__getitem__};
 
 // Flatten block inputs and insert a tuple construct in the block
-static void flattenTupleInBlockParam(Node* n, size_t index) {
+static void flattenTupleInLoopParams(Node* n, size_t index) {
   auto input = n->inputs()[index];
   TupleTypePtr tt = input->type()->cast<TupleType>();
 
@@ -40,9 +40,9 @@ static void flattenTupleInBlockParam(Node* n, size_t index) {
   auto new_construct_node =
       block->prependNode(block->owningGraph()->create(prim::TupleConstruct));
   for (size_t j = 0; j < tt->elements().size(); ++j) {
-    auto new_block_in = block->addInput();
+    auto new_block_in = block->insertInput(index + j );
     new_construct_node->addInput(new_block_in);
-    block_node->addInput(input->node()->inputs().at(j));
+    block_node->insertInput(index + j + 1, input->node()->inputs().at(j));
   }
   new_construct_node->output()->setType(block->inputs().at(index - 1)->type());
   block->inputs().at(index - 1)->replaceAllUsesWith(
@@ -110,10 +110,6 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       n->outputs()[i]->replaceAllUsesWith(construct_node->inputs().at(i));
     }
   } else if (n->kind() == prim::TupleIndex) {
-    if ((construct_node->kind() == prim::If) ||
-        (construct_node->kind() == prim::Loop)) {
-      return;
-    }
     auto idx = n->inputs().at(1);
     auto maybe_int = constant_as<int64_t>(idx);
     if (!maybe_int) {
@@ -189,7 +185,8 @@ static void flattenInputs(Node* n, Node* insert_point) {
       if (supported_ops.count(n->kind()) > 0) {
         if ((n->kind() == prim::Loop)) {
           if (input->node()->kind() == prim::TupleConstruct) {
-            flattenTupleInBlockParam(n, i);
+            // This function supports all node types with blocks that take tuple inputs.
+            flattenTupleInLoopParams(n, i);
           }
         } else if ((n->kind() == prim::Return)) {
           if (input->node()->kind() == prim::TupleConstruct) {

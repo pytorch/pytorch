@@ -6793,11 +6793,12 @@ class TestONNXRuntime(unittest.TestCase):
                     for j in range(2):
                         e, f = a
                         a = (d, f)
+                        f = c[1]
                         if f.size(0) != input1.size(-1):
-                            g = a[1]
+                            g = b[1]
                             b = (g, f)
                         else:
-                            k = a[0:]
+                            k = c[0:]
                             b = (f, k[0])
                     m, n = b
                     c = (n, m)
