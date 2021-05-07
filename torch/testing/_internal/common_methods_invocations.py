@@ -612,8 +612,8 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     test_cases = [
         # input size, ord, dim args
-        (size_1D, None, None),
-        (size_1D, None, (0,)),
+        (size_1D, 2, None),
+        (size_1D, 2, (0,)),
         (size_1D, 0, None),
         (size_1D, 0, (0,)),
         (size_1D, 0.9, None),
@@ -627,9 +627,9 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
         (size_1D, -inf, None),
         (size_1D, -inf, (0,)),
 
-        (size_2D, None, None),
-        (size_2D, None, (0,)),
-        (size_2D, None, (-1, 0)),
+        (size_2D, 2, None),
+        (size_2D, 2, (0,)),
+        (size_2D, 2, (-1, 0)),
         (size_2D, 0, None),
         (size_2D, 0, (0,)),
         (size_2D, 0, (-1, 0)),
@@ -2074,6 +2074,24 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     )
 
     return samples
+
+def sample_inputs_ormqr(op_info, device, dtype, requires_grad):
+    # create a helper function wrapping `make_tensor`
+    make_input = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def gen_inputs():
+        batches = [(), (0, ), (2, ), (2, 1)]
+        ns = [5, 2, 0]
+        tf = [True, False]
+        for batch, (m, n), left, transpose in product(batches, product(ns, ns), tf, tf):
+            reflectors = make_input((*batch, m, n))
+            tau = make_input((*batch, min(m, n)))
+            other_matrix_shape = (m, n) if left else (n, m)
+            other = make_input((*batch, *other_matrix_shape))
+            kwargs = {"left": left, "transpose": transpose}
+            yield SampleInput(reflectors, args=(tau, other,), kwargs=kwargs)
+
+    return tuple(gen_inputs())
 
 def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -4804,6 +4822,12 @@ op_db: List[OpInfo] = [
            aliases=('ger', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_outer,),
+    OpInfo('ormqr',
+           op=torch.ormqr,
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_ormqr,
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('permute',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
