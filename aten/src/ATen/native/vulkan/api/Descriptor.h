@@ -114,7 +114,6 @@ struct Descriptor final {
     ~Pool();
 
     Set allocate(const Shader::Layout::Object& shader_layout);
-    VkDescriptorSet allocate_single(const Shader::Layout::Object& shader_layout);
     void purge();
 
    private:
@@ -126,10 +125,7 @@ struct Descriptor final {
       static constexpr uint32_t kReserve = 64u;
     };
 
-   public:
     VkDevice device_;
-
-   private:
     Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
 
     struct {

@@ -23,7 +23,6 @@ namespace ops {
 
 struct Persistent final {
   api::Resource::Pool pool;
-  api::Descriptor::Pool descriptor_pool;
 };
 
 Persistent* persistent();

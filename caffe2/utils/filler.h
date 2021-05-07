@@ -21,6 +21,7 @@ class TensorFiller {
     auto min = (min_ < std::numeric_limits<Type>::min())
         ? std::numeric_limits<Type>::min()
         : static_cast<Type>(min_);
+    // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
     auto max = (max_ > std::numeric_limits<Type>::max())
         ? std::numeric_limits<Type>::max()
         : static_cast<Type>(max_);
