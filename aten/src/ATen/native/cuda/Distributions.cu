@@ -250,10 +250,9 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
       .add_input(total)
       .build();
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
     gpu_kernel(iter,
       [] GPU_LAMBDA (scalar_t x_val, scalar_t alpha_val, scalar_t total_val) -> scalar_t {
-        return dirichlet_grad_one<scalar_t, accscalar_t>(x_val, alpha_val, total_val);
+        return dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
       });
   });
   return ret;

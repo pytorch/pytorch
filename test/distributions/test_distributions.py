@@ -3044,6 +3044,18 @@ class TestRsample(TestCase):
                 "error = %.2g" % torch.abs(expected_grad - actual_grad).max(),
             ]))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_dirichlet_grad_consistency(self):
+        # Fix for https://github.com/pytorch/pytorch/issues/57447
+        dtype = torch.float32
+        x = torch.tensor([0.15497829020023346, 0.845021665096283], dtype=dtype)
+        c = torch.tensor([14539.8583984375, 79369.6484375], dtype=dtype)
+        t = torch.tensor([93909.5078125, 93909.5078125], dtype=dtype)
+
+        expected = torch._dirichlet_grad(x, c, t)
+        actual = torch._dirichlet_grad(x.to('cuda'), c.to('cuda'), t.to('cuda'))
+        self.assertEqual(expected, actual)
+
     def test_dirichlet_tangent_field(self):
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
