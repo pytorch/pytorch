@@ -10,7 +10,7 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
 
 jobs:
-  {# build:
+  build:
     runs-on: !{{ runner_type }}
     steps:
       - name: Clone pytorch/pytorch
@@ -51,11 +51,11 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path:
-            pytorch/artifacts.zip #}
+            pytorch/artifacts.zip
   test:
     runs-on: !{{ runner_type }}
-    {# needs:
-      - build #}
+    needs:
+      - build
     steps:
       - name: Install test dependencies
         run: |
@@ -65,14 +65,14 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
-      {# - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
-          name: !{{ build_environment }} #}
-      - name: Fake download artifacts
+          name: !{{ build_environment }}
+      {# - name: Fake download artifacts
         working-directory: pytorch/
         run: |
-          curl -L https://github-actions-sccache-macos.s3-us-west-2.amazonaws.com/pytorch-macos-10.15.zip -o artifacts.zip
+          curl -L https://github-actions-sccache-macos.s3-us-west-2.amazonaws.com/!{{ build_environment }}.zip -o artifacts.zip #}
       - name: Unzip artifacts
         working-directory: pytorch/
         run: 
