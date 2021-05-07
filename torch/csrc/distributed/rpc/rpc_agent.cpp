@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <c10/util/DeadlockDetection.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
 namespace distributed {
@@ -60,7 +60,8 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       retryOptions.rpcRetryDuration.count() >= 0,
       "rpcRetryDuration cannot be negative.");
 
-  auto originalFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+  auto originalFuture =
+      std::make_shared<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
   // Making a copy of the message so it can be retried after the first send.
@@ -231,7 +232,8 @@ void RpcAgent::rpcRetryCallback(
     }
   } else {
     // This try succeeded, so we can make the original future as complete.
-    earliestRpc->originalFuture_->markCompleted(jitFuture->value());
+    earliestRpc->originalFuture_->markCompleted(
+        jitFuture->value(), jitFuture->dataPtrs());
   }
 }
 
@@ -292,6 +294,12 @@ bool RpcAgent::isGILProfilingEnabled() {
 DeviceMap RpcAgent::getDeviceMap(const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
+}
+
+const std::vector<c10::Device>& RpcAgent::getDevices() const {
+  // By default the agent is CPU-only.
+  static const std::vector<c10::Device> noDevices = {};
+  return noDevices;
 }
 
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {

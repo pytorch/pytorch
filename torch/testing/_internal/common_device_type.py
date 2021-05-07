@@ -601,22 +601,20 @@ class ops(object):
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
 class skipIf(object):
 
-    def __init__(self, dep, reason, device_type=None, temp_enable=False):
+    def __init__(self, dep, reason, device_type=None):
         self.dep = dep
         self.reason = reason
         self.device_type = device_type
-        self.temp_enable = temp_enable
 
     def __call__(self, fn):
 
         @wraps(fn)
         def dep_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                if ((isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep) \
-                        and not self.temp_enable):
+                if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep):
                     raise unittest.SkipTest(self.reason)
 
-            return slowTest(fn(slf, device, *args, **kwargs))
+            return fn(slf, device, *args, **kwargs)
         return dep_fn
 
 
