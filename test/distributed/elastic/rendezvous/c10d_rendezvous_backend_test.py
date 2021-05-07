@@ -59,7 +59,7 @@ class CreateBackendTest(TestCase):
 
         self.assertIsInstance(backend.store, self._expected_store_type)
 
-        self.assertEqual(backend.name, "c10d-experimental")
+        self.assertEqual(backend.name, "c10d")
         self.assertEqual(backend.key, "torch.rendezvous." + self._params.run_id)
 
         store = backend.store
