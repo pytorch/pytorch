@@ -4754,6 +4754,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('nn.functional.hardshrink',
+           aten_name="hardshrink",
            dtypes=floating_types(),
            supports_autograd=True,
            assert_autodiffed=True,
