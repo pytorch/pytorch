@@ -92,5 +92,6 @@ DECLARE_DISPATCH(binary_fn, nextafter_stub);
 DECLARE_DISPATCH(binary_fn, heaviside_stub);
 DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
 DECLARE_DISPATCH(binary_fn, xlogy_stub);
+DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
 
 }} // namespace at::native

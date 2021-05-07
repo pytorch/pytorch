@@ -47,8 +47,6 @@ class Cache final {
 
   auto retrieve(const Descriptor& descriptor);
 
-  auto generate(const Descriptor& descriptor);
-
   // Only call this function infrequently, if ever.  This cache is only intended
   // for immutable Vulkan objects of which a small finite instances are required
   // at runtime.  A good place to call this function is between model loads.
@@ -83,13 +81,6 @@ inline auto Cache<Factory>::retrieve(
   }
 
   return iterator->second.get();
-}
-
-template<typename Factory>
-inline auto Cache<Factory>::generate(
-    const Descriptor& descriptor) {
-
-  return factory_(descriptor);
 }
 
 template<typename Factory>

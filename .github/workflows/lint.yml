@@ -24,25 +24,32 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Install requirements
+        id: requirements
         run: pip install -r requirements.txt
       - name: Ensure consistent CircleCI YAML config
+        if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
+        if: always() && steps.requirements.outcome == 'success'
         run: |
           pip install ruamel.yaml==0.17.4
           echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
           .github/scripts/regenerate_cancel_redundant_workflow.py
           git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
+        if: always() && steps.requirements.outcome == 'success'
         run: |
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
       - name: Extract scripts from GitHub Actions workflows
+        if: always() && steps.requirements.outcome == 'success'
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
           tools/extract_scripts.py --out=.extracted_scripts
       - name: Install ShellCheck
+        id: install_shellcheck
+        if: always()
         # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
         run: |
           set -x
@@ -52,9 +59,11 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
       - name: Run ShellCheck
+        if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
           tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
+        if: always() && steps.requirements.outcome == 'success'
         run: |
           (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
@@ -79,12 +88,12 @@ jobs:
         if: always()
         run: |
           # shellcheck disable=SC2016
-          (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
+          (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' '**.pyi' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       - name: Ensure no unqualified type ignore
         if: always()
         run: |
           # shellcheck disable=SC2016
-          (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+          (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -94,10 +103,12 @@ jobs:
           # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
+        if: always() && steps.requirements.outcome == 'success'
         run: |
-          sudo apt-get install -y doxygen && pip install -r requirements.txt
+          sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check
+        if: always() && steps.requirements.outcome == 'success'
         run: |
           set -eux
           python torch/testing/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
@@ -261,6 +272,7 @@ jobs:
             git submodule update --init --recursive
 
             export USE_NCCL=0
+            export USE_DEPLOY=1
             # We really only need compile_commands.json, so no need to build!
             time python setup.py --cmake-only build
 
@@ -362,6 +374,8 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install mypy==0.812
+          # Needed to check tools/render_junit.py
+          pip install junitparser rich
       - name: Run autogen
         run: |
           set -eux

@@ -45,7 +45,9 @@ void GroupNormKernelImplInternal(
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     constexpr int64_t K = vec256::Vec256<T>::size();
     const int64_t inner_size = D * HxW / K * K;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> mean_arr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> rstd_arr;
     for (int64_t i = start; i < end; ++i) {
       const T* X_ptr = X_data + i * D * HxW;
@@ -125,7 +127,9 @@ void ComputeInternalGradients(
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec256::Vec256<T>::size();
     const int64_t inner_size = HxW / K * K;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> ds_arr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
       const T* dY_ptr = dY + i * HxW;
@@ -173,7 +177,9 @@ void GroupNormInputBackward(
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec256::Vec256<T>::size();
     const int64_t d = D / K * K;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> ds_arr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
       const int64_t g = i % G;
@@ -338,7 +344,9 @@ void GroupNormBackwardKernelImpl(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
 
 } // namespace native
