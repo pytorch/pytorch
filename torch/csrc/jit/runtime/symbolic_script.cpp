@@ -89,11 +89,9 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, unbiased: bool):
-            b = AD_bool_to_int(unbiased)
-
+        def AD_var_backward_0(grad, self, correction: int):
             # FIXME: torchscript: div(float, float)
-            return  grad * (self - self.mean()) * 2.0 / (self.numel() - b)
+            return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
                          dims: List[int]):
@@ -110,23 +108,35 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              unbiased: bool,
+                              correction: int,
                               keepdim: bool):
             if self.dim() == 0:
-                return AD_var_backward_0(grad, self, unbiased)
+                return AD_var_backward_0(grad, self, correction)
             self_size = self.size()
-            b = AD_bool_to_int(unbiased)
             if not keepdim and self.dim() > 1:
                 grad = AD_unsqueeze_multiple(grad, dim, len(self_size))
 
             # FIXME: torchscript: div(float, float)
-            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - b)
+            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - correction)
+
+        def AD_var_backward_2(grad,
+                              self,
+                              dim: Optional[List[int]],
+                              correction: Optional[int],
+                              keepdim: bool):
+            if correction is None:
+                correction = 1
+            if self.dim() == 0 or dim is None:
+              return AD_var_backward_0(grad, self, correction)
+
+            return AD_var_backward_1(grad, self, dim, correction, keepdim)
 
         def std_0(self,
                   unbiased: bool=True):
             std_out = torch.std(self, unbiased)
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, correction)
                 return grad_self, None
 
             return std_out, backward
@@ -137,7 +147,20 @@ const std::vector<std::string> functions = {
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return std_out, backward
+
+        def std_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -145,7 +168,8 @@ const std::vector<std::string> functions = {
         def var_0(self,
                   unbiased: bool=True):
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output, self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output, self, correction)
                 return grad_self, None
 
             return torch.var(self, unbiased), backward
@@ -155,10 +179,22 @@ const std::vector<std::string> functions = {
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output, self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
+
+        def var_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return torch.var(self, dim, correction=correction, keepdim=keepdim), backward
 
         def tanh(self):
             output = torch.tanh(self)
@@ -343,7 +379,8 @@ const std::vector<std::string> functions = {
                 grad_mat2 = AD_bmm_backward_mat2(grad_output, self)
                 return grad_self, grad_mat2
             return torch.bmm(self, mat2), backward
-
+    )",
+    R"(
         def AD_mat_transpose(mat):
             dim = mat.dim()
             if dim == 1:
