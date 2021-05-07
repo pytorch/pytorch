@@ -67,7 +67,11 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x3L: (Comment missing)
 //  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
-constexpr uint64_t kProducedBytecodeVersion = 0x4L;
+//  0x5L: (update)
+//  1. Update tensor storage schema. The root key of tensor storage is
+//  updated from {index} to {archive_name/index}. Forward-compatible change.
+//  2. Update api with extra optional argument {_version} to export old models.
+constexpr uint64_t kProducedBytecodeVersion = 0x5L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
