@@ -362,9 +362,6 @@ class TestCommon(JitCommonTestCase):
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
-        # TODO: fix this
-        if _requires_grad and not op.supports_gradgrad:
-            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
 
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
@@ -404,7 +401,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -414,7 +411,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
