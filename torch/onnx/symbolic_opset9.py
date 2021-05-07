@@ -3110,11 +3110,15 @@ def index_add(g, self, dim, index, other):
 
     dim = sym_help._maybe_get_const(dim, 'i')
     if dim is None:
-        return _unimplemented("index_add",
-                              "Input rank is unknown at export time.")
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                  "unknown 'dim' value.")
 
     self_dim_rank = sym_help._get_tensor_rank(self)
     other_dim_rank = sym_help._get_tensor_rank(other)
+
+    if self_dim_rank is None or other_dim_rank is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function while " +
+                                  "the rank of self tensor or tensor to be added is unknown.")
 
     if other_dim_rank != self_dim_rank:
         delta = self_dim_rank - other_dim_rank
