@@ -8,6 +8,7 @@ from functools import reduce
 from itertools import product
 from operator import mul
 from math import pi
+import time
 
 
 import torch
@@ -280,7 +281,7 @@ module_tests = [
         constructor_args=(5, 5e-3, 1e-3, 2),
         cpp_constructor_args='torch::nn::CrossMapLRN2dOptions(5).alpha(5e-3).beta(1e-3).k(2)',
         input_size=(2, 3, 6, 6),
-        check_gradgrad=False,
+        check_gradgrad=True,
         # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
         check_batched_grad=False,
     ),
@@ -458,7 +459,7 @@ def bce_with_logistic_legacy_enum_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False,
     )
 
@@ -475,7 +476,7 @@ def bce_with_logistic_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False,
     )
 
@@ -492,7 +493,7 @@ def bce_with_logistic_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False
     )
 
@@ -944,7 +945,7 @@ def multilabelmarginloss_0d_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -961,7 +962,7 @@ def multilabelmarginloss_1d_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -978,7 +979,7 @@ def multilabelmarginloss_index_neg_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -995,7 +996,7 @@ def multilabelmarginloss_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1058,7 +1059,7 @@ def multilabelsoftmarginloss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log())).sum(dim=1) / i.size(1),
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1078,7 +1079,7 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
         reference_fn=lambda i, *_:
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights).sum(dim=1) / i.size(1),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1095,7 +1096,7 @@ def multimarginloss_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1112,7 +1113,7 @@ def multimarginloss_1d_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1129,7 +1130,7 @@ def multimarginloss_1d_input_0d_target_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1146,7 +1147,7 @@ def multimarginloss_p_no_reduce_test():
         reference_fn=lambda i, *_:
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), p=2, reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1165,7 +1166,7 @@ def multimarginloss_margin_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
                                                   margin=0.5, reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -1186,7 +1187,7 @@ def multimarginloss_weights_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
                                                   weight=weights, reduction='none'),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         pickle=False)
 
 
@@ -2557,14 +2558,14 @@ new_module_tests = [
         constructor_args=(4, 3),
         cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3),
         cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='mean',
     ),
     dict(
@@ -2573,7 +2574,7 @@ new_module_tests = [
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='sum',
     ),
     dict(
@@ -2582,7 +2583,7 @@ new_module_tests = [
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='max',
     ),
     dict(
@@ -2590,7 +2591,7 @@ new_module_tests = [
         constructor=lambda: nn.EmbeddingBag(4, 3, padding_idx=1),
         cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).padding_idx(1)',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         fullname='EmbeddingBag_sum_padding_idx',
@@ -2598,7 +2599,7 @@ new_module_tests = [
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         fullname='EmbeddingBag_max_padding_idx',
@@ -2606,14 +2607,14 @@ new_module_tests = [
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         fullname='EmbeddingBag_sparse',
         constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
         cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).sparse(true)',
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
-        check_gradgrad=False,
+        check_gradgrad=True,
         has_sparse_gradients=True,
     ),
     dict(
@@ -2621,7 +2622,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3).sparse(true)',
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         fullname='Embedding_sparse',
-        check_gradgrad=False,
+        check_gradgrad=True,
         has_sparse_gradients=True,
     ),
     dict(
@@ -3378,7 +3379,7 @@ new_module_tests = [
         constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
         cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
         input_size=(2, 4, 3, 3),
-        check_gradgrad=False,
+        check_gradgrad=True,
         test_cuda=True,
     ),
     dict(
@@ -3386,7 +3387,7 @@ new_module_tests = [
         constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
         cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
         input_size=(2, 16, 4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         test_cuda=True,
     ),
     dict(
@@ -3394,7 +3395,7 @@ new_module_tests = [
         constructor=lambda: nn.Unfold(2, 1, 0, 1),
         cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
         input_size=(2, 4, 3, 3),
-        check_gradgrad=False,
+        check_gradgrad=True,
         test_cuda=True,
     ),
     dict(
@@ -3402,7 +3403,7 @@ new_module_tests = [
         constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
         cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
         input_size=(2, 16, 4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         test_cuda=True,
     ),
     dict(
@@ -3640,7 +3641,7 @@ new_module_tests = [
                                 .dropout(0.0)
                                 .activation(torch::kGELU)''',
         input_size=(2, 3, 4),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='gelu_activation',
         with_tf32=True,
         tf32_precision=0.05,
@@ -3652,7 +3653,7 @@ new_module_tests = [
                                 .dim_feedforward(8)
                                 .dropout(0.0)''',
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='relu_activation',
         with_tf32=True,
         tf32_precision=0.05,
@@ -3665,7 +3666,7 @@ new_module_tests = [
                                 .dropout(0.0)
                                 .activation(torch::kGELU)''',
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='gelu_activation',
         with_tf32=True,
         tf32_precision=0.05,
@@ -3682,7 +3683,7 @@ new_module_tests = [
                                 .dropout(0.0)
                                 .activation(torch::kReLU)''',
         input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
-        check_gradgrad=False,
+        check_gradgrad=True,
         desc='multilayer_coder',
         with_tf32=True,
         tf32_precision=0.01,
@@ -4246,7 +4247,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         desc="1d",
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_bfloat16=True,
     ),
     dict(
@@ -4256,7 +4257,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_bfloat16=True,
     ),
     dict(
@@ -4264,7 +4265,7 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4273,7 +4274,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             multimarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4283,7 +4284,7 @@ criterion_tests = [
             multimarginloss_reference(i, t, reduction=get_reduction(m)),
         desc='1d',
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4295,7 +4296,7 @@ criterion_tests = [
             multimarginloss_reference(i, t, p=2, reduction=get_reduction(m)),
         desc='p',
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4308,7 +4309,7 @@ criterion_tests = [
             multimarginloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4321,7 +4322,7 @@ criterion_tests = [
             multimarginloss_reference(i, t, weight=get_weight(m), reduction=get_reduction(m)),
         desc='weights',
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='SmoothL1Loss',
@@ -4634,7 +4635,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
         desc='weights',
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
     ),
     dict(
         module_name='CTCLoss',
@@ -4647,7 +4648,7 @@ criterion_tests = [
         desc='lengths_intlists',
         check_forward_only=True,
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_half=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
@@ -4665,7 +4666,7 @@ criterion_tests = [
         desc='lengths_tensors',
         check_forward_only=True,
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_half=False,
     ),
     # Test is flaky
@@ -4680,7 +4681,7 @@ criterion_tests = [
     #     reference_fn=lambda i, t, il, tl, m:
     #         ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
     #     check_sum_reduction=True,
-    #     check_gradgrad=False,
+    #     check_gradgrad=True,
     #     check_half=False,
     # ),
     dict(
@@ -4694,7 +4695,7 @@ criterion_tests = [
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
         check_forward_only=True,
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_half=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
@@ -4712,7 +4713,7 @@ criterion_tests = [
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
         check_forward_only=True,
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_half=False,
     ),
     dict(
@@ -4727,7 +4728,7 @@ criterion_tests = [
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
         check_forward_only=True,
         check_sum_reduction=True,
-        check_gradgrad=False,
+        check_gradgrad=True,
         check_half=False,
     ),
 ]
@@ -5068,10 +5069,7 @@ class ModuleTest(TestBase):
                 test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
         # Run double-backwards on CPU and GPU and compare results
-        if not self.check_gradgrad:
-            start = time.time()
-        # Removing check for self.check_gradgrad - we are testing "all" of them for profiling purposes
-        if not self.FIXME_no_cuda_gradgrad_comparison:
+        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
             cpu_output = cpu_module(*cpu_input_tuple)
             gpu_output = gpu_module(*gpu_input_tuple)
 
@@ -5111,13 +5109,6 @@ class ModuleTest(TestBase):
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
-        if not self.check_gradgrad:
-            end = time.time()
-            with open("recordedWithArgsAllSlowTests.txt", "a") as _file:
-                _file.write(
-                        test_case.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
-                )
-
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 class InputVariableMixin(object):
@@ -5169,18 +5160,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
                                            check_batched_grad=self.check_batched_grad))
 
-        # Enabling all gradgrad checks for profiling purposes
-        # if self.check_gradgrad:
-        if not self.check_gradgrad:
-            start = time.time()
-        test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad))
-        if not self.check_gradgrad:
-            end = time.time()
-            with open("recordedWithArgsAllSlowTests.txt", 'a') as _file:
-                _file.write(
-                        test_case.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
-                )
+        if self.check_gradgrad:
+            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
+                                               check_batched_grad=self.check_batched_grad)) 
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
@@ -5388,17 +5370,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
 
         gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
-        # Enabling all gradgrad checks for profiling purposes
-        # if self.check_gradgrad:
-        if not self.check_gradgrad:
-            start = time.time()
-        gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
-        if not self.check_gradgrad:
-            end = time.time()
-            with open("recordedWithArgsAllSlowTests.txt", 'a') as _file:
-                _file.write(
-                    apply_fn.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
-                )
+        if self.check_gradgrad:
+            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad) 
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
