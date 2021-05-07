@@ -74,6 +74,7 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   }
 
 CREATE_BINARY_META_FUNC(gcd);
+CREATE_BINARY_META_FUNC(lcm);
 CREATE_BINARY_META_FUNC(hypot);
 CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
@@ -216,6 +217,7 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tens
 }
 
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
+CREATE_BINARY_TORCH_IMPL_FUNC(lcm);
 CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
@@ -1083,21 +1085,6 @@ Tensor& logaddexp2_out(const Tensor& self, const Tensor& other, Tensor& result) 
 Tensor logaddexp2(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::logaddexp2_out(result, self, other);
-}
-
-Tensor& lcm_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  lcm_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor lcm(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::lcm_out(result, self, other);
-}
-
-Tensor& lcm_(Tensor& self, const Tensor& other) {
-  return at::lcm_out(self, self, other);
 }
 
 // Note: this function is only for testing.
