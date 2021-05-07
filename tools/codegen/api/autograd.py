@@ -281,7 +281,7 @@ def match_differentiability_info(
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
                     required_inputs_primal=fw_info.required_inputs_primal,), ]
         else:
-            forward_derivatives= []
+            forward_derivatives = []
 
         result.append(NativeFunctionWithDifferentiabilityInfo(
             func=f,
