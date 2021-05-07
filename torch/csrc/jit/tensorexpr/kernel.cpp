@@ -2439,7 +2439,8 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
-      auto start_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
+      auto start_dim =
+          at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
       auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
       return Compute(
           "aten_transpose",
