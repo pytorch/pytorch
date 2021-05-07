@@ -892,7 +892,7 @@ void hypot_kernel(TensorIterator& iter) {
   });
 }
 
-void igamma_kernel(TensorIterator& iter) {
+void igamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igamma_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -905,7 +905,7 @@ void igamma_kernel(TensorIterator& iter) {
   });
 }
 
-void igammac_kernel(TensorIterator& iter) {
+void igammac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igammac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
