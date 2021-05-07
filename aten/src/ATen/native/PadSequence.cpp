@@ -31,7 +31,7 @@ namespace native {
       if (batch_first) {
         out.select(0, i).narrow(0, 0, length_i).copy_(currseq);
       } else {
-	out.narrow(0, 0, length_i).select(1, i).copy_(currseq);
+        out.narrow(0, 0, length_i).select(1, i).copy_(currseq);
       }
     }
     return out;
