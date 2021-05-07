@@ -84,12 +84,6 @@
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
-#ifdef __has_attribute
-#define C10_HAS_ATTRIBUTE(x) __has_attribute(x)
-#else
-#define C10_HAS_ATTRIBUTE(x) (0)
-#endif
-
 #ifdef __has_cpp_attribute
 #define C10_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
 #else
@@ -222,12 +216,9 @@ using namespace c10::hip;
 #define C10_ALWAYS_INLINE inline
 #endif
 
-#ifdef _MSC_VER
-#define C10_FALLTHROUGH
-#elif C10_HAS_CPP_ATTRIBUTE(fallthrough)
+// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
+#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
 #define C10_FALLTHROUGH [[fallthrough]]
-#elif C10_HAS_ATTRIBUTE(fallthrough)
-#define C10_FALLTHROUGH __attribute__((fallthrough))
 #else
 #define C10_FALLTHROUGH
 #endif
