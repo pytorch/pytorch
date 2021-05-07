@@ -53,17 +53,14 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
-  void processRRefUserDelete(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  c10::intrusive_ptr<JitFuture> processRRefUserDelete(
+      RpcCommandBase& rpc) const;
 
-  void processRRefChildAccept(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  c10::intrusive_ptr<JitFuture> processRRefChildAccept(
+      RpcCommandBase& rpc) const;
 
-  void processRRefForkRequest(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  c10::intrusive_ptr<JitFuture> processRRefForkRequest(
+      RpcCommandBase& rpc) const;
 
   c10::intrusive_ptr<JitFuture> processForwardAutogradReq(
       RpcCommandBase& rpc,
