@@ -101,6 +101,9 @@ SCRIPT_MODULE_BYTECODE_PKL = {
     4: {
         "bytecode_pkl": SCRIPT_MODULE_V4_BYTECODE_PKL,
         "model_name": "script_module_v4.ptl"},
+    5: {
+        "bytecode_pkl": SCRIPT_MODULE_V5_BYTECODE_PKL,
+        "model_name": "script_module_v5.ptl"},
 }
 
 # The minimum version a model can be backported to
