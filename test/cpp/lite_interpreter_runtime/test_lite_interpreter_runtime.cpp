@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 
-#include <regex>
 #include <unordered_set>
 
 namespace torch {
@@ -142,9 +141,8 @@ TEST(RunTimeTest, DelegateException) {
   inputs.emplace_back(torch::rand({2, 4}));
   inputs.emplace_back(torch::rand({13, 9}));
 
-  const std::regex error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*",
-      std::regex::extended);
+  const std::string error_pattern(
+      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
   ASSERT_THROWS_WITH_MESSAGE(
       mlm.forward(inputs),

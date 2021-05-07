@@ -6,8 +6,6 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/torch.h>
 
-#include <regex>
-
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -194,8 +192,8 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   std::stringstream ss;
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
-  const std::regex error_pattern(
-      ".*(self.__backend.execute).*(return x \\+ h).*", std::regex::extended);
+  const std::string error_pattern(
+      ".*(self.__backend.execute).*(return x \\+ h).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
@@ -234,9 +232,6 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   std::stringstream ss;
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
-  const std::regex error_pattern(
-      ".*(self.__backend.execute).*self.A0.forward.*(return x \\+ y).*",
-      std::regex::extended);
   /*
    * Error stack throw will look like this:
    * Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)
@@ -262,6 +257,8 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
    *          ~~~~~ <--- HERE
    *
    */
+  const std::string error_pattern(
+      ".*(self.__backend.execute).*self.A0.forward.*(return x \\+ y).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
   ASSERT_THROWS_WITH_MESSAGE(
       mlm.forward(inputs),
@@ -305,9 +302,6 @@ TEST(
   std::stringstream ss;
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
-  const std::regex error_pattern(
-      ".*(self.__backend.execute).*self.B0.forward.*self.A0.forward.*(return x \\+ y).*",
-      std::regex::extended);
   /*
    * Error stack throw will look like this:
    * Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A)
@@ -339,6 +333,8 @@ TEST(
    *             ~~~~~ <--- HERE
    *
    */
+  const std::string error_pattern(
+      ".*(self.__backend.execute).*self.B0.forward.*self.A0.forward.*(return x \\+ y).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
   ASSERT_THROWS_WITH_MESSAGE(
       mlm.forward(inputs),
@@ -401,9 +397,8 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   std::stringstream ss;
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
-  const std::regex error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(return x \\+ y).*",
-      std::regex::extended);
+  const std::string error_pattern(
+      ".*(self.A0.forward).*(self.__backend.execute).*(return x \\+ y).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(c_loaded.forward(inputs), error_pattern);
   ASSERT_THROWS_WITH_MESSAGE(
       c_loaded.forward(inputs),
@@ -506,9 +501,8 @@ TEST(
    *
    *
    *  */
-  const std::regex error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*",
-      std::regex::extended);
+  const std::string error_pattern(
+      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*");
   ASSERT_THROWS_WITH_REGEX_MESSAGE(c_loaded.forward(inputs), error_pattern);
   ASSERT_THROWS_WITH_MESSAGE(
       c_loaded.forward(inputs),
