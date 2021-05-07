@@ -20,7 +20,7 @@ namespace at {
 namespace native {
 
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "exp2_cuda", 
       [&]() {
