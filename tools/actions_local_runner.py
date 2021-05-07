@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import subprocess
 import sys
@@ -8,12 +9,11 @@ import yaml
 import asyncio
 import shutil
 import re
+import fnmatch
 import shlex
 import configparser
 
-from typing import List, Dict, Any, Optional, Tuple
-
-from tools.mypy_wrapper import is_match
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,10 +87,17 @@ def print_results(job_name: str, passed: bool, streams: List[str]) -> None:
 
 
 async def shell_cmd(
-    cmd: str, env: Optional[Dict[str, Any]] = None, redirect: bool = True
+    cmd: Union[str, List[str]],
+    env: Optional[Dict[str, Any]] = None,
+    redirect: bool = True,
 ) -> Tuple[bool, str, str]:
+    if isinstance(cmd, list):
+        cmd_str = shlex.join(cmd)  # type: ignore[attr-defined]
+    else:
+        cmd_str = cmd
+
     proc = await asyncio.create_subprocess_shell(
-        cmd,
+        cmd_str,
         shell=True,
         cwd=REPO_ROOT,
         env=env,
@@ -104,11 +111,11 @@ async def shell_cmd(
     if not redirect:
         return passed, "", ""
 
-    return passed, stdout.decode(), stderr.decode()
+    return passed, stdout.decode().strip(), stderr.decode().strip()
 
 
 def header(name: str, passed: bool) -> None:
-    PASS = color(col.GREEN, "\N{check mark}")
+    PASS = color(col.GREEN, "✓")
     FAIL = color(col.RED, "x")
     icon = PASS if passed else FAIL
     print(f"{icon} {color(col.BLUE, name)}")
@@ -118,26 +125,35 @@ def get_flake_excludes() -> List[str]:
     config = configparser.ConfigParser()
     config.read(os.path.join(REPO_ROOT, ".flake8"))
 
-    excludes = config["flake8"]["exclude"].split("\n")
-    return [i.strip() for i in excludes if i.strip() != ""]
+    excludes = re.split(r',\s*', config["flake8"]["exclude"].strip())
+    excludes = [e.strip() for e in excludes if e.strip() != ""]
+    return excludes
 
 
 async def run_flake8(files: Optional[List[str]], quiet: bool) -> bool:
-    cmd = "flake8"
+    cmd = ["flake8"]
+
+    excludes = get_flake_excludes()
+
+    def should_include(name: str) -> bool:
+        for exclude in excludes:
+            if fnmatch.fnmatch(name, pat=exclude):
+                return False
+            if name.startswith(exclude) or ("./" + name).startswith(exclude):
+                return False
+        return True
+
     if files is not None:
-        excludes = get_flake_excludes()
-        files = [
-            f
-            for f in files
-            if not any(is_match(pattern=exclude, filename=f) for exclude in excludes)
-        ]
+        files = [f for f in files if should_include(f)]
+
         if len(files) == 0:
             print_results("flake8", True, [])
             return True
 
-        # shlex.join is Python 3.8+, but we guard for that before getting here
-        # so ignore mypy
-        cmd = f"flake8 {shlex.join(files)}"  # type: ignore[attr-defined]
+        # Running quicklint, pass in an explicit list of files (unlike mypy,
+        # flake8 will still use .flake8 to filter this list by the 'exclude's
+        # in the config
+        cmd += files
 
     passed, stdout, stderr = await shell_cmd(cmd)
     print_results("flake8", passed, [stdout, stderr])
@@ -158,23 +174,44 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
         for f in files:
             f = os.path.join(REPO_ROOT, f)
             f_passed, f_stdout, f_stderr = await shell_cmd(
-                f"{sys.executable} tools/mypy_wrapper.py '{f}'"
+                [sys.executable, "tools/mypy_wrapper.py", f]
             )
             if not f_passed:
                 passed = False
-            stdout += f_stdout + "\n"
-            stderr += f_stderr + "\n"
+
+            if f_stdout != "":
+                stdout += f_stdout + "\n"
+            if f_stderr != "":
+                stderr += f_stderr + "\n"
 
         print_results("mypy (skipped typestub generation)", passed, [stdout, stderr])
         return passed
 
     # Not running quicklint, so use lint.yml
     _, _, _ = await shell_cmd(
-        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run autogen'",
+        [
+            f"{sys.executable}",
+            "tools/actions_local_runner.py",
+            "--job",
+            "'mypy'",
+            "--file",
+            ".github/workflows/lint.yml",
+            "--step",
+            "'Run autogen'",
+        ],
         redirect=False,
     )
     passed, _, _ = await shell_cmd(
-        f"{sys.executable} tools/actions_local_runner.py --job 'mypy' --file .github/workflows/lint.yml --step 'Run mypy'",
+        [
+            f"{sys.executable}",
+            "tools/actions_local_runner.py",
+            "--job",
+            "'mypy'",
+            "--file",
+            ".github/workflows/lint.yml",
+            "--step",
+            "'Run mypy'",
+        ],
         redirect=False,
     )
     return passed
@@ -210,18 +247,11 @@ async def run_steps(
 def relevant_changed_files(file_filters: Optional[List[str]]) -> Optional[List[str]]:
     changed_files: Optional[List[str]] = None
     try:
-        changed_files = find_changed_files()
+        changed_files = sorted(find_changed_files())
     except Exception:
         # If the git commands failed for some reason, bail out and use the whole list
         print(
             "Could not query git for changed files, falling back to testing all files instead",
-            file=sys.stderr,
-        )
-        return None
-
-    if changed_files is None:
-        print(
-            "Did not find any changed files, falling back to testing all files instead",
             file=sys.stderr,
         )
         return None
@@ -314,7 +344,7 @@ def main() -> None:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(future)
     else:
-        raise RuntimeError("Only Python >3.7 is supported")
+        raise RuntimeError("Only Python >=3.8 is supported")
 
 
 # These are run differently locally in order to enable quicklint, so dispatch
