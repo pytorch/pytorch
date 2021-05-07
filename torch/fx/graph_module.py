@@ -464,6 +464,7 @@ class {module_name}(torch.nn.Module):
         """
         if self._graph._pytree_info is not None:
             self._in_spec = self._graph._pytree_info.in_spec
+            self._out_spec = self._graph._pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 

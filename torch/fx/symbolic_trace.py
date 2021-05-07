@@ -339,8 +339,8 @@ class Tracer(TracerBase):
                     out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
                     if x == PH:
                         return out
-
-                    if type(x) in base_types and type(x) != torch.Tensor:
+                    # Union[int, bool] == bool in Python <= 3.6
+                    if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
                         torch._assert(out == x, f"{name} has been specialized to have value {x}")
                     else:
                         torch.warnings.warn(
@@ -387,7 +387,7 @@ class Tracer(TracerBase):
                 out_args, out_spec = pytree.tree_flatten(tree_out)
                 assert(self.graph._pytree_info is not None)
                 self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
-                return tree_out
+                return out_args
 
             return flatten_fn, flat_args
         return root_fn, args

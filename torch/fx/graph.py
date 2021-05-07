@@ -52,6 +52,7 @@ _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
 _register_custom_builtin('device', 'from torch import device', torch.device)
 _register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
+_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', pytree)
 
 
 def _is_magic(x: str) -> bool:
@@ -931,7 +932,10 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
+                if self._pytree_info is None:
+                    body.append(f'return {repr(node.args[0])}')
+                else:
+                    body.append(f'return pytree.tree_unflatten({repr(node.args[0])}, self._out_spec)')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
