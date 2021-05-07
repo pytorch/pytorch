@@ -34,7 +34,6 @@ using namespace native;
     if (topKSize.size() > 0) {
       topKSize[dim] = k;
     }
-
     set_output(0, topKSize, self.options());
     set_output(1, topKSize, self.options().dtype(at::kLong));
   }
@@ -751,9 +750,9 @@ TORCH_IMPL_FUNC(topk_out_cpu)
   if (self.dim() == 0 && self.numel() == 1) {
     values.copy_(self);
     indices.zero_();
+  } else {
+    topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
   }
-
-  topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
 }
 
 std::tuple<Tensor&, Tensor&> median_out_cpu(
