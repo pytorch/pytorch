@@ -1498,6 +1498,11 @@ size_t ONNXAssignOutputShape(
   } else if (PyList_Check(output_obj)) {
     size_t list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+      auto output_type = graph->outputs().at(outputs_index)->type();
+      TORCH_CHECK(
+          output_type->cast<ListType>(),
+          "Expected a sequence type, but received a non-iterable type in graph output index ",
+          outputs_index);
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
