@@ -50,14 +50,14 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
   return rpc;
 }
 
-std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
     Message& request,
     std::shared_ptr<LazyStreamContext> ctx) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
-  auto retFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+  auto retFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
@@ -118,7 +118,7 @@ void RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
     processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
@@ -131,7 +131,7 @@ void RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */) const {
+    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
   TORCH_CHECK(
@@ -169,7 +169,7 @@ void RequestCallbackNoPython::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */) const {
+    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -177,7 +177,7 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */,
+    const c10::intrusive_ptr<JitFuture>& /* unused */,
     std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
@@ -196,7 +196,7 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
   auto rrefId = scriptRemoteCall.retRRefId();
   auto forkId = scriptRemoteCall.retForkId();
@@ -272,7 +272,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
   auto& ctx = RRefContext::getInstance();
 
@@ -314,7 +314,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
 void RequestCallbackNoPython::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */,
+    const c10::intrusive_ptr<JitFuture>& /* unused */,
     std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
@@ -355,7 +355,7 @@ void RequestCallbackNoPython::processRRefForkRequest(
 void RequestCallbackNoPython::processForwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
@@ -387,7 +387,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
   // Make an overall future for the wrapped response.
   auto wrappedRpcResponseFuture =
-      std::make_shared<JitFuture>(at::AnyClassType::get());
+      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
   processRpc(
@@ -437,7 +437,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 void RequestCallbackNoPython::processBackwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
   const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
@@ -486,7 +486,7 @@ void RequestCallbackNoPython::processCleanupAutogradContextReq(
 void RequestCallbackNoPython::processRunWithProfilingReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
@@ -509,7 +509,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
       "Profiler state set to CUDA but CUDA not available.");
   const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
   auto wrappedRpcResponseFuture =
-      std::make_shared<JitFuture>(at::AnyClassType::get());
+      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Enable the profiler with the config from the sender.
   // When enabling on the main thread, ensure profiler states are cleaned
   // up, but defer consolidation of all profiled events to the continuation
@@ -573,7 +573,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
 void RequestCallbackNoPython::processRRefBackward(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */) const {
+    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -581,7 +581,7 @@ void RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
