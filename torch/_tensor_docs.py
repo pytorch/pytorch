@@ -4232,7 +4232,7 @@ Example::
     >>> y = x.view(16)
     >>> y.size()
     torch.Size([16])
-    >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
+    >>> z = x.view(-1, 8)  # the size -1 is inferred to keep number of elements same
     >>> z.size()
     torch.Size([2, 8])
 
