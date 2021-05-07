@@ -158,14 +158,6 @@ void RequestCallbackNoPython::processScriptCallOp(
   });
 }
 
-TypePtr RequestCallbackNoPython::getScriptRemoteCallType(
-    ScriptRemoteCall& scriptRemoteCall) const {
-  TORCH_CHECK(
-      scriptRemoteCall.hasOp(),
-      "Only supports the case where ScriptCall has an op");
-  return scriptRemoteCall.op()->schema().returns()[0].type();
-}
-
 void RequestCallbackNoPython::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
@@ -216,10 +208,12 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
         IValue(c10::make_intrusive<Message>(std::move(m))));
   };
 
+  auto& stack = scriptRemoteCall.stackRef();
+  auto jitFuture = processScriptRemoteCall(scriptRemoteCall, stack);
+
   // scriptRemoteCall is only alive within this block, use reference to
   // avoid copy. If the underlying code runs with a continuation, runAsync()
   // below will std::move the appropriate portion of the stack.
-  TypePtr returnType = getScriptRemoteCallType(scriptRemoteCall);
   c10::intrusive_ptr<OwnerRRef> ownerRRef;
   if (rrefId == forkId) {
     // Creating an owner RRef on self, should already exist in owners map
@@ -228,11 +222,8 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
                               ->constValue()
                               .toRRef());
   } else {
-    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, jitFuture->elementType());
   }
-
-  auto& stack = scriptRemoteCall.stackRef();
-  auto jitFuture = processScriptRemoteCall(scriptRemoteCall, stack);
 
   jitFuture->addCallback([postProcessing, ownerRRef](JitFuture& future) {
     if (future.hasError()) {
