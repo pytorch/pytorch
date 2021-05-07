@@ -409,7 +409,7 @@ class TORCH_API OwnerRRef final : public RRef {
 
   // Blocks all streams in the context on all events previously stored in
   // the current OwnerRRef instance.
-  void blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx);
+  void blockAllStreams(const std::shared_ptr<LazyStreamContext>& ctx);
 
  private:
   // a storage for device events for synchronization.

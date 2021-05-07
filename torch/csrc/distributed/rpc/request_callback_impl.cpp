@@ -220,52 +220,20 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
       uprc.rrefId(), uprc.forkId(), std::move(future), std::move(lsctx));
 }
 
-void RequestCallbackImpl::processPythonRRefFetchCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
-  // Making this lambda mutable to allow move-capture it in callbacks
-  auto postProcessing = [responseFuture, lsctx = std::move(lsctx)](
-                            const c10::intrusive_ptr<OwnerRRef>& rref) mutable {
-    auto whenValueSet = rref->getFuture();
-    if (whenValueSet->hasError()) {
-      responseFuture->setError(whenValueSet->exception_ptr());
-      return;
-    }
-    try {
-      SerializedPyObj result = serializePyObject(rref->getValue());
-      Message m = PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
-      rref->blockAllStreams(lsctx);
-      responseFuture->markCompleted(
-          IValue(c10::make_intrusive<Message>(std::move(m))));
-    } catch (const std::exception& /* unused */) {
-      responseFuture->setError(std::current_exception());
-    }
-  };
-
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-  auto& ctx = RRefContext::getInstance();
 
-  auto futureOwner = ctx.getOwnerRRef(prf.rrefId());
-  if (futureOwner->completed()) {
-    auto rref = fromRRefInterface(futureOwner->constValue().toRRef());
-    if (rref->hasValue()) {
-      // optional fast-path, the OwnerRRef has been created
-      postProcessing(rref);
-      return;
-    }
-  }
+  auto future = retrieveOwnerRRef(prf.rrefId(), std::move(lsctx));
 
-  futureOwner->addCallback([postProcessing{std::move(postProcessing)}](
-                               JitFuture& futureOwner) mutable {
-    const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
-
-    // Our response is satisfied when the the rpc.remote() request
-    // finishes executing on the owner.
-    rref->getFuture()->addCallback(
-        [rref, postProcessing{std::move(postProcessing)}](
-            JitFuture& /* unused */) mutable { postProcessing(rref); });
-  });
+  return future->then(
+      [](JitFuture& future) {
+        SerializedPyObj result = serializePyObject(future.value());
+        return c10::make_intrusive<Message>(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 void RequestCallbackImpl::handleRRefDelete(
@@ -308,43 +276,23 @@ bool RequestCallbackImpl::cudaAvailable() const {
 #endif
 }
 
-void RequestCallbackImpl::processRRefBackward(
-    RpcCommandBase& rpc,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
+    RpcCommandBase& rpc) const {
   auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
 
-  // Get all fields
-  const auto& rrefId = rrefBackwardReq.getRRefId();
-  const auto& autogradContextId = rrefBackwardReq.getAutogradContextId();
-  const auto& retainGraph = rrefBackwardReq.retainGraph();
+  auto future =
+      retrieveOwnerRRef(rrefBackwardReq.getRRefId(), /*lsctx=*/nullptr);
 
-  auto futureOwner = RRefContext::getInstance().getOwnerRRef(rrefId);
-  futureOwner->addCallback(
-      [responseFuture, autogradContextId, retainGraph](JitFuture& futureOwner) {
-        const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
-        auto whenValueSet = rref->getFuture();
+  return future->then(
+      [autogradContextId = rrefBackwardReq.getAutogradContextId(),
+       retainGraph = rrefBackwardReq.retainGraph()](JitFuture& future) {
+        // Run backward (TODO: make this async?).
+        PyRRef::backwardOwnerRRef(
+            autogradContextId, retainGraph, future.value());
 
-        whenValueSet->addCallback(
-            [responseFuture, rref, autogradContextId, retainGraph](
-                JitFuture& whenValueSet) {
-              if (whenValueSet.hasError()) {
-                responseFuture->setError(whenValueSet.exception_ptr());
-                return;
-              }
-
-              try {
-                // Run backward (TODO: make this async?).
-                PyRRef::backward(autogradContextId, retainGraph, rref);
-
-                // Return the response.
-                Message m = RRefBackwardResp().toMessage();
-                responseFuture->markCompleted(
-                    IValue(c10::make_intrusive<Message>(std::move(m))));
-              } catch (const std::exception& /* unused */) {
-                responseFuture->setError(std::current_exception());
-              }
-            });
-      });
+        return c10::make_intrusive<Message>(RRefBackwardResp().toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runJitFunction(
