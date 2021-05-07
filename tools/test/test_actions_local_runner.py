@@ -1,9 +1,13 @@
+# -*- coding: utf-8 -*-
+
 import textwrap
 import unittest
 import sys
 import contextlib
 import io
 import os
+import subprocess
+import multiprocessing
 from typing import List, Dict, Any
 
 from tools import actions_local_runner
@@ -57,6 +61,43 @@ if sys.version_info >= (3, 8):
             self.assertIn("say hello", result)
             self.assertIn("hi", result)
 
+    class TestEndToEnd(unittest.TestCase):
+        expected = [
+            "✓ quick-checks: Extract scripts from GitHub Actions workflows",
+            "✓ cmakelint: Run cmakelint",
+            "✓ quick-checks: Ensure no direct cub include",
+            "✓ quick-checks: Ensure no unqualified type ignore",
+            "✓ quick-checks: Ensure no unqualified noqa",
+            "✓ quick-checks: Ensure canonical include",
+            "✓ quick-checks: Ensure no non-breaking spaces",
+            "✓ quick-checks: Ensure no tabs",
+            "✓ flake8",
+            "✓ quick-checks: Ensure correct trailing newlines",
+            "✓ quick-checks: Ensure no trailing spaces",
+            "✓ quick-checks: Run ShellCheck",
+        ]
+
+        def test_lint(self):
+            cmd = ["make", "lint", "-j", str(multiprocessing.cpu_count())]
+            proc = subprocess.run(cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE)
+            stdout = proc.stdout.decode()
+
+            for line in self.expected:
+                self.assertIn(line, stdout)
+
+            self.assertIn("✓ mypy", stdout)
+
+        def test_quicklint(self):
+            cmd = ["make", "quicklint", "-j", str(multiprocessing.cpu_count())]
+            proc = subprocess.run(cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE)
+            stdout = proc.stdout.decode()
+
+            for line in self.expected:
+                self.assertIn(line, stdout)
+
+            self.assertIn("✓ mypy (skipped typestub generation)", stdout)
+
+
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):
         test_files = [
             os.path.join("caffe2", "some_cool_file.py"),
@@ -103,7 +144,24 @@ if sys.version_info >= (3, 8):
             self.maxDiff = None
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
+                # Quicklint assumes this has been run already and doesn't work
+                # without it
+                _, _, _ = await actions_local_runner.shell_cmd(
+                    [
+                        f"{sys.executable}",
+                        "tools/actions_local_runner.py",
+                        "--job",
+                        "mypy",
+                        "--file",
+                        ".github/workflows/lint.yml",
+                        "--step",
+                        "Run autogen",
+                    ],
+                    redirect=True,
+                )
+
                 await actions_local_runner.run_mypy(self.test_files, True)
+
 
             # Should exclude the aten/ file
             expected = textwrap.dedent("""
