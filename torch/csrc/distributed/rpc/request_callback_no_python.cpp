@@ -535,10 +535,10 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         {}); // TODO: https://github.com/pytorch/pytorch/issues/55757
 
     wrappedRpcResponseFuture->addCallback(
-        at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
-                                         responseFuture,
-                                         profilingKeyId,
-                                         profilingConfig] {
+        at::wrapPropagateTLSState([wrappedRpcResponseFuture,
+                                   responseFuture,
+                                   profilingKeyId,
+                                   profilingConfig] {
           std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
