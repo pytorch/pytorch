@@ -8,13 +8,17 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/DistributionTemplates.h>
 #include <c10/cuda/CUDAMathCompat.h>
 
 namespace at {
@@ -241,6 +245,160 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
+}
+
+// -----------------------------------
+// rrelu
+// -----------------------------------
+template<typename scalar_t>
+inline scalar_t __device__ curand_uniform_type(curandStatePhilox4_32_10_t *state);
+
+template <>
+inline THHalf __device__ curand_uniform_type<THHalf>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform4(state);
+  return ScalarConvert<float, THHalf>::to(rand.x);
+}
+
+template <>
+inline float __device__ curand_uniform_type<float>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform4(state);
+  return rand.x;
+}
+
+template <>
+inline double __device__ curand_uniform_type<double>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform2_double(state);
+  return rand.x;
+}
+
+template <typename scalar_t>
+__global__ void rrelu_with_noise_cuda_kernel(
+    int64_t n,
+    PhiloxCudaState philox_args,
+    scalar_t* output,
+    scalar_t* input,
+    scalar_t* noise,
+    double a,
+    double b) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  curandStatePhilox4_32_10_t state;
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
+  CUDA_KERNEL_LOOP(i, n)
+  {
+    if (input[i] <= 0)
+    {
+      scalar_t r = curand_uniform_type<scalar_t>(&state);
+      r = ScalarConvert<double, scalar_t>::to(r * (b - a) + a);
+      output[i] = input[i] * r;
+      noise[i] = r;
+    }
+    else
+    {
+      output[i] = input[i];
+      noise[i] = ScalarConvert<int, scalar_t>::to(1);
+    }
+  }
+}
+
+template <typename scalar_t>
+inline void _rrelu_with_noise_cuda_train(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& noise,
+    const Scalar& lower_,
+    const Scalar& upper_,
+    c10::optional<Generator> generator) {
+
+  const int64_t numel = input.numel();
+  auto execution_policy = calc_execution_policy(numel);
+
+  auto counter_offset = std::get<0>(execution_policy);
+  auto grid = std::get<1>(execution_policy);
+  auto block = std::get<2>(execution_policy);
+
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+      generator, cuda::detail::getDefaultCUDAGenerator());
+  PhiloxCudaState rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+  }
+
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.data_ptr<scalar_t>();
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+
+  double lower = lower_.to<double>();
+  double upper = upper_.to<double>();
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  rrelu_with_noise_cuda_kernel<scalar_t><<<grid, block, 0, stream>>>(
+      numel,
+      rng_engine_inputs,
+      output_data,
+      input_data,
+      noise_data,
+      lower,
+      upper);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
+    const Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    c10::optional<Generator> generator,
+    Tensor& output) {
+  TensorArg self_arg{self, "self", 1}, noise_arg{noise, "noise", 2},
+      output_arg{output, "output", 3};
+  checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
+
+  auto input = self.contiguous();
+  auto noise_ = noise.contiguous();
+
+  if (training) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
+          _rrelu_with_noise_cuda_train<scalar_t>(
+              output, input, noise_, lower, upper, generator);
+        });
+  } else {
+    auto lower_tensor = scalar_to_tensor(lower);
+    auto upper_tensor = scalar_to_tensor(upper);
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    at::leaky_relu_out(output, self, negative_slope);
+  }
+  return output;
+}
+
+Tensor rrelu_with_noise_cuda(
+    const Tensor& self,
+    const Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    c10::optional<Generator> generator) {
+  Tensor output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::native::rrelu_with_noise_out_cuda(self, noise, lower, upper, training, generator, output);
+}
+
+Tensor& rrelu_with_noise_cuda_(
+    Tensor& self,
+    const Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    c10::optional<Generator> generator) {
+  return at::native::rrelu_with_noise_out_cuda(
+      self, noise, lower, upper, training, generator, self);
 }
 
 // -----------------------------------

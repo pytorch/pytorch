@@ -430,7 +430,6 @@ filegroup(
         "aten/src/THCUNN/LogSigmoid.cu.cc",
         "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
         "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/RReLU.cu.cc",
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftPlus.cu.cc",
         "aten/src/THCUNN/SoftShrink.cu.cc",
