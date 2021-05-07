@@ -8136,6 +8136,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("getDefaultCUDAStream", ("getDefaultHIPStream", API_C10)),
         ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStream", API_C10)),
         ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
+        ("cuda::get_cuda_check_prefix", ("hip::get_cuda_check_prefix", API_C10)),
         ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
