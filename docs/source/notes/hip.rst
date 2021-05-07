@@ -112,3 +112,7 @@ hipFFT/rocFFT plan cache
 
 Setting the size of the cache for hipFFT/rocFFT plans is not supported.
 
+Refer to CUDA Semantics doc
+---------------------------
+
+For any sections not listed here, please refer to the CUDA semantics doc: :ref:`cuda-semantics`
