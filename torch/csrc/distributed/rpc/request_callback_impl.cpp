@@ -462,16 +462,15 @@ void RequestCallbackImpl::handleRRefDelete(
   }
 }
 
-void RequestCallbackImpl::processRpcWithErrors(
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
+    return processRpc(rpc, messageType, messageId, std::move(ctx));
   } catch (py::error_already_set& e) {
-    responseFuture->markCompleted(handleError(e, messageType, messageId));
+    auto future = asFuture(handleError(e, messageType, messageId));
     // There are request callback impls in Python, where Python
     // exceptions could be thrown. For releasing Python exception
     // py::objects, GIL must be held.
@@ -480,8 +479,9 @@ void RequestCallbackImpl::processRpcWithErrors(
                  // Python Error Indicator.
     PyErr_Clear(); // Clear the Python Error Indicator as we has
                    // recorded the exception in the response message.
+    return future;
   } catch (std::exception& e) {
-    responseFuture->markCompleted(handleError(e, messageType, messageId));
+    return asFuture(handleError(e, messageType, messageId));
   }
 }
 

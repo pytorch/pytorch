@@ -92,10 +92,9 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete) const;
 
-  void processForwardAutogradReq(
+  c10::intrusive_ptr<JitFuture> processForwardAutogradReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processBackwardAutogradReq(
@@ -107,25 +106,22 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete) const;
 
-  void processRunWithProfilingReq(
+  c10::intrusive_ptr<JitFuture> processRunWithProfilingReq(
       RpcCommandBase& rpc,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+      const int64_t messageId) const;
 
   virtual void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const;
 
-  void processRpc(
+  c10::intrusive_ptr<JitFuture> processRpc(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
-  virtual void processRpcWithErrors(
+  virtual c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
   c10::intrusive_ptr<Message> handleError(

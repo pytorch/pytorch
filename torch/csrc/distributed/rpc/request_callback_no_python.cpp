@@ -57,7 +57,6 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
-  auto retFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
@@ -66,9 +65,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
-    rrefsReadyFuture->addCallback(
+    auto retFuture = rrefsReadyFuture->thenAsync(
         [this,
-         retFuture,
          // std::function must be copyable, hence hae to cast the unique_ptr to
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
@@ -92,8 +90,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          processRpcWithErrors(
-              *rpc, messageType, id, retFuture, std::move(ctx));
+          auto retFuture =
+              processRpcWithErrors(*rpc, messageType, id, std::move(ctx));
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -106,24 +104,27 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
             profiler::processglobal::pushResultRecursive(
                 serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
           }
-        });
+
+          return retFuture;
+        },
+        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+    return retFuture;
   } catch (std::exception& e) {
-    retFuture->markCompleted(handleError(e, request.type(), request.id()));
     rrefContext.clearRecordedPendingRRefsOnError();
+    return asFuture(handleError(e, request.type(), request.id()));
   }
-  return retFuture;
 }
 
-void RequestCallbackNoPython::processRpcWithErrors(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
+    return processRpc(rpc, messageType, messageId, std::move(ctx));
   } catch (std::exception& e) {
-    responseFuture->markCompleted(handleError(e, messageType, messageId));
+    return asFuture(handleError(e, messageType, messageId));
   }
 }
 
@@ -352,11 +353,11 @@ void RequestCallbackNoPython::processRRefForkRequest(
   markComplete(RRefAck().toMessage());
 }
 
-void RequestCallbackNoPython::processForwardAutogradReq(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
-    std::shared_ptr<LazyStreamContext> ctx) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processForwardAutogradReq(
+        RpcCommandBase& rpc,
+        const int64_t messageId,
+        std::shared_ptr<LazyStreamContext> ctx) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
   // Need to reverse the device map for the backward pass of distributed
@@ -385,27 +386,20 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 
   // Process the original RPC.
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-  // Make an overall future for the wrapped response.
-  auto wrappedRpcResponseFuture =
-      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
-  processRpc(
+  auto wrappedRpcResponseFuture = processRpc(
       rpcWithAutograd.wrappedRpc(),
       wrappedMessageType,
       messageId,
-      wrappedRpcResponseFuture,
       std::move(ctx));
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
   // one completes, with the autograd context information wrapped.
-  wrappedRpcResponseFuture->addCallback(
-      [responseFuture,
-       messageId,
-       fromWorkerId,
-       ctxId =
-           autogradContext->contextId()](JitFuture& wrappedRpcResponseFuture) {
+  auto responseFuture = wrappedRpcResponseFuture->then(
+      [messageId, fromWorkerId, ctxId = autogradContext->contextId()](
+          JitFuture& wrappedRpcResponseFuture) {
         // As this callback can be invoked by a different thread, we have to
         // make sure that the thread_local states in the previous thread is
         // correctly propagated.
@@ -420,7 +414,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 
         if (wrappedRpcResponseFuture.hasError()) {
           // Propagate error to responseFuture if we had one.
-          responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
+          std::rethrow_exception(wrappedRpcResponseFuture.exception_ptr());
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
@@ -428,10 +422,12 @@ void RequestCallbackNoPython::processForwardAutogradReq(
                   *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
               MessageType::FORWARD_AUTOGRAD_RESP);
           msg.setId(messageId);
-          responseFuture->markCompleted(
-              IValue(c10::make_intrusive<Message>(std::move(msg))));
+          return c10::make_intrusive<Message>(std::move(msg));
         }
-      });
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+  return responseFuture;
 }
 
 void RequestCallbackNoPython::processBackwardAutogradReq(
@@ -483,10 +479,9 @@ void RequestCallbackNoPython::processCleanupAutogradContextReq(
   markComplete(std::move(CleanupAutogradContextResp()).toMessage());
 }
 
-void RequestCallbackNoPython::processRunWithProfilingReq(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processRunWithProfilingReq(RpcCommandBase& rpc, const int64_t messageId)
+        const {
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
@@ -508,8 +503,6 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           this->cudaAvailable(),
       "Profiler state set to CUDA but CUDA not available.");
   const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
-  auto wrappedRpcResponseFuture =
-      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Enable the profiler with the config from the sender.
   // When enabling on the main thread, ensure profiler states are cleaned
   // up, but defer consolidation of all profiled events to the continuation
@@ -524,16 +517,15 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
-    processRpc(
+    auto wrappedRpcResponseFuture = processRpc(
         rpcWithProfilingReq.wrappedRpc(),
         wrappedMsgType,
         messageId,
-        wrappedRpcResponseFuture,
         {}); // TODO: https://github.com/pytorch/pytorch/issues/55757
 
-    wrappedRpcResponseFuture->addCallback(at::wrapPropagateTLSState(
-        [responseFuture, profilingKeyId, profilingConfig](
-            JitFuture& wrappedRpcResponseFuture) {
+    auto responseFuture = wrappedRpcResponseFuture->then(
+        at::wrapPropagateTLSState([profilingKeyId, profilingConfig](
+                                      JitFuture& wrappedRpcResponseFuture) {
           std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
@@ -551,7 +543,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           if (wrappedRpcResponseFuture.hasError()) {
             // Propagate error
             // No need to propagate remote events in the case of an error.
-            responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
+            std::rethrow_exception(wrappedRpcResponseFuture.exception_ptr());
           } else {
             populateRemoteProfiledEvents(
                 profiledEvents, profilingConfig, event_lists);
@@ -561,10 +553,13 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
                     *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);
-            responseFuture->markCompleted(IValue(c10::make_intrusive<Message>(
-                std::move(*rpcWithProfilingResp).toMessage())));
+            return c10::make_intrusive<Message>(
+                std::move(*rpcWithProfilingResp).toMessage());
           }
-        }));
+        }),
+        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+    return responseFuture;
     // Exiting the scope will disable the profiler on this thread with the
     // options specified above.
   }
@@ -577,12 +572,15 @@ void RequestCallbackNoPython::processRRefBackward(
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processRpc(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
+  // TODO Avoid creating a future here and passing it down, and instead allow
+  // each method to create the future however it wants and pass it back up.
+  auto responseFuture = c10::make_intrusive<JitFuture>(
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(
@@ -597,61 +595,59 @@ void RequestCallbackNoPython::processRpc(
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
       processScriptCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return responseFuture;
     }
     case MessageType::PYTHON_CALL: {
       processPythonCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return responseFuture;
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       processBaseScriptRemoteCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return responseFuture;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       processPythonRemoteCall(
           rpc, markComplete, messageId, responseFuture, std::move(ctx));
-      return;
+      return responseFuture;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       processScriptRRefFetchCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return responseFuture;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       processPythonRRefFetchCall(
           rpc, messageId, responseFuture, std::move(ctx));
-      return;
+      return responseFuture;
     }
     case MessageType::RREF_USER_DELETE: {
       processRRefUserDelete(rpc, markComplete);
-      return;
+      return responseFuture;
     }
     case MessageType::RREF_CHILD_ACCEPT: {
       processRRefChildAccept(rpc, markComplete);
-      return;
+      return responseFuture;
     }
     case MessageType::RREF_FORK_REQUEST: {
       processRRefForkRequest(rpc, markComplete);
-      return;
+      return responseFuture;
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      processForwardAutogradReq(rpc, messageId, responseFuture, std::move(ctx));
-      return;
+      return processForwardAutogradReq(rpc, messageId, std::move(ctx));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       processBackwardAutogradReq(rpc, messageId, responseFuture);
-      return;
+      return responseFuture;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       processCleanupAutogradContextReq(rpc, markComplete);
-      return;
+      return responseFuture;
     }
     case MessageType::RUN_WITH_PROFILING_REQ: {
-      processRunWithProfilingReq(rpc, messageId, responseFuture);
-      return;
+      return processRunWithProfilingReq(rpc, messageId);
     }
     case MessageType::RREF_BACKWARD_REQ: {
       processRRefBackward(rpc, messageId, responseFuture);
-      return;
+      return responseFuture;
     }
     default: {
       TORCH_INTERNAL_ASSERT(
