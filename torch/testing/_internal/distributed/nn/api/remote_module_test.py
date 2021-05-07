@@ -38,7 +38,9 @@ def remote_forward(remote_module, args):
 
 # RPC handler for running forward_async on the destination worker.
 def remote_forward_async(remote_module, args):
-    return remote_module.forward_async(*args)
+    # Since future cannot be pickled and sent over the RPC layer,
+    # have to wait and behave just like ``forward_sync``.
+    return remote_module.forward_async(*args).wait()
 
 
 class ModuleCreationMode(enum.Enum):
@@ -460,19 +462,16 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_device_map_set"])
             self.assertFalse(attrs["is_scriptable"])
 
-            # Test worker1's forward result initiated by worker2.
+            # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
+            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
+            # not have another worker to initiate forward over the RPC layer.lint
             args = (torch.ones(1), 2, "3")
-            ret = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
-            self.assertEqual(ret, tuple(reversed(args)))
-
-            # Although worker2 can initiate worker1's forward_sync,
-            # cannot pass the result of type future back to worker2 over RPC layer.
-            with self.assertRaisesRegex(
-                RuntimeError, r"Can not pickle torch.futures.Future"
-            ):
-                ret = rpc.rpc_sync(
-                    dst_worker2_name, remote_forward_async, (remote_module, args)
-                )
+            ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
+            self.assertEqual(ret1, tuple(reversed(args)))
+            ret2 = rpc.rpc_sync(
+                dst_worker2_name, remote_forward_async, (remote_module, args)
+            )
+            self.assertEqual(ret2, tuple(reversed(args)))
 
     @unittest.skip(
         "Script RemoteModule cannot be sent over RPC at this time. See #33052"
@@ -504,19 +503,16 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_device_map_set"])
             self.assertFalse(attrs["is_scriptable"])
 
-            # Test worker1's forward result initiated by worker2.
+            # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
+            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
+            # not have another worker to initiate forward over the RPC layer.lint
             args = (torch.ones(1), 2, "3")
-            ret = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
-            self.assertEqual(ret, tuple(reversed(args)))
-
-            # Although worker2 can initiate worker1's forward_sync,
-            # cannot pass the result of type future back to worker2 over RPC layer.
-            with self.assertRaisesRegex(
-                RuntimeError, r"Can not pickle torch.futures.Future"
-            ):
-                ret = rpc.rpc_sync(
-                    dst_worker2_name, remote_forward_async, (remote_module, args)
-                )
+            ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
+            self.assertEqual(ret1, tuple(reversed(args)))
+            ret2 = rpc.rpc_sync(
+                dst_worker2_name, remote_forward_async, (remote_module, args)
+            )
+            self.assertEqual(ret2, tuple(reversed(args)))
 
 
 class CudaRemoteModuleTest(CommonRemoteModuleTest):
