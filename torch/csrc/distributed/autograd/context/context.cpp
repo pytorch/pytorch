@@ -112,7 +112,7 @@ void DistAutogradContext::accumulateGrad(
       [this, &variable](at::Tensor&& grad_update) {
         auto device = grad_update.device();
         accumulatedGrads_.insert(variable, std::move(grad_update));
-        recordGradEvent(std::move(device));
+        recordGradEvent(device);
       });
 }
 
@@ -270,7 +270,7 @@ void DistAutogradContext::runGradCallbackForVariable(
     auto device = grad.device();
     // Needs to update the grad in the map.
     accumulatedGrads_.insert_or_assign(variable, std::move(grad));
-    recordGradEvent(std::move(device));
+    recordGradEvent(device);
   }
 }
 
