@@ -119,11 +119,24 @@ TEST(StaticRuntime, UnaryOps) {
 
   std::vector<IValue> args{a};
 
+  // sum
   testStaticRuntime(aten_sum, args);
   testStaticRuntime(aten_sum_0, args);
   testStaticRuntime(aten_sum_1, args);
   testStaticRuntime(aten_sum_0_true, args);
   testStaticRuntime(aten_sum_1_true, args);
+}
+
+TEST(StaticRuntime, Logit) {
+  auto a = at::ones({2, 3});
+  double b = 1e-6;
+  std::vector<IValue> args_1{a};
+  std::vector<IValue> args_2({a, b});
+
+  // logit
+  testStaticRuntime(logit_script_1, args_1);
+  testStaticRuntime(logit_script_2, args_1);
+  testStaticRuntime(logit_script_3, args_2);
 }
 
 TEST(StaticRuntime, EmbeddingBag) {
@@ -142,9 +155,7 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
-
   const auto input = torch::rand({20, 10, 10, 10});
-
   for (int normalized_size: {2, 3}) {
       std::vector<int64_t> normalized_shape(normalized_size, 10);
       const auto weight = torch::rand(normalized_shape);
@@ -170,6 +181,24 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(list_unpack_script_2, args);
   testStaticRuntime(tuple_construct_script, args);
   testStaticRuntime(tuple_construct_script_2, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
+  // 1-D, 1-D
+  std::vector<IValue> args{at::randn({3}), at::randn({3})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 2-D
+  args = {at::randn({3, 2}), at::randn({2, 3})};
+  testStaticRuntime(aten_matmul, args);
+  // 1-D, 2-D
+  args = {at::randn({3}), at::randn({3, 5})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 1-D
+  args = {at::randn({3, 5}), at::randn({5})};
+  testStaticRuntime(aten_matmul, args);
+  // > 2-D , > 2-D
+  args = {at::randn({3, 1, 4, 5}), at::randn({2, 5, 6})};
+  testStaticRuntime(aten_matmul, args);
 }
 
 TEST(StaticRuntime, IndividualOps_Div) {
@@ -204,6 +233,25 @@ TEST(StaticRuntime, IndividualOps_Sub) {
 
   std::vector<IValue> args3{a, 2.3, 4};
   testStaticRuntime(sub_scalar_alpha, args3);
+}
+
+TEST(StaticRuntime, IndividualOps_Norm) {
+  auto a = at::randn({2, 3});
+  auto dim = std::vector<int64_t>({1});
+  auto dtype = at::ScalarType::Float;
+
+  std::vector<IValue> args2{a, 2};
+  testStaticRuntime(norm_2arg, args2);
+
+  std::vector<IValue> args3{a, 2, dtype};
+  testStaticRuntime(norm_3arg, args3);
+
+  std::vector<IValue> args4{a, 3, dim, false};
+  testStaticRuntime(norm_4arg, args4);
+
+  std::vector<IValue> args5{a, 4, dim, true, dtype};
+  testStaticRuntime(norm_5arg, args5);
+
 }
 
 TEST(StaticRuntime, IndividualOps_Reshape) {

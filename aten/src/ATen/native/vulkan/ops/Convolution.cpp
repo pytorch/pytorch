@@ -646,8 +646,16 @@ void conv2d_dw(
 
     context->dispatch(
         command_buffer,
-        context->get_conv2d_dw_cache(),
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d_dw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -720,8 +728,16 @@ void conv2d_pw(
 
     context->dispatch(
         command_buffer,
-        context->get_conv2d_pw_cache(),
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d_pw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -812,8 +828,16 @@ void conv2d(
 
     context->dispatch(
         command_buffer,
-        context->get_conv2d_cache(),
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(

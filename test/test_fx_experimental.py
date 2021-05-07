@@ -1306,10 +1306,27 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        op_skip = {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma', 'einsum'}
+        # Sorted and one entry on each line to minimize merge conflicts.
+        op_skip = {'einsum',
+                   'expand',
+                   'expand_as',
+                   'index_put',
+                   'polygamma',
+                   'repeat',
+                   'view',
+                   'view_as',
+                   'unfold',
+                   '__getitem__',
+                   '__radd__',
+                   '__rsub__',
+                   '__rmul__',
+                   '__rdiv__',
+                   '__rpow__'}
+
         # Unsupported input types
         if op.name in op_skip:
             return
+
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
                    'linalg.multi_dot'}
