@@ -4,6 +4,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native {
@@ -49,12 +50,7 @@ template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
   using Vec = Vec256<scalar_t>;
   if (exp == 0.5) {
-    cpu_kernel_vec(iter,
-        [](scalar_t base) -> scalar_t {
-          return std::sqrt(base);
-        },
-        [](Vec base) -> Vec { return base.sqrt(); }
-    );
+    sqrt_stub(kCPU, iter);
   } else if (exp == 2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -70,19 +66,9 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         [](Vec base) -> Vec { return base * base * base; }
     );
   } else if (exp == -0.5) {
-    cpu_kernel_vec(iter,
-        [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return static_cast<cast_scalar_t>(1.0) / std::sqrt(base);
-        },
-        [](Vec base) -> Vec { return base.rsqrt(); }
-    );
+    rsqrt_stub(kCPU, iter);
   } else if (exp == -1.0) {
-    cpu_kernel_vec(iter,
-        [](scalar_t base) -> scalar_t {
-          return static_cast<cast_scalar_t>(1.0) / base;
-        },
-        [](Vec base) -> Vec { return base.reciprocal(); }
-    );
+    reciprocal_stub(kCPU, iter);
   } else if (exp == -2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
