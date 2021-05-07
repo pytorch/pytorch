@@ -227,16 +227,14 @@ class TestGradients(TestCase):
     def test_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
-        if op.supports_forward_ad is None:
+        if op.supports_forward_ad:
+            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
-            hint_msg = ("Running forward AD for an OP that has unspecified forward AD support did not "
+            hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
-        elif op.supports_forward_ad:
-            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
-        else:
-            self.skipTest("Forward AD is not supported for this op.")
 
 
 # Tests operators for consistency between JIT and eager, also checks
