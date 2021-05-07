@@ -85,11 +85,7 @@ def supported_activities():
     """
     Returns a set of supported profiler activities
     """
-    activities = [ProfilerActivity.CPU]
-    # CUPTI profiling is not supported on ROCm
-    if torch.cuda.is_available() and torch.version.hip is None:
-        activities.append(ProfilerActivity.CUDA)
-    return set(activities)
+    return torch.autograd.supported_kineto_activities()
 
 
 class profile(object):
@@ -217,7 +213,7 @@ class profile(object):
             if activity not in supported_activities():
                 warn("Unsupported profiler activity specified (" + str(activity) + ")")
         self.activities = self.activities.intersection(supported_activities())
-        assert len(self.activities) > 0, "No profiler activities specified"
+        assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
             self.schedule = schedule

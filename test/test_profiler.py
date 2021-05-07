@@ -121,7 +121,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
-        use_cuda = torch.cuda.is_available() and (not TEST_WITH_ROCM)
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
 
@@ -224,29 +224,29 @@ class TestProfiler(TestCase):
             ]
         )
 
-        # if kineto_available():
-        #    with TemporaryFileName(mode="w+") as fname:
-        #        with profile(profile_memory=True) as prof:
-        #            x = None
-        #            with record_function("test_user_scope_alloc"):
-        #                x = create_cpu_tensor()
-        #            with record_function("test_user_scope_dealloc"):
-        #                del x
-        #        prof.export_chrome_trace(fname)
-        #        with io.open(fname, 'r') as f:
-        #            trace = json.load(f)
-        #            assert "traceEvents" in trace
-        #            events = trace["traceEvents"]
-        #            found_memory_events = False
-        #            for evt in events:
-        #                assert "name" in evt
-        #                if evt["name"] == "[memory]":
-        #                    found_memory_events = True
-        #                    assert "args" in evt
-        #                    assert "Device Type" in evt["args"]
-        #                    assert "Device Id" in evt["args"]
-        #                    assert "Bytes" in evt["args"]
-        #            assert found_memory_events
+        if kineto_available():
+            with TemporaryFileName(mode="w+") as fname:
+                with profile(profile_memory=True) as prof:
+                    x = None
+                    with record_function("test_user_scope_alloc"):
+                        x = create_cpu_tensor()
+                    with record_function("test_user_scope_dealloc"):
+                        del x
+                prof.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    trace = json.load(f)
+                    assert "traceEvents" in trace
+                    events = trace["traceEvents"]
+                    found_memory_events = False
+                    for evt in events:
+                        assert "name" in evt
+                        if evt["name"] == "[memory]":
+                            found_memory_events = True
+                            assert "args" in evt
+                            assert "Device Type" in evt["args"]
+                            assert "Device Id" in evt["args"]
+                            assert "Bytes" in evt["args"]
+                    assert found_memory_events
 
         if torch.cuda.is_available():
             create_cuda_tensor()
@@ -500,7 +500,7 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
     def test_tensorboard_trace_handler(self):
-        use_cuda = torch.cuda.is_available()
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
 
@@ -593,7 +593,8 @@ class TestProfiler(TestCase):
                 json.load(f)
 
         # Same test but for cuda.
-        if not torch.cuda.is_available():
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        if not use_cuda:
             return
 
         device = torch.device("cuda:0")

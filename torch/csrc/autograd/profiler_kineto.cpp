@@ -116,7 +116,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       evt.updateMemoryStats(alloc_size, device);
       getEventList(thread_id).record(std::move(evt));
 
-#ifdef USE_KINETO_UPDATED
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
         memory_events_.emplace_back();
@@ -131,7 +130,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.addMetadata("Device Id", std::to_string(device.index()));
         act.addMetadata("Bytes", std::to_string(alloc_size));
       }
-#endif
     }
   }
 
@@ -139,10 +137,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {
       // CPU_OP and CPU_INSTANT_EVENT events are already processed
-      if (ev_ptr->type() != libkineto::ActivityType::CPU_OP
-#ifdef USE_KINETO_UPDATED
-          && ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT
-#endif
+      if (ev_ptr->type() != libkineto::ActivityType::CPU_OP &&
+          ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT
         ) {
         kineto_events_.emplace_back();
         kineto_events_.back()
@@ -178,19 +174,16 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             std::to_string(kineto_event.sequenceNr()));
       }
     }
-#ifdef USE_KINETO_UPDATED
+
     cpu_trace->activities.insert(
       cpu_trace->activities.end(),
       memory_events_.begin(),
       memory_events_.end());
-#endif
   }
 
   std::vector<KinetoEvent> kineto_events_;
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
-#ifdef USE_KINETO_UPDATED
   std::vector<libkineto::GenericTraceActivity> memory_events_;
-#endif
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -454,9 +447,7 @@ c10::DeviceType KinetoEvent::deviceType() const {
     case (uint8_t)libkineto::ActivityType::CPU_OP:
     case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
     case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
-#ifdef USE_KINETO_UPDATED
     case (uint8_t)libkineto::ActivityType::CPU_INSTANT_EVENT:
-#endif
       return c10::DeviceType::CPU;
   }
   TORCH_CHECK(false, "Unknown activity type");
