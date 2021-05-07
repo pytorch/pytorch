@@ -26,7 +26,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addr_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // Helper function for det methods.
@@ -90,6 +92,7 @@ Tensor logdet(const Tensor& self) {
   Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
   if (self.dim() > 2) {
     auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
+    // NOLINTNEXTLINE(performance-move-const-arg)
     logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
   } else if (det_sign.item<double>() < 0) {
     logdet_vals.fill_(NAN);
@@ -1206,6 +1209,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
@@ -1570,6 +1574,7 @@ Tensor compute_T2(const Tensor& A) {
   auto As = _allocate_buffer(A, 3);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   As.select(0, 2).div_(2.0);
   return As.sum(0);
 }
@@ -1589,6 +1594,7 @@ Tensor compute_T4(const Tensor& A) {
     // computes (I / 2 + A / 6 + A^2 / 24)
     at::native::_compute_linear_combination(
       As.narrow(0, 0, 3),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
     )
   );
@@ -1611,6 +1617,7 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto As = _allocate_buffer(A, 5);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
@@ -1655,27 +1662,43 @@ Tensor compute_T12(const Tensor& A) {
   constexpr int num_prods = 4;
   array2d<scalar_t, num_prods, num_prods> b = {{
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       9.0198e-16,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.46932117595418237389,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.20099424927047284052,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.04623946134063071740
     },
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5.31597895759871264183,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.19926790417132231573,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.01179296240992997031,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.01108844528519167989
     },
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.18188869982170434744,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.05502798439925399070,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.09351590770535414968,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.00610700528898058230
     },
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -2.0861320e-13,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.13181061013830184015,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.02027855540589259079,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.00675951846863086359
     }
   }};
@@ -1717,37 +1740,57 @@ Tensor compute_T18(const Tensor& A) {
   array2d<scalar_t, num_prods, num_prods> b = {{
     {
       0.,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.00365581030144618291e-01,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -8.02924648241156932449e-03,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -8.92138498045729985177e-04,
       0.
     },
     {
       0.,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       3.97849749499645077844e-01,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.36783778460411720168e+00,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       4.98289622525382669416e-01,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.37898194594723280150e-04
     },
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.09676396052962061844e+01,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.68015813878906206114e+00,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5.71779846478865511061e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.98210122488052056106e-03,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       3.34975017086070470649e-05
     },
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -9.04316832390810593223e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.76404519071381882256e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6.75961301770459654925e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       2.95552570429315521194e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.39180257516060693404e-05
     },
     {
       0.,
       0.,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -9.23364619367118555360e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.69364939002081722752e-02,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.40086798182036094347e-05
     }
   }};
@@ -2118,6 +2161,7 @@ static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim)
 static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const optional<Scalar>& opt_ord,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ord = opt_ord.value_or(2.0).toDouble();
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());
@@ -2209,7 +2253,8 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
+      Tensor result_ = at::linalg_vector_norm(
+          self, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
       // TODO: Resize and copy should be avoided with
       //       https://github.com/pytorch/pytorch/issues/52712
       at::native::resize_output(result, result_.sizes());
@@ -2224,11 +2269,11 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
   return result;
 }
 
-static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   // Casting a large integer to a double will introduce some error, but for
   // practical purposes, it won't matter since a large order will usually
   // give an infinite result
-  auto ord = opt_ord.value_or(2).toDouble();
+  auto ord = scalar_ord.toDouble();
 
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "linalg.vector_norm only supports CPU and CUDA device types, but got: ",
@@ -2299,14 +2344,14 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar
   return result;
 }
 
-Tensor linalg_vector_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
   Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
-  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
+  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 
-Tensor& linalg_vector_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
+Tensor& linalg_vector_norm_out(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 
 // Numerical or None norms
@@ -2389,6 +2434,7 @@ void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg_cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
@@ -2419,12 +2465,14 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   }
 
   // If ord == None or ord == ±2
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (std::abs(ord.toDouble()) == 2.0) {
     auto singular_values = std::get<1>(at::svd(self));
     // singular values are sorted in descending order
     auto s_max = at::narrow(singular_values, /*dim=*/-1, /*start=*/0, /*length=*/1);
     auto s_min = at::narrow(singular_values, /*dim=*/-1, /*start=*/-1, /*length=*/1);
     Tensor result;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (ord.toDouble() == -2.0) {
       result = s_min / s_max;
     } else {
@@ -2594,8 +2642,11 @@ struct KronImpl final {
       maxdim = std::max(self.dim(), other.dim());
       int64_t pad_self = maxdim - self.dim();
       int64_t pad_other = maxdim - other.dim();
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
       for (int64_t i = 0; i < maxdim; i++) {
         a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
@@ -2611,6 +2662,7 @@ struct KronImpl final {
     Tensor& kron_out(Tensor& result) const {
       TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
       for (int64_t i = 0; i < maxdim; i++) {
         mul_shape[2 * i] = a_reshape[2 * i];
@@ -2630,8 +2682,11 @@ struct KronImpl final {
     int64_t maxdim;
     Tensor self_view;
     Tensor other_view;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> result_reshape;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> a_reshape;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> b_reshape;
 };
 }

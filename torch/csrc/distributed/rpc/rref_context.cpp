@@ -320,7 +320,8 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
-    auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
+    auto rref = c10::make_intrusive<OwnerRRef>(
+        getWorkerId(), rrefId, type, agent_->getDevices());
     owners_[rref->rrefId()] = rref;
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter != pendingOwners_.end()) {
@@ -372,7 +373,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
   return c10::make_intrusive<OwnerRRef>(
-      getWorkerId(), genGloballyUniqueId(), type);
+      getWorkerId(), genGloballyUniqueId(), type, agent_->getDevices());
 }
 
 c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
@@ -392,6 +393,8 @@ c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
       // Note: The type passed into RRefType::create() does not matter here, as
       // the future is marked as completed with the RRef of the specific type
       // in getOrCreateOwnerRRef().
+      // Also no need to specify any devices because the RRef object itself
+      // doesn't contain any DataPtrs, it just provides means to retrieve them.
       auto futureOwner =
           c10::make_intrusive<JitFuture>(RRefType::create(c10::AnyType::get()));
       pendingOwners_[rrefId] = futureOwner;
@@ -405,6 +408,8 @@ c10::intrusive_ptr<JitFuture> RRefContext::getOwnerRRef(
     auto owner = iter->second;
     auto rrefPtr = fromOwnerRRef(owner);
 
+    // No need to specify any devices because the RRef object itself doesn't
+    // contain any DataPtrs, it just provides means to retrieve them.
     auto futureOwner =
         c10::make_intrusive<JitFuture>(RRefType::create(owner->type()));
     futureOwner->markCompleted(IValue(rrefPtr));

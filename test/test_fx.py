@@ -2303,8 +2303,27 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
-                           'polygamma', 'cdist', 'einsum'}
+        # Sorted and one entry on each line to minimize merge conflicts.
+        known_no_schema = {'cdist',
+                           'dstack',
+                           'einsum',
+                           'expand',
+                           'expand_as',
+                           'hstack',
+                           'linalg.multi_dot',
+                           'polygamma',
+                           'repeat',
+                           'stack',
+                           'view',
+                           'view_as',
+                           'vstack',
+                           '__getitem__',
+                           '__radd__',
+                           '__rsub__',
+                           '__rmul__',
+                           '__rdiv__',
+                           '__rpow__'}
+
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             schemas = get_signature_for_torch_op(op.op)
@@ -2325,7 +2344,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema
+            assert op.name in known_no_schema or "nn.functional" in op.name
 
 
 class TestFunctionalTracing(JitTestCase):

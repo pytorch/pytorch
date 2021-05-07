@@ -7,7 +7,9 @@
 #include <libshm/socket.h>
 #include <libshm/libshm.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, ClientSocket> managers;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::string manager_executable_path;
 
 AllocInfo get_alloc_info(const char* filename) {
@@ -23,9 +25,11 @@ AllocInfo get_alloc_info(const char* filename) {
 }
 
 void start_manager() {
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   int pipe_ends[2];
   SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t pid;
   SYSCHECK_ERR_RETURN_NEG1(pid = fork());
   if (!pid) {
@@ -33,11 +37,19 @@ void start_manager() {
     SYSCHECK_ERR_RETURN_NEG1(dup2(pipe_ends[1], 1)); // Replace stdout
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
+
+    std::string msg("ERROR: execl failed: ");
+    msg += strerror(errno);
+    msg += '\n';
+    write(1, msg.c_str(), msg.size());
+
     exit(1);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ssize_t bytes_read;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
   char buffer[1000];
   std::string handle;
   for (;;) {
@@ -49,15 +61,20 @@ void start_manager() {
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {
-    std::string msg("error executing torch_shm_manager at \"");
+    std::string msg("no response from torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\"";
     throw std::runtime_error(msg);
   }
 
   handle.pop_back(); // remove \n
-  if (handle == "ERROR")
-    throw std::exception();
+  if (handle.rfind("ERROR: ", 0) == 0) {
+    std::string msg("torch_shm_manager at \"");
+    msg += manager_executable_path;
+    msg += "\": ";
+    msg += handle.substr(7);  // remove "ERROR: "
+    throw std::runtime_error(msg);
+  }
 
   ClientSocket manager {handle};
   managers.emplace(std::move(handle), std::move(manager));
@@ -82,6 +99,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle,
   : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ClientSocket *socket;
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
