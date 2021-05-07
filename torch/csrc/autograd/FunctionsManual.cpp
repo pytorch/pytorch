@@ -2342,7 +2342,7 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
 
   const auto gL = grads[0];
   const auto gV = grads[1];
-  const auto Vh = V.conj().transpose(-2, -1);
+  const auto Vh = V.transpose(-2, -1).conj();
 
   if (gV.defined()) {
     const auto L_conj = L.conj();
