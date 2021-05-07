@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
@@ -101,7 +102,7 @@ struct CodeImpl {
   //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
   // op_to_num_specified_args_["aten::foo.str"] = 3
   // This is because for all usages, at most 3 args are used.
-  std::unordered_map<std::string, int> op_to_num_specified_args_;
+  std::unordered_map<std::string, size_t> op_to_num_specified_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
@@ -183,7 +184,8 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, int>& op_to_num_specified_args() const {
+  const std::unordered_map<std::string, size_t>& op_to_num_specified_args()
+      const {
     return op_to_num_specified_args_;
   }
 
@@ -734,48 +736,18 @@ struct MobileCodeImpl : CodeImpl {
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
           auto numInclude =
-              calculate_necessary_args(op_schema.arguments(), node->inputs());
+              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
-              std::pair<std::string, int>(unique_name, 0));
+              std::pair<std::string, size_t>(unique_name, 0));
           auto prev_value = it.first->second;
           it.first->second = std::max(numInclude, prev_value);
         }
       }
       node = graph_it.next();
     }
-  }
-
-  int calculate_necessary_args(
-      const std::vector<Argument>& schema_args,
-      at::ArrayRef<Value*> actual_inputs) {
-    AT_ASSERT(schema_args.size() == actual_inputs.size());
-    // keeps track of trailing unnecessary args
-    int schema_size = schema_args.size();
-    for (int schema_idx = schema_size - 1; schema_idx > -1; schema_idx--) {
-      // this means it is not default argument, so it is necessary
-      if (!schema_args.at(schema_idx).default_value().has_value()) {
-        return schema_idx + 1;
-      } else {
-        auto schema_value =
-            schema_args.at(schema_idx).default_value().value().toIValue();
-        // non-const value will become nullptr here, so will be marked necessary
-        // non-const would include prim::ListConstruct, prim::DictConstruct as
-        // well.
-        auto actual_value = toIValue(actual_inputs[schema_idx]);
-        if (!actual_value.has_value()) {
-          return schema_idx + 1;
-        }
-        // if the IR has same value as default value of the schema,
-        // it is not necessary argument.
-        if (schema_value != actual_value.value()) {
-          return schema_idx + 1;
-        }
-      }
-    }
-    return 0;
   }
 
   void emitOperator(Node* node) override {
