@@ -6833,6 +6833,9 @@ workflows:
           filters:
             branches:
               only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
                 - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
