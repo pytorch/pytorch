@@ -1117,7 +1117,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   void run() override {
     auto output = allreduce(inputs);
 
-    // Can we avoid copy here?
     // This copy is needed when we run a multi-gpu version of reduce (multiple
     // inputs per rank).
     for (int i = 0; i < inputs.size(); ++i) {
