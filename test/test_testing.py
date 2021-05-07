@@ -1117,11 +1117,12 @@ class TestAsserts(TestCase):
 
     @onlyCPU
     def test_scalar(self, device):
-        tensor = torch.rand(1, device=device)
-        actual = expected = tensor.item()
+        number = torch.randint(10, size=(), device=device).item()
+        for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
+            check_dtype = type(actual) is type(expected)
 
-        for fn in self.assert_fns_with_inputs(actual, expected):
-            fn()
+            for fn in self.assert_fns_with_inputs(actual, expected):
+                fn(check_dtype=check_dtype)
 
     @onlyCPU
     def test_msg_str(self, device):
