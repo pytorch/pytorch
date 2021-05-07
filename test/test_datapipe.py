@@ -7,6 +7,7 @@ import warnings
 import tarfile
 import zipfile
 import numpy as np
+import sys
 from PIL import Image
 from unittest import skipIf
 
@@ -567,9 +568,11 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
-class InvalidData(Generic[T_co], NamedTuple):
-    name: str
-    data: T_co
+# Metaclass conflict for Python 3.6
+if sys.version_info >= (3, 7):
+    class InvalidData(Generic[T_co], NamedTuple):
+        name: str
+        data: T_co
 
 
 class TestTyping(TestCase):
@@ -675,9 +678,10 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
-        with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
-            class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
-                pass
+        if sys.version_info >= (3, 7):
+            with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
+                class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
+                    pass
 
         class DP1(IterDataPipe[Tuple[int, str]]):
             def __init__(self, length):
