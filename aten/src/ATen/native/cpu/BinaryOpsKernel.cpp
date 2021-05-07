@@ -858,7 +858,7 @@ void logaddexp2_kernel(TensorIterator& iter) {
   });
 }
 
-void gcd_kernel(TensorIterator& iter) {
+void gcd_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
       cpu_kernel(
           iter,
