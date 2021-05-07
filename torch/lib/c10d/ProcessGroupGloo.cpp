@@ -1111,27 +1111,22 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           indices[i], values[i], input.sizes(), input.options());
     }
 
-    // Coalesce for good measure.
+    // This might be not necessary, e.g. (quote from FB diff)
+    // If the participants contribute values that are known to not overlap
+    // (or hardly overlap), then coalescing may not be needed. To always
+    // coalesce regardless means performance overhead. The caller can always
+    // call coalesce themselves if it needed.
     return output.coalesce();
   }
 
   void run() override {
     auto output = allreduce(inputs);
 
-    // Copy back to input tensors.
+    // Can we avoid copy here in common case where input.size() == 1?
     outputs.reserve(inputs.size());
     for (auto& input : inputs) {
       input.copy_(output);
-      if (output.is_sparse()) {
-        outputs.push_back(output.clone());
-      } else {
-        outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
-      }
     }
-  }
-
-  std::vector<at::Tensor> result() override {
-    return outputs;
   }
 
  private:
