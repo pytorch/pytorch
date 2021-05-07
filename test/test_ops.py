@@ -363,6 +363,9 @@ class TestCommon(JitCommonTestCase):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
 
+        if not _requires_grad:
+            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
+
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         for sample in samples:
