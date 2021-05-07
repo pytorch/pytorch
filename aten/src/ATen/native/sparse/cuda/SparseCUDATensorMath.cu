@@ -63,7 +63,7 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
   colIndicesInt.copy_(colIndices);
 
   Tensor r__;
-  if (cast_beta == 0) {
+  if (cast_beta == scalar_t(0)) {
     r_.zero_();
   } else if (!is_same_tensor(t, r_)) {
     r_.copy_(t);
@@ -151,7 +151,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
 
 
   // No half support, so we don't have to use CUDATypeConversion
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     values.scalar_type(), "addmm_sparse_cuda", [&] {
       s_addmm_out_sparse_dense_cuda_worker<scalar_t>(nnz, m, n, k, r_, beta, t, alpha, indices, values, dense);
     }
@@ -689,7 +689,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto input_indices_ti = getTensorInfo<int64_t, int64_t>(input_indices_1D);
       auto input_indices_pos_ti = getTensorInfo<int64_t, int64_t>(input_indices_pos);
 
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_values.scalar_type(), "_sparse_sum_backward_cuda", [&] {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, grad_values.scalar_type(), "_sparse_sum_backward_cuda", [&] {
         auto grad_values_expand_ti = getTensorInfo<scalar_t, int64_t>(grad_values_expand);
         auto grad_input_values_ti = getTensorInfo<scalar_t, int64_t>(grad_input_values);
 
@@ -894,7 +894,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
