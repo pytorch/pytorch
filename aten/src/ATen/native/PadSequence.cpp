@@ -3,7 +3,7 @@
 namespace at {
 namespace native {
   Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value) {
-    const auto sequences_size = sequences.size();
+    const int64_t sequences_size = sequences.size();
     TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
     IntArrayRef max_size = sequences[0].sizes();
     IntArrayRef trailing_dims = max_size.slice(1);
@@ -24,7 +24,7 @@ namespace native {
     out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
 
     Tensor out = at::full(out_dims, padding_value, sequences[0].options());
-    for (auto i = 0; i < sequences_size; i++) {
+    for (int64_t i = 0; i < sequences_size; i++) {
       const Tensor currseq = sequences[i];
       const int64_t length_i = currseq.size(0);
       // use index notation to prevent duplicate references to the tensor
