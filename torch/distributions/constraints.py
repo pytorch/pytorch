@@ -463,9 +463,9 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        batch_shape = value.unsqueeze(0).shape[:-2]
-        positive = torch.linalg.eigvalsh(value, UPLO="U")[..., :1] > 0.0
-        return positive.view(batch_shape)
+        # Assumes that the matrix in value are symmetric
+        # info == 0 means no error, that is, it's SPD
+        return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
 
 
 class _Cat(Constraint):
