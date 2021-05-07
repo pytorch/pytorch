@@ -4741,7 +4741,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=False,
            supports_out=False,
-           autodiff_fusible_nodes=["aten::hardswish"]),
+           autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
