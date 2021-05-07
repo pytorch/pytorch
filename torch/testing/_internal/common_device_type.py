@@ -614,7 +614,7 @@ class skipIf(object):
                 if ((isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep)):
                     raise unittest.SkipTest(self.reason)
 
-            return slowTest(fn(slf, device, *args, **kwargs))
+            return fn(slf, device, *args, **kwargs)
         return dep_fn
 
 
