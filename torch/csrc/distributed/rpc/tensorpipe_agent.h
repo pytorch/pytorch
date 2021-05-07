@@ -256,7 +256,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<JitFuture>& futureResponseMessage,
+      JitFuture& futureResponseMessage,
       uint64_t messageId,
       std::shared_ptr<LazyStreamContext> ctx);
 

@@ -74,7 +74,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id(),
-         ctx = std::move(ctx)]() mutable {
+         ctx = std::move(ctx)](JitFuture& /* unused */) mutable {
           c10::MultiStreamGuard guard(
               ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
           // The cost of pre-request check is minimal thanks to
@@ -287,16 +287,16 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
     }
   }
 
-  futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
-    const auto& rref = fromRRefInterface(futureOwner->constValue().toRRef());
+  futureOwner->addCallback([responseFuture, messageId](JitFuture& futureOwner) {
+    const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
     auto whenValueSet = rref->getFuture();
 
     // Our response is satisfied when the rpc.remote() request
     // finishes executing on the owner.
     whenValueSet->addCallback(
-        [responseFuture, messageId, rref, whenValueSet]() {
-          if (whenValueSet->hasError()) {
-            responseFuture->setError(whenValueSet->exception_ptr());
+        [responseFuture, messageId, rref](JitFuture& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(whenValueSet.exception_ptr());
             return;
           }
           try {
@@ -400,13 +400,12 @@ void RequestCallbackNoPython::processForwardAutogradReq(
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
   // one completes, with the autograd context information wrapped.
-  // Uses weak_ptr so we can std::move the value.
   wrappedRpcResponseFuture->addCallback(
       [responseFuture,
        messageId,
        fromWorkerId,
-       weak = std::weak_ptr<JitFuture>(wrappedRpcResponseFuture),
-       ctxId = autogradContext->contextId()]() {
+       ctxId =
+           autogradContext->contextId()](JitFuture& wrappedRpcResponseFuture) {
         // As this callback can be invoked by a different thread, we have to
         // make sure that the thread_local states in the previous thread is
         // correctly propagated.
@@ -419,16 +418,14 @@ void RequestCallbackNoPython::processForwardAutogradReq(
         // https://github.com/pytorch/pytorch/issues/38510
         DistAutogradContextGuard cbCtxGuard(ctxId);
 
-        auto wrappedRpcResponseFuture = weak.lock();
-        TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
-        if (wrappedRpcResponseFuture->hasError()) {
+        if (wrappedRpcResponseFuture.hasError()) {
           // Propagate error to responseFuture if we had one.
-          responseFuture->setError(wrappedRpcResponseFuture->exception_ptr());
+          responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
               std::move(
-                  *wrappedRpcResponseFuture->value().toCustomClass<Message>()),
+                  *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
               MessageType::FORWARD_AUTOGRAD_RESP);
           msg.setId(messageId);
           responseFuture->markCompleted(
@@ -460,14 +457,14 @@ void RequestCallbackNoPython::processBackwardAutogradReq(
       autogradContext, sendFunction, gradientsCall.retainGraph());
 
   // Our response is satisfied when the rpcs come back.
-  execFuture->addCallback([responseFuture, messageId, execFuture]() {
-    if (!execFuture->hasError()) {
+  execFuture->addCallback([responseFuture, messageId](JitFuture& execFuture) {
+    if (!execFuture.hasError()) {
       Message m = std::move(PropagateGradientsResp()).toMessage();
       m.setId(messageId);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
     } else {
-      responseFuture->setError(execFuture->exception_ptr());
+      responseFuture->setError(execFuture.exception_ptr());
     }
   });
 }
@@ -534,11 +531,9 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         wrappedRpcResponseFuture,
         {}); // TODO: https://github.com/pytorch/pytorch/issues/55757
 
-    wrappedRpcResponseFuture->addCallback(
-        at::wrapPropagateTLSState([wrappedRpcResponseFuture,
-                                   responseFuture,
-                                   profilingKeyId,
-                                   profilingConfig] {
+    wrappedRpcResponseFuture->addCallback(at::wrapPropagateTLSState(
+        [responseFuture, profilingKeyId, profilingConfig](
+            JitFuture& wrappedRpcResponseFuture) {
           std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
@@ -553,17 +548,17 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           torch::autograd::profiler::ProfilerDisableOptions opts(false, true);
           auto event_lists =
               torch::autograd::profiler::disableProfilerLegacy(opts);
-          if (wrappedRpcResponseFuture->hasError()) {
+          if (wrappedRpcResponseFuture.hasError()) {
             // Propagate error
             // No need to propagate remote events in the case of an error.
-            responseFuture->setError(wrappedRpcResponseFuture->exception_ptr());
+            responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
           } else {
             populateRemoteProfiledEvents(
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
                 MessageType::RUN_WITH_PROFILING_RESP,
-                std::move(*wrappedRpcResponseFuture->value()
-                               .toCustomClass<Message>()),
+                std::move(
+                    *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);
             responseFuture->markCompleted(IValue(c10::make_intrusive<Message>(
