@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 
-size_t CalculateNecessaryArgs(
+inline size_t CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs) {
   if (schema_args.size() < actual_inputs.size()) {
@@ -38,9 +38,6 @@ size_t CalculateNecessaryArgs(
   }
   return 0;
 }
-
-} // namespace jit
-} // namespace torch
 
 } // namespace jit
 } // namespace torch
