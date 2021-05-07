@@ -1082,7 +1082,7 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
     for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
         # FIXME add an override for JIT and revert 0. back to 0
         # since it's accepted by eager
-        for p in [0., 1., 2., 3, 0.5, 1.5, 2.5, float("inf")]:
+        for p in [0., 1., 2., 3., 0.5, 1.5, 2.5, float("inf")]:
             for t1_size, t2_size in test_cases:
                 # The args should never be non-contiguous as this is not supported in the backward
                 samples.append(SampleInput(
@@ -3950,6 +3950,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
+           assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
