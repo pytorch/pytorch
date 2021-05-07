@@ -412,7 +412,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {
-        Tensor result = at::empty({}, self.options());    
+        Tensor result = at::empty({}, self.options());
 
         auto handle = at::cuda::getCurrentCUDABlasHandle();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
@@ -423,7 +423,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
             incx,
             other.data_ptr<scalar_t>(),
             incy,
-            result.data_ptr<scalar_t>());    
+            result.data_ptr<scalar_t>());
 
         return result;
       });
