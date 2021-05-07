@@ -3111,3 +3111,60 @@ def fill(g, self, value):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
 
     return full_like(g, self, value, dtype)
+
+
+def index_add(g, self, dim, index, other):
+    warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
+                  "this will cause the ONNX model to be incorrect.")
+    from torch.onnx.symbolic_opset9 import scatter_add
+    from sys import maxsize as maxsize
+
+    dim = sym_help._maybe_get_const(dim, 'i')
+    if dim is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                  "unknown 'dim' value.")
+
+    self_dim_rank = sym_help._get_tensor_rank(self)
+    other_dim_rank = sym_help._get_tensor_rank(other)
+
+    if self_dim_rank is None or other_dim_rank is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function while " +
+                                  "the rank of self tensor or tensor to be added is unknown.")
+
+    if other_dim_rank != self_dim_rank:
+        delta = self_dim_rank - other_dim_rank
+        for i in range(delta):
+            other = sym_help._unsqueeze_helper(g, other, [sym_help._get_tensor_rank(other)])
+
+    other_dim_size = sym_help._get_tensor_dim_size(other, dim)
+    self_dim_size = sym_help._get_tensor_dim_size(self, dim)
+
+    if (other_dim_size is not None) and (self_dim_size is not None):
+        if other_dim_size > self_dim_size:
+            raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                      "duplicated values in 'index' parameter yet.")
+
+    # Construct a new shape. It's almost as same as self except the size of the 'dim'
+    # dimension is 1, so that we can expand other dimensions as expected.
+    new_shape_axes = list(range(self_dim_rank))
+    new_shape_starts = [0 for i in range(self_dim_rank)]
+    new_shape_ends = [maxsize
+                      if (i != dim)
+                      else
+                      1
+                      for i in range(self_dim_rank)]
+
+    new_shape = sym_help._slice_helper(g,
+                                       self,
+                                       axes=new_shape_axes,
+                                       starts=new_shape_starts,
+                                       ends=new_shape_ends)
+    other = expand_as(g, other, new_shape)
+
+    for i in range(dim):
+        index = sym_help._unsqueeze_helper(g, index, [0])
+
+    for i in range(self_dim_rank - dim - 1):
+        index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
+
+    return scatter_add(g, self, dim, expand_as(g, index, other), other)
