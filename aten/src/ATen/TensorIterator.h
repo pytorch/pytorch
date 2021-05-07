@@ -34,6 +34,14 @@
 //     return a + b;
 //   });
 //
+// Note [Order of Construction]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// When setting up the tensor iterator configuration, the output Tensors
+// have to be added first via TensorIteratorConfig::add_output(at::Tensor).
+// After adding all outputs, the inputs can be added via
+// TensorIteratorConfig::add_input(at::Tensor).
+// Adding another output after inputs have been added will rise an exception.
+//
 // Note [Common Dtype Computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Some operations have a natural notion of a "common dtype" or
@@ -478,6 +486,8 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
+  // Stores input/output Tensors while incrementing the reference count.
+  // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_output(const Tensor& output);
   TensorIteratorConfig& add_input(const Tensor& input);
 
@@ -485,6 +495,7 @@ public:
   // the reference count. The caller must ensure that these Tensors
   // live at least as long as this TensorIteratorConfig and any
   // TensorIteratorBase built from this TensorIteratorConfig.
+  // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
 
