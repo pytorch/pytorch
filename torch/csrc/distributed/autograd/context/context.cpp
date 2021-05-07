@@ -14,7 +14,8 @@ using torch::autograd::AccumulateGrad;
 
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId),
-      impl_(c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA}) {}
+      impl_(c10::impl::VirtualGuardImpl{
+          at::hasCUDA() ? c10::DeviceType::CUDA : c10::DeviceType::CPU}) {}
 
 int64_t DistAutogradContext::contextId() const {
   return contextId_;
@@ -90,7 +91,7 @@ void DistAutogradContext::accumulateGrad(
   // call it here to get the streams correct.
   auto forward_stream =
       torch::autograd::impl::grad_accumulator(variable)->stream(
-          c10::DeviceType::CUDA);
+          grad.device().type());
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
