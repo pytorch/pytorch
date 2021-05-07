@@ -68,7 +68,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
     @property
     def name(self) -> str:
         """See base class."""
-        return "etcd-experimental"
+        return "etcd-v2"
 
     @property
     def client(self) -> EtcdClient:
