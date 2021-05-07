@@ -437,8 +437,9 @@ struct ConcreteInterpreterSessionImpl
     }
 
     py::dict py_kwargs;
-    for (auto [key, value] : kwargs) {
-      py_kwargs[py::cast(key)] = torch::jit::toPyObject(value);
+    for (auto kv : kwargs) {
+      py_kwargs[py::cast(std::get<0>(kv))] =
+          torch::jit::toPyObject(std::get<1>(kv));
     }
     return wrap(call(unwrap(obj), py_args, py_kwargs));
   }
