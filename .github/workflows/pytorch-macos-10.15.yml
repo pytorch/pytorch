@@ -1,0 +1,45 @@
+# @generated DO NOT EDIT MANUALLY
+# Template is at:    .github/templates/macos_ci_workflow.yml.j2
+# Generation script: .github/scripts/generate_macos_ci_workflows.py
+name: MacOS CI (pytorch-macos-10.15)
+
+on:
+  pull_request:
+
+env:
+  BUILD_ENVIRONMENT: pytorch-macos-10.15
+  SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+
+jobs:
+  
+  test:
+    runs-on: macos-10.15
+    
+    steps:
+      - name: Install test dependencies
+        run: |
+          brew install libomp
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      
+      - name: Fake download artifacts
+        working-directory: pytorch/
+        run: |
+          curl -L https://github-actions-sccache-macos.s3-us-west-2.amazonaws.com/pytorch-macos-10.15.zip -o artifacts.zip
+      - name: Unzip artifacts
+        working-directory: pytorch/
+        run: 
+          unzip -o artifacts.zip
+      - name: Run tests
+        working-directory: pytorch/
+        env:
+          BUILD_ENVIRONMENT: pytorch-macos-10.15-test
+        run: |
+          set -e
+          export IN_CI=1
+
+          chmod a+x .jenkins/pytorch/macos-test.sh
+          .jenkins/pytorch/macos-test.sh
