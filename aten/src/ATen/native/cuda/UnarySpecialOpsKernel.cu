@@ -22,7 +22,7 @@ namespace native {
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "exp2_cuda", 
+      iter.common_dtype(), "exp2_cuda",
       [&]() {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::exp2(a);
