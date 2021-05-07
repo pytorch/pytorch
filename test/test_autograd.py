@@ -3762,14 +3762,14 @@ class TestAutograd(TestCase):
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.eig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfNoLapack
     def test_eig_complex_eigenvalues(self):
         A = torch.tensor([[0., -1.], [1., 0.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.eig(A, eigenvectors=True)
-        with self.assertRaisesRegex(RuntimeError, 'does not support complex eigenvalues'):
+        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfNoLapack
