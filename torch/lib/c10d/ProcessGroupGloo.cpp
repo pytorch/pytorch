@@ -425,8 +425,9 @@ void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
     work->run();
   } catch (...) {
     eptr = std::current_exception();
+    work->finishWorkGlooError(eptr);
   }
-  work->finish(eptr);
+  work->finishWorkGloo();
 }
 
 std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
@@ -438,6 +439,49 @@ std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
       outputTensors_.size() <= 1, "work result does not support list of lists.");
   return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
                                     : outputTensors_.at(0);
+}
+
+namespace {
+c10::intrusive_ptr<c10::ivalue::Future> CreateFutureForOutput(
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  // if (outputTensors_.size() == 0) {
+  //   return c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::create());
+  // }
+  if (outputTensors.size() > 1) {
+    return c10::make_intrusive<c10::ivalue::Future>(
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+  }
+  return c10::make_intrusive<c10::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()));
+}
+
+void ReturnFutureWithOutput(
+    c10::intrusive_ptr<c10::ivalue::Future> future,
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() > 1) {
+    future->markCompleted(c10::IValue(outputTensors));
+    return;
+  }
+  future->markCompleted(c10::IValue(outputTensors[0]));
+}
+} // namespace
+
+ProcessGroupGloo::AsyncWork::AsyncWork(
+    std::vector<std::vector<at::Tensor>> outputTensors,
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+      outputTensors_(std::move(outputTensors)),
+      future_(CreateFutureForOutput(outputTensors)) {}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
+  ReturnFutureWithOutput(future_, outputTensors_);
+  finish();
 }
 
 ProcessGroupGloo::SendWork::SendWork(
