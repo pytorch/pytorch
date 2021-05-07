@@ -1113,11 +1113,11 @@
 - name: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
   self: unsqueeze_to(grad, dim, self.sizes())
 
-- name: std(Tensor self, bool unbiased=True) -> Tensor
-  self: std_backward(result, grad, self, unbiased)
+- name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+  self: std_backward(result, grad, self, dim, correction, keepdim)
 
-- name: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  self: std_backward(result, grad, self, dim, unbiased, keepdim)
+- name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, true)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -1254,11 +1254,11 @@
 - name: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   self: grad.squeeze(dim)
 
-- name: var(Tensor self, bool unbiased=True) -> Tensor
-  self: var_backward(grad, self, unbiased)
+- name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+  self: var_backward(grad, self, dim, correction, keepdim)
 
-- name: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  self: var_backward(grad, self, dim, unbiased, keepdim)
+- name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, false)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
@@ -2015,18 +2015,6 @@
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
-
-- name: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
-
-- name: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
-
-- name: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, unbiased, true)
-
-- name: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, unbiased, false)
 
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor

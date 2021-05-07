@@ -955,58 +955,63 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
-Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
+static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t correction) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
+  return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (self.dim() == 0) {
-    return var_backward(grad, self, unbiased);
+Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+    c10::optional<int64_t> correction_opt, bool keepdim) {
+  auto correction = correction_opt.value_or(1);
+  if (self.dim() == 0 || !dim_opt.has_value()) {
+    return var_backward(grad, self, correction);
   }
+  auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
+  const int64_t dof = _safe_size(self.sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
+  return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
-}
-
-Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
+Tensor std_backward(
+    const Tensor& result, const Tensor& grad, const Tensor& self,
+    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+  auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
+  return var_backward(grad_var, self, dim, correction, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
   return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
 }
 
-Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
   return grad.expand(sizes) / numel;
 }
 
-Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
-  Tensor grad;
-  if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+static Tensor mean_backward(
+    const Tensor& grad, const IntArrayRef sizes, int64_t numel,
+    c10::optional<IntArrayRef> dim, bool keepdim) {
+  if (dim.has_value()) {
+    return mean_backward(grad, sizes, *dim, keepdim);
+  } else {
+    return mean_backward(grad, sizes, numel);
   }
-  if (grads[1].defined()) {
-    Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
-    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
-  }
-  return grad;
 }
 
-Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+Tensor var_std_mean_backward(
+    const variable_list& grads, const Tensor& self, const Tensor& r1,
+    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+    grad = is_std ? std_backward(r1, grads[0], self, dim, correction, keepdim)
+                  : var_backward(grads[0], self, dim, correction, keepdim);
   }
   if (grads[1].defined()) {
-    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
-    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel(), dim, keepdim);
+    grad = grad.defined() ? grad + mean_grad : mean_grad;
   }
   return grad;
 }
@@ -3020,10 +3025,10 @@ infinitely_differentiable_native_layer_norm_backward(
             X_tensor,
             var,
             mean_tensor,
-            {1},
-            false,
-            true,
-            false);
+            /*dim=*/IntArrayRef{1},
+            /*correction=*/0,
+            /*keepdim=*/true,
+            /*is_std=*/false);
       }
       dX = dX.reshape_as(X);
     } else if (dmean.defined() && drstd.defined()) {
@@ -3032,10 +3037,10 @@ infinitely_differentiable_native_layer_norm_backward(
                X_tensor,
                var,
                mean_tensor,
-               {1},
-               false,
-               true,
-               false)
+               /*dim=*/IntArrayRef{1},
+               /*correction=*/0,
+               /*keepdim=*/true,
+               /*is_std=*/false)
                .reshape_as(X);
     }
   }
@@ -3113,8 +3118,8 @@ infinitely_differentiable_native_group_norm_backward(
             X_tensor,
             var,
             mean_tensor,
-            {2, 3},
-            false,
+            IntArrayRef{2, 3},
+            0,
             true,
             false);
       }
@@ -3125,8 +3130,8 @@ infinitely_differentiable_native_group_norm_backward(
                X_tensor,
                var,
                mean_tensor,
-               {2, 3},
-               false,
+               IntArrayRef{2, 3},
+               0,
                true,
                false)
                .reshape_as(X);
