@@ -11,52 +11,10 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
 
 jobs:
-  build:
-    runs-on: macos-10.15
-    steps:
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Download and set up sccache
-        run: |
-          set -e
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-      - name: Run build
-        working-directory: pytorch/
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
-        run: |
-          sudo xcode-select -r
-
-          # reload aws creds
-          sccache --stop-server || echo server already stopped
-          sccache --start-server
-          sccache -s
-
-          export IN_CI=1
-          sudo xcode-select -s /Applications/Xcode_12.0.1.app
-          chmod a+x .jenkins/pytorch/macos-build.sh
-          .jenkins/pytorch/macos-build.sh
-      - name: Archive artifacts into zip
-        working-directory: pytorch/
-        run: |
-          zip -r artifacts.zip dist/ build/
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: pytorch-macos-10.15-py3.8.zip
-          retention-days: 30
-          if-no-files-found: error
-          path:
-            pytorch/artifacts.zip
+  
   test:
     runs-on: macos-10.15
-    needs:
-      - build
+    
     steps:
       - name: Install test dependencies
         run: |
@@ -66,15 +24,19 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
-      - uses: actions/download-artifact@v2
-        name: Download PyTorch Build Artifacts
-        with:
-          name: pytorch-macos-10.15-py3.8.zip
       
+      - name: Fake download artifacts
+        working-directory: pytorch/
+        run: |
+          curl -L https://github-actions-sccache-macos.s3-us-west-2.amazonaws.com/pytorch-macos-10.15-py3.8.zip.zip -o artifacts.zip
       - name: Unzip artifacts
         working-directory: pytorch/
-        run: 
-          unzip -o pytorch-macos-10.15-py3.8.zip
+        run: |
+          unzip -o artifacts.zip
+      - name: test torch
+        working-directory: pytorch/
+        run: |
+          python -c 'import torch'
       - name: Run tests
         working-directory: pytorch/
         env:
