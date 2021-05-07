@@ -221,9 +221,7 @@ jobs:
           python tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
-        run: |
-          echo ::set-output name=branch::"${GITHUB_REF#refs/heads/}"
-          echo ::set-output name=tag::"${GITHUB_REF#refs/tags/}"
+        run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/print_test_stats.py to natively support GitHub Actions
