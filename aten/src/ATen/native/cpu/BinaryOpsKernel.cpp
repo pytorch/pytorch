@@ -183,7 +183,6 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             scalar_t floordiv;
             if (div != 0) {
               floordiv = std::floor(div);
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (div - floordiv > scalar_t(0.5)) {
                 floordiv += scalar_t(1.0);
               }
@@ -639,9 +638,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
             [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
               auto z = std::abs(a - b);
               return z < beta_val
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   ? static_cast<scalar_t>(0.5) * z * z / beta_val
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   : z - static_cast<scalar_t>(0.5) * beta_val;
             },
             [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
@@ -662,9 +659,7 @@ void huber_kernel(TensorIterator& iter, double delta) {
       iter,
       [&delta_val](scalar_t a, scalar_t b) -> scalar_t {
         auto z = std::abs(a - b);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return z < delta_val ? static_cast<scalar_t>(0.5) * z * z :
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         delta_val * (z - static_cast<scalar_t>(0.5) * delta_val);
       },
       [&delta_val_vec, &point_five_vec](Vec a, Vec b) {
@@ -847,7 +842,6 @@ void logaddexp2_kernel(TensorIterator& iter) {
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
           Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
           Vec256<scalar_t> one(1.0);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Vec256<scalar_t> two(2.0);
           Vec256<scalar_t> m = maximum(a, b);
           return Vec256<scalar_t>::blendv(

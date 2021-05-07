@@ -1194,12 +1194,10 @@ Tensor& heaviside_(Tensor& self, const Tensor& values) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::mul_out(result, self, at::pow(2.0, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::mul(self, at::pow(2.0, other));
 }
 

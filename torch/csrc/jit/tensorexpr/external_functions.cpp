@@ -76,9 +76,7 @@ void nnc_aten_conv2d(
     int64_t paddingH = extra_args[2];
     int64_t paddingW = extra_args[3];
     int64_t dilationH = extra_args[4];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t dilationW = extra_args[5];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t groups = extra_args[6];
 
     try {

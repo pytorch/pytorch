@@ -408,7 +408,6 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            std::vector<int64_t> size;
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            size.reserve(8);
            for (auto i = 0; i < num_inputs; ++i) {
              size =
@@ -867,7 +866,6 @@ RegisterOperators reg2({
               ss << "-";
               i = -i;
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
             str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
             ss << "0b" << str;
