@@ -312,9 +312,9 @@ TEST(IValueTest, FutureCallbacks) {
   auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimesA = 0;
   int calledTimesB = 0;
-  f2->addCallback([f2, &calledTimesA]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesA](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesA;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -322,9 +322,9 @@ TEST(IValueTest, FutureCallbacks) {
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 0);
   // Post-markCompleted()
-  f2->addCallback([f2, &calledTimesB]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesB](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesB;
   });
   ASSERT_EQ(calledTimesA, 1);
@@ -336,10 +336,10 @@ TEST(IValueTest, FutureCallbacks) {
 TEST(IValueTest, FutureExceptions) {
   auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimes = 0;
-  f3->addCallback([f3, &calledTimes]() {
-    ASSERT_TRUE(f3->completed());
+  f3->addCallback([&calledTimes](ivalue::Future& f3) {
+    ASSERT_TRUE(f3.completed());
     try {
-      (void)f3->value();
+      (void)f3.value();
     } catch (const std::exception& e) {
       if (std::string(e.what()) == "My Error") {
         ++calledTimes;
