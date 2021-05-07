@@ -1,3 +1,5 @@
+#!/bin/sh
+
 run_benchmark_basic() {
     # requires slurm
     gpurun='srun -p q2 --cpus-per-task=16 -t 5:00:00 --gpus-per-node=4'
