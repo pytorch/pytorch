@@ -56,7 +56,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     @property
     def name(self) -> str:
         """See base class."""
-        return "c10d-experimental"
+        return "c10d"
 
     @property
     def store(self) -> Store:
@@ -77,14 +77,20 @@ class C10dRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token]]:
+    ) -> Optional[Tuple[bytes, Token, bool]]:
         """See base class."""
         base64_state_str: str = codecs.encode(state, "base64").decode()
 
         if token:
             # Shortcut if we know for sure that the token is not valid.
             if not isinstance(token, bytes):
-                return self.get_state()
+                result = self.get_state()
+                if result is not None:
+                    tmp = *result, False
+                    # Python 3.6 does not support tuple unpacking in return
+                    # statements.
+                    return tmp
+                return None
 
             token = token.decode()
         else:
@@ -92,7 +98,16 @@ class C10dRendezvousBackend(RendezvousBackend):
 
         base64_state: bytes = self._call_store("compare_set", self._key, token, base64_state_str)
 
-        return self._decode_state(base64_state)
+        state_token_pair = self._decode_state(base64_state)
+        if state_token_pair is None:
+            return None
+
+        new_state, new_token = state_token_pair
+
+        # C10d Store's compare_set method does not offer an easy way to find out
+        # whether our write attempt was successful. As a brute-force solution we
+        # perform a bitwise comparison of our local state and the remote state.
+        return new_state, new_token, new_state == state
 
     def _call_store(self, store_op: str, *args, **kwargs) -> Any:
         try:
@@ -105,6 +120,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     def _decode_state(self, base64_state: bytes) -> Optional[Tuple[bytes, Token]]:
         if base64_state == self._NULL_SENTINEL.encode():
             return None
+
         try:
             state = codecs.decode(base64_state, "base64")
         except binascii.Error as exc:

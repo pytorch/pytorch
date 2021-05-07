@@ -330,14 +330,26 @@
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
+- name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
+  self: clamp_backward(grad, self, min, max)
+  min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
+
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
-  self: grad * (self >= min).to(grad.dtype())
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+
+- name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
-  self: grad * (self <= max).to(grad.dtype())
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+
+- name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -889,7 +901,7 @@
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
 
-- name: linalg_vector_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
@@ -1141,9 +1153,6 @@
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
-
-- name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
-  self: non_differentiable
 
 - name: linalg_eigvals(Tensor self) -> Tensor
   self: non_differentiable
