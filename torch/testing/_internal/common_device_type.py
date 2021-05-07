@@ -11,7 +11,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, slowTest
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -611,7 +611,7 @@ class skipIf(object):
         @wraps(fn)
         def dep_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                if ((isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep)):
+                if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep):
                     raise unittest.SkipTest(self.reason)
 
             return fn(slf, device, *args, **kwargs)
