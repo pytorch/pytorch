@@ -20,4 +20,10 @@ void Shape::DeleteDimension(int64 dim_to_delete) {
   }
 }
 
+bool Shape::IsDynamicMode() { return dynamic_mode_.load(); }
+
+void Shape::SetDynamicMode() { dynamic_mode_ = true; }
+
+std::atomic<bool> Shape::dynamic_mode_{false};
+
 }  // namespace lazy_tensors
