@@ -56,6 +56,12 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   void processRRefBackward(
       RpcCommandBase& rpc,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+
+  // Helpers to run user-defined functions, operators and other computations.
+
+  c10::intrusive_ptr<JitFuture> runJitFunction(
+      const c10::QualifiedName& name,
+      std::vector<at::IValue>& stack) const;
 };
 
 } // namespace rpc
