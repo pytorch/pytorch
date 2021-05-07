@@ -5,8 +5,7 @@
 namespace torch {
 namespace jit {
 
-NodeToDebugHandle
-generate_debug_handles(const std::shared_ptr<Graph>& graph) {
+NodeToDebugHandle generate_debug_handles(const std::shared_ptr<Graph>& graph) {
   NodeToDebugHandle node_to_debug_handles;
   BackendDebugHandleManager* dbg_handle_manager_ptr =
       getBackendDebugHandleManager();
