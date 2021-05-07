@@ -36,7 +36,9 @@ jobs:
       - name: test torch
         working-directory: pytorch/
         run: |
-          python -c 'import torch'
+          python3 --version
+          python --version
+          python3 -c 'import torch'
       - name: Run tests
         working-directory: pytorch/
         env:
