@@ -255,7 +255,7 @@ graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_permute(self):
         def f(a):
-            return a.permute([2,1,0])
+            return a.permute([2, 1, 0])
 
         device, size = 'cpu', (3, 4, 5)
         x = torch.rand(size, device=device)
@@ -281,10 +281,10 @@ graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_expand(self):
         def f(a):
-            return a.expand((2,3,4))
+            return a.expand((2, 3, 4))
 
         device = 'cpu'
-        x = torch.rand((1,3,1), device=device)
+        x = torch.rand((1, 3, 1), device=device)
         graph_str = """
 graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
   %1 : int = prim::Constant[value=2]()
