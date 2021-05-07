@@ -129,7 +129,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # Variant is not TypeVar or Union
     if hasattr(variant, '__origin__') and variant.__origin__ is not None:
         v_origin = variant.__origin__
-        v_args = variant.__args__
+        # In Python-3.9 typing library untyped generics do not have args
+        v_args = getattr(variant, "__args__", None)
     else:
         v_origin = variant
         v_args = None
@@ -150,7 +151,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                 if v_origin == c_origin:
                     if not recursive:
                         return True
-                    c_args = constraint.__args__
+                    # In Python-3.9 typing library untyped generics do not have args
+                    c_args = getattr(constraint, "__args__", None)
                     if c_args is None or len(c_args) == 0:
                         return True
                     if v_args is not None and len(v_args) == len(c_args) and \
