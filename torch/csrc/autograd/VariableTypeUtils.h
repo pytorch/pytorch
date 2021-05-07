@@ -217,8 +217,9 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
       // For now, we only do that same (wrong) thing as the old code which is to only check when the inputs is a
       // backward differentiable view
       if (diff_view_meta->has_bw_view()) {
-        TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                              "Functions that result multiple view must have a creation meta reflecting this behavior.");
+        TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
+            creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+            "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       }
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
       const auto& base_bw_info = diff_view_meta->get_backward_view();

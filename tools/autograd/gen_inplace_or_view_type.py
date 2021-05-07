@@ -292,14 +292,20 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         # We only support simple Tensor or a TensorList for functions that return views
         if not is_tensor_type(return_info.type) and not is_tensor_list_type(return_info.type):
             raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
+
+        # See Note [ View + Inplace detection]
+        def get_creation_meta_in_mode(original):
+            creation_meta_with_grad_mode = f'(at::GradMode::is_enabled() ? {original} : CreationMeta::NO_GRAD_MODE)'
+            return f'InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : {creation_meta_with_grad_mode}'
+
         # Only allow rebasing of the history if we return a single Tensor
         # If we are in a no grad block, raise a warning
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
             if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
+                creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_SAFE')
             else:
-                creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
+                creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_NODE')
             call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                      '/* is_fw_differentiable */ true, '
                      f'/* creation_meta */ {creation_meta});')
@@ -307,9 +313,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('InferenceMode::is_enabled() ? '
-                             'CreationMeta::INFERENCE_MODE : '
-                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
+            creation_meta = get_creation_meta_in_mode('CreationMeta::DEFAULT')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
