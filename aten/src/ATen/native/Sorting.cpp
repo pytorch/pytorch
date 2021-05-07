@@ -30,7 +30,7 @@ using namespace native;
 
     // Build the output size, which is the dim being selected set to
     // size k
-    std::vector<int64_t> topKSize = self.sizes().vec();
+    DimVector topKSize(self.sizes().vec());
     if (topKSize.size() > 0) {
       topKSize[dim] = k;
     }
@@ -351,7 +351,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
 
-  DimVector out_shape(self.sizes().vec());
+  std::vector<int64_t> out_shape = self.sizes().vec();
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
