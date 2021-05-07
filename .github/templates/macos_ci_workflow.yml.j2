@@ -47,7 +47,7 @@ jobs:
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
-          name: !{{ build_environment }}
+          name: !{{ build_environment }}.zip
           retention-days: 30
           if-no-files-found: error
           path:
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
-          name: !{{ build_environment }}
+          name: !{{ build_environment }}.zip
       {# - name: Fake download artifacts
         working-directory: pytorch/
         run: |
@@ -76,7 +76,7 @@ jobs:
       - name: Unzip artifacts
         working-directory: pytorch/
         run: 
-          unzip -o artifacts.zip
+          unzip -o !{{ build_environment }}.zip
       - name: Run tests
         working-directory: pytorch/
         env:

@@ -48,7 +48,7 @@ jobs:
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
-          name: pytorch-macos-10.15-py3.8
+          name: pytorch-macos-10.15-py3.8.zip
           retention-days: 30
           if-no-files-found: error
           path:
@@ -69,12 +69,12 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
-          name: pytorch-macos-10.15-py3.8
+          name: pytorch-macos-10.15-py3.8.zip
       
       - name: Unzip artifacts
         working-directory: pytorch/
         run: 
-          unzip -o artifacts.zip
+          unzip -o pytorch-macos-10.15-py3.8.zip
       - name: Run tests
         working-directory: pytorch/
         env:
