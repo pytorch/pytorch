@@ -100,7 +100,7 @@ if __name__ == '__main__':
                     x mypy (skipped typestub generation)
                     torch/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
                     torch/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-                """).lstrip("\n")
+                """).lstrip("\n")  # noqa: B950
                 self.assertEqual(expected, f.getvalue())
 
 
