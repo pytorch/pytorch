@@ -922,8 +922,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 }
 
 static void addmm_impl_cpu_(
-    Tensor &result, const Tensor &org_self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
-  auto self = *(expand_size(org_self, {m1.sizes()[0], m2.sizes()[1]}, "addmm_out"));
+    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
 
   // Array access is faster than .size(n) and .stride(n)
@@ -1102,9 +1101,10 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 }
 
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
 }
 
