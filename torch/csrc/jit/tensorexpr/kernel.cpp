@@ -541,6 +541,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
     case aten::log:
@@ -1844,6 +1845,20 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(a, zero, zero, a, kLT);
           });
     } break;
+
+    case aten::gelu: {
+      return computeOneOperand(
+          "aten_gelu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            auto one = Cast::make(a.dtype(), 1.);
+            auto point_five = Cast::make(a.dtype(), .5);
+            return a * point_five * (one + erf(a * m_sqrt1_2));
+          });
+    } break;
     case aten::batch_norm: {
       bool hasWeight = true;
       bool hasBias = true;
@@ -2424,8 +2439,8 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
-      auto start_dim = c10::get<int64_t>(inputs[1]);
-      auto to_dim = c10::get<int64_t>(inputs[2]);
+      auto start_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
+      auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
       return Compute(
           "aten_transpose",
           c10::fmap<DimArg>(outputShape),
@@ -2529,6 +2544,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::isnan:
     case aten::relu:
     case aten::hardswish:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::log:
     case aten::log10:
@@ -2932,7 +2948,6 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   }
   return result;
 }
-
 
 template <typename T>
 std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {

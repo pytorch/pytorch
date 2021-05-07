@@ -634,12 +634,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "call",
           [](CodeGen& self, const std::vector<at::Tensor>& values) {
-            std::vector<CodeGen::CallArg> value_ptrs;
+            std::vector<void*> value_ptrs;
             value_ptrs.reserve(values.size());
             for (const auto& value : values) {
-              value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
+              value_ptrs.emplace_back(value.data_ptr());
             }
-            self.call(value_ptrs);
+            self.call_raw(value_ptrs);
           })
       .def(
           "get_code_text",
