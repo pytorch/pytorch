@@ -3938,61 +3938,7 @@ Example::
 add_docstr(torch.inverse, r"""
 inverse(input, *, out=None) -> Tensor
 
-Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
-of 2D square tensors, in which case this function would return a tensor composed of
-individual inverses.
-
-Supports real and complex input.
-
-.. note:: :func:`torch.inverse` is deprecated. Please use :func:`torch.linalg.inv` instead.
-
-.. note::
-
-    Irrespective of the original strides, the returned tensors will be
-    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).stride()`
-
-Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                    batch dimensions
-
-Keyword args:
-    {out}
-
-Examples::
-
-    >>> x = torch.rand(4, 4)
-    >>> y = torch.inverse(x)
-    >>> z = torch.mm(x, y)
-    >>> z
-    tensor([[ 1.0000, -0.0000, -0.0000,  0.0000],
-            [ 0.0000,  1.0000,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  1.0000,  0.0000],
-            [ 0.0000, -0.0000, -0.0000,  1.0000]])
-    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
-    tensor(1.1921e-07)
-
-    >>> # Batched inverse example
-    >>> x = torch.randn(2, 3, 4, 4)
-    >>> y = torch.inverse(x)
-    >>> z = torch.matmul(x, y)
-    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
-    tensor(1.9073e-06)
-
-    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
-    >>> y = torch.inverse(x)
-    >>> z = torch.mm(x, y)
-    >>> z
-    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
-            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
-            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
-            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
-            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
-            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
-            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
-            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
-        dtype=torch.complex128)
-    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
-    tensor(7.5107e-16, dtype=torch.float64)
+Alias for :func:`torch.linalg.inv`
 """.format(**common_args))
 
 add_docstr(torch.isinf, r"""
@@ -5111,8 +5057,6 @@ Example::
 
 add_docstr(torch.matrix_power, r"""
 matrix_power(input, n, *, out=None) -> Tensor
-
-.. note:: :func:`torch.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
 Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
@@ -9823,38 +9767,7 @@ Keyword args:
 add_docstr(torch.det, r"""
 det(input) -> Tensor
 
-Calculates determinant of a square matrix or batches of square matrices.
-
-.. note:: :func:`torch.det` is deprecated. Please use :func:`torch.linalg.det` instead.
-
-.. note::
-    Backward through :math:`det` internally uses SVD results when :attr:`input` is
-    not invertible. In this case, double backward through :math:`det` will be
-    unstable when :attr:`input` doesn't have distinct singular values. See
-    :math:`~torch.svd` for details.
-
-Arguments:
-    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                    batch dimensions.
-
-Example::
-
-    >>> A = torch.randn(3, 3)
-    >>> torch.det(A)
-    tensor(3.7641)
-
-    >>> A = torch.randn(3, 2, 2)
-    >>> A
-    tensor([[[ 0.9254, -0.6213],
-             [-0.5787,  1.6843]],
-
-            [[ 0.3242, -0.9665],
-             [ 0.4539, -0.0887]],
-
-            [[ 1.1336, -0.4025],
-             [-0.7089,  0.9032]]])
-    >>> A.det()
-    tensor([1.1990, 0.4099, 0.7386])
+Alias for :func:`torch.linalg.det`
 """)
 
 add_docstr(torch.where,
@@ -9964,104 +9877,13 @@ Example::
 add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
-Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
-
-.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
-
-.. note::
-    If ``input`` has zero determinant, this returns ``(0, -inf)``.
-
-.. note::
-    Backward through :meth:`slogdet` internally uses SVD results when :attr:`input`
-    is not invertible. In this case, double backward through :meth:`slogdet`
-    will be unstable in when :attr:`input` doesn't have distinct singular values.
-    See :meth:`~torch.svd` for details.
-
-Arguments:
-    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
-
-Returns:
-    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
-    value of the absolute determinant.
-
-Example::
-
-    >>> A = torch.randn(3, 3)
-    >>> A
-    tensor([[ 0.0032, -0.2239, -1.1219],
-            [-0.6690,  0.1161,  0.4053],
-            [-1.6218, -0.9273, -0.0082]])
-    >>> torch.det(A)
-    tensor(-0.7576)
-    >>> torch.logdet(A)
-    tensor(nan)
-    >>> torch.slogdet(A)
-    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
+Alias for :func:`torch.linalg.slogdet`
 """)
 
 add_docstr(torch.pinverse, r"""
 pinverse(input, rcond=1e-15) -> Tensor
 
-Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
-Please look at `Moore-Penrose inverse`_ for more details
-
-.. note:: :func:`torch.pinverse` is deprecated. Please use :func:`torch.linalg.pinv` instead
-          which includes new parameters :attr:`hermitian` and :attr:`out`.
-
-.. note::
-    This method is implemented using the Singular Value Decomposition.
-
-.. note::
-    The pseudo-inverse is not necessarily a continuous function in the elements of the matrix `[1]`_.
-    Therefore, derivatives are not always existent, and exist for a constant rank only `[2]`_.
-    However, this method is backprop-able due to the implementation by using SVD results, and
-    could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
-    See :meth:`~torch.svd` for more details.
-
-.. note::
-    Supports real and complex inputs.
-    Batched version for complex inputs is only supported on the CPU.
-
-Arguments:
-    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is
-        zero or more batch dimensions.
-    rcond (float, optional): A floating point value to determine the cutoff for
-        small singular values. Default: ``1e-15``.
-
-Returns:
-    The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
-
-Example::
-
-    >>> input = torch.randn(3, 5)
-    >>> input
-    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
-            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
-            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
-    >>> torch.pinverse(input)
-    tensor([[ 0.0600, -0.1933, -0.2090],
-            [-0.0903, -0.0817, -0.4752],
-            [-0.7124, -0.1631, -0.2272],
-            [ 0.1356,  0.3933, -0.5023],
-            [-0.0308, -0.1725, -0.5216]])
-    >>> # Batched pinverse example
-    >>> a = torch.randn(2,6,3)
-    >>> b = torch.pinverse(a)
-    >>> torch.matmul(b, a)
-    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
-            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
-            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
-
-            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
-            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
-            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
-
-.. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
-
-.. _[1]: https://epubs.siam.org/doi/10.1137/0117004
-
-.. _[2]: https://www.jstor.org/stable/2156365
+Alias for :func:`torch.linalg.pinv`
 """)
 
 add_docstr(torch.hann_window,

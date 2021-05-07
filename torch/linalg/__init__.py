@@ -163,15 +163,22 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
+.. note::
+    Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
+    the inverse, as::
+
+        torch.linalg.solve(A, B) == A.inv() @ B
+
+    It is always prefered to use :func:`~solve` when possible, as it is faster and more
+    numerically stable than computing the inverse explicitly.
+
 .. seealso::
 
         :func:`torch.linalg.pinv` computes the pseudoinverse (Moore-Penrose inverse) of matrices
         of any shape.
 
-        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
-
-        It is always prefered to use :func:`torch.linalg.solve` when possible, as it is
-        faster and more stable than computing the inverse and then multiplying.
+        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a
+        numerically stable algorithm.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
@@ -825,14 +832,19 @@ If :attr:`n`\ `= 0`, it returns the identity matrix (or batch) of the same shape
 as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
 (if invertible) raised to the power of `abs(n)`.
 
+.. note::
+    Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
+    a negative power as, if :attr:`n`\ `> 0`::
+
+        matrix_power(torch.linalg.solve(A, B), n) == matrix_power(A, -n)  @ B
+
+    It is always prefered to use :func:`~solve` when possible, as it is faster and more
+    numerically stable than computing :math:`A^{-n}` explicitly.
+
 .. seealso::
 
-        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
-
-        It is always prefered to use :func:`~matrix_power` with :attr:`n`\ `> 0` followed
-        by :func:`torch.linalg.solve` when possible, rather than
-        :func:`~matrix_power` with :attr:`n`\ `< 0`. The former method is
-        faster and more stable than computing :math:`A^{-n}` explicitly.
+        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a
+        numerically stable algorithm.
 
 Args:
     A (Tensor): tensor of shape `(*, m, m)` where `*` is zero or more batch dimensions.
@@ -1542,14 +1554,27 @@ that are below the specified :attr:`rcond` threshold are treated as zero and dis
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
           For CUDA inputs, this function synchronizes that device with the CPU.
 
+.. note::
+    Consider using :func:`torch.linalg.lstsq` if possible for multiplying a matrix on the left by
+    the the pseudoinverse, as::
+
+        torch.linalg.lstsq(A, B).solution == A.pinv() @ B
+
+    It is always prefered to use :func:`~lstsq` when possible, as it is faster and more
+    numerically stable than computing the pseudoinverse explicitly.
+
+.. warning::
+    This function uses internally :func:`torch.linalg.svd` (or :func:`torch.linalg.eigh`
+    when :attr:`hermitian`\ `= True`), so its derivative has the same problems as those of these
+    functions. See the warnings in :func:`torch.linalg.svd` and :func:`torch.linalg.eigh` for
+    more details.
+
 .. seealso::
 
         :func:`torch.linalg.inv` computes the inverse of a square matrix.
 
-        :func:`torch.linalg.lstsq` computes :attr:`A`\ `.pinv() @ \ `:attr:`B` with a stable algorithm.
-
-        It is always prefered to use :func:`torch.linalg.lstsq` when possible, as it is
-        faster and more stable than computing the pseudoinverse and then multiplying.
+        :func:`torch.linalg.lstsq` computes :attr:`A`\ `.pinv() @ \ `:attr:`B` with a
+        numerically stable algorithm.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -1729,14 +1754,19 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
           this function computes the (multiplicative) inverse of :attr:`A`
           (see :func:`torch.linalg.inv`).
 
+.. note::
+    Consider using :func:`torch.linalg.tensorsolve` if possible for multiplying a tensor on the left
+    by the tensor inverse, as::
+
+        tensorsolve(A, B) == torch.tensordot(tensorinv(A), B)
+
+    It is always prefered to use :func:`~tensorsolve` when possible, as it is faster and more
+    numerically stable than computing the pseudoinverse explicitly.
+
 .. seealso::
 
         :func:`torch.linalg.tensorsolve` computes
         `torch.tensordot(tensorinv(\ `:attr:`A`\ `), \ `:attr:`B`\ `)`.
-
-        It is always prefered to use :func:`~tensorsolve` when possible, as it is
-        faster and more stable than using
-        :func:`~tensorinv` followed by :func:`torch.tensordot`.
 
 Args:
     A (Tensor): tensor to invert. Its shape must satisfy
