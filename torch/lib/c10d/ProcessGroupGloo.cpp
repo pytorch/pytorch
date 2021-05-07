@@ -453,9 +453,6 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> CreateFutureForOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
-  // if (outputTensors_.size() == 0) {
-  //   return c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::create());
-  // }
   if (outputTensors.size() > 1) {
     return c10::make_intrusive<c10::ivalue::Future>(
         c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
