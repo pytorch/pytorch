@@ -2,7 +2,7 @@
 #include <c10/util/Exception.h>
 
 namespace c10 {
-class DelegatedBackendRuntimeException : public c10::Error {
+class C10_API DelegatedBackendRuntimeException : public c10::Error {
  public:
   // Use debug_handle to throw exception
   DelegatedBackendRuntimeException(
