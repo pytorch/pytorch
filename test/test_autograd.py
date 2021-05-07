@@ -7125,14 +7125,13 @@ class TestAutogradForwardMode(TestCase):
             self.assertIsNone(gfoo)
             self.assertEqual(gbar, torch.ones_like(bar))
 
-            # Check that forward gradients are not impacted by detach
+            # Check that forward gradients are impacted by detach()
             detached_dual = dual.detach()
             out = detached_dual * 2
             p, t = fwAD.unpack_dual(out)
             self.assertFalse(p.requires_grad)
-            self.assertFalse(t.requires_grad)
             self.assertEqual(p, foo * 2)
-            self.assertEqual(t, bar * 2)
+            self.assertIsNone(t)
 
             # Check that forward gradients are not impacted by no_grad
             with torch.no_grad():
@@ -7149,9 +7148,8 @@ class TestAutogradForwardMode(TestCase):
             out = dual * 2
             p, t = fwAD.unpack_dual(out)
             self.assertFalse(p.requires_grad)
-            self.assertFalse(t.requires_grad)
             self.assertEqual(p, foo * 2)
-            self.assertEqual(t, bar * 2)
+            self.assertIsNone(t)
 
     def test_view_inplace_non_differentiable_views(self):
         original_foo = torch.rand(2, dtype=torch.double)
@@ -7228,11 +7226,11 @@ class TestAutogradForwardMode(TestCase):
             # Unused values get a gradient of 0
             self.assertEqual(fwAD.unpack_dual(baz)[1][1], 0.)
 
-            # Check that backward non-differentiable views don't prevent gradient update
+            # Check that forward non-differentiable views do prevent gradient update
             baz = torch.rand(2)
             view = baz.detach()
             view += dual
-            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+            self.assertIsNone(fwAD.unpack_dual(baz)[1])
 
     def test_grad_cleanup(self):
         foo = torch.rand(2)
@@ -7255,6 +7253,16 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(dual_primal, new_dual_primal)
             self.assertIsNone(dual_tangent)
             self.assertEqual(new_dual_tangent, baz)
+
+    def test_detach_view_tracking(self):
+        # Default detach is both forward and backward non-differentiable
+        foo = torch.rand(2)
+        foo_weak = torch._C._WeakTensorRef(foo)
+
+        out = foo.detach()
+
+        del foo
+        self.assertTrue(foo_weak.expired())
 
 
 # Generic device type autograd tests.
