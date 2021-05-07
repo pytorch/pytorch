@@ -95,8 +95,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
-DType = Any  # torch.float, torch.quint8, etc
-
 # ------------------------
 # Helper Functions
 # ------------------------
@@ -422,6 +420,11 @@ def get_standalone_module_configs_rewrite(
     prepare_custom_config_dict: Dict[str, Any],
     qconfig: QConfigAny,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Returns the standalone module qconfig_dict and prepare_config_dict
+    for `node`, assuming that the module pointed to by `node` is
+    a standalone modules.
+    """
     standalone_module = modules[node.target]  # type: ignore[index]
     standalone_module_name_configs = \
         prepare_custom_config_dict.get("standalone_module_name", [])
@@ -443,6 +446,10 @@ def insert_observer_rewrite(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
 ) -> Node:
+    """
+    Attaches `observer` to `model`, and creates a node which calls
+    `observer` on the output of `node`.
+    """
     model_device = assert_and_get_unique_device(model)
     if model_device:
         observer.to(model_device)
@@ -465,7 +472,7 @@ def get_target_dtype_for_node_rewrite(
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
     qhandler: Optional[QuantizeHandler],
-) -> DType:
+) -> torch.dtype:
     """
     Returns the expected dtype of the input and output of this node after
     convert.
@@ -504,17 +511,6 @@ def get_target_dtype_for_node_rewrite(
     else:
         raise AssertionError(f'need to handle {node.format_node()}')
 
-# TODO(before land): reuse with NS instead of copy-pasta
-def getattr_from_fqn(gm: torch.nn.Module, fqn: str) -> Any:
-    """
-    Given a gm and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
-    """
-    fqn_parts = fqn.split(".")
-    cur_val = gm
-    for part in fqn_parts:
-        cur_val = getattr(cur_val, part)
-    return cur_val
-
 def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     node: Union[Node, Any],
     arg: Argument,
@@ -528,6 +524,10 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> Argument:
+    """
+    Given a `node` and an `arg`, inserts an input observer between
+    `node` and `arg` if necessary.
+    """
     # TODO(before land): docblock
     # print('checking', node, arg)
 
@@ -583,7 +583,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             (arg_dtype != torch.bool) and
             (is_activation and activation_is_statically_quantized(qconfig))
         )
-        # print(1, weight_needs_obs, 2, bias_needs_obs, 3, dtype_changes_and_second_dtype_not_float)
 
         needs_obs = (
             weight_needs_obs or
@@ -597,8 +596,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             get_standalone_module_configs_rewrite(
                 node, modules, prepare_custom_config_dict, qconfig)
 
-        # print('sm', sm_prepare_config_dict)
-        sm_input_quantized_idxs = sm_prepare_config_dict.get('input_quantized_idxs', [])
+        sm_input_quantized_idxs = \
+            sm_prepare_config_dict.get('input_quantized_idxs', [])
         # for args, this is set to the index of the current arg
         # for kwargs, this is left at None
         cur_input_idx = None
@@ -628,10 +627,9 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
         # of the correct type already exists. If it does, use it.
         # This prevents duplicate observer insertions if a node is
         # used by multiple nodes.
-
         for maybe_obs_node, _ in arg_this_env.users.items():
             if maybe_obs_node.op == 'call_module':
-                maybe_obs_mod = getattr_from_fqn(model, maybe_obs_node.target)
+                maybe_obs_mod = modules[maybe_obs_node.target]
                 if (
                     type(maybe_obs_mod) == type(new_obs_mod) and
                     node_name_to_target_dtype[maybe_obs_node.name] == node_dtype
@@ -644,7 +642,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
                 arg_this_env, new_obs_mod, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs_node.name] = node_dtype
-            # new_obs.dtype = node.dtype
             # override this arg to be the observed arg
             new_arg = new_obs_node
         else:
@@ -725,8 +722,6 @@ def maybe_insert_output_observer_for_node_rewrite(
         is_standalone_module = qhandler is not None and \
             isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
-        # after this point, all the observers up to this node are correct
-        # if needed by this node, also insert an observer for the output
         should_insert_observer = \
             qhandler.should_insert_observer_for_output(
                 qconfig, model.training)
@@ -776,11 +771,15 @@ def maybe_insert_output_observer_for_node_rewrite(
 
 def maybe_propagate_dtype_for_node_rewrite(
     node: Node,
-    target_dtype: DType,
-    node_name_to_target_dtype: Dict[str, DType],
+    target_dtype: torch.dtype,
+    node_name_to_target_dtype: Dict[str, torch.dtype],
     matches: Dict[str, MatchResult],
 ) -> None:
-    # TODO(before land): docblock
+    """
+    Assigns `target_dtype` to `node`. If `node` is matched to an instance
+    of `CopyNodeQuantizeHandler`, also call this function recursively on
+    the first argument, to propagate the dtype to the caller.
+    """
     node_name_to_target_dtype[node.name] = target_dtype
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
@@ -793,10 +792,19 @@ def maybe_propagate_dtype_for_node_rewrite(
 
 def propagate_dtypes_for_known_nodes_rewrite(
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, DType],
+    node_name_to_target_dtype: Dict[str, torch.dtype],
     matches: Dict[str, MatchResult],
 ) -> None:
-    # TODO(before land): docblock
+    """
+    Currently we assume that inputs to the graph are either `torch.float` or
+    `torch.quint8`, which is not always correct. For ops such as
+    `x.masked_fill(mask, value)`, we know that the dtype of  `mask` is a
+    `BoolTensor`. Propagate this information throughout the graph.
+
+    Note: not all dtypes in the graph will be correct after this pass, but a
+    higher percentage of them will be correct. Hopefully in the future we can
+    replace this with a better way to reason about dtypes of tensors.
+    """
     for node in graph.nodes:
         bool_arg_idxs = node_bool_tensor_arg_indexes(node)
         for bool_arg_idx in bool_arg_idxs:
@@ -809,7 +817,19 @@ def adjust_observers_for_cat_rewrite(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
 ) -> None:
-    # TODO(before land): docblock
+    """
+    Ensures that for quantized `torch.cat` nodes, we share an observer
+    for all input arguments as well as the output argument. In detail, given
+    a graph of
+
+      x0 -> obs0 -> cat -> x2
+                  /
+      x1 -> obs1 /
+
+    where node obs0 points to observer instance observer0,
+    obs1 points to observer1 and obs2 points to observer2, we make nodes obs1
+    and ob2 point to observer0.
+    """
     # find the observer module to use
     first_arg = node.args[0]
     assert isinstance(first_arg, (list, tuple))
@@ -828,7 +848,7 @@ def adjust_observers_for_cat_rewrite(
     assert isinstance(first_arg_arg, Node)
     target_to_use = first_arg_arg.target
     assert isinstance(target_to_use, str)
-    obs_mod_to_use = getattr_from_fqn(model, target_to_use)
+    obs_mod_to_use = modules[target_to_use]
 
     # set all other input observer nodes to use that module
     for input_idx, input_arg in enumerate(first_arg):
@@ -850,7 +870,7 @@ def adjust_observers_for_cat_rewrite(
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
 
-    # TODO(before land): delete the orphaned observer modules
+    # TODO(future PR): delete the orphaned observer modules
 
 def insert_observers_for_model_rewrite(
         model: GraphModule,
@@ -863,7 +883,6 @@ def insert_observers_for_model_rewrite(
         output_quantized_idxs: List[int]) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
-
 
     For each node in the graph:
       1. determine the target dtype of this node in the quantized graph, and save
@@ -950,12 +969,10 @@ def insert_observers_for_model_rewrite(
             pass
 
         elif new_node.op in ('call_module', 'call_method', 'call_function', 'output'):
-            # TODO(before land): fix the modules hack
             modules = dict(model.named_modules(remove_duplicate=False))
             args_have_no_tensors = \
                 all_node_args_have_no_tensors(
                     new_node, modules, cache_for_no_tensor_check)
-            # TODO(before land): decide whether we need to handle this better
             is_getitem = new_node.op == 'call_function' and \
                 new_node.target == operator.getitem
 
@@ -1050,7 +1067,6 @@ def run_prepare_fx_on_standalone_modules_rewrite(
     not modify the graph, it just replaces the unobserved modules with
     their observed versions.
     """
-
     for (
         node_name,
         (root_node, matched_nodes, pattern, qhandler, qconfig),
