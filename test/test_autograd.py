@@ -4261,41 +4261,32 @@ class TestAutograd(TestCase):
 
         err_msg = "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"
 
-        # Test for all inputs and outputs being real
-        x = torch.rand(2, dtype=torch.double, requires_grad=True)
-        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+        for fast_mode in [True, False]:
+            # Test for all inputs and outputs being real
+            x = torch.rand(2, dtype=torch.double, requires_grad=True)
+            y = torch.rand(2, dtype=torch.double, requires_grad=True)
 
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
+            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
-        def basic_mul(x):
-            return torch.view_as_real(x * 1j)
-        gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=False)
-        gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=True)
+            def basic_mul(x):
+                return torch.view_as_real(x * 1j)
+            gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=fast_mode)
 
-        # Test for one input and one output being complex
-        x = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+            # Test for one input and one output being complex
+            x = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
 
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
+            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
-        # Test for all inputs and outputs being complex
-        y = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+            # Test for all inputs and outputs being complex
+            y = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
 
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=False)
-        gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=True)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=False)
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=True)
+            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
