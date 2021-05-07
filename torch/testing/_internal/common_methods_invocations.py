@@ -1821,7 +1821,6 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
         det = A.det()
         if sign is not None:
             if A.dim() == 2:
-                det = det.item()
                 if (det < 0) ^ (sign < 0):
                     A[0, :].neg_()
             else:
