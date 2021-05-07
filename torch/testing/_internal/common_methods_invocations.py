@@ -1080,7 +1080,9 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
 
     samples = []
     for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-        for p in [0, 1, 2, 3, 0.5, 1.5, 2.5, float("inf")]:
+        # FIXME add an override for JIT and revert 0. back to 0
+        # since it's accepted by eager
+        for p in [0., 1., 2., 3, 0.5, 1.5, 2.5, float("inf")]:
             for t1_size, t2_size in test_cases:
                 # The args should never be non-contiguous as this is not supported in the backward
                 samples.append(SampleInput(
@@ -4732,6 +4734,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('nn.functional.hardswish',
+           aten_name="hardswish",
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
