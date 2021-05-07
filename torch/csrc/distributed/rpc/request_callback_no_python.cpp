@@ -173,6 +173,48 @@ void RequestCallbackNoPython::processPythonRemoteCall(
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
+void RequestCallbackNoPython::assignOwnerRRef(
+    const RRefId& rrefId,
+    const RRefId& forkId,
+    c10::intrusive_ptr<JitFuture> valueFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
+  auto& ctx = RRefContext::getInstance();
+
+  c10::intrusive_ptr<OwnerRRef> ownerRRef;
+  if (rrefId == forkId) {
+    // Creating an owner RRef on self, should already exist in owners map
+    ownerRRef =
+        fromRRefInterface(ctx.getOwnerRRef(rrefId, /* forceCreated */ true)
+                              ->constValue()
+                              .toRRef());
+  } else {
+    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, valueFuture->elementType());
+    // Caller is a user and callee is the owner, add fork
+    //
+    // NB: rrefId == forkId is true if and only if calling remote to self.
+    // In that case both the caller and the callee will access the
+    // OwnerRRef. Hence, on the callee side (here), it should not call
+    // addForkOfOwner as it is not a fork. To allow callee to distinguish
+    // when this request is sent to self, the caller will set forkId using
+    // rrefId (OwnerRRef does not have a forkId anyway).
+    ctx.addForkOfOwner(rrefId, forkId);
+  }
+
+  valueFuture->addCallback(
+      [ownerRRef, rrefId, forkId, responseFuture, lsctx = std::move(lsctx)](
+          JitFuture& future) {
+        if (future.hasError()) {
+          ownerRRef->setError(future.exception_ptr());
+        } else {
+          ownerRRef->recordAllStreams(lsctx);
+          ownerRRef->setValue(future.value());
+        }
+        responseFuture->markCompleted(c10::make_intrusive<Message>(
+            RemoteRet(rrefId, forkId).toMessage()));
+      });
+}
+
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
     std::vector<at::IValue>& stack) const {
@@ -186,53 +228,15 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
     const std::function<void(Message)>& markComplete,
     const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
-  auto rrefId = scriptRemoteCall.retRRefId();
-  auto forkId = scriptRemoteCall.retForkId();
-  auto& ctx = RRefContext::getInstance();
-
-  auto postProcessing = [rrefId, forkId, responseFuture]() {
-    if (rrefId != forkId) {
-      // Caller is a user and callee is the owner, add fork
-      //
-      // NB: rrefId == forkId is true if and only if calling remote to
-      // self. In that case both the caller and the callee will access
-      // the OwnerRRef. Hence, on the callee side (here), it should not
-      // call addForkOfOwner as it is not a fork. To allow callee to
-      // distinguish when this request is sent to self, the caller will
-      // set forkId using rrefId (OwnerRRef does not have a forkId
-      // anyway).
-      RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
-    }
-    Message m = RemoteRet(rrefId, forkId).toMessage();
-    responseFuture->markCompleted(
-        IValue(c10::make_intrusive<Message>(std::move(m))));
-  };
-
   auto& stack = scriptRemoteCall.stackRef();
   auto jitFuture = processScriptRemoteCall(scriptRemoteCall, stack);
 
-  // scriptRemoteCall is only alive within this block, use reference to
-  // avoid copy. If the underlying code runs with a continuation, runAsync()
-  // below will std::move the appropriate portion of the stack.
-  c10::intrusive_ptr<OwnerRRef> ownerRRef;
-  if (rrefId == forkId) {
-    // Creating an owner RRef on self, should already exist in owners map
-    ownerRRef =
-        fromRRefInterface(ctx.getOwnerRRef(rrefId, /* forceCreated */ true)
-                              ->constValue()
-                              .toRRef());
-  } else {
-    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, jitFuture->elementType());
-  }
-
-  jitFuture->addCallback([postProcessing, ownerRRef](JitFuture& future) {
-    if (future.hasError()) {
-      ownerRRef->setError(future.exception_ptr());
-    } else {
-      ownerRRef->setValue(future.value());
-    }
-    postProcessing();
-  });
+  assignOwnerRRef(
+      scriptRemoteCall.retRRefId(),
+      scriptRemoteCall.retForkId(),
+      std::move(jitFuture),
+      responseFuture,
+      /*lsctx=*/nullptr);
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
