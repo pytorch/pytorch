@@ -520,27 +520,21 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
-      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
       futureResponse->addCallback(
-          [this,
-           fromId,
-           requestId,
-           weak = std::weak_ptr<JitFuture>(futureResponse)]() {
-            auto futureResponse = weak.lock();
-            TORCH_INTERNAL_ASSERT(futureResponse);
+          [this, fromId, requestId](JitFuture& futureResponse) {
             --serverActiveCalls_;
             --serverActiveAsyncCalls_;
-            if (!futureResponse->hasError()) {
+            if (!futureResponse.hasError()) {
               send(
                   getWorkerInfo(fromId),
-                  std::move(*futureResponse->value().toCustomClass<Message>()));
+                  std::move(*futureResponse.value().toCustomClass<Message>()));
             } else {
               send(
                   getWorkerInfo(fromId),
                   createExceptionResponse(
-                      futureResponse->tryRetrieveErrorMessage(), requestId));
+                      futureResponse.tryRetrieveErrorMessage(), requestId));
             }
           });
     }

@@ -734,7 +734,7 @@ void TensorPipeAgent::pipeWrite(
 
 void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::shared_ptr<JitFuture>& futureResponseMessage,
+    JitFuture& futureResponseMessage,
     uint64_t messageId,
     std::shared_ptr<LazyStreamContext> ctx) {
   if (!rpcAgentRunning_.load()) {
@@ -748,9 +748,9 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << " is sending response to request #" << messageId << " to "
           << pipe->getRemoteName();
 
-  if (!futureResponseMessage->hasError()) {
+  if (!futureResponseMessage.hasError()) {
     Message&& responseMessage =
-        std::move(*futureResponseMessage->value().toCustomClass<Message>());
+        std::move(*futureResponseMessage.value().toCustomClass<Message>());
     responseMessage.setId(messageId);
 
     std::vector<c10::Device> devices;
@@ -809,7 +809,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(
-            futureResponseMessage->tryRetrieveErrorMessage(), messageId),
+            futureResponseMessage.tryRetrieveErrorMessage(), messageId),
         /* devices */ {},
         std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
@@ -889,20 +889,18 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           if (futureResponseMessage->completed()) {
             decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
-                pipe, futureResponseMessage, messageId, std::move(ctx));
+                pipe, *futureResponseMessage, messageId, std::move(ctx));
           } else {
             // Not complete yet
             increaseCallCount(serverActiveAsyncCalls_);
-            futureResponseMessage->addCallback([this,
-                                                pipe,
-                                                futureResponseMessage,
-                                                messageId,
-                                                ctx{std::move(ctx)}]() mutable {
-              decreaseCallCount(serverActiveCalls_);
-              decreaseCallCount(serverActiveAsyncCalls_);
-              sendCompletedResponseMessage(
-                  pipe, futureResponseMessage, messageId, std::move(ctx));
-            });
+            futureResponseMessage->addCallback(
+                [this, pipe, messageId, ctx{std::move(ctx)}](
+                    JitFuture& futureResponseMessage) mutable {
+                  decreaseCallCount(serverActiveCalls_);
+                  decreaseCallCount(serverActiveAsyncCalls_);
+                  sendCompletedResponseMessage(
+                      pipe, futureResponseMessage, messageId, std::move(ctx));
+                });
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
@@ -973,11 +971,12 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
         requestMessage.tensors(), deviceMap, clientPipe.pipe_->getRemoteName());
   }
 
-  futureResponseMessage->jitFuture->addCallback([this]() {
-    TORCH_INTERNAL_ASSERT(
-        this->threadPool_.inThreadPool(),
-        "Future marked complete from outside the thread pool");
-  });
+  futureResponseMessage->jitFuture->addCallback(
+      [this](JitFuture& /* unused */) {
+        TORCH_INTERNAL_ASSERT(
+            this->threadPool_.inThreadPool(),
+            "Future marked complete from outside the thread pool");
+      });
 
   increaseCallCount(clientActiveCalls_);
   // Use the default RPC timeout if no timeout is specified for this send call

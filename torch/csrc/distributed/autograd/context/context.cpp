@@ -124,21 +124,19 @@ void DistAutogradContext::resetGraphTask() {
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::JitFuture>& jitFuture) {
-  std::weak_ptr<rpc::JitFuture> wp = jitFuture;
-  jitFuture->addCallback([this, wp]() {
-    auto future = wp.lock();
-    if (future->hasError()) {
+  jitFuture->addCallback([this](rpc::JitFuture& future) {
+    if (future.hasError()) {
       // If we have an error, let the local autograd engine know about it.
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
-          graphTask_->future_result_->setErrorIfNeeded(future->exception_ptr());
+          graphTask_->future_result_->setErrorIfNeeded(future.exception_ptr());
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
-                     << future->tryRetrieveErrorMessage();
+                     << future.tryRetrieveErrorMessage();
       }
     }
   });
@@ -171,10 +169,8 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
     state->future->markCompleted(c10::IValue());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      std::weak_ptr<rpc::JitFuture> wp = rpc;
-      rpc->addCallback([state, wp]() {
-        auto future = wp.lock();
-        if (future->hasError()) {
+      rpc->addCallback([state](rpc::JitFuture& future) {
+        if (future.hasError()) {
           // If there's an error, we want to setError() on the future,
           // unless another error has already been sent - use a CAS to
           // guard.
@@ -186,7 +182,7 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
           bool expectedAlreadySent = false;
           if (state->alreadySentError.compare_exchange_strong(
                   expectedAlreadySent, true)) {
-            state->future->setError(future->exception_ptr());
+            state->future->setError(future.exception_ptr());
           }
           return;
         }

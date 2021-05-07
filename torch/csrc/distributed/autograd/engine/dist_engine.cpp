@@ -395,8 +395,8 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
       std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
   futureGrads->addCallback(
-      [autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
-        if (futureGrads->hasError()) {
+      [autogradContext, outputEdges, accumulateGradFuture](c10::ivalue::Future& futureGrads) {
+        if (futureGrads.hasError()) {
           // Don't accumulate gradients if we receive an error.
           // We must add the node information here since DistEngine::execute
           // waits on accumulateGradFuture and will throw an exception once we
@@ -405,7 +405,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
               "Error on Node ",
               DistAutogradContainer::getInstance().getWorkerId(),
               ": ",
-              futureGrads->tryRetrieveErrorMessage());
+              futureGrads.tryRetrieveErrorMessage());
           accumulateGradFuture->setError(std::make_exception_ptr(
               c10::ivalue::Future::FutureError(std::move(errorMsg))));
           return;
@@ -413,7 +413,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
 
         try {
           const variable_list& grads =
-              futureGrads->constValue().toTensorVector();
+              futureGrads.constValue().toTensorVector();
           TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
           accumulateGradFuture->markCompleted(c10::IValue());
         } catch (std::exception& e) {
@@ -474,22 +474,21 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
         std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
     accumulateGradFuture->addCallback([autogradContext,
-                                       callbackFuture,
-                                       accumulateGradFuture]() {
+                                       callbackFuture](c10::ivalue::Future& accumulateGradFuture) {
       try {
-        if (accumulateGradFuture->hasError()) {
+        if (accumulateGradFuture.hasError()) {
           // Perform cleanup at the end of the backward pass (before we mark
           // the future as completed).
           DistEngine::getInstance().cleanupBackwardPass(autogradContext);
 
           // Skip any further processing on errors.
-          callbackFuture->setError(accumulateGradFuture->exception_ptr());
+          callbackFuture->setError(accumulateGradFuture.exception_ptr());
           return;
         }
 
         // Wait for all RPCs after the autograd engine is done.
         auto rpcFuture = autogradContext->clearAndWaitForOutstandingRpcsAsync();
-        rpcFuture->addCallback([callbackFuture, autogradContext, rpcFuture]() {
+        rpcFuture->addCallback([callbackFuture, autogradContext](c10::ivalue::Future& rpcFuture) {
           try {
             // Perform cleanup at the end of the backward pass (before
             // we mark the future as completed).
@@ -500,10 +499,10 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           }
 
           // Finally mark the 'uber' future as completed.
-          if (!rpcFuture->hasError()) {
+          if (!rpcFuture.hasError()) {
             callbackFuture->markCompleted(c10::IValue());
           } else {
-            callbackFuture->setError(rpcFuture->exception_ptr());
+            callbackFuture->setError(rpcFuture.exception_ptr());
           }
         });
       } catch (std::exception& e) {
