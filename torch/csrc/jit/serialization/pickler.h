@@ -23,7 +23,9 @@ struct tensor_value_hash {
 
 struct tensor_value_equal {
   bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-    return a.equal(b);
+    at::IValue iv_a(a);
+    at::IValue iv_b(b);
+    return at::IValue::hash(iv_a) == at::IValue::hash(iv_b);
   }
 };
 
