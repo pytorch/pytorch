@@ -607,12 +607,12 @@ TEST_F(Kernel, CatWoConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getCatWoConditionals() = false;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, OptimizeConditionals) {
   getOptConditionals() = true;
-  getCatWoConditionals() = false;
   const auto graph_string = R"IR(
       graph(%a : Float(5, 3, strides=[3, 1], device=cpu),
             %b : Float(5, 7, strides=[7, 1], device=cpu),
@@ -670,6 +670,7 @@ TEST_F(Kernel, OptimizeConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getOptConditionals() = false;
 }
 
 namespace {
