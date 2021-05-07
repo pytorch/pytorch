@@ -33,8 +33,9 @@ struct TORCH_API MutationRemover {
 
   bool inplaceOpVariant(Node* n);
 
+  static bool hasNoSideEffectOrAlias(Value* v, AliasDb* aliasDb);
+
  private:
-  bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
   bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(

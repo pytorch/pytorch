@@ -11,7 +11,7 @@ bool MutationRemover::removeTensorMutation() {
   return RemoveTensorMutation(graph_->block());
 }
 
-bool MutationRemover::newMemoryLocation(Value* v) {
+bool MutationRemover::hasNoSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
   // bail on nodes with side effects, blocks, or graph / graph inputs
   Node* n = v->node();
   bool unhandled_node = n->blocks().size() != 0 ||
@@ -20,8 +20,7 @@ bool MutationRemover::newMemoryLocation(Value* v) {
 
   // if the output isn't contained or alias by the inputs to its node, it's
   // unique
-  return !unhandled_node &&
-      !getOrCreateAliasDb()->mayContainAlias(v->node()->inputs(), v) &&
+  return !unhandled_node && !aliasDb->mayContainAlias(v->node()->inputs(), v) &&
       !(v->node()->kind() == prim::Param);
 }
 
@@ -81,7 +80,7 @@ bool MutationRemover::tryMakeCreationAndMutationAtomic(
   // We can only remove mutation to values that are unique aliases in the
   // graph. if x = y[0] or y = self.y, then removing the mutation could
   // change observable semantics
-  if (!newMemoryLocation(mutated_value)) {
+  if (!hasNoSideEffectOrAlias(mutated_value, getOrCreateAliasDb())) {
     return false;
   }
 
@@ -116,7 +115,8 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
     return false;
   }
 
-  if (!newMemoryLocation(true_value) || !newMemoryLocation(false_value)) {
+  if (!hasNoSideEffectOrAlias(true_value, getOrCreateAliasDb()) ||
+      !hasNoSideEffectOrAlias(false_value, getOrCreateAliasDb())) {
     return false;
   }
 

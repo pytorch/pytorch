@@ -10,6 +10,9 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
+
 // Default RPC timeout
 constexpr float kDefaultRpcTimeoutSeconds = 60;
 // Unset RPC timeout. This is the value agent::send() will have if user does not
@@ -108,7 +111,7 @@ struct TORCH_API RpcRetryInfo {
   RpcRetryInfo(
       const WorkerInfo& to,
       Message&& message,
-      std::shared_ptr<JitFuture> originalFuture,
+      c10::intrusive_ptr<JitFuture> originalFuture,
       int retryCount,
       RpcRetryOptions options)
       : to_(to),
@@ -120,7 +123,7 @@ struct TORCH_API RpcRetryInfo {
   const WorkerInfo& to_;
   Message message_;
   // Future that is returned to the caller of sendWithRetries().
-  std::shared_ptr<JitFuture> originalFuture_;
+  c10::intrusive_ptr<JitFuture> originalFuture_;
   // Number of send attempts completed so far.
   int retryCount_;
   RpcRetryOptions options_;
@@ -160,7 +163,7 @@ class TORCH_API RpcAgent {
   // If ``message.isRequest()`` is true, the ``JitFuture`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
-  virtual std::shared_ptr<JitFuture> send(
+  virtual c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
@@ -178,7 +181,7 @@ class TORCH_API RpcAgent {
   // executing a method twice on the remote end (it does not guarantee
   // exactly-once semantics). Therefore, the user must ensure their requests
   // are idempotent.
-  std::shared_ptr<JitFuture> sendWithRetries(
+  c10::intrusive_ptr<JitFuture> sendWithRetries(
       const WorkerInfo& to,
       Message&& message,
       RpcRetryOptions retryOptions = RpcRetryOptions());
@@ -264,8 +267,10 @@ class TORCH_API RpcAgent {
   std::shared_ptr<TypeResolver> getTypeResolver();
 
   // Retrieves the device map for the provided destination worker.
-  virtual std::unordered_map<c10::Device, c10::Device> getDeviceMap(
-      const WorkerInfo& dst) const;
+  virtual DeviceMap getDeviceMap(const WorkerInfo& dst) const;
+
+  // Retrieve the (non-CPU) devices that are supported by the agent.
+  virtual const std::vector<c10::Device>& getDevices() const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -313,7 +318,7 @@ class TORCH_API RpcAgent {
   // error and do not retry again. In case 3, we move the RpcRetryInfo struct
   // to another time point in the map to schedule the RPC for a future send.
   void rpcRetryCallback(
-      const std::shared_ptr<JitFuture>& message,
+      JitFuture& message,
       steady_clock_time_point newTime,
       std::shared_ptr<RpcRetryInfo> earliestRpc);
 
