@@ -123,7 +123,7 @@ void DistAutogradContext::resetGraphTask() {
 }
 
 void DistAutogradContext::addOutstandingRpc(
-    const std::shared_ptr<rpc::JitFuture>& jitFuture) {
+    const c10::intrusive_ptr<rpc::JitFuture>& jitFuture) {
   jitFuture->addCallback([this](rpc::JitFuture& future) {
     if (future.hasError()) {
       // If we have an error, let the local autograd engine know about it.
@@ -149,7 +149,7 @@ void DistAutogradContext::clearOutstandingRpcs() {
   outStandingRpcs_.clear();
 }
 
-std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
+c10::intrusive_ptr<c10::ivalue::Future> DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
@@ -158,9 +158,9 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
   struct State {
     explicit State(int32_t count)
         : future(
-              std::make_shared<c10::ivalue::Future>(c10::NoneType::get())),
+              c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get())),
           remaining(count) {}
-    std::shared_ptr<c10::ivalue::Future> future;
+    c10::intrusive_ptr<c10::ivalue::Future> future;
     std::atomic<int32_t> remaining;
     std::atomic<bool> alreadySentError{false};
   };

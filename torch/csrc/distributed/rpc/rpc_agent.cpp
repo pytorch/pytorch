@@ -48,7 +48,7 @@ void RpcAgent::shutdown() {
   shutdownImpl();
 }
 
-std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
+c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
     const WorkerInfo& to,
     Message&& message,
     RpcRetryOptions retryOptions) {
@@ -61,7 +61,7 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       "rpcRetryDuration cannot be negative.");
 
   auto originalFuture =
-      std::make_shared<JitFuture>(at::AnyClassType::get(), getDevices());
+      c10::make_intrusive<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
   // Making a copy of the message so it can be retried after the first send.
@@ -83,10 +83,11 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
 void RpcAgent::retryExpiredRpcs() {
   // Stores the retried futures so callbacks can be added outside the lock.
   std::vector<
-      std::pair<std::shared_ptr<JitFuture>, std::shared_ptr<RpcRetryInfo>>>
+      std::pair<c10::intrusive_ptr<JitFuture>, std::shared_ptr<RpcRetryInfo>>>
       futures;
   // Stores futures and exception messages for non-retriable error-ed futures.
-  std::vector<std::pair<std::shared_ptr<JitFuture>, std::string>> errorFutures;
+  std::vector<std::pair<c10::intrusive_ptr<JitFuture>, std::string>>
+      errorFutures;
 
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(rpcRetryMutex_);
@@ -123,7 +124,7 @@ void RpcAgent::retryExpiredRpcs() {
       auto& earliestRpc = *it;
       // Making a copy of the message so it can be retried in the future.
       Message msgCopy = earliestRpc->message_;
-      std::shared_ptr<JitFuture> jitFuture;
+      c10::intrusive_ptr<JitFuture> jitFuture;
 
       // send() will throw an exception if an RPC is retried while the agent is
       // shutdown. We must catch this exception and mark the original future
