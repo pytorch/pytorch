@@ -88,8 +88,9 @@ void DistAutogradContext::accumulateGrad(
   // we directly call AccumulateGrad::accumulateGrad, and skip the
   // CUDA stream restoration from autograd function. Hence, we manually
   // call it here to get the streams correct.
-  auto forward_stream = torch::autograd::impl::grad_accumulator(variable)
-                            -> stream(c10::DeviceType::CUDA);
+  auto forward_stream =
+      torch::autograd::impl::grad_accumulator(variable)->stream(
+          c10::DeviceType::CUDA);
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
@@ -189,8 +190,7 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
 
   struct State {
     explicit State(int32_t count)
-        : future(
-              std::make_shared<c10::ivalue::Future>(c10::NoneType::get())),
+        : future(std::make_shared<c10::ivalue::Future>(c10::NoneType::get())),
           remaining(count) {}
     std::shared_ptr<c10::ivalue::Future> future;
     std::atomic<int32_t> remaining;
