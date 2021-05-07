@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import enum
+import unittest
 from typing import Tuple
 
 import torch
@@ -28,6 +29,16 @@ def remote_device(module_rref):
 # RPC handler for querying __dict__ on the destination worker.
 def remote_module_attributes(remote_module):
     return remote_module.__dict__
+
+
+# RPC handler for running forward on the destination worker.
+def remote_forward(remote_module, args):
+    return remote_module.forward(*args)
+
+
+# RPC handler for running forward_async on the destination worker.
+def remote_forward_async(remote_module, args):
+    return remote_module.forward_async(*args)
 
 
 class ModuleCreationMode(enum.Enum):
@@ -392,10 +403,42 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.extra_repr()
 
     @dist_utils.dist_init
-    def test_send_remote_module_over_the_wire(self):
+    def test_send_remote_module_with_a_new_attribute_over_the_wire(self):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        # If add a new attribute is added to this RemoteModule, which will be sent over the wire by RPC,
+        # this new field must be added to either _REMOTE_MODULE_PICKLED_ATTRIBUTES or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
+        # to avoid runtime error.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            new_attr_name = "new_attr"
+            setattr(remote_module, new_attr_name, 1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Attribute ``{}`` of RemoteModule must be either in "
+                "``_REMOTE_MODULE_PICKLED_ATTRIBUTES``  or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``".format(
+                    new_attr_name
+                ),
+            ):
+                rpc.rpc_sync(
+                    dst_worker_name, remote_module_attributes, (remote_module,)
+                )
+
+
+class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
+    @property
+    def world_size(self):  # Override setting in CommonRemoteModuleTest
+        return 3
+
+    @dist_utils.dist_init
+    def test_send_remote_module_over_the_wire(self):
+        if self.rank != 0:
+            return
+        dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
 
         # Unpickled attribtes include both the inherent attributes of RemoteModule
         # (not inherited from the superclass) and two installed methods.
@@ -403,18 +446,77 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         expected_unpickled_attrs.append("forward_async")
         expected_unpickled_attrs.append("forward")
 
-        # Only test Python nn.Module, because script module methods cannot be deepcopied using copy.deepcopy.
+        # Create a remote module on worker1 and then pass it to worker2 over the RPC layer.
         for remote_module in self._create_remote_module_iter(
-            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+            dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR]
         ):
+            # Test querying some simple attributes from worker2.
             attrs = rpc.rpc_sync(
-                dst_worker_name, remote_module_attributes, (remote_module,)
+                dst_worker2_name, remote_module_attributes, (remote_module,)
             )
             self.assertListEqual(list(attrs.keys()), expected_unpickled_attrs)
             self.assertEqual(attrs["on"], "worker1")
             self.assertEqual(attrs["device"], "cpu")
             self.assertFalse(attrs["is_device_map_set"])
             self.assertFalse(attrs["is_scriptable"])
+
+            # Test worker1's forward result initiated by worker2.
+            args = (torch.ones(1), 2, "3")
+            ret = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
+            self.assertEqual(ret, tuple(reversed(args)))
+
+            # Although worker2 can initiate worker1's forward_sync,
+            # cannot pass the result of type future back to worker2 over RPC layer.
+            with self.assertRaisesRegex(
+                RuntimeError, r"Can not pickle torch.futures.Future"
+            ):
+                ret = rpc.rpc_sync(
+                    dst_worker2_name, remote_forward_async, (remote_module, args)
+                )
+
+    @unittest.skip(
+        "Script RemoteModule cannot be sent over RPC at this time. See #33052"
+    )
+    @dist_utils.dist_init
+    def test_send_remote_module_over_the_wire_script(self):
+        if self.rank != 0:
+            return
+        dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
+
+        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # (not inherited from the superclass) and two installed methods.
+        expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
+        expected_unpickled_attrs.append("forward_async")
+        expected_unpickled_attrs.append("forward")
+
+        # Create a remote module on worker1 and then pass it to worker2 over the RPC layer.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+        ):
+            # Test querying some simple attributes from worker2.
+            attrs = rpc.rpc_sync(
+                dst_worker2_name, remote_module_attributes, (remote_module,)
+            )
+            self.assertListEqual(list(attrs.keys()), expected_unpickled_attrs)
+            self.assertEqual(attrs["on"], "worker1")
+            self.assertEqual(attrs["device"], "cpu")
+            self.assertFalse(attrs["is_device_map_set"])
+            self.assertFalse(attrs["is_scriptable"])
+
+            # Test worker1's forward result initiated by worker2.
+            args = (torch.ones(1), 2, "3")
+            ret = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
+            self.assertEqual(ret, tuple(reversed(args)))
+
+            # Although worker2 can initiate worker1's forward_sync,
+            # cannot pass the result of type future back to worker2 over RPC layer.
+            with self.assertRaisesRegex(
+                RuntimeError, r"Can not pickle torch.futures.Future"
+            ):
+                ret = rpc.rpc_sync(
+                    dst_worker2_name, remote_forward_async, (remote_module, args)
+                )
 
 
 class CudaRemoteModuleTest(CommonRemoteModuleTest):

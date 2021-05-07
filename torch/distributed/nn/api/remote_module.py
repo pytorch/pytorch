@@ -42,6 +42,26 @@ _REMOTE_MODULE_PICKLED_ATTRIBUTES = (
     "module_rref",
 )
 
+# These attributes are mostly from RemoteModule's parent class and are not pickled.
+# A new attribute of RemoteModule must be either in _REMOTE_MODULE_PICKLED_ATTRIBUTES
+# or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
+_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
+    "training",
+    "_parameters",
+    "_buffers",
+    "_non_persistent_buffers_set",
+    "_backward_hooks",
+    "_is_full_backward_hook",
+    "_forward_hooks",
+    "_forward_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "_modules",
+    # The two attributes below are generated methods, not available at pickling time.
+    "forward_async",
+    "forward",
+)
+
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
     instantiator.instantiate_scriptable_remote_module_template(
@@ -89,6 +109,10 @@ class _RemoteModule(nn.Module):
         executed on the remote node.
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
+        It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`_,
+        without incurring any overheads of copying the actual module,
+        which is equivalent to an :class:`~torch.distributed.rpc.RRef`
+        pointing to the remote module.
 
         The arguments of ``forward_async`` and ``forward`` are the same as
         the ``forward`` method of the module returned by the ``module_cls``.
@@ -167,7 +191,7 @@ class _RemoteModule(nn.Module):
         super().__init__()
 
         # NOTE: if a new attribute is added to this class, also need to add it
-        # to `_REMOTE_MODULE_PICKLED_ATTRIBUTES` for pickling/Unpickling.
+        # to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` for pickling/unpickling.
 
         # Sanity checks.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
@@ -212,7 +236,9 @@ class _RemoteModule(nn.Module):
             fut.wait()  # Ensure remote_module_cls is available on remote side.
         else:
             self.is_scriptable = False
-            self.generated_methods = _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
+            self.generated_methods = (
+                _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
+            )
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
@@ -253,9 +279,18 @@ class _RemoteModule(nn.Module):
         return self.module_rref
 
     def __getstate__(self):
+        # Only pickle the attributes in _REMOTE_MODULE_PICKLED_ATTRIBUTES,
+        # and check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
         attrs = {}
-        for attr in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
-            attrs[attr] = self.__dict__[attr]
+        for k, v in self.__dict__.items():
+            if k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
+                attrs[k] = v
+            elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
+                raise RuntimeError(
+                    "Attribute ``{}`` of RemoteModule must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` "
+                    " or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
+                )
+
         return attrs
 
     def __setstate__(self, state):
