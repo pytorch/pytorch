@@ -116,8 +116,9 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-// If v is a Tensor with concretely-known sizes, return them, else nullopt.
-c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
+// If v is a Tensor with concretely-known sizes and dtype, return them, else
+// nullopt.
+c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
   if (!it) {
     return c10::nullopt;
@@ -125,92 +126,124 @@ c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
   if (!it->isComplete()) {
     return c10::nullopt;
   }
-  return it->sizes().concrete_sizes();
+  if (!it->scalarType()) {
+    return c10::nullopt;
+  }
+  auto concrete_sizes = it->sizes().concrete_sizes();
+  if (!concrete_sizes) {
+    return c10::nullopt;
+  }
+  return TensorInfo{*concrete_sizes, *it->scalarType()};
+}
+c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
+  std::vector<int64_t> dims;
+  for (auto dim : b.dims()) {
+    auto val = dynamic_cast<const IntImm*>(dim.node());
+    if (!val) {
+      return c10::nullopt;
+    }
+    dims.push_back(val->value());
+  }
+  return TensorInfo{dims, static_cast<at::ScalarType>(b.dtype().scalar_type())};
 }
 
-bool isFloatTensor(const torch::jit::Value* v) {
-  auto const& tt = v->type()->cast<TensorType>();
-  if (!tt) {
+std::vector<int64_t> _pair_int(ArgValue v) {
+  if (auto t = c10::get_if<IntList>(&v)) {
+    return {(*t)[0], (*t)[1]};
+  }
+  auto i = c10::get<int64_t>(v);
+  return {i, i};
+}
+std::vector<int64_t> _pair_int(IValue v) {
+  if (v.isIntList()) {
+    return v.toIntVector();
+  } else {
+    return {v.toInt(), v.toInt()};
+  }
+}
+
+bool conv2dIsSupported(
+    const TensorInfo& input,
+    const TensorInfo& weight,
+    const TensorInfo& bias,
+    const std::vector<int64_t>& stride,
+    const std::vector<int64_t>& pad,
+    const std::vector<int64_t>& dilation,
+    int64_t groups) {
+  if (input.dtype != c10::ScalarType::Float ||
+      weight.dtype != c10::ScalarType::Float ||
+      bias.dtype != c10::ScalarType::Float) {
+    GRAPH_DEBUG("only float32 allowed");
     return false;
   }
-  auto const& st = tt->scalarType();
-  return st && *st == c10::ScalarType::Float;
+  if (input.dims.size() != 4 || weight.dims.size() != 4 ||
+      bias.dims.size() != 1) {
+    GRAPH_DEBUG("inputs are the wrong size");
+    return false;
+  }
+  auto Cin = input.dims[1];
+  auto Cout = weight.dims[0];
+  auto CperG = weight.dims[1];
+  if (Cin != Cout || Cin != groups || CperG != 1) {
+    GRAPH_DEBUG("not depthwise");
+    return false;
+  }
+  auto KH = weight.dims[2];
+  auto KW = weight.dims[3];
+  if (KH != 3 || KW != 3) {
+    GRAPH_DEBUG("not 3x3");
+    return false;
+  }
+  if (stride.size() != 2 || stride[0] != stride[1]) {
+    GRAPH_DEBUG("unsupported stride");
+    return false;
+  }
+  if (pad.size() != 2 || pad[0] != pad[1]) {
+    GRAPH_DEBUG("unsupported pad");
+    return false;
+  }
+  if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
+    GRAPH_DEBUG("unsupported dilation");
+    return false;
+  }
+  return true;
 }
-
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
 // - Equal padding and strides, dilation == 1.
 // - Depthwise (groups == in_channels == out_channels)
 // - 3x3 kernel
-bool conv2dIsSupported(const torch::jit::Node* node) {
-  auto const& input = tensorSizes(node->input(0));
-  auto const& weight = tensorSizes(node->input(1));
-  auto const& bias = tensorSizes(node->input(2));
-  auto const& stride = constant_as<c10::List<int64_t>>(node->input(3));
-  auto const& pad = constant_as<c10::List<int64_t>>(node->input(4));
+bool conv2dIsSupportedJit(const torch::jit::Node* node) {
+  auto const& input = getTensorInfoJit(node->input(0));
+  auto const& weight = getTensorInfoJit(node->input(1));
+  auto const& bias = getTensorInfoJit(node->input(2));
+  auto const& stride = toIValue(node->input(3));
+  auto const& pad = toIValue(node->input(4));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  auto const& dilation = constant_as<c10::List<int64_t>>(node->input(5));
+  auto const& dilation = toIValue(node->input(5));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  auto const& groups = constant_as<int64_t>(node->input(6));
+  auto const& groups = toIValue(node->input(6));
 
   // Everything should be statically known.
   if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
-
-  // Inputs should be float32.  Other dtypes need more testing.
-  if (!isFloatTensor(node->input(0)) || !isFloatTensor(node->input(1)) ||
-      !isFloatTensor(node->input(2))) {
-    GRAPH_DEBUG("only float32 allowed");
-    return false;
-  }
-
-  // Proper ndim for tensor inputs.
-  if (input->size() != 4 || weight->size() != 4 || bias->size() != 1) {
-    GRAPH_DEBUG("inputs are the wrong size");
-    return false;
-  }
-
-  // Depthwise.
-  auto Cin = (*input)[1];
-  auto Cout = (*weight)[0];
-  auto CperG = (*weight)[1];
-  if (Cin != Cout || Cin != *groups || CperG != 1) {
-    GRAPH_DEBUG("not depthwise");
-    return false;
-  }
-
-  // 3x3 kernel.
-  auto KH = (*weight)[2];
-  auto KW = (*weight)[3];
-  if (KH != 3 || KW != 3) {
-    GRAPH_DEBUG("not 3x3");
-    return false;
-  }
-
-  // Stride, pad, and dilation checks.
-  if (stride->size() != 2 || (*stride)[0] != (*stride)[1]) {
-    GRAPH_DEBUG("unsupported stride");
-    return false;
-  }
-  if (pad->size() != 2 || (*pad)[0] != (*pad)[1]) {
-    GRAPH_DEBUG("unsupported pad");
-    return false;
-  }
-  if (dilation->size() != 2 || (*dilation)[0] != 1 || (*dilation)[1] != 1) {
-    GRAPH_DEBUG("unsupported dilation");
-    return false;
-  }
-
-  return true;
+  return conv2dIsSupported(
+      *input,
+      *weight,
+      *bias,
+      _pair_int(*stride),
+      _pair_int(*pad),
+      _pair_int(*dilation),
+      groups->toInt());
 }
 
 // The fuser currently only supports matmul of 2D x 2D matrices
 bool matmulIsSupported(const torch::jit::Node* node) {
-  auto const& input0 = tensorSizes(node->input(0));
-  auto const& input1 = tensorSizes(node->input(1));
+  auto const& input0 = getTensorInfoJit(node->input(0));
+  auto const& input1 = getTensorInfoJit(node->input(1));
 
   // Everything should be statically known.
   if (!input0 || !input1) {
@@ -219,7 +252,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   }
 
   // Proper ndim for tensor inputs.
-  if (input0->size() != 2 || input1->size() != 2) {
+  if (input0->dims.size() != 2 || input1->dims.size() != 2) {
     GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
     return false;
   }
@@ -508,6 +541,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
     case aten::log:
@@ -1423,11 +1457,11 @@ Tensor* computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
-  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
+  const BufHandle a = c10::get<BufHandle>(inputs[0]);
+  const BufHandle b = c10::get<BufHandle>(inputs[1]);
 
-  auto size_a = ExprVectorToExprHandleVector(a->dims());
-  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  auto size_a = a.dims();
+  auto size_b = b.dims();
   const IntImm* total_size = dynamic_cast<const IntImm*>(
       IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
 
@@ -1445,17 +1479,61 @@ Tensor* computeMatmul(
         {{size_a[0], "M"}, {size_b[1], "N"}},
         Sum(),
         [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
-          BufHandle ah(a);
-          BufHandle bh(b);
-          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+          return Load::make(a, {m, k}) * Load::make(b, {k, n});
         },
         {{size_a[1], "K"}});
   } else {
     return new Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+        ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
   }
+}
+
+Tensor* computeConv2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("conv", outputShape, dtype);
+  BufHandle inp = c10::get<BufHandle>(inputs[0]);
+  BufHandle w = c10::get<BufHandle>(inputs[1]);
+  BufHandle b = c10::get<BufHandle>(inputs[2]);
+
+  auto strides = _pair_int(inputs[3]);
+  auto padding = _pair_int(inputs[4]);
+  auto dilation = _pair_int(inputs[5]);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  int groups = c10::get<int64_t>(inputs[6]);
+
+  auto inpInfo = getTensorInfo(inp);
+  auto wInfo = getTensorInfo(w);
+  auto bInfo = getTensorInfo(b);
+  // Generate TE for depthwise convolutions.
+  if (inpInfo && wInfo && bInfo &&
+      !conv2dIsSupported(
+          *inpInfo, *wInfo, *bInfo, strides, padding, dilation, groups)) {
+    return conv2d_depthwise(inp, w, b, strides[0], padding[0], groups);
+  }
+
+  // Once we have a performant TE representation for conv2d, we could use it
+  // here instead of the external call!
+  Stmt* s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv2d",
+      {inp, w, b},
+      {strides[0],
+       strides[1],
+       padding[0],
+       padding[1],
+       dilation[0],
+       dilation[1],
+       groups});
+  return new Tensor(ResultBuf.node(), s);
 }
 
 Tensor* tensorexpr::computeOperandValue(
@@ -1765,6 +1843,20 @@ Tensor* tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             auto zero = Cast::make(a.dtype(), 0);
             return CompareSelect::make(a, zero, zero, a, kLT);
+          });
+    } break;
+
+    case aten::gelu: {
+      return computeOneOperand(
+          "aten_gelu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            auto one = Cast::make(a.dtype(), 1.);
+            auto point_five = Cast::make(a.dtype(), .5);
+            return a * point_five * (one + erf(a * m_sqrt1_2));
           });
     } break;
     case aten::batch_norm: {
@@ -2331,9 +2423,60 @@ Tensor* tensorexpr::computeOperandValue(
               }
             }
 
-            return tensorOrConstant(inputs[0], indices);
+            return broadcast(c10::get<BufHandle>(inputs[0]), indices);
           });
     }
+    case aten::t: {
+      auto shape = valueShape(inputs[0]);
+      if (shape.size() == 1) {
+        return new Tensor(c10::get<BufHandle>(inputs[0]).node(), nullptr);
+      }
+      return computeOperandValue(
+          aten::transpose,
+          {inputs[0], (int64_t)1, (int64_t)0},
+          outputShape,
+          outputType);
+    }
+    case aten::transpose: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto start_dim =
+          at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
+      auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
+      return Compute(
+          "aten_transpose",
+          c10::fmap<DimArg>(outputShape),
+          [&](std::vector<VarHandle> axes) {
+            std::swap(axes[start_dim], axes[to_dim]);
+            return A.load(axes);
+          });
+    }
+    case aten::permute: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto permute_dims = c10::get<IntList>(inputs[1]);
+      return Compute(
+          "aten_permute",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<VarHandle> new_axes;
+            assert(permute_dims.size() == axes.size());
+            for (auto i : permute_dims) {
+              new_axes.push_back(axes[i]);
+            }
+            return A.load(new_axes);
+          });
+    }
+    case aten::expand: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      return Compute(
+          "aten_expand",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            return broadcast(A, indices);
+          });
+    }
+    case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
+                   // rank 2
     case aten::matmul: {
       return computeMatmul(inputs, outputShape, outputType);
     }
@@ -2346,10 +2489,12 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::softmax: {
       return computeSoftmax(inputs, outputShape, false);
     }
-
     case aten::log_softmax: {
       return computeSoftmax(inputs, outputShape, true);
     }
+    case aten::conv2d: {
+      return computeConv2d(inputs, outputShape, outputType);
+    } break;
     default: {
       std::string msg =
           std::string("Unhandled node kind: ") + op.toQualString();
@@ -2400,6 +2545,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::isnan:
     case aten::relu:
     case aten::hardswish:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::log:
     case aten::log10:
@@ -2440,11 +2586,17 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::lgamma:
     case aten::slice:
     case aten::unsqueeze:
+    case aten::t:
+    case aten::transpose:
+    case aten::expand:
+    case aten::permute:
+    case aten::mm:
     case aten::matmul:
     case aten::cat:
     case aten::sum:
     case aten::softmax:
-    case aten::log_softmax: {
+    case aten::log_softmax:
+    case aten::conv2d: {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {
         argInputs.push_back(toArg(inp));
@@ -2472,10 +2624,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 bufs_.at(n->input(0)), v->offset(), dim, chunks, indices);
           });
     } break;
-
-    case aten::conv2d: {
-      return computeConv2d(v);
-    }
 
     default: {
       std::string msg = std::string("Unhandled node kind: ") +
@@ -2805,67 +2953,6 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
   }
   return result;
-}
-
-namespace {} // namespace
-
-Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
-  const Node* n = v->node();
-  auto const& shape = sizesForValue(v);
-  Dtype dtype = kFloat;
-  auto maybe_stype = findDtypeForValue(v);
-  if (maybe_stype) {
-    dtype = Dtype(*maybe_stype);
-  }
-  BufHandle ResultBuf("conv", shape, dtype);
-  BufHandle inp = BufHandle(bufs_.at(n->input(0)));
-  BufHandle w = BufHandle(bufs_.at(n->input(1)));
-  BufHandle b = BufHandle(bufs_.at(n->input(2)));
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int sH, sW;
-  auto strides_iv = *toIValue(n->input(3));
-  if (strides_iv.isIntList()) {
-    sH = strides_iv.toIntList()[0];
-    sW = strides_iv.toIntList()[1];
-  } else {
-    sH = sW = strides_iv.toInt();
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int pH, pW;
-  auto padding_iv = *toIValue(n->input(4));
-  if (padding_iv.isIntList()) {
-    pH = padding_iv.toIntList()[0];
-    pW = padding_iv.toIntList()[1];
-  } else {
-    pH = pW = padding_iv.toInt();
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int dH, dW;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  auto dil_iv = *toIValue(n->input(5));
-  if (dil_iv.isIntList()) {
-    dH = dil_iv.toIntList()[0];
-    dW = dil_iv.toIntList()[1];
-  } else {
-    dH = dW = dil_iv.toInt();
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  int groups = toIValue(n->input(6))->toInt();
-
-  // Generate TE for depthwise convolutions.
-  if (conv2dIsSupported(n)) {
-    return conv2d_depthwise(inp, w, b, sH, pH, groups);
-  }
-
-  // Once we have a performant TE representation for conv2d, we could use it
-  // here instead of the external call!
-  Stmt* s = ExternalCall::make(
-      ResultBuf,
-      "nnc_aten_conv2d",
-      {inp, w, b},
-      {sH, sW, pH, pW, dH, dW, groups});
-  return new Tensor(ResultBuf.node(), s);
 }
 
 template <typename T>

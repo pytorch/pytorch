@@ -27,6 +27,8 @@ from torch.testing._internal.common_quantized import _quantize, _dequantize, _ca
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.quantization import PerChannelMinMaxObserver
 
+from typing import Optional
+
 np_dtype = {
     torch.quint8 : np.uint8,
     torch.qint8 : np.int8,
@@ -2419,7 +2421,15 @@ class TestQuantizedOps(TestCase):
                 super(MultiheadAttentionModel, self).__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
-            def forward(self, query, key, value, key_padding_mask=None, need_weights=True, attn_mask=None):
+            def forward(
+                self,
+                query,
+                key,
+                value,
+                key_padding_mask: Optional[torch.Tensor] = None,
+                need_weights: bool = True,
+                attn_mask: Optional[torch.Tensor] = None,
+            ):
                 return self.layer(query, key, value, key_padding_mask, need_weights, attn_mask)
 
         qengine = torch.backends.quantized.engine
@@ -2435,7 +2445,7 @@ class TestQuantizedOps(TestCase):
         kembed_dim = 128
         vembed_dim = 256
 
-        dropout = 0  # This is not supported
+        dropout = 0.0  # This is not supported
 
         Bias = [False, True]
         Add_bias_kv = [False, True]
@@ -2514,6 +2524,9 @@ class TestQuantizedOps(TestCase):
                                  f"Run with bias={bias}, "
                                  f"add_bias_kv={add_bias_kv}, "
                                  f"add_zero_attn={add_zero_attn}"))
+
+                    # Verify the result is scriptable
+                    mha_quantized_scripted = torch.jit.script(mha_quantized)
 
 
 class TestDynamicQuantizedLinear(TestCase):
