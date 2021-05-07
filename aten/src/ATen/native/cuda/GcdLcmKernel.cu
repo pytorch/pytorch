@@ -18,7 +18,7 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-void lcm_kernel_cuda(TensorIterator& iter) {
+void lcm_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       scalar_t g = calc_gcd(a, b);

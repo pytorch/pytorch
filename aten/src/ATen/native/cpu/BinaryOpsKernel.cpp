@@ -868,7 +868,7 @@ void gcd_kernel(TensorIteratorBase& iter) {
     });
 }
 
-void lcm_kernel(TensorIterator& iter) {
+void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
       cpu_kernel(
           iter,
