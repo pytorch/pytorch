@@ -712,8 +712,8 @@ struct MobileCodeImpl : CodeImpl {
       std::string function_name,
       bool emit_default_input_instructions,
       size_t remaining_bailout_depth)
-      : emit_default_input_instructions_(emit_default_input_instructions),
-        CodeImpl(graph, function_name, remaining_bailout_depth, false) {
+      : CodeImpl(graph, function_name, remaining_bailout_depth, false),
+        emit_default_input_instructions_(emit_default_input_instructions) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -801,7 +801,7 @@ struct MobileCodeImpl : CodeImpl {
       operator_table_.emplace_back(op.getOperation(node));
     }
   }
-  bool emit_default_input_instructions_ = false;
+  bool emit_default_input_instructions_;
 };
 
 } // namespace interpreter
