@@ -287,9 +287,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   zero_numel_check_dims(self, dim, "kthvalue()");
-  TORCH_CHECK(
-      k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
-      "selected index k out of range");
 
   at::assert_no_overlap(self, values);
 
@@ -354,7 +351,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
 
-  std::vector<int64_t> out_shape = self.sizes().vec();
+  DimVector out_shape(self.sizes().vec());
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
@@ -746,7 +743,6 @@ TORCH_IMPL_FUNC(topk_out_cpu)
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
 
-  _allocate_or_resize_output_with_indices(const_cast<Tensor&>(values), const_cast<Tensor&>(indices), self, dim_, k);
   if (self.dim() == 0 && self.numel() == 1) {
     values.copy_(self);
     indices.zero_();

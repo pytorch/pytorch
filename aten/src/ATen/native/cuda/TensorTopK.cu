@@ -157,7 +157,6 @@ TORCH_IMPL_FUNC(topk_out_cuda)
    const Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
-  TORCH_CHECK(indices.dtype() == at::kLong, "expected indices to be of type ", at::kLong);
   dim = at::maybe_wrap_dim(dim, self);
 
   int numDims = self.dim();
@@ -167,14 +166,6 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   Tensor input = self.contiguous();
 
-  // Build the output size, which is the dim being selected set to
-  // size k
-  std::vector<int64_t> topKSize = input.sizes().vec();
-  if (topKSize.size() > 0) {
-    topKSize[dim] = k;
-  }
-  at::native::resize_output(values, topKSize);
-  at::native::resize_output(indices, topKSize);
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
