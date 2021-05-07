@@ -76,6 +76,11 @@ wrap('len')
 def wrapped_via_decorator(a):
     return a + 1
 
+wrap('wrapped_with_submodule')
+
+def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
+    return batchnorm1d(x)
+
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -303,6 +308,24 @@ class TestFX(JitTestCase):
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+    def test_wrap_with_submodule(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+
+            def forward(self, x: torch.Tensor):
+                return wrapped_with_submodule(x, self.batchnorm1d)
+
+        m = symbolic_trace(M())
+
+        self.assertIn("wrapped_with_submodule", m.code)
+
+        input = torch.rand(3, 2)
+        ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+        self.assertEqual(ref_batchnorm1d(input), m(input))
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):

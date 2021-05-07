@@ -193,7 +193,10 @@ class Tracer(TracerBase):
             for n_, p_ in self.root.named_buffers():
                 if a is p_:
                     return self.create_node('get_attr', n_, (), {})
-
+        elif isinstance(a, torch.nn.Module):
+            for n_, p_ in self.root.named_modules():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, '_fields'):
