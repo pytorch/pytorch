@@ -5068,7 +5068,10 @@ class ModuleTest(TestBase):
                 test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
         # Run double-backwards on CPU and GPU and compare results
-        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
+        if not self.check_gradgrad:
+            start = time.time()
+        # Removing check for self.check_gradgrad - we are testing "all" of them for profiling purposes
+        if not self.FIXME_no_cuda_gradgrad_comparison:
             cpu_output = cpu_module(*cpu_input_tuple)
             gpu_output = gpu_module(*gpu_input_tuple)
 
@@ -5108,6 +5111,12 @@ class ModuleTest(TestBase):
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+        if not self.check_gradgrad:
+            end = time.time()
+            with open("recordedWithArgsAllSlowTests.txt", "a") as _file:
+                _file.write(
+                        test_case.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
+                )
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
@@ -5160,9 +5169,18 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
                                            check_batched_grad=self.check_batched_grad))
 
-        if self.check_gradgrad:
-            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
+        # Enabling all gradgrad checks for profiling purposes
+        # if self.check_gradgrad:
+        if not self.check_gradgrad:
+            start = time.time()
+        test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
                                                check_batched_grad=self.check_batched_grad))
+        if not self.check_gradgrad:
+            end = time.time()
+            with open("recordedWithArgsAllSlowTests.txt", 'a') as _file:
+                _file.write(
+                        test_case.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
+                )
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
@@ -5370,8 +5388,17 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
 
         gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
-        if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+        # Enabling all gradgrad checks for profiling purposes
+        # if self.check_gradgrad:
+        if not self.check_gradgrad:
+            start = time.time()
+        gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+        if not self.check_gradgrad:
+            end = time.time()
+            with open("recordedWithArgsAllSlowTests.txt", 'a') as _file:
+                _file.write(
+                    apply_fn.__name__ + ', *args: , **kwargs: , time taken: ' + str(end - start) + ' s\n'
+                )
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
