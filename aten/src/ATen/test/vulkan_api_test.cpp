@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 // TODO: These functions should move to a common place.
 
@@ -63,36 +62,10 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   }
 }
 
-template <class... Inputs>
-inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {std::forward<Inputs>(inputs)...};
-}
-
-template <class... Args>
-inline std::vector<c10::IValue> callOpByHandle(
-        const c10::OperatorHandle& op,
-            Args... args) {
-    auto stack = makeStack(std::forward<Args>(args)...);
-    c10::Dispatcher::singleton().callBoxed(op, &stack);
-    return stack;
-}
-
-template <class... Args>
-inline std::vector<c10::IValue> callOpByName(
-        const char* func_name,
-        const char* overload_name,
-        Args... args) {
-    const c10::optional<c10::OperatorHandle> op_handle =
-          c10::Dispatcher::singleton().findSchema({func_name, overload_name});
-    assert(op_handle.has_value());
-    return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
-}
-
 } // namespace
 
 namespace {
 
-/*
 TEST(VulkanAPITest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1736,34 +1709,6 @@ TEST(VulkanAPITest, mobilenetv2) {
   }
 
   ASSERT_TRUE(check);
-}
-*/
-
-TEST(VulkanAPITest, playground) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
-  const auto test_cpu = at::rand({1, 4, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
-  auto play = callOpByName("vulkan_prepack::playground_prepack", "", test_cpu);
-
-  std::cout << "=== Run 1 ===" << std::endl;
-  //const auto in_vulkan = at::ones({1, 4, 3, 3}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()*1.34;
-  const auto in_cpu = at::rand({1, 4, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_vulkan = in_cpu.vulkan();
-  auto out = callOpByName("vulkan_prepack::playground_run", "", in_vulkan, play[0])[0].toTensor().cpu();
-
-  std::cout << in_cpu << std::endl;
-  std::cout << out << std::endl;
-
-  std::cout << "=== Run 2 ===" << std::endl;
-  //const auto in2_vulkan = at::ones({1, 4, 3, 3}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()*0.77;
-  const auto in2_cpu = at::rand({1, 4, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in2_vulkan = in2_cpu.vulkan();
-  auto out2 = callOpByName("vulkan_prepack::playground_run", "", in2_vulkan, play[0])[0].toTensor().cpu();
-
-  std::cout << in2_cpu << std::endl;
-  std::cout << out2 << std::endl;
 }
 
 } // namespace

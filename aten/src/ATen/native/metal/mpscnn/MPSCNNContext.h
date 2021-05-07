@@ -3,6 +3,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 API_AVAILABLE(ios(10.0), macos(10.13))
+// TODO[T79947194]: Convert this class to C++
 @interface MPSCNNContext : NSObject
 @property(nonatomic, strong, readonly) id<MTLDevice> device;
 @property(nonatomic, strong, readonly) id<MTLCommandQueue> commandQueue;
