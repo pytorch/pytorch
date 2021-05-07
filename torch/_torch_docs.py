@@ -214,7 +214,7 @@ Alias for :func:`torch.acosh`.
 """.format(**common_args))
 
 add_docstr(torch.add, r"""
-add(input, other, *, out=None)
+add(input, other, *, out=None) -> Tensor
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
 and returns a new resulting tensor.
@@ -227,7 +227,7 @@ a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    value (Number): the number to be added to each element of :attr:`input`
+    other (Number): the number to be added to each element of :attr:`input`
 
 Keyword arguments:
     {out}
@@ -240,7 +240,7 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, other, *, alpha=1, out=None)
+.. function:: add(input, other, *, alpha=1, out=None) -> Tensor
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -2029,13 +2029,16 @@ Keyword args:
 """.format(**common_args))
 
 add_docstr(torch.clamp, r"""
-clamp(input, min, max, *, out=None) -> Tensor
+clamp(input, min=None, max=None, *, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
-Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
+Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
+Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
 
 .. math::
-    y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
+    y_i = \min(\max(x_i, \text{min\_value}_i), \text{max\_value}_i)
+
+If :attr:`min` is ``None``, there is no lower bound.
+Or, if :attr:`max` is ``None`` there is no upper bound.
 """ + r"""
 
 .. note::
@@ -2044,8 +2047,8 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 
 Args:
     {input}
-    min (Number): lower-bound of the range to be clamped to
-    max (Number): upper-bound of the range to be clamped to
+    min (Number or Tensor, optional): lower-bound of the range to be clamped to
+    max (Number or Tensor, optional): upper-bound of the range to be clamped to
 
 Keyword args:
     {out}
@@ -2058,47 +2061,14 @@ Example::
     >>> torch.clamp(a, min=-0.5, max=0.5)
     tensor([-0.5000,  0.1734, -0.0478, -0.0922])
 
-.. function:: clamp(input, *, min, out=None) -> Tensor
+    >>> min = torch.linspace(-1, 1, steps=4)
+    >>> torch.clamp(a, min=min)
+    tensor([-1.0000,  0.1734,  0.3333,  1.0000])
 
-Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
-
-Args:
-    {input}
-
-Keyword args:
-    min (Number): minimal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([-0.0299, -2.3184,  2.1593, -0.8883])
-    >>> torch.clamp(a, min=0.5)
-    tensor([ 0.5000,  0.5000,  2.1593,  0.5000])
-
-.. function:: clamp(input, *, max, out=None) -> Tensor
-
-Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-Args:
-    {input}
-
-Keyword args:
-    max (Number): maximal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
-    >>> torch.clamp(a, max=0.5)
-    tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
 """.format(**common_args))
 
 add_docstr(torch.clip, r"""
-clip(input, min, max, *, out=None) -> Tensor
+clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
@@ -4706,8 +4676,8 @@ Similar to SciPy's `scipy.special.xlogy`.
 """ + r"""
 
 Args:
-    input (Number or Tensor)
-    other (Number or Tensor)
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
 
 .. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
@@ -6001,7 +5971,7 @@ Example::
 """.format(**single_dim_common))
 
 add_docstr(torch.mul, r"""
-mul(input, other, *, out=None)
+mul(input, other, *, out=None) -> Tensor
 
 Multiplies each element of the input :attr:`input` with the scalar
 :attr:`other` and returns a new resulting tensor.
@@ -6027,7 +5997,7 @@ Example::
     >>> torch.mul(a, 100)
     tensor([  20.1494,  -42.5491,  260.8663])
 
-.. function:: mul(input, other, *, out=None)
+.. function:: mul(input, other, *, out=None) -> Tensor
 
 Each element of the tensor :attr:`input` is multiplied by the corresponding
 element of the Tensor :attr:`other`. The resulting tensor is returned.
@@ -6036,8 +6006,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \text{input}_i \times \text{other}_i
-""" + r"""
+    \text{{out}}_i = \text{{input}}_i \times \text{{other}}_i
+""".format(**common_args) + r"""
 
 Args:
     input (Tensor): the first multiplicand tensor
@@ -6725,22 +6695,40 @@ Alias for :func:`torch.linalg.householder_product`.
 
 add_docstr(torch.ormqr,
            r"""
-ormqr(input, input2, input3, left=True, transpose=False) -> Tensor
+ormqr(input, tau, other, left=True, transpose=False, *, out=None) -> Tensor
 
-Multiplies `mat` (given by :attr:`input3`) by the orthogonal `Q` matrix of the QR factorization
-formed by :func:`torch.geqrf` that is represented by `(a, tau)` (given by (:attr:`input`, :attr:`input2`)).
+Computes the matrix-matrix multiplication of a product of Householder matrices with a general matrix.
 
-This directly calls the underlying LAPACK function `?ormqr`.
-See `LAPACK documentation for ormqr`_ for further details.
+Multiplies a :math:`m \times n` matrix `C` (given by :attr:`other`) with a matrix `Q`,
+where `Q` is represented using Householder reflectors `(input, tau)`.
+See `Representation of Orthogonal or Unitary Matrices`_ for further details.
+
+If :attr:`left` is `True` then `op(Q)` times `C` is computed, otherwise the result is `C` times `op(Q)`.
+When :attr:`left` is `True`, the implicit matrix `Q` has size :math:`m \times m`.
+It has size :math:`n \times n` otherwise.
+If :attr:`transpose` is `True` then `op` is the conjugate transpose operation, otherwise it's a no-op.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+.. seealso::
+
+        :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
+        from the QR decomposition.
 
 Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-    input3 (Tensor): the matrix to be multiplied.
+    input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
+                    and `mn` equals to `m` or `n` depending on the :attr:`left`.
+    tau (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
+    other (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    left (bool): controls the order of multiplication.
+    transpose (bool): controls whether the matrix `Q` is conjugate transposed or not.
 
-.. _LAPACK documentation for ormqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+Keyword args:
+    out (Tensor, optional): the output Tensor. Ignored if `None`. Default: `None`.
 
+.. _Representation of Orthogonal or Unitary Matrices:
+    https://www.netlib.org/lapack/lug/node128.html
 """)
 
 add_docstr(torch.permute,
