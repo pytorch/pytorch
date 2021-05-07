@@ -1698,17 +1698,9 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
   }
 }
 
-// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
-//     here. Batched cholesky is dispatched to magma.
-//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
-//     See https://github.com/pytorch/pytorch/issues/53879.
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(input) == 1 || !use_magma_) {
-    cholesky_helper_cusolver(input, upper, info);
-  } else {
-    cholesky_helper_magma(input, upper, info);
-  }
+  cholesky_helper_cusolver(input, upper, info);
 #else
   cholesky_helper_magma(input, upper, info);
 #endif // USE_CUSOLVER
