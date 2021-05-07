@@ -109,7 +109,7 @@ class _RemoteModule(nn.Module):
         executed on the remote node.
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
-        It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`_,
+        It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`__,
         without incurring any overheads of copying the actual module,
         which is equivalent to an :class:`~torch.distributed.rpc.RRef`
         pointing to the remote module.

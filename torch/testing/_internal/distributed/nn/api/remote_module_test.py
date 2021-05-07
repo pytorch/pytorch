@@ -464,7 +464,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
 
             # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
             # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
-            # not have another worker to initiate forward over the RPC layer.lint
+            # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")
             ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
             self.assertEqual(ret1, tuple(reversed(args)))
@@ -474,7 +474,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertEqual(ret2, tuple(reversed(args)))
 
     @unittest.skip(
-        "Script RemoteModule cannot be sent over RPC at this time. See #33052"
+        "Script RemoteModule cannot be sent over RPC at this time. See #57865"
     )
     @dist_utils.dist_init
     def test_send_remote_module_over_the_wire_script(self):
@@ -505,7 +505,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
 
             # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
             # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
-            # not have another worker to initiate forward over the RPC layer.lint
+            # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")
             ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
             self.assertEqual(ret1, tuple(reversed(args)))
