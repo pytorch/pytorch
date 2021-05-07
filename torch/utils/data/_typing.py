@@ -6,7 +6,13 @@ import numbers
 import sys
 from typing import (Any, Dict, Iterator, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
-from typing import ForwardRef, _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
+from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
+
+try:  # Python > 3.6
+    from typing import ForwardRef  # type: ignore[attr-defined]
+except ImportError:  # Python 3.6
+    from typing import _ForwardRef as ForwardRef  # type: ignore[attr-defined]
+
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 try:
