@@ -843,7 +843,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nansum: lambda input, dim=None: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
-        torch.linalg.svd: lambda input, full_matrices=True, compute_uv=True, out=None: -1,
+        torch.linalg.svd: lambda input, full_matrices=True, out=None: -1,
         torch.linalg.svdvals: lambda input, out=None: -1,
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
