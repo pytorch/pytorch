@@ -2619,7 +2619,7 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   self_ = self_.reshape({result_product, result_product});
 
   // normally `other` would be flattened by at::linalg_solve expects 2D input
-  Tensor result = at::linalg_solve(self_, other.reshape({other.numel(), 1}));
+  Tensor result = at::linalg_solve(self_, other.flatten());
   return result.reshape(result_shape);
 }
 

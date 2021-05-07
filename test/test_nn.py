@@ -2126,7 +2126,7 @@ class TestNN(NNTestCase):
                 # Cayley map
                 # If X is skew-symmetric it returns an orthogonal matrix
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + A, Id - A)
+                return torch.linalg.solve(Id + X, Id - X)
 
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
@@ -2346,9 +2346,9 @@ class TestNN(NNTestCase):
                 super().__init__()
                 self.register_buffer("B", torch.eye(n))
 
-            def forward(self, A):
+            def forward(self, X):
                 Id = torch.eye(X.size(0))
-                return self.B @ torch.linalg.solve(Id + A, Id - A)
+                return self.B @ torch.linalg.solve(Id + X, Id - X)
 
             def is_orthogonal(self, X):
                 Id = torch.eye(X.size(0))
@@ -2438,7 +2438,7 @@ class TestNN(NNTestCase):
         class Orthogonal(nn.Module):
             def forward(self, X):
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + A, Id - A)
+                return torch.linalg.solve(Id + X, Id - X)
 
         model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", Skew())
