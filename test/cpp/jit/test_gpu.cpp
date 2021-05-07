@@ -7377,16 +7377,15 @@ TEST(NVFuserTest, FusionCacheBefore_CUDA) {
   TensorView* tv2 = mul(tv1, new Double(3.0));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
+
   // Before: TV2 = TV1 * 3
   // After:  TV3 = TV1 * 3;
   //         TV2 = TV3;
+  TensorView* tv3 = tv2->cache_before();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
   tv0->computeAt(tv2, -1);
-
-  // cache_before automatically applies ComputeAt to the cache TensorView
-  tv2->cache_before();
 
   // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
@@ -7416,16 +7415,15 @@ TEST(NVFuserTest, FusionCacheAfter_CUDA) {
   TensorView* tv2 = mul(tv1, new Double(3.0));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
+
   // Before: TV1 = TV0 + 1
   // After:  TV3 = TV0;
   //         TV1 = TV3 + 1
+  TensorView* tv3 = tv0->cache_after();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
   tv0->computeAt(tv2, -1);
-
-  // cache_after automatically applies ComputeAt to the cache TensorView
-  tv0->cache_after();
 
   // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
@@ -7465,7 +7463,6 @@ TEST(NVFuserTest, FusionCacheFork_CUDA) {
   // Output:  TV3, TV2
 
   // cache_fork !!does not!! automatically apply ComputeAt to the cache
-  // TensorView TODO: enforce
   auto tv3 = tv1->cache_fork();
 
   constexpr int BSX = 32;
@@ -7514,13 +7511,13 @@ TEST(NVFuserTest, FusionCacheIndirect_CUDA) {
   fusion.addOutput(tv6);
   // t6 = ((t1 + (t2 - t3)) - t0)
 
+  tv5->cache_after();
+  tv5->cache_before();
+
   // cache_after on inputs placed before schedule
   constexpr int BSX = 32;
   tv6->split(-1, BSX);
   tv2->computeAt(tv6, -1);
-
-  tv5->cache_after();
-  tv5->cache_before();
 
   // Thread and Block binding
   tv6->axis(0)->parallelize(ParallelType::BIDx);
@@ -7559,15 +7556,6 @@ TEST(NVFuserTest, FusionCacheBcast_CUDA) {
   fusion.addInput(tv2);
   fusion.addOutput(tv4);
 
-  constexpr int BSX = 128;
-  tv4->split(0, BSX);
-  tv4->split(-1, BSX);
-  tv4->reorder({{0, 0}, {1, 2}, {2, 1}, {3, 3}});
-  // M/BSX, N/BSY, BSX, BSY
-  tv0->computeAt(tv4, 2);
-  tv2->computeAt(tv4, 2);
-  // 0, 1 | 2, 3, 4
-
   // Case 1
   tv0->cache_after();
 
@@ -7579,6 +7567,15 @@ TEST(NVFuserTest, FusionCacheBcast_CUDA) {
 
   // Case 4
   TensorView* tv8 = tv4->cache_before();
+
+  constexpr int BSX = 128;
+  tv4->split(0, BSX);
+  tv4->split(-1, BSX);
+  tv4->reorder({{0, 0}, {1, 2}, {2, 1}, {3, 3}});
+  // M/BSX, N/BSY, BSX, BSY
+  tv0->computeAt(tv4, 2);
+  tv2->computeAt(tv4, 2);
+  // 0, 1 | 2, 3, 4
 
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::BIDy);
@@ -7618,13 +7615,13 @@ TEST(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   fusion.addOutput(tv2);
   fusion.addOutput(tv4);
 
-  tv1->computeAt(tv2, -1);
-  tv3->computeAt(tv4, -1);
-
   auto tv5 = tv1->cache_before();
   auto tv6 = tv3->cache_before();
   tv5->setMemoryType(MemoryType::Shared);
   tv6->setMemoryType(MemoryType::Shared);
+
+  tv1->computeAt(tv2, -1);
+  tv3->computeAt(tv4, -1);
 
   // Fails because tensor must be recomputed twice
   // auto tv7 = tv0->cache_after();
@@ -13490,6 +13487,9 @@ TEST(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
 
   fusion.addOutput(tv3);
 
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+
   tv3->split(-1, 128 * 4);
   tv3->split(-1, 4);
   // Reduce outer dim first
@@ -13503,9 +13503,6 @@ TEST(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
 
   tv0->computeAt(tv4, -2);
   tv1->computeAt(tv4, -2);
-
-  auto c0 = tv0->cache_after();
-  auto c1 = tv1->cache_after();
 
   c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
   c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
@@ -13835,6 +13832,9 @@ TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
   auto tv4 = tv3->rFactor({-3, -1});
   // Tv3 will reduce threads
 
+  auto tv6 = tv0->cache_after();
+  auto tv7 = tv1->cache_after();
+
   tv0->computeAt(tv3, 1);
   tv1->computeAt(tv3, 1);
 
@@ -13842,9 +13842,6 @@ TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
 
   tv0->computeAt(tv4, -2);
   tv1->computeAt(tv4, -2);
-
-  auto tv6 = tv0->cache_after();
-  auto tv7 = tv1->cache_after();
 
   tv6->axis(-1)->parallelize(ParallelType::Vectorize);
   tv7->axis(-1)->parallelize(ParallelType::Vectorize);
