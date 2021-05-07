@@ -267,52 +267,5 @@ class testVariousModelVersions(TestCase):
             torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
 
 
-    def test_backport_bytecode_from_buffer_to_buffer(self):
-        script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
-        script_module = torch.jit.load(script_module_v5_path)
-        script_module_v5_buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-
-        # Backport model to v4 to buffer
-        script_module_v4_buffer = _backport_for_mobile_to_buffer(script_module_v5_buffer, 4)
-
-        # Check the model v4 from backport
-        bytesio = io.BytesIO(script_module_v4_buffer)
-        backport_version = _get_model_bytecode_version(bytesio)
-        assert(backport_version == 4)
-
-        # Load model v4 from backport and run forward method
-        bytesio = io.BytesIO(script_module_v4_buffer)
-        mobile_module = _load_for_lite_interpreter(bytesio)
-        module_input = 1
-        mobile_module_result = mobile_module(module_input)
-        expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-        torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
-
-
-    def test_backport_bytecode_from_buffer_to_file(self):
-        script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
-        script_module = torch.jit.load(script_module_v5_path)
-        script_module_v5_buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-
-        # Backport model to v4 to file
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            backport_model_path = Path(tmpdirname, "backport_script_module_v5.ptl")
-
-            # backport from buffer to file
-            success = _backport_for_mobile(script_module_v5_buffer, backport_model_path, 4)
-            assert(success)
-
-            # check bacport model version
-            backport_version = _get_model_bytecode_version(backport_model_path)
-            assert(backport_version == 4)
-
-            # Load model v5 and run forward method
-            mobile_module = _load_for_lite_interpreter(str(backport_model_path))
-            module_input = 1
-            mobile_module_result = mobile_module(module_input)
-            expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-            torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
-            shutil.rmtree(tmpdirname)
-
 if __name__ == '__main__':
     run_tests()
