@@ -738,6 +738,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
   endif()
 
@@ -1017,17 +1018,18 @@ if(USE_TBB)
 endif()
 
 
-# if(LINUX)
-#   find_library(BREAKPAD_LIB breakpad_client)
-#   find_path(BREAKPAD_INCLUDE_DIR breakpad)
-#   if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
-#     target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
-#     add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
-#     target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
-#   else()
-#     message(STATUS "breakpad library not found")
-#   endif()
-# endif()
+if(LINUX)
+  find_library(BREAKPAD_LIB breakpad_client)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
+    message(STATUS "found breakpad library")
+    target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
+    add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+  else()
+    message(STATUS "breakpad library not found")
+  endif()
+endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 

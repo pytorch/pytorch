@@ -18,8 +18,8 @@ def enable_minidumps(directory=DEFAULT_MINIDUMP_DIR):
     torch._C._enable_minidumps(directory)
 
 
-def enable_minidumps_on_exceptions(directory=DEFAULT_MINIDUMP_DIR):
-    torch._C._enable_minidumps_on_exceptions(directory)
+def enable_minidumps_on_exceptions():
+    torch._C._enable_minidumps_on_exceptions()
 
 
 def disable_minidumps():

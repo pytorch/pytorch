@@ -26,42 +26,9 @@ bool check_env(char* name) {
 #ifdef ADD_BREAKPAD_SIGNAL_HANDLER
 
 namespace {
-bool should_enable_minidump_handler() {
-  if (check_env("TORCH_DISABLE_MINIDUMPS")) {
-    // If disabled in the environment, don't do anything
-    return false;
-  }
-
-  // Test these signals, if any of them already have a handler then we don't
-  // want to override it with breakpad's signal handler. It should match the
-  // list of breakpad signal handlers here:
-  // https://chromium.googlesource.com/breakpad/breakpad/+/refs/heads/chrome_43/src/client/linux/handler/exception_handler.cc#121
-  std::array<int, 5> signals{
-      SIGSEGV,
-      SIGABRT,
-      SIGFPE,
-      SIGILL,
-      SIGBUS
-  };
-
-  for (int signal : signals) {
-    // NOLINTNEXTLINE
-    struct sigaction action;
-    action.sa_handler = nullptr;
-    sigaction(signal, nullptr, &action);
-
-    if (action.sa_handler != nullptr) {
-      // A signal handler was already set, don't override it and give up
-      return false;
-    }
-  }
-
-  // Nothing was blocking it, so enable the handler by default
-  return true;
-}
-
 bool initialize_minidumps() {
-  if (!should_enable_minidump_handler()) {
+  if (check_env("TORCH_DISABLE_MINIDUMPS")) {
+    // If statically disabled in the environment, don't do anything
     return false;
   }
   enable_minidumps("/tmp/pytorch_crashes");
@@ -86,7 +53,6 @@ bool dump_callback(
 
 void enable_minidumps(const std::string& dir) {
   minidump_directory = dir;
-
   // The constructor here registers the actual signal handler
   handler = std::make_unique<google_breakpad::ExceptionHandler>(
       google_breakpad::MinidumpDescriptor(minidump_directory),
@@ -104,7 +70,7 @@ void disable_minidumps() {
 const std::string& get_minidump_directory() {
   if (handler == nullptr) {
     AT_ERROR(
-        "Minidump handler is uninintialized, make sure to call _enable_minidump_collection first");
+        "Minidump handler is uninintialized, make sure to call enable_minidumps first");
   }
   return minidump_directory;
 }
@@ -120,8 +86,16 @@ bool is_enabled_on_exceptions() {
 void write_minidump() {
   TORCH_CHECK(
       handler != nullptr,
-      "Minidump handler is uninintialized, make sure to call _enable_minidump_collection first");
+      "Minidump handler is uninintialized, make sure to call enable_minidumps first");
   handler->WriteMinidump();
+}
+
+void enable_minidumps_on_exceptions() {
+  if (handler == nullptr) {
+    AT_ERROR(
+        "Minidump handler is uninintialized, make sure to call enable_minidumps first");
+  }
+  enabled_for_exceptions = true;
 }
 
 #else
