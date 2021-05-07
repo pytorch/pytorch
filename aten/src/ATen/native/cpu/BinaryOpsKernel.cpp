@@ -918,7 +918,7 @@ void igammac_kernel(TensorIterator& iter) {
   });
 }
 
-void nextafter_kernel(TensorIterator& iter) {
+void nextafter_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,
