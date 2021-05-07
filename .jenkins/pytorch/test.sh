@@ -154,12 +154,7 @@ test_python() {
 }
 
 test_python_gloo_with_tls() {
-  source "$(dirname "${BASH_SOURCE[0]}")/create_test_cert.sh"
-  time python test/run_test.py --include distributed/test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM" -- ProcessGroupGlooTest
-  unset GLOO_DEVICE_TRANSPORT
-  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY
-  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT
-  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE
+  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
 }
 
