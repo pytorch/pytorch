@@ -27,11 +27,9 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   TypePtr getScriptRemoteCallType(
       ScriptRemoteCall& scriptRemoteCall) const override;
 
-  void processScriptRemoteCall(
+  c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const override;
+      std::vector<at::IValue>& stack) const override;
 
   void processPythonRemoteCall(
       RpcCommandBase& rpc,

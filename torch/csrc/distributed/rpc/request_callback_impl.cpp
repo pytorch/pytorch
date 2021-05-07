@@ -212,32 +212,17 @@ TypePtr RequestCallbackImpl::getScriptRemoteCallType(
   return returnType;
 }
 
-void RequestCallbackImpl::processScriptRemoteCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
-    const std::function<void(void)>& postProcessing,
-    std::vector<at::IValue>& stack,
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
+    std::vector<at::IValue>& stack) const {
   if (scriptRemoteCall.hasOp()) {
-    processScriptRemoteCallOp(
-        scriptRemoteCall, postProcessing, stack, ownerRRef);
-    return;
+    return processScriptRemoteCallOp(scriptRemoteCall, stack);
   }
 
-  auto asyncPostProcessing = [ownerRRef, postProcessing](JitFuture& jitFuture) {
-    if (jitFuture.hasError()) {
-      ownerRRef->setError(jitFuture.exception_ptr());
-    } else {
-      ownerRRef->setValue(jitFuture.value());
-    }
-    postProcessing();
-  };
-
-  auto jitFuture = runJitFunction(
+  return runJitFunction(
       scriptRemoteCall.qualifiedName(),
       stack,
       scriptRemoteCall.isAsyncExecution());
-
-  jitFuture->addCallback(asyncPostProcessing);
 }
 
 void RequestCallbackImpl::processPythonRemoteCall(
