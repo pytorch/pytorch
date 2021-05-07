@@ -10,11 +10,13 @@ import tempfile
 import torch
 
 
+__all__ = ["basichandlers", "imagehandler", "videohandler", "audiohandler",
+           "mathandler", "Decoder", "extension_extract_fn"]
+
+
 ################################################################
 # handle basic datatypes
 ################################################################
-
-
 def basichandlers(extension, data):
 
     if extension in "txt text transcript":
@@ -50,7 +52,6 @@ def basichandlers(extension, data):
 ################################################################
 # handle images
 ################################################################
-
 imagespecs = {
     "l8": ("numpy", "uint8", "l"),
     "rgb8": ("numpy", "uint8", "rgb"),
@@ -179,9 +180,7 @@ def imagehandler(imagespec):
 ################################################################
 # torch video
 ################################################################
-
-
-def torch_video(extension, data):
+def videohandler(extension, data):
     if extension not in "mp4 ogv mjpeg avi mov h264 mpg webm wmv".split():
         return None
 
@@ -202,9 +201,7 @@ def torch_video(extension, data):
 ################################################################
 # torchaudio
 ################################################################
-
-
-def torch_audio(extension, data):
+def audiohandler(extension, data):
     if extension not in ["flac", "mp3", "sox", "wav", "m4a", "ogg", "wma"]:
         return None
 
@@ -242,12 +239,15 @@ class MatHandler:
         with io.BytesIO(data) as stream:
             return self.sio.loadmat(stream, **self.loadmat_kwargs)
 
+def mathandler(**loadmat_kwargs):
+    return MatHandler(**loadmat_kwargs)
+
 
 ################################################################
 # a sample decoder
 ################################################################
 # Extract extension from pathname
-def _default_key_fn(pathname):
+def extension_extract_fn(pathname):
     ext = os.path.splitext(pathname)[1]
     # Remove dot
     if ext:
@@ -262,7 +262,7 @@ class Decoder:
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, *handler, key_fn=_default_key_fn):
+    def __init__(self, *handler, key_fn=extension_extract_fn):
         self.handlers = list(handler) if handler else []
         self.key_fn = key_fn
 
@@ -271,7 +271,7 @@ class Decoder:
     def add_handler(self, *handler):
         if not handler:
             return
-        self.handlers[0: 0] = list(handler)
+        self.handlers = list(handler) + self.handlers
 
     def decode1(self, key, data):
         if not data:

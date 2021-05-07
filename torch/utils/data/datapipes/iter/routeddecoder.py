@@ -6,7 +6,7 @@ from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler,
-    _default_key_fn)
+    extension_extract_fn)
 
 
 @functional_datapipe('decode')
@@ -22,12 +22,17 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
             order follows the order of handlers (the first handler has the top priority)
         key_fn: Function for decoder to extract key from pathname to dispatch handlers.
             Default is set to extract file extension from pathname
+
+    Note:
+        When `key_fn` is specified returning anything other than extension, the default
+        handler will not work and users need to specify custom handler. Custom handler
+        could use regex to determine the eligibility to handle data.
     """
 
     def __init__(self,
                  datapipe: Iterable[Tuple[str, BufferedIOBase]],
                  *handlers: Callable,
-                 key_fn: Callable = _default_key_fn) -> None:
+                 key_fn: Callable = extension_extract_fn) -> None:
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         if not handlers:
