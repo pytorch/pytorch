@@ -1257,5 +1257,80 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, RunFast) {
+#ifdef TORCH_ENABLE_LLVM
+  // TODO: Implement call_raw in IREval and remove the ifdef
+  KernelScope kernel_scope;
+
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+
+  k.runFast({a.data_ptr(), b.data_ptr()}, {o.data_ptr()});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
+TEST_F(Kernel, CodegenInspection) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
+          %none : NoneType = prim::Constant()
+          %dtype : int = prim::Constant[value=6]()
+          %c0 : int = prim::Constant[value=0]()
+          %c256 : int = prim::Constant[value=256]()
+          %c16 : int = prim::Constant[value=16]()
+          %y_flat : Tensor = aten::arange(%c0, %c256, %dtype, %none, %none, %none)
+          %sizes : int[] = prim::ListConstruct(%c16, %c16)
+          %y_t : Tensor = aten::view(%y_flat, %sizes)
+          %y : Tensor = aten::t(%y_t)
+          %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
+          return (%z))IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we generate several aten
+  // calls to produce non-contiguos constant tensor and then const-prop it
+  ConstantPropagation(graph);
+
+  TensorExprKernel k(graph);
+
+  // Check that we could retrieve generated assembly
+  auto asm_str = k.getCodeText("asm");
+  const std::string& asm_verification_pattern =
+      R"ASM(
+        # CHECK: .text
+        # CHECK: retq)ASM";
+  torch::jit::testing::FileCheck().run(asm_verification_pattern, asm_str);
+
+  // Check that we could retrieve info about codegen parameters
+  auto constants = k.getConstantDescriptors();
+  auto buf_args = k.getBufferArgs();
+  // Expected buf args: [input0, output0, constant0]
+  ASSERT_EQ(buf_args.size(), 3);
+  ASSERT_EQ(constants.size(), 1);
+  ASSERT_TRUE(
+      !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
+#endif
+}
+
 } // namespace jit
 } // namespace torch
