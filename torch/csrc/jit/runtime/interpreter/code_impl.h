@@ -4,9 +4,9 @@
 #include <vector>
 
 #include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/calculate_necessary_args.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/frontend/calculate_necessary_args.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -184,7 +184,8 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, size_t>& op_to_num_specified_args() const {
+  const std::unordered_map<std::string, size_t>& op_to_num_specified_args()
+      const {
     return op_to_num_specified_args_;
   }
 
