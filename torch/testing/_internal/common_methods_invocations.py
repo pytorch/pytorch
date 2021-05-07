@@ -3358,6 +3358,44 @@ def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_
 
     return samples
 
+
+def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, 1, 1), (S, S, S)),
+             ((S, 1, S), (S, S, S)),
+             ((S, 1), (S, S, S)),
+             ((1,), (S, S, S)),
+             ((1, S), (1, 1, S)),
+             ((), ()),
+             ((), (1, 3, 2)),
+             )
+
+    def generator():
+        for case in cases:
+            shape, args = case
+            yield(SampleInput(make_arg(shape), args=(args, )))
+
+    return list(generator())
+
+
+def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+    cases = (((S, 1, 1), (S, S, S)),
+             ((), ()),
+             ((), (1, 1)),
+             )
+
+    def generator():
+        for case in cases:
+            shape, shape_other = case
+            yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
+                              args=(make_arg(shape_other, requires_grad=False), )))
+
+    return list(generator())
+
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
     ForeachUnaryFuncInfo('acos'),
@@ -4131,6 +4169,22 @@ op_db: List[OpInfo] = [
                    ),
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
+    OpInfo('expand',
+           op=lambda self, shape: self.expand(shape),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand,
+           skips=(
+               # Because expand does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           supports_out=False),
+    OpInfo('expand_as',
+           op=lambda self, other: self.expand_as(other),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand_as,
+           skips=(
+               # Because expand_as does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           supports_out=False),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
@@ -6021,14 +6075,6 @@ def method_tests():
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
         ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('expand', (S, 1, 1), (S, S, S), '', (False,)),
-        ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size', (False,)),
-        ('expand', (S, 1), (S, S, S), 'new_dim', (False,)),
-        ('expand', (1,), (S, S, S), '1_element', (False,)),
-        ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1', (False,)),
-        ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
-        ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
-        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),

@@ -2307,6 +2307,8 @@ class TestOperatorSignatures(JitTestCase):
         known_no_schema = {'cdist',
                            'dstack',
                            'einsum',
+                           'expand',
+                           'expand_as',
                            'hstack',
                            'linalg.multi_dot',
                            'polygamma',
