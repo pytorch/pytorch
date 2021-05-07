@@ -5,6 +5,8 @@ from torch.fx.node import map_aggregate
 import torch.utils._pytree as pytree
 from functorch._C import hasPythonKey, addPythonKey, removePythonKey
 from torch.fx import Tracer, GraphModule
+import torch.fx as fx
+from .nnc_compile import nnc_compile
 
 class PythonTensor(object):
     def __init__(self, out, proxy):
@@ -122,13 +124,38 @@ def wrap_key(f, inps):
                 flat_args[idx] = addPythonKey(PythonTensor(flat_inps[idx], arg))
             else:
                 flat_args[idx] = flat_inps[idx]
+
         tree_args = pytree.tree_unflatten(flat_args, args_spec)
         out = f(*tree_args)
 
         flat_outs, out_spec = pytree.tree_flatten(out)
         for idx in range(len(flat_outs)):
-            if hasPythonKey(flat_outs[idx]):
+            if isinstance(flat_outs[idx], torch.Tensor) and hasPythonKey(flat_outs[idx]):
                 flat_outs[idx] = removePythonKey(flat_outs[idx]).proxy
         return pytree.tree_unflatten(flat_outs, out_spec)
 
     return wrapped
+
+def make_fx(f):
+    @functools.wraps(f)
+    def wrapped(*args):
+        phs = pytree.tree_map(lambda x: fx.PH, args)
+        t = pythonkey_trace(wrap_key(f, args), concrete_args=tuple(phs))
+        return t
+
+    return wrapped
+
+
+def nnc_jit(f):
+    cached = None
+    @functools.wraps(f)
+    def compiled(*args):
+        nonlocal cached
+        if cached is not None:
+            return cached(*args)
+        fx_model = make_fx(f)(*args)
+        fx_model.graph.lint()
+        compiled_f = nnc_compile(fx_model, args)
+        cached = compiled_f
+        return cached(*args)
+    return compiled
