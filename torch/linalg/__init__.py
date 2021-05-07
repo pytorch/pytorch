@@ -89,6 +89,56 @@ Examples::
     True
 """)
 
+cholesky_ex = _add_docstr(_linalg.linalg_cholesky_ex, r"""
+linalg.cholesky_ex(input, *, check_errors=False, out=None) -> (Tensor, Tensor)
+
+Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+Returns a namedtuple ``(L,info)``. ``L`` contains the result of the Cholesky decomposition.
+``info`` stores the LAPACK error codes.
+
+If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
+and one or more of them is not a Hermitian positive-definite matrix,
+then ``info`` stores a positive integer for the corresponding matrix.
+The positive integer indicates the order of the leading minor that is not positive-definite,
+and the decomposition could not be completed.
+``info`` filled with zeros indicates that the decomposition was successful.
+If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
+
+.. note:: Given inputs on a CUDA device, this function may synchronize that device with the CPU.
+
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
+.. seealso::
+        :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
+
+Args:
+    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a @ a.t().conj()  # creates a Hermitian positive-definite matrix
+    >>> l, info = torch.linalg.cholesky_ex(a)
+    >>> a
+    tensor([[ 2.3792+0.0000j, -0.9023+0.9831j],
+            [-0.9023-0.9831j,  0.8757+0.0000j]], dtype=torch.complex128)
+    >>> l
+    tensor([[ 1.5425+0.0000j,  0.0000+0.0000j],
+            [-0.5850-0.6374j,  0.3567+0.0000j]], dtype=torch.complex128)
+    >>> info
+    tensor(0, dtype=torch.int32)
+
+""")
+
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(A, *, out=None) -> Tensor
 
@@ -452,8 +502,8 @@ The eigenvalues are returned in ascending order.
 
 .. seealso::
 
-        :func:`torch.linalg.eigvalsh` computes only the eigenvalues.
-        However, that function is not differentiable.
+        :func:`torch.linalg.eigvalsh` computes only the eigenvalues,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.cholesky` for a different decomposition of a Hermitian matrix.
         The Cholesky decomposition gives less information about the matrix but is much faster
@@ -536,8 +586,9 @@ The eigenvalues are returned in ascending order.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.eigh` instead, which also computes the eigenvectors.
+.. seealso::
+
+        :func:`torch.linalg.eigh` computes the full eigenvalue decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
@@ -611,6 +662,10 @@ Also supports batched inputs, and, if the input is batched, the output is batche
         :func:`torch.geqrf` can be used together with this function to form the `Q` from the
         :func:`~qr` decomposition.
 
+        :func:`torch.ormqr` is a related function that computes the matrix multiplication
+        of a product of Householder matrices with another matrix.
+        However, that function is not supported by autograd.
+
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tau (Tensor): tensor of shape `(*, k)` where `*` is zero or more batch dimensions.
@@ -648,7 +703,7 @@ Examples::
 """)
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
-torch.linalg.lstsq(A, B, cond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
+torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes a solution to the least squares problem  of a system of linear equations.
 
@@ -697,6 +752,8 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
   otherwise, it is an empty tensor.
+  If :attr:`A` is a batch of matrices and any matrix in the batch is not full rank,
+  then an empty tensor is returned. This behavior may change in a future PyTorch release.
 - `rank`: tensor of ranks of the matrices in :attr:`A`.
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`),
@@ -708,20 +765,20 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
 
 .. note::
     While `X = \ `:attr:`A`\ `.pinv() @ \ `:attr:`B`, this function computes the
-    solution in a faster and more numerically stable way that performing the
+    solution in a faster and more numerically stable way than performing the
     computations separately.
 
 .. warning::
-    The default value of :attr:`cond` may change in the future.
+    The default value of :attr:`rcond` may change in a future PyTorch release.
     It is therefore recommended to use a fixed value to avoid potential
     breaking changes.
 
 Args:
     A (Tensor): lhs tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     B (Tensor): rhs tensor of shape `(*, m, k)` where `*` is zero or more batch dimensions.
-    cond (float, optional): used to determine the effective rank of :attr:`A`.
-                            If :attr:`cond`\ `= None`, :attr:`cond` is set to the machine
-                            precision of the dtype of :attr:`A`. Default: `None`.
+    rcond (float, optional): used to determine the effective rank of :attr:`A`.
+                             If :attr:`rcond`\ `= None`, :attr:`rcond` is set to the machine
+                             precision of the dtype of :attr:`A` times `max(m, n)`. Default: `None`.
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
@@ -891,7 +948,7 @@ Examples::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
@@ -909,7 +966,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 ======================   ========================================================
 :attr:`ord`              vector norm
 ======================   ========================================================
-`None` (default)         `2`-norm
+`2` (default)            `2`-norm
 `inf`                    `max(abs(x))`
 `-inf`                   `min(abs(x))`
 `0`                      `sum(x != 0)`
@@ -920,7 +977,7 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
 Args:
     A (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions.
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
+    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
@@ -1220,8 +1277,8 @@ Differences with `numpy.linalg.svd`:
 
 .. seealso::
 
-        :func:`torch.linalg.svdvals` computes only the singular values.
-        However, that function is not differentiable.
+        :func:`torch.linalg.svdvals` computes only the singular values,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.eig` for a function that computes another type of spectral
         decomposition of a matrix. The eigendecomposition works just on on square matrices.
@@ -1298,12 +1355,13 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 The singular values are returned in descending order.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.svd` instead, which also computes the singular vectors.
-
 .. note:: This function is equivalent to NumPy's `linalg.svd(A, compute_uv=False)`.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
+
+.. seealso::
+
+        :func:`torch.linalg.svd` computes the full singular value decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.

@@ -26,7 +26,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
+from torch.nn.parallel import DistributedDataParallel
+from torch.distributed.distributed_c10d import get_world_size, _get_default_group, AllreduceOptions, GroupMember
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
     skip_if_small_worldsize,
     skip_if_lt_x_gpu,
+    nccl_skip_if_lt_x_gpu,
     skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
@@ -45,6 +47,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from torch.cuda.amp import GradScaler, autocast
 
 try:
     import torchvision
@@ -106,6 +109,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
 SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
+    dist.Backend.NCCL,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -152,6 +156,7 @@ class DDPUnevenTestInput(NamedTuple):
     model: nn.Module
     inp: Union[torch.tensor, tuple]
     sync_interval: int
+    throw_on_early_termination: bool = False
 
 
 class _FC2(nn.Module):
@@ -935,29 +940,77 @@ class DistributedTest:
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
-        def test_send_recv_nccl(self):
+        def _test_send_recv_nccl(self, profiler_ctx=None):
+            # TODO: now that nccl send/recv is supported, there does not seem to
+            # be a need to have nccl send/recv be tested separately.
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
 
             tensor = _build_tensor(rank + 1, device_id=device_id)
+            profiler_cls = profiler_ctx if profiler_ctx is not None else suppress()
+            with profiler_cls as prof:
+                for src in range(0, dist.get_world_size()):
+                    if src == rank:
+                        # Send mode
+                        for dst in range(0, dist.get_world_size()):
+                            if dst == rank:
+                                continue
+                            dist.send(tensor, dst)
+                    else:
+                        # Recv mode
+                        expected_tensor = _build_tensor(src + 1)
+                        output_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
+                        dist.recv(output_tensor, src)
+                        self.assertEqual(output_tensor, expected_tensor)
 
-            for src in range(0, dist.get_world_size()):
-                if src == rank:
-                    # Send mode
-                    for dst in range(0, dist.get_world_size()):
-                        if dst == rank:
-                            continue
-                        dist.send(tensor, dst)
-                else:
-                    # Recv mode
-                    expected_tensor = _build_tensor(src + 1)
-                    output_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                    dist.recv(output_tensor, src)
-                    self.assertEqual(output_tensor, expected_tensor)
+                self._barrier()
 
-            self._barrier()
+            if profiler_ctx is not None:
+                backend = dist.get_backend()
+                if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    for event_name in [f"{backend}:send", f"{backend}:recv"]:
+                        events = get_profiling_event(event_name, prof)
+                        self.assertTrue(events)
+                        # Event order is not deterministic, so simply assert their shape
+                        # is found in the following list.
+                        expected_shapes = [
+                            [[rank + 1] * 3] for rank in range(dist.get_world_size())
+                        ]
+                        for event in events:
+                            self.assertTrue(event.input_shapes in expected_shapes)
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_send_recv_nccl(self):
+            self._test_send_recv_nccl()
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_send_recv_nccl_autograd_profiler(self):
+            profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
+            self._test_send_recv_nccl(profiler_ctx)
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
+        def test_send_recv_nccl_torch_profiler(self):
+            profiler_ctx = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=True
+            )
+            self._test_send_recv_nccl(profiler_ctx)
 
         # SEND RECV
         def _test_send_recv(self, profiler_ctx):
@@ -996,6 +1049,7 @@ class DistributedTest:
                             [[rank + 1] * 3] for rank in range(dist.get_world_size())
                         ]
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl")
@@ -1063,6 +1117,7 @@ class DistributedTest:
                         # Each rank sends/recvs from other rank twice.
                         self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
                 # Each rank would have 2 * (world_size - 1) sends, verify that
@@ -1137,6 +1192,7 @@ class DistributedTest:
                         expected_event_count = dist.get_world_size() - 1
                         self.assertEqual(event_count, expected_event_count)
                         for event in events:
+                            self.assertTrue(event.is_async)
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
@@ -1194,6 +1250,7 @@ class DistributedTest:
                         r: [[r] * 3] for r in range(1, dist.get_world_size())
                     }
                     for event in events:
+                        self.assertTrue(event.is_async)
                         self.assertEqual(event.name, expected_event_name)
                         if rank == 0:
                             self.assertTrue(event.input_shapes in expected_shapes.values())
@@ -1641,6 +1698,7 @@ class DistributedTest:
                 print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
+                    self.assertTrue(e.is_async)
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
                     # Verify tensor shapes if given
@@ -3376,6 +3434,219 @@ class DistributedTest:
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
 
+        def _prepare_single_device_module(
+                self,
+                rank,
+                process_group,
+                devices,
+                device_ids,
+                global_batch_size,
+                gradient_as_bucket_view=False,
+        ):
+            model = Net()
+            device = devices[0] if devices else torch.device("cuda:%d" % rank)
+            ddp_model = DistributedDataParallel(
+                copy.deepcopy(model).to(device),
+                device_ids=device_ids,
+                process_group=process_group,
+                bucket_cap_mb=0.001,
+                gradient_as_bucket_view=gradient_as_bucket_view,
+            )
+
+            model.to(device)
+
+            input = torch.randn(global_batch_size, 2).to(device)
+            target = torch.randn(global_batch_size, 4).to(device)
+
+            return model, ddp_model, input, target
+
+        def _prepare_cpu_module(
+            self,
+            process_group,
+            global_batch_size,
+            gradient_as_bucket_view=False,
+        ):
+            model = Net()
+            ddp_model = DistributedDataParallel(
+                copy.deepcopy(model),
+                process_group=process_group,
+                bucket_cap_mb=0.001,
+                gradient_as_bucket_view=gradient_as_bucket_view,
+            )
+            input = torch.randn(global_batch_size, 2)
+            target = torch.randn(global_batch_size, 4)
+            return model, ddp_model, input, target
+
+        def _test_accumulate_gradients_no_sync(
+                self, num_iters=2, ddp_comm_hook=None, gradient_as_bucket_view=False
+        ):
+            """
+            This is the recommended way to implement accumulate grads.
+            If ``ddp_comm_hook`` input was specified, it will also register that hook
+            to the ``ddp_model``. The hook fed into this function should not change
+            the resulting gradients.
+            """
+            group, group_id, rank = self._init_global_test()
+            world_size = get_world_size()
+
+            if BACKEND == "mpi":
+                global_batch_size = world_size
+                local_batch_size = 1
+                model, ddp_model, input, target = self._prepare_cpu_module(
+                    group_id, global_batch_size, gradient_as_bucket_view
+                )
+
+            if BACKEND == "nccl":
+                rank_to_GPU = self._init_multigpu_helper()
+                int_devices = rank_to_GPU[rank][:1]
+                devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+                # print (int_devices, devices)
+                global_batch_size = world_size
+                local_batch_size = len(devices)
+                model, ddp_model, input, target = self._prepare_single_device_module(
+                    rank, group_id, devices, devices, global_batch_size, gradient_as_bucket_view
+                )
+
+            if ddp_comm_hook is not None:
+                ddp_model.register_comm_hook(group_id, ddp_comm_hook)
+
+            def step_model(model, input, target):
+                model.train()
+                output = model(input)
+                loss = F.mse_loss(output, target.to(output.device))
+                loss.backward()
+
+            # ensure accumulate grads works with no_grad => no grads are accumulated.
+            with torch.no_grad():
+                with ddp_model.no_sync():
+                    ddp_model.train()
+                    ddp_model(input)
+
+            # check two model parameters over num_iters iterations
+            for iteration in range(num_iters):
+                step_model(model, input, target)
+
+                ddp_input = input[
+                    rank * local_batch_size: (rank + 1) * local_batch_size
+                ]
+                ddp_target = target[
+                    rank * local_batch_size: (rank + 1) * local_batch_size
+                ]
+
+                if iteration % num_iters == 0:
+                    # accumulate grads locally
+                    with ddp_model.no_sync():
+                        step_model(ddp_model, ddp_input, ddp_target)
+                else:
+                    # sync grads
+                    step_model(ddp_model, ddp_input, ddp_target)
+
+                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    if not i.requires_grad:
+                        continue
+                    if iteration % num_iters == 0:
+                        self.assertNotEqual(i.grad, j.grad)
+                    else:
+                        self.assertEqual(i.grad, j.grad)
+
+
+                # Shuffle the input so that DDP input is different
+                torch.manual_seed(1337 + iteration)
+                input = input[torch.randperm(global_batch_size)]
+
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_accumulate_gradients_no_sync_grad_is_view(self):
+            """
+            Runs _test_accumulate_gradients_no_sync using default inputs
+            """
+            self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_accumulate_gradients_no_sync_allreduce_hook(self):
+            """
+            Runs multiple iterations on _test_accumulate_gradients_no_sync
+            using allreduce hook and validates whether future result was properly
+            passed as gradients in reducer.
+            """
+
+            world_size = get_world_size()
+
+            def allreduce_hook(
+                    group_id: object, bucket: dist.GradBucket
+            ) -> torch._C.Future:
+                tensors = [bucket.get_tensor() / world_size]
+                return group_id.allreduce(tensors).get_future()
+
+            self._test_accumulate_gradients_no_sync(
+                num_iters=4, ddp_comm_hook=allreduce_hook
+            )
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
+            """
+            Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
+            hook that also uses then callbacks. In first then callback result is multiplied
+            by 2, and the second callback divides the result by 2 * world_size. It validates
+            whether final result was properly passed as gradients in reducer.
+            """
+
+            world_size = get_world_size()
+
+            def allreduce_with_then_hook(
+                    group_id: object, bucket: dist.GradBucket
+            ) -> torch.futures.Future:
+                fut = group_id.allreduce([bucket.get_tensor()]).get_future()
+
+                def mult(fut):
+                    # Multiply the result by 2.
+                    return [2 * t for t in fut.wait()]
+
+                def div(fut):
+                    # Divide the result by 2 * world_size.
+                    return [t / (2 * world_size) for t in fut.wait()]
+
+                return fut.then(mult).then(div)
+
+            self._test_accumulate_gradients_no_sync(
+                num_iters=4, ddp_comm_hook=allreduce_with_then_hook
+            )
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != "nccl",
+            "get_future is only supported on mpi"
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_get_future(self):
+            def mult(fut):
+                return [t * 3 for t in fut.wait()]
+
+            def add(fut):
+                return [t + 1 for t in fut.wait()]
+            group, group_id, rank = self._init_global_test()
+            input = _build_tensor(3, 2)
+            if BACKEND == "nccl":
+                rank_to_GPU = self._init_multigpu_helper()
+                device_id = rank_to_GPU[rank][0]
+                input = input.to(device_id)
+            fut = group_id.allreduce([input]).get_future()
+            res = fut.then(mult).then(add).wait()
+            expected = _build_tensor(3, 2 * len(group) * 3 + 1)
+
+            self.assertEqual(res[0], expected)
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -3410,6 +3681,70 @@ class DistributedTest:
             gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+
+        def _test_DistributedDataParallel_with_amp(self, grad_is_view=False):
+            torch.manual_seed(31415)
+            # Creates model and optimizer in default precision
+            model = copy.deepcopy(DDP_NET).cuda()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.03)
+
+            # Creates a GradScaler once at the beginning of training.
+            scaler = GradScaler()
+
+            ddp_model = nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank], gradient_as_bucket_view=grad_is_view)
+
+            input = torch.randn(dist.get_world_size() * 2, 2).cuda()
+            target = torch.randn(dist.get_world_size() * 2, 4).cuda()
+            loss_fn = nn.MSELoss()
+
+            # verify grads are none before training
+            for p in ddp_model.parameters():
+                self.assertTrue(p is not None)
+                self.assertTrue(p.grad is None)
+
+            for idx in range(20):
+                optimizer.zero_grad()
+                # Runs the forward pass with autocasting.
+                with autocast():
+                    output = ddp_model(input)
+                    loss = loss_fn(output, target)
+
+                # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
+                # Backward passes under autocast are not recommended.
+                # Backward ops run in the same dtype autocast chose for corresponding forward ops.
+                scaler.scale(loss).backward()
+
+                # verify grads are not none and are valid during training
+                for p in ddp_model.parameters():
+                    if p.requires_grad:
+                        self.assertTrue(p.grad is not None)
+                        self.assertFalse(p.grad.isnan().any())
+                        self.assertFalse(p.grad.isinf().any())
+
+                # scaler.step() first unscales the gradients of the optimizer's assigned params.
+                # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+                # otherwise, optimizer.step() is skipped.
+                scaler.step(optimizer)
+
+                # Updates the scale for next iteration.
+                scaler.update()
+
+                # Shuffle the input so that DDP input is different
+                torch.manual_seed(1337 + idx)
+                input = input[torch.randperm(dist.get_world_size() * 2)]
+
+            return ddp_model
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_with_amp_and_grad_is_view(self):
+            torch.cuda.set_device(self.rank)
+            ddp_model_grad_not_view = self._test_DistributedDataParallel_with_amp(grad_is_view=False)
+            ddp_model_grad_is_view = self._test_DistributedDataParallel_with_amp(grad_is_view=True)
+            for i, j in zip(ddp_model_grad_not_view.parameters(), ddp_model_grad_is_view.parameters()):
+                self.assertEqual(i, j)
 
         def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset,
                                                         output_device=None, affine=True):
@@ -3870,6 +4205,28 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_comm_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))
 
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_static_graph_api_cpu(self):
+            model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
+            model_DDP._set_static_graph()
+            self.assertEqual(model_DDP.get_ddp_logging_data().get("static_graph"), True)
+            with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):
+                local_bs = 2
+                batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
+                offset = dist.get_rank() * local_bs
+
+                # DDP training, DDP scatters subsets of input to nodes/GPUs
+                self._test_DDP_helper(
+                    model_DDP,
+                    input[offset: offset + local_bs],
+                    target[offset: offset + local_bs],
+                    loss,
+                    1,
+                )
+                model_DDP._set_static_graph()
+
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
@@ -4289,7 +4646,8 @@ class DistributedTest:
             model = nn.Linear(dim, dim, bias=False)
             inp = torch.rand(batch, dim, device=self.rank)
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
             )
             profiler_ctx_copy = copy.deepcopy(profiler_ctx)
 
@@ -4303,6 +4661,7 @@ class DistributedTest:
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
+                self.assertTrue(event.is_async)
                 self.assertEqual(event.name, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
@@ -4317,7 +4676,9 @@ class DistributedTest:
             # for a single pass, and ensure it is recorded. This tests that the
             # thread local state is correctly updated.
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True
             )
             for i in range(3):
                 loss = net(inp).sum()
@@ -4328,9 +4689,14 @@ class DistributedTest:
                 loss.backward()
 
             events = get_profiling_event(all_reduce_event_name, prof)
-            self.assertEqual(1, len(events))
-            self.assertEqual(1, events[0].count)
+            self.assertGreaterEqual(len(events), 1)
+            self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
+            for event in events:
+                self.assertTrue(event.is_async)
+            # Ensure searching unused parameters was profiled
+            events = get_profiling_event("search_unused_parameters", prof)
+            self.assertEqual(len(events), 1)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4411,6 +4777,7 @@ class DistributedTest:
             inp = test_case.inp
             rank = self.rank
             sync_interval = test_case.sync_interval
+            torch.cuda.set_device(rank)
             # Ensure all outsanding GPU work is comlete so this test runs independently.
             dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
@@ -4424,44 +4791,135 @@ class DistributedTest:
 
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
-            with net.join():
-                for i in range(num_iters):
-                    # Use model.no_sync() to disable grad synchronization every
-                    # sync_interval.
-                    if i % sync_interval != 0:
-                        context = net.no_sync()
-                    else:
-                        context = suppress()
-                    with context:
-                        if isinstance(inp, tuple):
-                            loss = net(*inp).sum()
+            # If we throw when earliest rank terminates, we should ensure
+            # that we iterate for that minimum number of times.
+            num_iters_tensor = torch.tensor([num_iters], device=torch.cuda.current_device())
+            dist.all_reduce(num_iters_tensor, op=dist.ReduceOp.MIN)
+            min_num_iters = num_iters_tensor.item()
+            total_iters = 0
+            if test_case.throw_on_early_termination:
+                if min_num_iters == num_iters:
+                    # Early termination rank(s)
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
+                    )
+                else:
+                    # Non early termination rank
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError,
+                        "Detected at least one rank that exhausted inputs."
+                    )
+            else:
+                exception_ctx = suppress()
+            with exception_ctx:
+                with net.join(throw_on_early_termination=test_case.throw_on_early_termination):
+                    for i in range(num_iters):
+                        # Use model.no_sync() to disable grad synchronization every
+                        # sync_interval.
+                        if i % sync_interval != 0:
+                            context = net.no_sync()
                         else:
-                            loss = net(inp).sum()
-                        loss.backward()
-                        self._model_step(net)
-                        # Ensure completion of GPU kernels (including allreduce). If the
-                        # join API is not properly implemented, then this should hang
-                        # since the allreduce will hang.
-                        torch.cuda.synchronize(device=rank)
+                            context = suppress()
+                        with context:
+                            if isinstance(inp, tuple):
+                                loss = net(*inp).sum()
+                            else:
+                                loss = net(inp).sum()
+                            loss.backward()
+                            self._model_step(net)
+                            # Ensure completion of GPU kernels (including allreduce). If the
+                            # join API is not properly implemented, then this should hang
+                            # since the allreduce will hang.
+                            torch.cuda.synchronize(device=rank)
+                        total_iters += 1
+            if test_case.throw_on_early_termination:
+                # Ensure we iterated min_num_iters times.
+                self.assertEqual(total_iters, min_num_iters)
+            else:
+                # Ensure we iterated at least min_num_iters times.
+                self.assertGreaterEqual(total_iters, min_num_iters)
 
             # Ensure completion of all GPU kernels.
             torch.cuda.synchronize(device=rank)
-            self.assertTrue(net._authoritative_rank)
-            # All ranks should have agreed on the same authoritative_rank!
-            final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
-            tensor_list = [
-                torch.zeros_like(final_rank_tensor)
-                for _ in range(dist.get_world_size())
-            ]
-            dist.all_gather(tensor_list, final_rank_tensor)
-            max_rank = dist.get_world_size() - 1
-            self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
-            # Ensure that all models are the same across ranks after all have joined.
-            self.validate_net_equivalence(net)
-            # Ensure that running with DDP uneven inputs was logged.
-            ddp_logging_data = net.get_ddp_logging_data()
-            self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
-            dist.barrier()
+            # When throwing on early rank termination, we do not
+            # broadcast model state from an authoritative rank. All models
+            # should already be in sync.
+            if not test_case.throw_on_early_termination:
+                self.assertTrue(net._authoritative_rank)
+                # All ranks should have agreed on the same authoritative_rank!
+                final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
+                tensor_list = [
+                    torch.zeros_like(final_rank_tensor)
+                    for _ in range(dist.get_world_size())
+                ]
+                dist.all_gather(tensor_list, final_rank_tensor)
+                max_rank = dist.get_world_size() - 1
+                self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
+                # Ensure that all models are the same across ranks after all have joined.
+                self.validate_net_equivalence(net)
+                # Ensure that running with DDP uneven inputs was logged.
+                ddp_logging_data = net.get_ddp_logging_data()
+                self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
+                dist.barrier()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        def test_ddp_uneven_inputs_stop_iteration_sync_bn(self):
+            # Tests that uneven inputs join handler correctly throws StopIteration
+            # for models with SyncBN or general collective comm when
+            # throw_on_early_termination=True.
+            class ModelWithComm(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lin = nn.Linear(2, 40, bias=False)
+
+                def forward(self, x):
+                    x = self.lin(x)
+                    dist.all_reduce(x)
+                    return x
+
+            torch.cuda.set_device(self.rank)
+            model_bn = BN_NET
+            model_bn = nn.SyncBatchNorm.convert_sync_batchnorm(
+                copy.deepcopy(model_bn)
+            ).cuda(self.rank)
+            comm_model = ModelWithComm().cuda(self.rank)
+            model_input = torch.randn(10, 2).cuda(torch.cuda.current_device())
+
+            for model in [model_bn, comm_model]:
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                )
+                min_num_iters = 5
+                if self.rank != 0:
+                    # Early termination rank(s)
+                    num_iters = min_num_iters
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
+                    )
+                else:
+                    # Non early termination rank
+                    num_iters = min_num_iters * 2
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError,
+                        "Detected at least one rank that exhausted inputs."
+                    )
+                n = 0
+                with exception_ctx:
+                    with model.join(throw_on_early_termination=True):
+                        for i in range(num_iters):
+                            loss = model(model_input).sum()
+                            loss.backward()
+                            self._model_step(model)
+                            n += 1
+
+                self.assertEqual(n, min_num_iters)
+                # Verify model equivalence
+                self.validate_net_equivalence(model)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
@@ -4564,7 +5022,20 @@ class DistributedTest:
                     )
                 )
 
+            throw_on_early_term_tests = []
+            for test_input in models_to_test:
+                throw_on_early_term_tests.append(
+                    DDPUnevenTestInput(
+                        name=test_input.name,
+                        model=test_input.model,
+                        inp=test_input.inp,
+                        sync_interval=test_input.sync_interval,
+                        throw_on_early_termination=True,
+                    )
+                )
+
             models_to_test.extend(models_with_sync)
+            models_to_test.extend(throw_on_early_term_tests)
 
             # 0 iteration tests for when one process does not train model at all, so
             # we must shadow the broadcast calls made when rebuilding buckets.
@@ -5033,7 +5504,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_same_across_ranks(self):
             # Control flow that is the same across ranks.
             batch = 20
@@ -5132,7 +5602,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_different_across_ranks(self):
             # Control flow that is different across ranks.
             batch = 20
@@ -5708,3 +6177,47 @@ class DistributedTest:
             # Tests unused parameter reporting when DDP is configured to ignore
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_sync_bn_training_vs_eval(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            # Need to set track_running_stats=False, when track_running_stats=True,
+            # bn_training is False and sync could not occur in eval model.
+            model = nn.SyncBatchNorm(
+                2, momentum=0.99, track_running_stats=False
+            ).cuda(rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            # Test sync occurs in training mode.
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(6):
+                    inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                    out = model(inp)
+                    loss = out.sum()
+                    loss.backward()
+
+            # SyncBN allgathers stats across all ranks, so verify call to
+            # all_gather in profiler.
+            all_gather_calls = get_profiling_event("all_gather", prof)
+            self.assertNotEqual([], all_gather_calls)
+
+            # Only do inference on one rank. If SyncBN did collective stats sync,
+            # this would hang/error.
+            model_inference = model.module
+            if self.rank == 0:
+                model_inference.eval()
+                with torch.autograd.profiler.profile() as prof:
+                    for i in range(6):
+                        inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                        out = model_inference(inp)
+                        loss = out.sum()
+                        loss.backward()
+
+                # Ensure sync does not occur in eval() mode.
+                all_gather_calls = get_profiling_event("all_gather", prof)
+                self.assertEqual([], all_gather_calls)

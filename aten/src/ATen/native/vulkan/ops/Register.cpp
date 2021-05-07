@@ -3,7 +3,6 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/Playground.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -43,17 +42,6 @@ TORCH_LIBRARY(vulkan, m) {
             return linear_prepack(
                 std::move(std::get<0>(state)), std::move(std::get<1>(state)));
           });
-
-  m.class_<PlaygroundOpContext>("PlaygroundOpContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<PlaygroundOpContext>& context) {
-            return context->unpack();
-          },
-          // __setstate__
-          [](PlaygroundOpContext::State state) {
-            return playground_prepack(std::move(std::get<0>(state)));
-          });
 }
 
 TORCH_LIBRARY(vulkan_prepack, m) {
@@ -71,24 +59,16 @@ TORCH_LIBRARY(vulkan_prepack, m) {
   m.def(
       "linear_run(Tensor X, "
       "__torch__.torch.classes.vulkan.LinearOpContext BW_prepack) -> Tensor Y");
-  m.def(
-      "playground_prepack(Tensor T) "
-      "-> __torch__.torch.classes.vulkan.PlaygroundOpContext");
-  m.def(
-      "playground_run(Tensor X, "
-      "__torch__.torch.classes.vulkan.PlaygroundOpContext P_prepack) -> Tensor Y");
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl("conv2d_clamp_prepack", TORCH_FN(conv2d_clamp_prepack));
   m.impl("linear_prepack", TORCH_FN(linear_prepack));
-  m.impl("playground_prepack", TORCH_FN(playground_prepack));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl("conv2d_clamp_run", TORCH_FN(conv2d_clamp_run));
   m.impl("linear_run", TORCH_FN(linear_run));
-  m.impl("playground_run", TORCH_FN(playground_run));
 }
 
 } // namespace
