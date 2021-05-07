@@ -240,6 +240,11 @@ NodePtr Node::Clone(OpList operands) const {
 lazy_tensors::hash_t Node::GetOpHash(OpKind op,
                                      const lazy_tensors::Shape& shape,
                                      lazy_tensors::hash_t hash_seed) {
+  if (lazy_tensors::Shape::IsDynamicMode()) {
+    lazy_tensors::hash_t h = lazy_tensors::util::HashCombine(
+        op.hash(), lazy_tensors::util::Hash(shape.rank()));
+    return lazy_tensors::util::HashCombine(h, hash_seed);
+  }
   lazy_tensors::hash_t h = lazy_tensors::util::HashCombine(
       op.hash(), lazy_tensors::util::Hash(shape.ToString()));
   return lazy_tensors::util::HashCombine(h, hash_seed);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <ostream>
 #include <vector>
 
@@ -67,6 +68,9 @@ class Shape {
   // Methods for accessing the dimensions array.
   int dimensions_size() const { return dimensions_.size(); }
   int64 dimensions(int index) const {
+    if (dynamic_mode_.load()) {
+      throw std::runtime_error("Exact shape not known");
+    }
     LTC_CHECK_LT(index, dimensions_.size());
     return dimensions_[index];
   }
@@ -77,6 +81,9 @@ class Shape {
   }
 
   lazy_tensors::Span<const int64> dimensions() const {
+    if (dynamic_mode_.load()) {
+      throw std::runtime_error("Exact shape not known");
+    }
     return absl::MakeSpan(dimensions_);
   }
 
@@ -98,12 +105,17 @@ class Shape {
            dimensions_ == other.dimensions_;
   }
 
+  static bool IsDynamicMode();
+
+  static void SetDynamicMode();
+
  private:
   PrimitiveType element_type_;
   std::vector<int64> dimensions_;
   std::vector<bool> dynamic_dimensions_;
   std::vector<Shape> element_shapes_;
   Layout layout_;
+  static std::atomic<bool> dynamic_mode_;
 };
 
 class ProgramShape {
