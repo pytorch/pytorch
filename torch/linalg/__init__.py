@@ -502,8 +502,8 @@ The eigenvalues are returned in ascending order.
 
 .. seealso::
 
-        :func:`torch.linalg.eigvalsh` computes only the eigenvalues.
-        However, that function is not differentiable.
+        :func:`torch.linalg.eigvalsh` computes only the eigenvalues,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.cholesky` for a different decomposition of a Hermitian matrix.
         The Cholesky decomposition gives less information about the matrix but is much faster
@@ -586,8 +586,9 @@ The eigenvalues are returned in ascending order.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.eigh` instead, which also computes the eigenvectors.
+.. seealso::
+
+        :func:`torch.linalg.eigh` computes the full eigenvalue decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
@@ -947,7 +948,7 @@ Examples::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
@@ -965,7 +966,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 ======================   ========================================================
 :attr:`ord`              vector norm
 ======================   ========================================================
-`None` (default)         `2`-norm
+`2` (default)            `2`-norm
 `inf`                    `max(abs(x))`
 `-inf`                   `min(abs(x))`
 `0`                      `sum(x != 0)`
@@ -976,7 +977,7 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
 Args:
     A (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions.
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
+    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
@@ -1276,8 +1277,8 @@ Differences with `numpy.linalg.svd`:
 
 .. seealso::
 
-        :func:`torch.linalg.svdvals` computes only the singular values.
-        However, that function is not differentiable.
+        :func:`torch.linalg.svdvals` computes only the singular values,
+        but its gradients are always numerically stable.
 
         :func:`torch.linalg.eig` for a function that computes another type of spectral
         decomposition of a matrix. The eigendecomposition works just on on square matrices.
@@ -1354,12 +1355,13 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 The singular values are returned in descending order.
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.svd` instead, which also computes the singular vectors.
-
 .. note:: This function is equivalent to NumPy's `linalg.svd(A, compute_uv=False)`.
 
 .. note:: For CUDA inputs, this function synchronizes that device with the CPU.
+
+.. seealso::
+
+        :func:`torch.linalg.svd` computes the full singular value decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
