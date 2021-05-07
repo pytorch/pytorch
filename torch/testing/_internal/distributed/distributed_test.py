@@ -3489,7 +3489,8 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             world_size = get_world_size()
 
-            if BACKEND == "mpi":
+            # FIXME: Add testing for gloo/CUDA
+            if BACKEND == "mpi" or BACKEND == "gloo":
                 global_batch_size = world_size
                 local_batch_size = 1
                 model, ddp_model, input, target = self._prepare_cpu_module(
@@ -3500,7 +3501,6 @@ class DistributedTest:
                 rank_to_GPU = self._init_multigpu_helper()
                 int_devices = rank_to_GPU[rank][:1]
                 devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-                # print (int_devices, devices)
                 global_batch_size = world_size
                 local_batch_size = len(devices)
                 model, ddp_model, input, target = self._prepare_single_device_module(
@@ -3556,8 +3556,19 @@ class DistributedTest:
 
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
-            "get_future is only supported on mpi and nccl"
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            "get_future is only supported on mpi, nccl and gloo"
+        )
+        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        def test_accumulate_gradients_no_sync(self):
+            """
+            Runs _test_accumulate_gradients_no_sync using default inputs
+            """
+            self._test_accumulate_gradients_no_sync()
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_grad_is_view(self):
@@ -3567,8 +3578,8 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
-            "get_future is only supported on mpi and nccl"
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
@@ -3591,8 +3602,8 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
-            "get_future is only supported on mpi and nccl"
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
@@ -3625,8 +3636,8 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl",
-            "get_future is only supported on mpi"
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_get_future(self):
@@ -3635,6 +3646,7 @@ class DistributedTest:
 
             def add(fut):
                 return [t + 1 for t in fut.wait()]
+
             group, group_id, rank = self._init_global_test()
             input = _build_tensor(3, 2)
             if BACKEND == "nccl":

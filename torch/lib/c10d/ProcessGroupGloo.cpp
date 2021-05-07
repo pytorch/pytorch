@@ -426,6 +426,10 @@ void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
     work->finishWorkGlooError(std::current_exception());
     return;
   }
+
+  // FIXME: We need to call it here since Future completion requires all
+  // the work to be synchronized to CUDA.
+  work->synchronize();
   work->finishWorkGloo();
 }
 
