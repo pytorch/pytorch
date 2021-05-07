@@ -2793,7 +2793,7 @@ class TestLinalg(TestCase):
 
             out_u = torch.empty(0, dtype=dtype, device=device)
             if svd == torch.linalg.svd:
-                msg = "but got VT with dtype Int"
+                msg = "but got Vh with dtype Int"
             else:
                 msg = "but got V with dtype Int"
             with self.assertRaisesRegex(RuntimeError, msg):
