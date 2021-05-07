@@ -103,6 +103,13 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross'
 }
 
+GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
+    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    'sparse_mask_helper_cuda', '_sparse_addmm',
+}
+
+GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
+
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
     'set', 'resize'
