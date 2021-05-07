@@ -38,32 +38,32 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 
 } // namespace
 
-Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
+c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
-  Tensor tensor_;
+  c10::MaybeOwned<Tensor> tensor_;
   int fast_dim = transpose_result ? 2 : 1;
   int leading_dim = transpose_result ? 1 : 2;
 
   if (tensor_strides[fast_dim] == 1 &&
     (tensor_strides[leading_dim] >= std::max<int64_t>(1, m))) {
     transpose_tensor = false;
-    tensor_ = tensor;
+    tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
     ld_tensor = tensor_strides[leading_dim];
   } else if ((tensor_strides[leading_dim] == 1) &&
     (tensor_strides[fast_dim] >= std::max<int64_t>(1, n))) {
     transpose_tensor = true;
-    tensor_ = tensor;
+    tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
     ld_tensor = tensor_strides[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
     // gemm call requires leading dimension and stride parameters to be non-zero
-    bool is_stride_non_zero = tensor.stride(1) != 0 && tensor.stride(2) != 0;
+    bool is_stride_non_zero = tensor.strides()[1] != 0 && tensor.strides()[2] != 0;
     if (tensor.is_contiguous() && is_stride_non_zero) {
-      tensor_ = tensor;
+      tensor_ = c10::MaybeOwned<Tensor>::borrowed(tensor);
     } else {
-      tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
+      tensor_ = c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
     }
-    ld_tensor = tensor_.stride(1);
+    ld_tensor = tensor_->strides()[1];
   }
 
   return tensor_;
@@ -217,58 +217,55 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   }
 
   bool transpose_result = false;
-  Tensor result_;
+  c10::MaybeOwned<Tensor> result_;
   IntArrayRef result_strides = result.strides();
   IntArrayRef result_sizes = result.sizes();
 
   if ((result_strides[1] == 1) &&
       ((result_sizes[2] == 1) || (result_strides[2] >= std::max<int64_t>(1, result_sizes[1])))) {
-    result_ = result;
+    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
   } else if ((result_strides[2] == 1) &&
     (result_sizes[1] == 1 || (result_strides[1] >= std::max<int64_t>(1, result_sizes[2])))) {
     transpose_result = true;
-    result_ = result;
+    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
   } else {
-    result_ = result.transpose(1, 2).clone(at::MemoryFormat::Contiguous);
-    result_ = result_.transpose(1, 2);
+    result_ = c10::MaybeOwned<Tensor>::owned(result.transpose(1, 2).clone(at::MemoryFormat::Contiguous).transpose(1, 2));
   }
 
   int leading_dim = transpose_result ? 1 : 2;
 
-  Tensor batch1_ = transpose_result ? batch2 : batch1;
-  Tensor batch2_ = transpose_result ? batch1 : batch2;
   int64_t m = result_sizes[transpose_result ? 2 : 1];
   int64_t n = result_sizes[leading_dim];
-  int64_t k = batch1_.size(leading_dim);
+  int64_t k = (transpose_result ? batch2 : batch1).sizes()[leading_dim];
 
   int64_t lda, ldb, ldc;
   bool transpose_batch1, transpose_batch2;
-  batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, lda, transpose_result, m, k);
-  batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, ldb, transpose_result, k, n);
+  auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
+  auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
 
-  ldc = result_.stride(leading_dim);
-  int64_t num_batches = result_.size(0);
+  ldc = result_->strides()[leading_dim];
+  int64_t num_batches = result_->sizes()[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
-    scalar_t* batch1_ptr = batch1_.data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_.data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_.data_ptr<scalar_t>();
+    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
+    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
       transpose_batch1 ? 't' : 'n',
       transpose_batch2 ? 't' : 'n',
       m, n, k,
       alpha_val,
-      batch1_ptr, lda, batch1_.stride(0),
-      batch2_ptr, ldb, batch2_.stride(0),
+      batch1_ptr, lda, batch1_->strides()[0],
+      batch2_ptr, ldb, batch2_->strides()[0],
       beta_val,
-      result_ptr, ldc, result_.stride(0),
+      result_ptr, ldc, result_->strides()[0],
       num_batches
     );
   });
-  if (!result.is_same(result_)) {
-    result.copy_(result_);
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
   }
   return result;
 }
@@ -334,7 +331,9 @@ Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, 
 }
 
 Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
-  result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
+  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
+  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
+  at::native::resize_output(result, {batch1.sizes()[0], batch1.sizes()[1], batch2.sizes()[2]});
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
@@ -348,7 +347,9 @@ Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result)
 }
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
-  Tensor result = at::empty({0}, self.options());
+  TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
+  TORCH_CHECK(mat2.dim() == 3, "batch2 must be a 3D tensor");
+  Tensor result = at::empty({self.sizes()[0], self.sizes()[1], mat2.sizes()[2]}, self.options());
   return native::bmm_out_cuda(self, mat2, result);
 }
 

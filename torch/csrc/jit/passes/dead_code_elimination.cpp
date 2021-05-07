@@ -20,7 +20,8 @@ class DeadCodeEliminator {
       std::shared_ptr<Graph> graph,
       DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy),
-        aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
+        graph_(std::move(graph)),
+        useAliasDb_(true) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy) {}
 
@@ -218,11 +219,12 @@ class DeadCodeEliminator {
       }
     }
 
-    if (aliasDb_) {
-      if (aliasDb_->writesToAlias(node, liveValues_)) {
+    if (useAliasDb_) {
+      if (getOrCreateAliasDb()->writesToAlias(node, liveValues_)) {
         return mark(node);
       }
     }
+
     return false;
   }
 
@@ -290,7 +292,7 @@ class DeadCodeEliminator {
   }
 
   bool hasUntrackedMutation(Node* node) {
-    if (!aliasDb_) {
+    if (!useAliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
 
@@ -300,7 +302,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      return aliasDb_->writesToWildcard(node);
+      return getOrCreateAliasDb()->writesToWildcard(node);
     }
   }
 
@@ -404,7 +406,18 @@ class DeadCodeEliminator {
         " will be removed");
   }
 
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
+
   DCESideEffectPolicy sideEffectPolicy_;
+
+  std::shared_ptr<Graph> graph_;
+  bool useAliasDb_ = false;
+  // lazily initialized
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
