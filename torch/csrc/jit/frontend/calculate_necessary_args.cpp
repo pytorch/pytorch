@@ -1,6 +1,4 @@
 #include <torch/csrc/jit/frontend/calculate_necessary_args.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/ir/constants.h>
 
 namespace torch {
 namespace jit {
