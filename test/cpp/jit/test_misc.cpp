@@ -2238,7 +2238,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_FALSE(f1->hasValue());
   int32_t sat1 = 0;
   int32_t sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(43);
   ASSERT_TRUE(f1->completed());
@@ -2247,7 +2247,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(f1->constValue().toInt(), 43);
   ASSERT_EQ(f1->value().toInt(), 43);
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
 }
@@ -2258,7 +2258,7 @@ TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
   int sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_EQ(sat1, 1);
@@ -2271,7 +2271,7 @@ TEST(FuturesTest, Error) {
   } catch (const std::exception& e) {
     ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
   }
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
   f1->setErrorIfNeeded(
@@ -2286,14 +2286,14 @@ TEST(FuturesTest, Error) {
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
-      [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+      [](Future& f1) -> IValue { return f1.constValue().toInt() + 1; },
       IntType::get());
   auto f3 = f2->then(
-      [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+      [](Future& f2) -> IValue { return f2.constValue().toInt() * 3; },
       IntType::get());
   bool done = false;
-  f3->addCallback([f3, &done]() {
-    ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+  f3->addCallback([&done](Future& f3) {
+    ASSERT_EQ(f3.constValue().toInt(), (42 + 1) * 3);
     done = true;
   });
   ASSERT_FALSE(done);
@@ -2419,7 +2419,7 @@ TEST(FuturesTest, CollectAny) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
-  auto profilerEnabledCb = []() {
+  auto profilerEnabledCb = [](Future& /* unused */) {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
   // test running callbacks with propagation of TLS state.
@@ -2444,8 +2444,8 @@ TEST(TLSFutureCallbacksTest, Basic) {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        wrapPropagateTLSState([&profilerEnabledCb]() {
-          profilerEnabledCb();
+        wrapPropagateTLSState([&profilerEnabledCb](Future& s1) {
+          profilerEnabledCb(s1);
           return at::IValue(1);
         }),
         IntType::get());
@@ -2466,37 +2466,39 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  auto verifyProfilerCb = wrapPropagateTLSState([&profilerEnabledCb] {
-    // Ensure the profiler is still enabled in this thread.
-    profilerEnabledCb();
-    auto t1 = torch::ones({2, 2});
-    auto t2 = torch::ones({2, 2});
-    torch::add(t1, t2);
-    // Don't cleanup TLSState, and just consolidate.
-    auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
-    auto thread_event_lists =
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
-    // Ensure that the events from this thread are still profiled and we obtain
-    // the expected in events in our consolidated list when calling
-    // disableProfilerLegacy().
-    bool found_ones = false;
-    bool found_add = false;
-    for (const auto& li : thread_event_lists) {
-      for (const auto& evt : li) {
-        if (strcmp(evt.name(), "aten::add") == 0) {
-          found_add = true;
-        } else if (strcmp(evt.name(), "aten::ones") == 0) {
-          found_ones = true;
+  auto verifyProfilerCb =
+      wrapPropagateTLSState([&profilerEnabledCb](Future& /* unused */) {
+        // Ensure the profiler is still enabled in this thread.
+        profilerEnabledCb();
+        auto t1 = torch::ones({2, 2});
+        auto t2 = torch::ones({2, 2});
+        torch::add(t1, t2);
+        // Don't cleanup TLSState, and just consolidate.
+        auto opts =
+            torch::autograd::profiler::ProfilerDisableOptions(false, true);
+        auto thread_event_lists =
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+        // Ensure that the events from this thread are still profiled and we
+        // obtain the expected in events in our consolidated list when calling
+        // disableProfilerLegacy().
+        bool found_ones = false;
+        bool found_add = false;
+        for (const auto& li : thread_event_lists) {
+          for (const auto& evt : li) {
+            if (strcmp(evt.name(), "aten::add") == 0) {
+              found_add = true;
+            } else if (strcmp(evt.name(), "aten::ones") == 0) {
+              found_ones = true;
+            }
+          }
+          if (found_add && found_ones) {
+            break;
+          }
         }
-      }
-      if (found_add && found_ones) {
-        break;
-      }
-    }
-    ASSERT_TRUE(found_ones);
-    ASSERT_TRUE(found_add);
-  });
+        ASSERT_TRUE(found_ones);
+        ASSERT_TRUE(found_add);
+      });
 
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.

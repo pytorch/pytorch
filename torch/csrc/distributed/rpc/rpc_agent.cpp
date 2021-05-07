@@ -73,13 +73,7 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
-  // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
-  jitFuture->addCallback([this,
-                          newTime,
-                          firstRetryRpc,
-                          wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-    auto future = wp.lock();
-    TORCH_INTERNAL_ASSERT(future);
+  jitFuture->addCallback([this, newTime, firstRetryRpc](JitFuture& future) {
     rpcRetryCallback(future, newTime, firstRetryRpc);
   });
 
@@ -167,13 +161,7 @@ void RpcAgent::retryExpiredRpcs() {
           earliestRpc->options_, earliestRpc->retryCount_);
       earliestRpc->retryCount_++;
 
-      // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
-      jitFuture->addCallback([this,
-                              newTime,
-                              earliestRpc,
-                              wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-        auto future = wp.lock();
-        TORCH_INTERNAL_ASSERT(future);
+      jitFuture->addCallback([this, newTime, earliestRpc](JitFuture& future) {
         rpcRetryCallback(future, newTime, earliestRpc);
       });
     }
@@ -192,10 +180,10 @@ void RpcAgent::retryExpiredRpcs() {
 }
 
 void RpcAgent::rpcRetryCallback(
-    const std::shared_ptr<JitFuture>& jitFuture,
+    JitFuture& jitFuture,
     steady_clock_time_point newTime,
     std::shared_ptr<RpcRetryInfo> earliestRpc) {
-  if (jitFuture->hasError()) {
+  if (jitFuture.hasError()) {
     // Adding one since we want to include the original send as well and not
     // just the retry count.
     LOG(INFO) << "Send try " << (earliestRpc->retryCount_ + 1) << " failed";
@@ -207,7 +195,7 @@ void RpcAgent::rpcRetryCallback(
           "RPC Agent is no longer running on Node ",
           RpcAgent::getWorkerInfo().id_,
           ". Cannot retry message.");
-      earliestRpc->originalFuture_->setError(jitFuture->exception_ptr());
+      earliestRpc->originalFuture_->setError(jitFuture.exception_ptr());
     } else if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
       // If the previous future completed with an error and we haven't
       // completed maxRetries send attempts, we move the earliestRpc
@@ -233,7 +221,7 @@ void RpcAgent::rpcRetryCallback(
   } else {
     // This try succeeded, so we can make the original future as complete.
     earliestRpc->originalFuture_->markCompleted(
-        jitFuture->value(), jitFuture->dataPtrs());
+        jitFuture.value(), jitFuture.dataPtrs());
   }
 }
 
