@@ -879,7 +879,7 @@ void lcm_kernel(TensorIterator& iter) {
     });
 }
 
-void hypot_kernel(TensorIterator& iter) {
+void hypot_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
     cpu_kernel_vec(
         iter,
