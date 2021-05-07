@@ -3892,6 +3892,10 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cuda', dtypes=[torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       # Complex gradcheck tests asinh at points 0 + ix for x > 1 which are points
+                       # where asinh is not differentiable
+                       SkipInfo('TestGradients', 'test_forward_mode_AD',
+                                dtypes=complex_types())
                    )),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
