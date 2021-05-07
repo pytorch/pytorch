@@ -1073,6 +1073,9 @@ bool LoopNest::optimizeConditionals() {
     std::vector<const Expr*> comp_values = {new IntImm(0)};
     std::vector<const Expr*> sub_exprs;
     auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
+    if (ifthenelse_exprs.empty()) {
+      continue;
+    }
     // We only check if the first if-then-else expression in this store
     // corresponds to a conditional of the required format. If there are more
     // than one such conditional, optimizing them requires checking if the
