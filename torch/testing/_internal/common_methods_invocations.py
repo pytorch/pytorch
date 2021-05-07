@@ -1585,7 +1585,12 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
-                     test_inplace_grad=False,),
+                     test_inplace_grad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
                      ref=np.fft.ihfft,
@@ -1612,7 +1617,13 @@ op_db: List[OpInfo] = [
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
                      check_batched_gradgrad=False,
-                     test_inplace_grad=False,),
+                     test_inplace_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
                    dtypes=floating_types_and(torch.half),
