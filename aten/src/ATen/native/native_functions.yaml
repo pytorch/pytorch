@@ -4035,29 +4035,32 @@
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function
+  structured_delegate: threshold.out
   dispatch:
-    CPU: threshold
-    CUDA: threshold_cuda
     QuantizedCPU: threshold_quantized_cpu
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
-  dispatch:
-    CPU: threshold_
-    CUDA: threshold__cuda
+  structured_delegate: threshold.out
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
   dispatch:
     CPU: threshold_out
     CUDA: threshold_out_cuda
 
+- func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: threshold_backward_out
+    CUDA: threshold_backward_out_cuda
+
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
+  structured_delegate: threshold_backward.grad_input
   dispatch:
-    CPU: threshold_backward
-    CUDA: threshold_backward_cuda
     MkldnnCPU: mkldnn_relu_backward
 
 - func: tile(Tensor self, int[] dims) -> Tensor

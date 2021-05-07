@@ -547,22 +547,12 @@ static Tensor threshold_out_cuda(
   return iter.output();
 }
 
-Tensor threshold_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out_cuda(nullopt, self, threshold, value, self);
+TORCH_IMPL_FUNC(threshold_out_cuda)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_out_cuda(make_optional(const_cast<Tensor&>(result)), self, threshold, value, self);
 }
 
-Tensor& threshold__cuda(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out_cuda(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out_cuda(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out_cuda(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out_cuda)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_out_cuda(make_optional(const_cast<Tensor&>(gradInput)), self, threshold, 0, grad);
 }
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);

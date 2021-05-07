@@ -13,7 +13,18 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
+  set_output(0, self.sizes(), {}, self.options().memory_format(self.suggest_memory_format()),
+             self.has_names() ? self.names() : {});
+}
+TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
+  set_output(0, self.sizes(), {}, self.options().memory_format(self.suggest_memory_format()),
+             self.has_names() ? self.names() : {});
+}
+} // namespace meta
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
@@ -429,22 +440,12 @@ static Tensor threshold_out(
   return iter.output();
 }
 
-Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out(nullopt, self, threshold, value, self);
+TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_out(make_optional(const_cast<Tensor&>(result)), self, threshold, value, self);
 }
 
-Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_out(make_optional(const_cast<Tensor&>(gradInput)), self, threshold, 0, grad);
 }
 
 // -----------------------------------
