@@ -73,6 +73,8 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);                 \
   }
 
+CREATE_BINARY_META_FUNC(logaddexp);
+CREATE_BINARY_META_FUNC(logaddexp2);
 CREATE_BINARY_META_FUNC(gcd);
 CREATE_BINARY_META_FUNC(lcm);
 CREATE_BINARY_META_FUNC(hypot);
@@ -216,6 +218,8 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tens
   func##_stub(device_type(), *this);                                                           \
 }
 
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
 CREATE_BINARY_TORCH_IMPL_FUNC(lcm);
 CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
@@ -1063,28 +1067,6 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 
 Tensor& fmod_(Tensor& self, const Scalar& other) {
   return native::fmod_(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& logaddexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  logaddexp_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor logaddexp(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::logaddexp_out(result, self, other);
-}
-
-Tensor& logaddexp2_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  logaddexp2_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor logaddexp2(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::logaddexp2_out(result, self, other);
 }
 
 // Note: this function is only for testing.

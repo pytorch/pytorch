@@ -808,7 +808,7 @@ void fmod_kernel(TensorIterator& iter) {
   }
 }
 
-void logaddexp_kernel(TensorIterator& iter) {
+void logaddexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -832,7 +832,7 @@ void logaddexp_kernel(TensorIterator& iter) {
   });
 }
 
-void logaddexp2_kernel(TensorIterator& iter) {
+void logaddexp2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
     cpu_kernel_vec(
         iter,
