@@ -17,7 +17,7 @@ namespace jit {
 struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
     at::IValue iv(tensor);
-    return iv.hash(iv);
+    return at::IValue::hash(iv);
   }
 };
 
