@@ -4,10 +4,10 @@
 #include <vector>
 
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/frontend/calculate_necessary_args.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
