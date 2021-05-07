@@ -306,6 +306,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: conj_out
+    SparseCPU, SparseCUDA: conj_out_sparse
 
 - func: _conj(Tensor self) -> Tensor
   variants: function
@@ -6332,8 +6333,7 @@
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _lu_with_info_cpu
-    CUDA: _lu_with_info_cuda
+    CPU, CUDA: _lu_with_info
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
