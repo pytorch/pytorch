@@ -125,7 +125,6 @@ void write_minidump() {
 }
 
 #else
-
 // On unspported systems we can't do anything, so stub out everything.
 void enable_minidumps(const std::string& dir) {
   AT_ERROR(
@@ -149,6 +148,12 @@ void write_minidump() {
   AT_ERROR(
       "Minidump collection is currently only implemented for Linux platforms");
 }
+
+void enable_minidumps_on_exceptions() {
+  AT_ERROR(
+      "Minidump collection is currently only implemented for Linux platforms");
+}
+
 #endif
 
 } // namespace crash_handler
