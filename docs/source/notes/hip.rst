@@ -77,7 +77,7 @@ which version of PyTorch you are using, refer to this example below::
 TensorFloat-32(TF32) on ROCm
 ----------------------------
 
-TF32 is not supported on ROCm
+TF32 is not supported on ROCm.
 
 .. _rocm-memory-management:
 
