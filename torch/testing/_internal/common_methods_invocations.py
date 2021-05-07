@@ -74,7 +74,7 @@ class SkipInfo(DecorateInfo):
 
     def __init__(self, cls_name=None, test_name=None, *,
                  device_type=None, dtypes=None, active_if=True):
-        super().__init__(decorators=[skipIf(True, "Skipped!")], cls_name=cls_name,
+        super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
 
