@@ -503,7 +503,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 #endif
     auto childFut = createInstance(std::move(type));
     addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) {
+        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
           try {
             childFut->markCompleted(cb(parentFut));
           } catch (std::exception&) {
@@ -522,7 +522,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 #endif
     auto childFut = createInstance(std::move(type));
     addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) {
+        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
           c10::intrusive_ptr<Future> intermediateFut;
           try {
             intermediateFut = cb(parentFut);
