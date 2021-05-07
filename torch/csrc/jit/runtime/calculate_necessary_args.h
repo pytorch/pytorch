@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/frontend/calculate_necessary_args.h>
+#pragma once
+
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <cstddef>
 
 namespace torch {
 namespace jit {
@@ -34,6 +38,9 @@ size_t CalculateNecessaryArgs(
   }
   return 0;
 }
+
+} // namespace jit
+} // namespace torch
 
 } // namespace jit
 } // namespace torch
