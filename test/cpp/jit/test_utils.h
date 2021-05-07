@@ -5,7 +5,16 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <regex.h>
+#include <regex>
+
+#define ASSERT_THROWS_WITH_REGEX_MESSAGE(statement, regex_pattern)   \
+  const std::regex error_regex(regex_pattern, std::regex::extended); \
+  try {                                                              \
+    (void)statement;                                                 \
+    FAIL();                                                          \
+  } catch (const std::exception& e) {                                \
+    ASSERT_TRUE(std::regex_match(e.what(), error_regex));            \
+  }
 
 #define ASSERT_THROWS_WITH_MESSAGE(statement, substring)                 \
   try {                                                                  \
@@ -13,14 +22,6 @@
     FAIL();                                                              \
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
-  }
-
-#define ASSERT_THROWS_WITH_REGEX_MESSAGE(statement, regex_error) \
-  try {                                                          \
-    (void)statement;                                             \
-    FAIL();                                                      \
-  } catch (const std::exception& e) {                            \
-    ASSERT_TRUE(std::regex_match(e.what(), regex_error));        \
   }
 
 namespace torch {
