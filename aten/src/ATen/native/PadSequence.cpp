@@ -22,7 +22,7 @@ namespace native {
       out_dims = {max_len, sequences_size};
     }
     out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
-    
+
     Tensor out = at::full(out_dims, padding_value, sequences[0].options());
     for (auto i = 0; i < sequences_size; i++) {
       const Tensor currseq = sequences[i];
