@@ -306,6 +306,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: conj_out
+    SparseCPU, SparseCUDA: conj_out_sparse
 
 - func: _conj(Tensor self) -> Tensor
   variants: function
