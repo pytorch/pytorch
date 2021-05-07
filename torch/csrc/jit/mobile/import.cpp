@@ -279,7 +279,8 @@ void BytecodeDeserializer::parseMethods(
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
   // version number are seen as version 3 (deprecated).
-  int64_t model_version = 0x3L;
+  constexpr uint64_t default_version = 0x3L;
+  uint64_t model_version = default_version;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
     model_version = vals[0].toInt();
