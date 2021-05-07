@@ -369,7 +369,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   }
 }
 
-std::shared_ptr<c10::ivalue::Future> DistEngine::
+c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
     runEngineAndAccumulateGradients(
         const ContextPtr& autogradContext,
         const std::shared_ptr<Node>& graphRoot,
@@ -392,7 +392,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   // execute after the original future is completed). This ensures we return a
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture =
-      std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+      c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
   futureGrads->addCallback(
       [autogradContext, outputEdges, accumulateGradFuture](c10::ivalue::Future& futureGrads) {
@@ -424,7 +424,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   return accumulateGradFuture;
 }
 
-std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
+c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
     const std::shared_ptr<SendRpcBackward>& sendFunction,
     bool retainGraph) {
@@ -471,7 +471,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture =
-        std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+        c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
     accumulateGradFuture->addCallback([autogradContext,
                                        callbackFuture](c10::ivalue::Future& accumulateGradFuture) {
@@ -520,7 +520,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
-    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted(c10::IValue());
     return fut;
   }

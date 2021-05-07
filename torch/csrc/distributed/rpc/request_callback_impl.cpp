@@ -88,13 +88,13 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
 void processPythonExecution(
     const py::object& pyFn,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     bool isAsyncExecution,
     std::function<void(
         const py::object&,
         int64_t,
         PythonRpcHandler&,
-        const std::shared_ptr<JitFuture>&)> postProcessing) {
+        const c10::intrusive_ptr<JitFuture>&)> postProcessing) {
   std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   {
@@ -151,7 +151,7 @@ void RequestCallbackImpl::processScriptCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
   if (processScriptCallOp(scriptCall, markComplete, stack)) {
@@ -207,7 +207,7 @@ void RequestCallbackImpl::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
   try {
     processPythonExecution(
@@ -218,7 +218,7 @@ void RequestCallbackImpl::processPythonCall(
         [](const py::object& result,
            const int64_t messageId,
            PythonRpcHandler& pythonRpcHandler,
-           const std::shared_ptr<JitFuture>& responseFuture) {
+           const c10::intrusive_ptr<JitFuture>& responseFuture) {
           // Check we have GIL.
           DCHECK(PyGILState_Check());
 
@@ -315,7 +315,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
 
@@ -358,7 +358,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
             const py::object& result,
             const int64_t messageId,
             PythonRpcHandler& /* unused */,
-            const std::shared_ptr<JitFuture>& responseFuture) {
+            const c10::intrusive_ptr<JitFuture>& responseFuture) {
           // Check we have GIL.
           DCHECK(PyGILState_Check());
 
@@ -387,7 +387,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
 void RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   // Making this lambda mutable to allow move-capture it in callbacks
   auto postProcessing = [responseFuture, lsctx = std::move(lsctx)](
@@ -466,7 +466,7 @@ void RequestCallbackImpl::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture,
+    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
     processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
@@ -496,7 +496,7 @@ bool RequestCallbackImpl::cudaAvailable() const {
 void RequestCallbackImpl::processRRefBackward(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
 
   // Get all fields
