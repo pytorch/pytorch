@@ -188,7 +188,7 @@ def lower_function(node, op, nnc_args, args):
     else:
         return out[0], out[1]
 
-def nnc_compile(fx_model: fx.GraphModule, example_inputs) -> torch.nn.Module:
+def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) -> torch.nn.Module:
     """
     nnc_compile(model, example_inputs) returns a function with the same args
     as `model.forward`, with an extra argument corresponding to where the
@@ -274,6 +274,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs) -> torch.nn.Module:
 
 
     loopnest = te.LoopNest(te.Stmt(compute_stmts), outs[0])
+    if get_loopnest:
+        return loopnest
     # loopnest.inline_intermediate_bufs(True)
     loopnest.simplify()
     loopnest.prepare_for_codegen()
@@ -299,6 +301,15 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs) -> torch.nn.Module:
         return results
     return f
 
+def make_nnc(f):
+    @functools.wraps(f)
+    def wrapped(*args):
+        fx_model = make_fx(f)(*args)
+        fx_model.graph.lint()
+        compiled_f = nnc_compile(fx_model, args, get_loopnest=True)
+        return compiled_f
+
+    return wrapped
 
 ################################
 # Example usage and Benchmarking
