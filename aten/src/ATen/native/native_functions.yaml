@@ -9635,6 +9635,12 @@
   python_module: linalg
   variants: function
 
+- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: _linalg_solve_out_helper_cpu
+    CUDA: _linalg_solve_out_helper_cuda
+
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
   variants: function
