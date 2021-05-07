@@ -612,8 +612,8 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     test_cases = [
         # input size, ord, dim args
-        (size_1D, None, None),
-        (size_1D, None, (0,)),
+        (size_1D, 2, None),
+        (size_1D, 2, (0,)),
         (size_1D, 0, None),
         (size_1D, 0, (0,)),
         (size_1D, 0.9, None),
@@ -627,9 +627,9 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
         (size_1D, -inf, None),
         (size_1D, -inf, (0,)),
 
-        (size_2D, None, None),
-        (size_2D, None, (0,)),
-        (size_2D, None, (-1, 0)),
+        (size_2D, 2, None),
+        (size_2D, 2, (0,)),
+        (size_2D, 2, (-1, 0)),
         (size_2D, 0, None),
         (size_2D, 0, (0,)),
         (size_2D, 0, (-1, 0)),

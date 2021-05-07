@@ -1336,7 +1336,7 @@ class TestLinalg(TestCase):
     def test_vector_norm(self, device, dtype):
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
-        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
+        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
         input_sizes = [
             (10, ),
             (4, 5),
@@ -1362,7 +1362,7 @@ class TestLinalg(TestCase):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}, norm_dtype={norm_dtype}'
             error_msg = None
             if input.numel() == 0:
-                if ord is not None and ord < 0:
+                if ord < 0:
                     error_msg = r'linalg.vector_norm of negative order cannot be performed on an empty tensor'
                 elif ord == inf and (dim is None or input.size(dim) == 0):
                     error_msg = (
@@ -1478,7 +1478,7 @@ class TestLinalg(TestCase):
             torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
             self.assertEqual(result, result_out, msg=msg)
 
-        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf]
         S = 10
         test_cases = [
             # input size, p settings, dim
@@ -1506,7 +1506,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
-        def run_test_case(input, p, dim, keepdim):
+        def run_test_case(input, ord, dim, keepdim):
             result = torch.linalg.norm(input, ord, dim, keepdim)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
@@ -1518,7 +1518,7 @@ class TestLinalg(TestCase):
             torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
             self.assertEqual(result, result_out, msg=msg)
 
-        ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro', None]
+        ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro']
         S = 10
         test_cases = [
             # input size, p settings, dim
