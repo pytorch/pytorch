@@ -3556,7 +3556,7 @@ class DistributedTest:
 
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -3567,7 +3567,7 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync()
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -3578,7 +3578,7 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -3602,7 +3602,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -3636,7 +3636,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != 'gloo',
+            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo"
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
