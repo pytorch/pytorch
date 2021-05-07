@@ -705,7 +705,7 @@ Examples::
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
-Computes a solution to the least squares problem of a system of linear equations.
+Computes a solution to the least squares problem  of a system of linear equations.
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 the **least squares problem** for a linear system :math:`AX = B` with
@@ -722,7 +722,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 :attr:`driver` chooses the LAPACK/MAGMA function that will be used.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank and `m < n`.
 To choose the best driver on CPU consider:
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
@@ -948,7 +948,7 @@ Examples::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
@@ -966,7 +966,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 ======================   ========================================================
 :attr:`ord`              vector norm
 ======================   ========================================================
-`None` (default)         `2`-norm
+`2` (default)            `2`-norm
 `inf`                    `max(abs(x))`
 `-inf`                   `min(abs(x))`
 `0`                      `sum(x != 0)`
@@ -977,7 +977,7 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
 Args:
     A (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions.
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
+    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
