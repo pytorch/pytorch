@@ -87,6 +87,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   int indent_ = 0;
 
  private:
+  // Skip the next indentation; used for body of control structures.
+  bool skip_indent_ = false;
+
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
 };

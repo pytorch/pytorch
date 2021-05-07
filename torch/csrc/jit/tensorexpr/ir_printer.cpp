@@ -397,15 +397,16 @@ void IRPrinter::visit(const For* v) {
     os() << " /* " << loop_options_str << " */";
   }
   if (v->body()) {
+    skip_indent_ = true;
     os() << *v->body();
   } else {
     os() << "{}";
   }
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const Block* v) {
-  os() << "{" << std::endl;
+  emitIndent();
+  os() << "{\n";
   indent_++;
 
   for (Stmt* s : *v) {
@@ -413,7 +414,7 @@ void IRPrinter::visit(const Block* v) {
   }
   indent_--;
   emitIndent();
-  os() << "}";
+  os() << "}\n";
 }
 
 void IRPrinter::visit(const Allocate* v) {
@@ -510,6 +511,10 @@ void IRPrinter::visit(const ExternalCall* v) {
 }
 
 void IRPrinter::emitIndent() {
+  if (skip_indent_) {
+    skip_indent_ = false;
+    return;
+  }
   os() << std::setw(2 * indent_) << "";
 }
 
