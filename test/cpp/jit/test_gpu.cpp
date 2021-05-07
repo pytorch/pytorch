@@ -5527,6 +5527,7 @@ TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
   tv1->computeAt(tv5, 2);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(1);
   at::Tensor aten_input = at::randn({9, 5}, options);
 
   auto t1 = aten_input.add(1.0);
