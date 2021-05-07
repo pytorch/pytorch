@@ -107,11 +107,9 @@ async def shell_cmd(
     return passed, stdout.decode(), stderr.decode()
 
 
-PASS = color(col.GREEN, "\N{check mark}")
-FAIL = color(col.RED, "x")
-
-
 def header(name: str, passed: bool) -> None:
+    PASS = color(col.GREEN, "\N{check mark}")
+    FAIL = color(col.RED, "x")
     icon = PASS if passed else FAIL
     print(f"{icon} {color(col.BLUE, name)}")
 

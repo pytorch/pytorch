@@ -1,7 +1,9 @@
+import textwrap
 import unittest
 import sys
 import contextlib
 import io
+import os
 from typing import List, Dict, Any
 
 from tools import actions_local_runner
@@ -55,6 +57,52 @@ if __name__ == '__main__':
                 result = f.getvalue()
                 self.assertIn("say hello", result)
                 self.assertIn("hi", result)
+
+        class TestQuicklint(unittest.IsolatedAsyncioTestCase):
+            test_file = os.path.join("torch", "some_cool_file.py")
+            maxDiff = None
+
+            def setUp(self, *args, **kwargs):
+                bad_code = textwrap.dedent("""
+                    some_variable = '2'
+                    some_variable = None
+                    some_variable = 11.2
+                """).rstrip("\n")
+
+                with open(self.test_file, "w") as f:
+                    f.write(bad_code)
+
+            def tearDown(self, *args, **kwargs):
+                os.remove(self.test_file)
+
+            def test_file_selection(self):
+                files = actions_local_runner.find_changed_files()
+                self.assertIn(self.test_file, files)
+
+            async def test_flake8(self):
+                f = io.StringIO()
+                with contextlib.redirect_stdout(f):
+                    await actions_local_runner.run_flake8([self.test_file], True)
+
+                expected = textwrap.dedent("""
+                    x flake8
+                    torch/some_cool_file.py:4:21: W292 no newline at end of file
+                """).lstrip("\n")
+                self.assertEqual(expected, f.getvalue())
+
+            async def test_mypy(self):
+                self.maxDiff = None
+                f = io.StringIO()
+                with contextlib.redirect_stdout(f):
+                    await actions_local_runner.run_mypy([self.test_file], True)
+
+                expected = textwrap.dedent("""
+                    x mypy (skipped typestub generation)
+                    torch/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
+                    torch/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
+                """).lstrip("\n")
+                self.assertEqual(expected, f.getvalue())
+
 
 
     unittest.main()
