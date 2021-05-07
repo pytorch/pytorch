@@ -14,16 +14,33 @@
 namespace torch {
 namespace jit {
 
+// Example tensor_str: "Columns 1 to 26 1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1\n\nColumns 27 to 52 1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1\n\nColumns 53 to 78 1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1\n\nColumns 79 to 104 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1\n\nColumns 105 to 115 1  1  1  1  1  1  1  1  1  1
+// 1\n[ CPULongType{1,115} ]"
 struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
-    at::IValue iv(tensor);
-    return at::IValue::hash(iv);
+    std::stringstream tensor_stream;
+    tensor_stream << tensor;
+    std::string tensor_str = tensor_stream.str();
+    std::size_t h1 = std::hash<std::string>{}(tensor_str);
+    return h1;
   }
 };
 
 struct tensor_value_equal {
   bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-    return a.equal(b);
+    std::stringstream a_stream;
+    a_stream << a;
+    std::string a_str = a_stream.str();
+
+    std::stringstream b_stream;
+    b_stream << b;
+    std::string b_str = b_stream.str();
+    return a_str == b_str;
   }
 };
 
