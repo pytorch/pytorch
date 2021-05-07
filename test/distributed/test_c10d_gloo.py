@@ -1836,8 +1836,6 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             process_group=process_group,
         )
 
-        # "get_future" API does not support gloo backend, see GH Issue #42048.
-        # Instead, we wait for an allreduce work, and write its result to a Future.
         def allreduce_hook_gloo(
                 state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
