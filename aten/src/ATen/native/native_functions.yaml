@@ -9806,3 +9806,7 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_backward_kernel
+
+- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
+  python_module: nn
+  variants: function
