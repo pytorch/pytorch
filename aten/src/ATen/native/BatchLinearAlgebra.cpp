@@ -774,19 +774,6 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
-
-// This is a type dispatching helper function for 'apply_solve'
-Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
-  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
-  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
-  // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
-    apply_solve<scalar_t>(result, input, infos);
-  });
-  return result;
-}
-
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
 static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
@@ -878,7 +865,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     result = result.unsqueeze_(-1);
   }
 
-  // _linalg_solve_out_helper_ (apply_solve) performs calculations in-place and result must be a copy of other_broadcasted
+  // lu_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
@@ -891,7 +878,14 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     infos.fill_(0);
   }
 
-  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
+  // compute the LU factorization of 'input_working_copy'
+  auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
+  pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
+  Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
+  lu_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
+
+  // solve the linear system using the LU factorization
+  lu_solve_stub(input.device().type(), result, input_working_copy, pivots);
 
   // for 1-dimensional 'other', we need to squeeze the result after "apply_solve"
   if (vector_case) {

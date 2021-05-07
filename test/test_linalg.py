@@ -3378,6 +3378,7 @@ class TestLinalg(TestCase):
         A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
         return b, A
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3426,6 +3427,7 @@ class TestLinalg(TestCase):
         for n, batch, rhs in itertools.product(ns, batches, nrhs):
             run_test(n, batch, rhs)
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
