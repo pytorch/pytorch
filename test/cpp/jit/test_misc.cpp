@@ -2429,7 +2429,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    s1->addCallback(wrapPropagateTLSState(profilerEnabledCb));
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
@@ -2444,7 +2444,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+        wrapPropagateTLSState([&profilerEnabledCb]() {
           profilerEnabledCb();
           return at::IValue(1);
         }),
@@ -2466,7 +2466,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  auto verifyProfilerCb = wrapPropagateTLSState<void>([&profilerEnabledCb] {
+  auto verifyProfilerCb = wrapPropagateTLSState([&profilerEnabledCb] {
     // Ensure the profiler is still enabled in this thread.
     profilerEnabledCb();
     auto t1 = torch::ones({2, 2});
