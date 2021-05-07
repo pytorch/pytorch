@@ -19,33 +19,35 @@ from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
 USE_CUDA_RPC = "use_cuda_rpc"
 
 
-def get_name(rank, trainer_count, parameter_server_count):
-    if rank < trainer_count:
+def get_name(rank, configs):
+    t_count = configs.trainer_count
+    ps_count = configs.ps_count
+    if rank < t_count:
         return f"trainer{rank}"
-    elif rank < (trainer_count + parameter_server_count):
+    elif rank < (t_count + ps_count):
         return f"ps{rank}"
     else:
         return "master"
 
 
-def get_parameter_server_rank(rank, configurations):
+def get_parameter_server_rank(rank, config):
     # rank mod parameter server count to get parameter server number
     # add trainer_count to get parameter server rank
-    rank_mod_ps_count = rank % configurations.parameter_server_count
-    return rank_mod_ps_count + configurations.trainer_count
+    rank_mod_ps_count = rank % config.ps_count
+    return rank_mod_ps_count + config.trainer_count
 
 
-def get_ps_rref(parameter_server_rank, configurations, ps_configurations):
-    ps = get_benchmark_ps_map()[str(ps_configurations["ps_class"])]
+def get_ps_rref(parameter_server_rank, config):
+    ps_config = config.ps_config
+    ps = get_benchmark_ps_map()[str(ps_config["ps_class"])]
     name = get_name(
         parameter_server_rank,
-        configurations.trainer_count,
-        configurations.parameter_server_count
+        config
     )
-    configured_args = ps_configurations["configurations"].values()
-    ps_trainer_count = configurations.trainer_count / configurations.parameter_server_count
-    rem = configurations.trainer_count % configurations.parameter_server_count
-    if parameter_server_rank - configurations.trainer_count < rem:
+    ps_args = ps_config["configurations"].values()
+    ps_trainer_count = config.trainer_count / ps_config.ps_count
+    rem = config.trainer_count % ps_config.ps_count
+    if parameter_server_rank - config.trainer_count < rem:
         ps_trainer_count += 1
     return rpc.remote(
         name,
@@ -53,62 +55,62 @@ def get_ps_rref(parameter_server_rank, configurations, ps_configurations):
         args=(
             parameter_server_rank,
             ps_trainer_count,
-            *configured_args,
+            *ps_args,
         ),
     )
 
 
 def run_trainer(
-    configurations, trainer_configurations, model, data, rank, ps_rref
+    config, model, data, rank, ps_rref
 ):
-    trainer_class = get_benchmark_trainer_map()[str(trainer_configurations["trainer_class"])]
-    configured_args = trainer_configurations["configurations"].values()
+    trainer_config = config.trainer_config
+    trainer_class = get_benchmark_trainer_map()[str(trainer_config["trainer_class"])]
+    trainer_args = trainer_config["configurations"].values()
     trainer = trainer_class(
         rank,
-        configurations.trainer_count,
+        config.trainer_count,
         ps_rref,
-        *configured_args
+        *trainer_args
     )
     trainer.train(model, data)
     metrics = trainer.get_metrics()
     return [rank, metrics]
 
 
-def call_trainers(configurations, trainer_configurations, model, train_data, parameter_server_rrefs):
+def call_trainers(config, model, train_data, parameter_server_rrefs):
     futs = []
-    for trainer_rank in range(0, configurations.trainer_count):
+    for trainer_rank in range(0, config.trainer_count):
         trainer_name = get_name(
             trainer_rank,
-            configurations.trainer_count,
-            configurations.parameter_server_count
+            config
         )
         ps_rref = None
         if parameter_server_rrefs:
-            ps_rank = get_parameter_server_rank(trainer_rank, configurations)
+            ps_rank = get_parameter_server_rank(trainer_rank, config)
             ps_rref = parameter_server_rrefs[ps_rank]
         fut = rpc.rpc_async(
             trainer_name,
             run_trainer,
             args=(
-                configurations,
-                trainer_configurations,
+                config,
                 copy.deepcopy(model),
                 train_data[trainer_rank],
                 trainer_rank,
                 ps_rref,
             ),
-            timeout=configurations.rpc_async_timeout
+            timeout=config.rpc_async_timeout
         )
         futs.append(fut)
     return futs
 
 
 def benchmark_warmup(
-    configurations, trainer_configurations, ps_configurations, model, data, parameter_server_rrefs
+    config, model, data, parameter_server_rrefs
 ):
-    if configurations.parameter_server_count > 0:
-        ps = get_benchmark_ps_map()[str(ps_configurations["ps_class"])]
-    futs = call_trainers(configurations, trainer_configurations, model, data, parameter_server_rrefs)
+    if config.ps_count > 0:
+        ps_config = config.ps_config
+        ps = get_benchmark_ps_map()[str(ps_config["ps_class"])]
+    futs = call_trainers(config, model, data, parameter_server_rrefs)
     for fut in futs:
         fut.wait()
     for ps_rref in parameter_server_rrefs.values():
@@ -124,13 +126,12 @@ def split_list(arr, n):
     return [arr[i::n] for i in range(n)]
 
 
-def run_master(rank, model, data, configurations, trainer_configurations, ps_configurations, rpc_backend_options):
-    world_size = configurations.trainer_count + configurations.parameter_server_count + 1
+def run_master(rank, model, data, config, rpc_backend_options):
+    world_size = config.trainer_count + config.ps_count + 1
     rpc.init_rpc(
         get_name(
             rank,
-            configurations.trainer_count,
-            configurations.parameter_server_count
+            config
         ),
         rank=rank,
         world_size=world_size,
@@ -138,22 +139,22 @@ def run_master(rank, model, data, configurations, trainer_configurations, ps_con
     )
     parameter_server_rrefs = {}
     for i in range(
-        configurations.trainer_count, world_size - 1
+        config.trainer_count, world_size - 1
     ):
-        parameter_server_rrefs[i] = get_ps_rref(i, configurations, ps_configurations)
+        parameter_server_rrefs[i] = get_ps_rref(i, config)
 
     train_data = split_list(
-        list(DataLoader(data, batch_size=configurations.batch_size)),
-        configurations.trainer_count
+        list(DataLoader(data, batch_size=config.batch_size)),
+        config.trainer_count
     )
 
     # warmup run the benchmark
     benchmark_warmup(
-        configurations, trainer_configurations, ps_configurations, model, train_data, parameter_server_rrefs
+        config, model, train_data, parameter_server_rrefs
     )
     # run the benchmark
     trainer_futs = call_trainers(
-        configurations, trainer_configurations, model, train_data, parameter_server_rrefs
+        config, model, train_data, parameter_server_rrefs
     )
     # collect metrics and print
     metrics_printer = ProcessedMetricsPrinter()
@@ -161,23 +162,22 @@ def run_master(rank, model, data, configurations, trainer_configurations, ps_con
     metrics_printer.print_metrics("trainer", rank_metrics_list)
 
 
-def run_benchmark(rank, model, data, configurations, trainer_configurations, ps_configurations):
+def run_benchmark(rank, model, data, config):
 
-    world_size = configurations.trainer_count + configurations.parameter_server_count + 1
-    os.environ['MASTER_ADDR'] = configurations.master_addr
-    os.environ['MASTER_PORT'] = configurations.master_port
+    world_size = config.trainer_count + config.ps_count + 1
+    os.environ['MASTER_ADDR'] = config.master_addr
+    os.environ['MASTER_PORT'] = config.master_port
     rpc_backend_options = TensorPipeRpcBackendOptions()
-    rpc_backend_options.init_method = configurations.rpc_init_method
+    rpc_backend_options.init_method = config.rpc_init_method
     if rank == world_size - 1:
         # master = [trainer_count + parameter_server_count, trainer_count + parameter_server_count]
-        run_master(rank, model, data, configurations, trainer_configurations, ps_configurations, rpc_backend_options)
-    elif rank >= configurations.trainer_count:
+        run_master(rank, model, data, config, rpc_backend_options)
+    elif rank >= config.trainer_count:
         # parameter_servers = [trainer_count, trainer_count + parameter_server_count)
         rpc.init_rpc(
             get_name(
                 rank,
-                configurations.trainer_count,
-                configurations.parameter_server_count
+                config
             ),
             rank=rank,
             world_size=world_size,
@@ -185,16 +185,17 @@ def run_benchmark(rank, model, data, configurations, trainer_configurations, ps_
         )
     else:
         # trainers = [0, trainer_count)
-        if (USE_CUDA_RPC in trainer_configurations and
-            trainer_configurations[USE_CUDA_RPC] and
-            USE_CUDA_RPC in ps_configurations and
-            ps_configurations[USE_CUDA_RPC] and
-                configurations.parameter_server_count > 0):
-            ps_rank = get_parameter_server_rank(rank, configurations)
+        trainer_config = config.trainer_config
+        ps_config = config.ps_config
+        if (USE_CUDA_RPC in trainer_config and
+            trainer_config[USE_CUDA_RPC] and
+            USE_CUDA_RPC in ps_config and
+            ps_config[USE_CUDA_RPC] and
+                config.ps_count > 0):
+            ps_rank = get_parameter_server_rank(rank, config)
             ps_name = get_name(
                 ps_rank,
-                configurations.trainer_count,
-                configurations.parameter_server_count
+                config
             )
             rpc_backend_options.set_device_map(
                 ps_name,
@@ -202,8 +203,7 @@ def run_benchmark(rank, model, data, configurations, trainer_configurations, ps_
             )
         trainer_name = get_name(
             rank,
-            configurations.trainer_count,
-            configurations.parameter_server_count
+            config
         )
         rpc.init_rpc(
             trainer_name,
@@ -221,12 +221,20 @@ def get_json_config(file_name, id):
         ),
         "r"
     )
-    return json.load(f)[id]
+    json_config = json.load(f)[id]
+    f.close()
+    return json_config
 
 
 def load_configurations(args):
-    benchmark_config_file = "configurations/benchmark_configurations.json"
-    benchmark_config = get_json_config(benchmark_config_file, args.bconfig_id)
+    trainer_config_file = args.trainer_config_path
+    ps_config_file = args.server_config_path
+    benchmark_config = get_json_config(args.benchmark_config_path, args.benchmark)
+    benchmark_config["trainer_config"] = get_json_config(trainer_config_file, args.trainer)
+    if args.server != "None":
+        benchmark_config["ps_config"] = get_json_config(ps_config_file, args.server)
+    else:
+        benchmark_config["ps_config"] = None
     return BenchmarkConfigurations(**benchmark_config)
 
 
@@ -236,8 +244,8 @@ def get_data(data_class, data_config):
 
 
 def load_data(args):
-    data_config_file = "configurations/data_configurations.json"
-    data_config = get_json_config(data_config_file, args.dconfig_id)
+    data_config_file = args.data_config_path
+    data_config = get_json_config(data_config_file, args.data)
     return get_data(data_config["data_class"], data_config["configurations"])
 
 
@@ -247,69 +255,84 @@ def get_model(model_class, model_config):
 
 
 def load_model(args):
-    model_config_file = "configurations/model_configurations.json"
-    model_config = get_json_config(model_config_file, args.mconfig_id)
+    model_config_file = args.model_config_path
+    model_config = get_json_config(model_config_file, args.model)
     return get_model(model_config["model_class"], model_config["configurations"])
-
-
-def load_trainer_configurations(args):
-    trainer_config_file = "configurations/trainer_configurations.json"
-    return get_json_config(trainer_config_file, args.tconfig_id)
-
-
-def load_parameter_server_configurations(args):
-    if args.pconfig_id == "None":
-        return None
-    ps_config_file = "configurations/parameter_server_configurations.json"
-    return get_json_config(ps_config_file, args.pconfig_id)
 
 
 def main():
     parser = argparse.ArgumentParser(description="RPC PS Benchmark")
+
     parser.add_argument(
-        "--bconfig_id",
+        "--benchmark_config_path",
         type=str,
-        help="id for configuration stored in benchmark_configurations.json"
+        default="configurations/benchmark_configurations.json",
+        help="path to benchmark configuration file"
     )
     parser.add_argument(
-        "--dconfig_id",
+        "--data_config_path",
         type=str,
-        help="id for configuration stored in data_configurations.json"
+        default="configurations/data_configurations.json",
+        help="path to data configuration file"
     )
     parser.add_argument(
-        "--mconfig_id",
+        "--model_config_path",
         type=str,
-        help="id for configuration stored in model_configurations.json"
+        default="configurations/model_configurations.json",
+        help="path to model configuration file"
     )
     parser.add_argument(
-        "--pconfig_id",
+        "--server_config_path",
         type=str,
-        help="id for configuration stored in parameter_server_configurations.json"
+        default="configurations/server_configurations.json",
+        help="path to server configuration file"
     )
     parser.add_argument(
-        "--tconfig_id",
+        "--trainer_config_path",
         type=str,
-        help="id for configuration stored in trainer_configurations.json"
+        default="configurations/trainer_configurations.json",
+        help="path to trainer configuration file"
+    )
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        help="id for benchmark configuration"
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        help="id for data configuration"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="id for model configuration"
+    )
+    parser.add_argument(
+        "--server",
+        type=str,
+        help="id for parameter server configuration"
+    )
+    parser.add_argument(
+        "--trainer",
+        type=str,
+        help="id for trainer configuration"
     )
     args = parser.parse_args()
     print(f"{args}\n")
 
-    configurations = load_configurations(args)
+    config = load_configurations(args)
     data = load_data(args)
     model = load_model(args)
-    trainer_configurations = load_trainer_configurations(args)
-    ps_configurations = load_parameter_server_configurations(args)
 
-    world_size = configurations.trainer_count + configurations.parameter_server_count + 1
+    world_size = config.trainer_count + config.ps_count + 1
 
     mp.spawn(
         run_benchmark,
         args=(
             model,
             data,
-            configurations,
-            trainer_configurations,
-            ps_configurations,
+            config,
         ),
         nprocs=world_size,
         join=True
