@@ -40,7 +40,7 @@ static void flattenTupleInLoopParams(Node* n, size_t index) {
   auto new_construct_node =
       block->prependNode(block->owningGraph()->create(prim::TupleConstruct));
   for (size_t j = 0; j < tt->elements().size(); ++j) {
-    auto new_block_in = block->insertInput(index + j );
+    auto new_block_in = block->insertInput(index + j);
     new_construct_node->addInput(new_block_in);
     block_node->insertInput(index + j + 1, input->node()->inputs().at(j));
   }
@@ -185,7 +185,8 @@ static void flattenInputs(Node* n, Node* insert_point) {
       if (supported_ops.count(n->kind()) > 0) {
         if ((n->kind() == prim::Loop)) {
           if (input->node()->kind() == prim::TupleConstruct) {
-            // This function supports all node types with blocks that take tuple inputs.
+            // This function supports all node types with blocks that take tuple
+            // inputs.
             flattenTupleInLoopParams(n, i);
           }
         } else if ((n->kind() == prim::Return)) {
