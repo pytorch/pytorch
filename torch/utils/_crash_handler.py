@@ -15,12 +15,12 @@ def enable_minidumps(directory=DEFAULT_MINIDUMP_DIR):
     elif not os.path.exists(directory):
         raise RuntimeError(f"Directory does not exist: {directory}")
 
-    torch._C._enable_minidumps(directory)  # type: ignore[attr-defined]
+    torch._C._enable_minidumps(directory)
 
 
-def enable_minidumps_on_exceptions():
-    torch._C._enable_minidumps_on_exceptions(directory)  # type: ignore[attr-defined]
+def enable_minidumps_on_exceptions(directory=DEFAULT_MINIDUMP_DIR):
+    torch._C._enable_minidumps_on_exceptions(directory)
 
 
 def disable_minidumps():
-    torch._C._disable_minidumps()  # type: ignore[attr-defined]
+    torch._C._disable_minidumps()
