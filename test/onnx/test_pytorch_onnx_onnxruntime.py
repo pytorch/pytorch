@@ -8776,6 +8776,32 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1]})
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x, loop_count: int):
+                result = torch.tensor([1.1 for i in range(loop_count)], dtype=torch.float)
+                x = torch.add(x, result)
+                return x, loop_count
+
+        x = torch.randint(5, (10, 5))
+        loop_count = 5
+
+        self.run_test(M(), (x, loop_count))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_bool(self):
+        class M(torch.nn.Module):
+            def forward(self, x, loop_count: int):
+                result = torch.tensor([True for i in range(loop_count)], dtype=torch.bool)
+                x = torch.add(x, result)
+                return x, loop_count
+
+        x = torch.randint(5, (10, 5))
+        loop_count = 5
+
+        self.run_test(M(), (x, loop_count))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
