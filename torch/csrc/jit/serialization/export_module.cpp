@@ -350,8 +350,13 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive(
-        kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
+    if (bytecode_format) {
+      writeArchive(
+          kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants), true);
+    } else {
+      writeArchive(
+          kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
+    }
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info);
       writeMobileMetadata(module, extra_files);
@@ -380,7 +385,7 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-    if (use_tensors_archive_table && !tensors_archive_table_.empty()) {
+    if (use_tensors_archive_table && archive_name == kArchiveNameBytecode && !tensors_archive_table_.empty()) {
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
     }
     data_pickle.protocol();
@@ -395,7 +400,7 @@ class ScriptModuleSerializer {
     // avoid deduplicating tensors among different archives.
 
     // Store all tensors from archives `constants` to tensors_archive_table_
-    if (archive_name == kArchiveNameConstants) {
+    if (use_tensors_archive_table && archive_name == kArchiveNameConstants) {
       const auto tensor_candidates = data_pickle.tensorData();
       for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
@@ -542,7 +547,7 @@ class ScriptModuleSerializer {
     moduleMethodsTuple(
         module, elements, debug_info_elements, debug_handle_manager);
     auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements, false);
+    writeArchive("bytecode", telements, true);
     auto debug_info_telements = Tup(std::move(debug_info_elements));
 
     // At the moment keeping this feature experimental
