@@ -1667,23 +1667,30 @@ class TestCuda(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
+    # this might create a reference cycle on self...
+    def _make_multiply_in_stream(self):
+        class MultiplyInStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, val):
+                ctx.val = val
+                ctx.stream = torch.cuda.current_stream()
+                return x * val
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(torch.cuda.current_stream(), ctx.stream)
+                # delays the operation in the the background stream
+                torch.cuda._sleep(1000 * 5000)
+                return grad * ctx.val, None
+
+        return MultiplyInStream
+
     @skipCUDANonDefaultStreamIf(True)
     def test_streaming_backwards_sync(self):
         default_stream = torch.cuda.current_stream()
         stream = torch.cuda.Stream()
 
-        class MultiplyInStream(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, val):
-                ctx.val = val
-                return x * val
-
-            @staticmethod
-            def backward(ctx, grad):
-                self.assertEqual(torch.cuda.current_stream(), stream)
-                # delays the operation in the the background stream
-                torch.cuda._sleep(1000 * 1000)
-                return grad * ctx.val, None
+        MultiplyInStream = self._make_multiply_in_stream()
 
         # Tests using grads outside the backward() stream context
         # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
@@ -1721,7 +1728,6 @@ class TestCuda(TestCase):
         # but only for BC. In a future PR, this pattern will become unsafe,
         # a sync will be required, and this test will be deleted in favor of
         # test_streaming_backward_multiple_streams below.
-
         class StreamModel(torch.nn.Module):
             def __init__(self):
                 super(StreamModel, self).__init__()
@@ -1757,20 +1763,7 @@ class TestCuda(TestCase):
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
-
-        class MultiplyInStream(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, val):
-                ctx.val = val
-                ctx.stream = torch.cuda.current_stream()
-                return x * val
-
-            @staticmethod
-            def backward(ctx, grad):
-                self.assertEqual(torch.cuda.current_stream(), ctx.stream)
-                # delays the operation in the the background stream
-                torch.cuda._sleep(1000 * 5000)
-                return grad * ctx.val, None
+        MultiplyInStream = self._make_multiply_in_stream()
 
         class StreamModel(torch.nn.Module):
             def __init__(self):
@@ -1896,6 +1889,48 @@ class TestCuda(TestCase):
                 with torch.no_grad():
                     self.assertEqual(a.grad, grad * b)
                     self.assertEqual(b.grad, grad * a)
+
+    def test_streaming_backwards_callback(self):
+        # Tests if autograd callbacks sync properly with respect to leaf streams and
+        # the user-facing stream surrounding backward(). If it fails, first suspect is
+        # sync logic where  "final_callbacks_" are called in torch/csrc/autograd/engine.cpp
+        MultiplyInStream = self._make_multiply_in_stream()
+
+        size = int(1e3)
+        a = torch.full((size,), 1, device="cuda", dtype=torch.float, requires_grad=True)
+        b = torch.full((size,), 1, device="cuda", dtype=torch.float, requires_grad=True)
+
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+
+        stash = []
+
+        # sets up a nontrivial structure of leaf streams
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            c = MultiplyInStream.apply(a, 2)
+
+        s1.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s1):
+            d = MultiplyInStream.apply(b, 3)
+            s1.wait_stream(s0)
+            e = c * d
+
+            def clone_leaf_grads():
+                stash.append(a.grad.clone())
+                stash.append(b.grad.clone())
+
+            # Use a hook on e to install the callback
+            e.register_hook(lambda grad: torch.autograd.Variable._execution_engine.queue_callback(clone_leaf_grads))
+
+        s2.wait_stream(s1)
+        with torch.cuda.stream(s2):
+            e.sum().backward()
+            # The autograd engine should sync s2 with all leaf streams then run the callback clone_leaf_grads on s2.
+            # If those things happened properly, checking the values of the cloned grads on s2 should be safe:
+            self.assertEqual(stash[0], torch.full_like(a, 6))
+            self.assertEqual(stash[1], torch.full_like(a, 6))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
