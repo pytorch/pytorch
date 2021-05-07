@@ -190,7 +190,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
     # Not running quicklint, so use lint.yml
     _, _, _ = await shell_cmd(
         [
-            f"{sys.executable}",
+            sys.executable,
             "tools/actions_local_runner.py",
             "--job",
             "mypy",
@@ -203,7 +203,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
     )
     passed, _, _ = await shell_cmd(
         [
-            f"{sys.executable}",
+            sys.executable,
             "tools/actions_local_runner.py",
             "--job",
             "mypy",
