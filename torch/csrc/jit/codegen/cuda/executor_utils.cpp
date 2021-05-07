@@ -668,6 +668,11 @@ NvrtcFunction nvrtcCompile(
 #endif
   }
 
+  // Add debug info to generated kernels
+#ifndef NDEBUG
+  args.push_back("-G");
+#endif
+
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   uint32_t jit_opt_level = 0;
 
