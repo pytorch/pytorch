@@ -1078,7 +1078,7 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
         reference_fn=lambda i, *_:
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights).sum(dim=1) / i.size(1),
         check_sum_reduction=True,
-        check_gradgrad=True,
+        check_gradgrad=False,
         pickle=False)
 
 
@@ -2598,7 +2598,7 @@ new_module_tests = [
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
-        check_gradgrad=True,
+        check_gradgrad=False,
     ),
     dict(
         fullname='EmbeddingBag_max_padding_idx',
@@ -4283,7 +4283,7 @@ criterion_tests = [
             multimarginloss_reference(i, t, reduction=get_reduction(m)),
         desc='1d',
         check_sum_reduction=True,
-        check_gradgrad=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -4680,7 +4680,7 @@ criterion_tests = [
     #     reference_fn=lambda i, t, il, tl, m:
     #         ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
     #     check_sum_reduction=True,
-    #     check_gradgrad=True,
+    #     check_gradgrad=False,
     #     check_half=False,
     # ),
     dict(
@@ -5108,6 +5108,7 @@ class ModuleTest(TestBase):
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 class InputVariableMixin(object):
@@ -5161,7 +5162,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad)) 
+                                               check_batched_grad=self.check_batched_grad))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
