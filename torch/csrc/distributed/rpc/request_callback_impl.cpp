@@ -137,74 +137,75 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::
   return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
 }
 
-void RequestCallbackImpl::processScriptCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
+    RpcCommandBase& rpc) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  auto& stack = scriptCall.stackRef();
+
+  c10::intrusive_ptr<JitFuture> future;
   if (scriptCall.hasOp()) {
-    processScriptCallOp(scriptCall, markComplete, stack);
-    return;
+    future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+  } else {
+    future = runJitFunction(
+        scriptCall.qualifiedName(),
+        scriptCall.stackRef(),
+        scriptCall.isAsyncExecution());
   }
 
-  auto jitFuture = runJitFunction(
-      scriptCall.qualifiedName(), stack, scriptCall.isAsyncExecution());
-
-  jitFuture->addCallback([responseFuture, markComplete](JitFuture& jitFuture) {
-    if (jitFuture.hasError()) {
-      responseFuture->setError(jitFuture.exception_ptr());
-    } else {
-      responseFuture->markCompleted(c10::make_intrusive<Message>(
-          ScriptResp(jitFuture.value()).toMessage()));
-    }
-  });
+  return future->then(
+      [](JitFuture& jitFuture) {
+        return c10::make_intrusive<Message>(
+            ScriptResp(jitFuture.value()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
-void RequestCallbackImpl::processPythonCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
+    RpcCommandBase& rpc) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
   auto future = runPythonFunction(upc.pythonUdf(), upc.isAsyncExecution());
 
-  future->addCallback([responseFuture](JitFuture& future) {
-    auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-    py::gil_scoped_acquire acquire;
-    auto serializedPyObj =
-        pythonRpcHandler.serialize(jit::toPyObject(future.value()));
-    responseFuture->markCompleted(c10::make_intrusive<Message>(
-        PythonResp(std::move(serializedPyObj)).toMessage()));
-  });
+  return future->then(
+      [](JitFuture& future) {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        py::gil_scoped_acquire acquire;
+        auto serializedPyObj = pythonRpcHandler.serialize(
+            jit::toPyObject(future.value()));
+        return c10::make_intrusive<Message>(
+            PythonResp(std::move(serializedPyObj)).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
-    ScriptRemoteCall& scriptRemoteCall,
-    std::vector<at::IValue>& stack) const {
+    RpcCommandBase& rpc) const {
+  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+
+  c10::intrusive_ptr<JitFuture> future;
   if (scriptRemoteCall.hasOp()) {
-    return processScriptRemoteCallOp(scriptRemoteCall, stack);
+    future =
+        runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
+  } else {
+    future = runJitFunction(
+        scriptRemoteCall.qualifiedName(),
+        scriptRemoteCall.stackRef(),
+        scriptRemoteCall.isAsyncExecution());
   }
 
-  return runJitFunction(
-      scriptRemoteCall.qualifiedName(),
-      stack,
-      scriptRemoteCall.isAsyncExecution());
+  return assignOwnerRRef(
+      scriptRemoteCall.retRRefId(),
+      scriptRemoteCall.retForkId(),
+      std::move(future),
+      /*lsctx=*/nullptr);
 }
 
-void RequestCallbackImpl::processPythonRemoteCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
   auto future = runPythonFunction(uprc.pythonUdf(), uprc.isAsyncExecution());
 
-  assignOwnerRRef(
-      uprc.rrefId(),
-      uprc.forkId(),
-      std::move(future),
-      responseFuture,
-      std::move(lsctx));
+  return assignOwnerRRef(
+      uprc.rrefId(), uprc.forkId(), std::move(future), std::move(lsctx));
 }
 
 void RequestCallbackImpl::processPythonRRefFetchCall(
