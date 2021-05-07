@@ -2453,7 +2453,7 @@ Tensor* tensorexpr::computeOperandValue(
       auto A = c10::get<BufHandle>(inputs[0]);
       auto permute_dims = c10::get<IntList>(inputs[1]);
       return Compute(
-          "aten_transpose",
+          "aten_permute",
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
             std::vector<VarHandle> new_axes;
@@ -2585,6 +2585,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::lgamma:
     case aten::slice:
     case aten::unsqueeze:
+    case aten::t:
+    case aten::transpose:
+    case aten::expand:
+    case aten::permute:
+    case aten::mm:
     case aten::matmul:
     case aten::cat:
     case aten::sum:
