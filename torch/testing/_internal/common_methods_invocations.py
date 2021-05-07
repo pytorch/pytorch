@@ -183,11 +183,9 @@ class OpInfo(object):
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
-                 supports_forward_ad=None,  # whether the operation support forward mode AD defaults to None
-                                            # If no value is specified, we test that forward grad is not implemented
+                 supports_forward_ad=False, # Whether the operation support forward mode AD
                                             # If the value is True, we check that the gradients are correct
-                                            # If the value is False, we skip all forward AD tests
-                                            # (this value is ignored if supports_autograd=False)
+                                            # If the value is False, we test that forward grad is not implemented
                  supports_sparse=False,  # whether the op supports sparse inputs
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
                  check_batched_grad=True,  # check batched grad when doing gradcheck
@@ -3957,14 +3955,15 @@ op_db: List[OpInfo] = [
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # Gradcheck for complex generates invalid inputs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_types(),
@@ -4021,7 +4020,6 @@ op_db: List[OpInfo] = [
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
-                   supports_forward_ad=False,  # TODO fix the formula for complex forward AD
                    skips=(
                        # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
                        #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
@@ -4033,6 +4031,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
+                       # TODO fix the formula for complex forward AD
+                       SkipInfo('TestGradients', 'test_forward_mode_AD'),
                    )),
     OpInfo('view_as_real',
            dtypes=complex_types(),
@@ -4447,14 +4447,15 @@ op_db: List[OpInfo] = [
            # got: vmap: Calling Tensor.as_strided is not supported
            # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # Gradcheck for complex generates invalid inputs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)
            ),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
@@ -4519,9 +4520,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           check_batched_grad=False,
-           check_batched_gradgrad=False,
-           supports_forward_ad=False,
+           supports_autograd=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # skip because `linalg_lstsq` is not differentiable
