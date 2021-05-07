@@ -150,6 +150,9 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
+  // Creates a new block by cloning `this` block and replacing the given
+  // statement with a new statement. Note that `old_stmt` refers to a statement
+  // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
   Block* clone_and_replace(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
