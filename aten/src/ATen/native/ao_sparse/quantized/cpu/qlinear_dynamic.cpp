@@ -62,7 +62,6 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*qmax=*/255);
 
   // Quantize input

@@ -22,10 +22,8 @@ class IDEEPInt8PoolOp final : public IDEEPConvPoolOpBase {
     }
 
     // Figure out the pooling descriptor.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (operator_def.type().substr(0, 11) == "Int8MaxPool") {
       algo_ = ialgo::pooling_max;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (operator_def.type().substr(0, 15) == "Int8AveragePool") {
       algo_ = ialgo::pooling_avg;
     } else {
