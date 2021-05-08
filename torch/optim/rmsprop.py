@@ -4,7 +4,7 @@ from .optimizer import Optimizer
 
 
 class RMSprop(Optimizer):
-    r"""Implements RMSprop algorithm.
+    r"""Implements the RMSprop algorithm.
 
     Proposed by G. Hinton in his
     `course <https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_.
@@ -14,16 +14,21 @@ class RMSprop(Optimizer):
 
     The implementation here takes the square root of the gradient average before
     adding epsilon (note that TensorFlow interchanges these two operations). The effective
-    learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
+    learning rate is thus :math:`r/(\sqrt{v} + \epsilon)` where :math:`r`
     is the scheduled learning rate and :math:`v` is the weighted moving average
-    of the squared gradient.
+    of the squared gradient. The weighted moving average is updated as follows:
+    .. math::
+        v_j := \alpha v_j + (1 - \alpha) g_j^2
+    
+    where :math:`\alpha` is the decay rate, :math:`v_j` is the :math:`j`th entry of the
+    weighted moving average, and :math:`g_j` is the :math:`j`th entry of the loss gradient.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
         momentum (float, optional): momentum factor (default: 0)
-        alpha (float, optional): smoothing constant (default: 0.99)
+        alpha (float, optional): decay rate (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
