@@ -212,9 +212,6 @@ template<class scalar_t>
 void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
 template<class scalar_t>
-void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
-
-template<class scalar_t>
 void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t>
@@ -1429,31 +1426,9 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("lu: LAPACK library not found in compilation");
-#else
-  auto self_data = self.data_ptr<scalar_t>();
-  auto pivots_data = pivots.data_ptr<int>();
-  auto infos_data = infos.data_ptr<int>();
-  auto self_matrix_stride = matrixStride(self);
-  auto pivots_matrix_stride = pivots.size(-1);
-  auto batch_size = batchCount(self);
-  auto m = self.size(-2);
-  auto n = self.size(-1);
+DEFINE_DISPATCH(lu_stub);
 
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
-    int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(m, n, self_working_ptr, m, pivots_working_ptr, infos_working_ptr);
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pivot, bool check_errors) {
-  TORCH_CHECK(pivot, "lu without pivoting is not implemented on the CPU");
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
@@ -1466,15 +1441,11 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
-  Tensor self_working_copy;
-  if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else {
-    self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cpu", [&]{
-      apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
-    });
-  }
+  // lu_stub (apply_lu) requires batched column major (Fortran-contiguous) tensors
+  // 'lu' tensor is modified in-place and must be a copy of 'self'
+  Tensor lu = cloneBatchedColumnMajor(self);
+  lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
+
   if (check_errors) {
     if (self.dim() > 2) {
       batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
@@ -1482,7 +1453,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
       singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     }
   }
-  return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
+  return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2923,25 +2894,21 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
     1. the 2nd parameter is bool some=True, which if effectively the opposite
        of full_matrices=True
 
-    2. svd returns V, while linalg.svd returns VT = V^T (for real inputs) or VT = V^H (for complex inputs).
+    2. svd returns V, while linalg.svd returns Vh = V^T (for real inputs) or Vh = V^H (for complex inputs).
        To accommodate the difference, we transpose() and conj() V upon return
 */
 
-std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices) {
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
 
     bool some = !full_matrices;
     Tensor U, S, V;
-    std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
-    if (compute_uv) {
-        Tensor VT = V.conj().transpose(-2, -1);
-        return std::make_tuple(U, S, VT);
-    } else {
-        Tensor empty_U = at::empty({0}, self.options());
-        Tensor empty_VT = at::empty({0}, self.options());
-        return std::make_tuple(empty_U, S, empty_VT);
-    }
+    std::tie(U, S, V) = at::_svd_helper(self, some, /*compute_uv=*/true);
+
+    Tensor Vh = V.conj().transpose(-2, -1);
+    return std::make_tuple(U, S, Vh);
+
 }
 
 static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
@@ -2950,21 +2917,21 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
   dst.copy_(src);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool full_matrices, bool compute_uv, Tensor& U, Tensor& S, Tensor& VT) {
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool full_matrices, Tensor& U, Tensor& S, Tensor& Vh) {
   checkSameDevice("svd", U, self, "U");
   checkSameDevice("svd", S, self, "S");
-  checkSameDevice("svd", VT, self, "VT");
+  checkSameDevice("svd", Vh, self, "Vh");
   checkLinalgCompatibleDtype("linalg_svd", U, self, "U");
-  checkLinalgCompatibleDtype("linalg_svd", VT, self, "VT");
+  checkLinalgCompatibleDtype("linalg_svd", Vh, self, "Vh");
   // singular values are always real-valued here
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_svd", S.scalar_type(), real_dtype, "S");
-  Tensor U_tmp, S_tmp, VT_tmp;
-  std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
+  Tensor U_tmp, S_tmp, Vh_tmp;
+  std::tie(U_tmp, S_tmp, Vh_tmp) = at::native::linalg_svd(self, full_matrices);
   svd_resize_and_copy("U", U_tmp, U);
   svd_resize_and_copy("S", S_tmp, S);
-  svd_resize_and_copy("V", VT_tmp, VT);
-  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
+  svd_resize_and_copy("V", Vh_tmp, Vh);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, Vh);
 }
 
 Tensor linalg_svdvals(const Tensor& input) {
