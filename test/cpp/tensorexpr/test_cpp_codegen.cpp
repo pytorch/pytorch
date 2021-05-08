@@ -36,9 +36,7 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
 TEST(CppPrinter, AllocateOnHeapThenFree) {
   KernelScope kernel_scope;
   std::vector<const Expr*> dims = {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       new IntImm(20),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       new IntImm(50),
       new IntImm(3)};
   const Buf* buf = new Buf("y", dims, kLong);

@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
 #include <algorithm>
 
@@ -1156,10 +1157,14 @@ struct PythonPrintImpl {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
         stmt << "(";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (i > 0) {
+        // calculate how many args are specified.
+        // see (https://github.com/pytorch/pytorch/pull/56079) for more
+        // details.
+        size_t necessary_args =
+            CalculateNecessaryArgs(schema.arguments(), node->inputs());
+        for (size_t i = 0; i < necessary_args; ++i) {
+          if (i > 0)
             stmt << ", ";
-          }
           auto v = useOf(node->inputs().at(i));
           // print the kwarg name if it is a kwarg only argument.
           if (i < schema.arguments().size()) {

@@ -32,7 +32,6 @@ void check_exact_values(
       auto tensor = layerParameters[p].to(torch::kFloat64);
       auto expectedTensor = expectedLayerParameters[p].to(torch::kFloat64);
 
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (!tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4)) {
         std::cout << "layer " << i << ": " << tensor << " != " << expectedTensor
                   << " (parameter " << p << ")" << std::endl;
@@ -47,17 +46,14 @@ void check_initializer_against_baseline(
     std::vector<std::vector<torch::Tensor>> expected) {
   torch::manual_seed(0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto layer1 = torch::nn::Linear(7, 15);
   initializer(layer1->weight);
   layer1->to(torch::kFloat64);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto layer2 = torch::nn::Linear(15, 15);
   initializer(layer2->weight);
   layer2->to(torch::kFloat64);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto layer3 = torch::nn::Linear(15, 2);
   initializer(layer3->weight);
   layer3->to(torch::kFloat64);
