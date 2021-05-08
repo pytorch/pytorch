@@ -78,7 +78,6 @@ where N is the number of batch elements in the input predictions.
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SmoothL1LossGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .Input(
