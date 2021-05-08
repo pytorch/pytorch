@@ -225,6 +225,24 @@ void nnc_aten_addmm(
   }
 }
 
+void nnc_aten_digamma(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  try {
+    at::digamma_out(r, x);
+  } catch (...) {
+  }
+}
+
 #ifndef C10_MOBILE
 
 const static RegisterNNCExternalFunction nnc_conv2d(
@@ -244,6 +262,9 @@ const static RegisterNNCExternalFunction nnc_mean(
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
+const static RegisterNNCExternalFunction nnc_digamma(
+    "nnc_aten_digamma",
+    nnc_aten_digamma);
 
 #endif
 
