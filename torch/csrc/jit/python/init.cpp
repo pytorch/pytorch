@@ -91,6 +91,7 @@
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/signal_handler.h>
@@ -587,6 +588,14 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_get_inline_everything_mode",
           []() { return getInlineEverythingMode(); })
+      .def(
+          "_jit_get_logging_option",
+          []() { return ::torch::jit::get_jit_logging_levels(); })
+      .def(
+          "_jit_set_logging_option",
+          [](std::string loggingOption) -> void  { 
+            ::torch::jit::set_jit_logging_levels(loggingOption);
+          })
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {

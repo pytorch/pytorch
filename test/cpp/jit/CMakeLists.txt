@@ -64,6 +64,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
+  ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
 )
 
 if(USE_CUDA)
