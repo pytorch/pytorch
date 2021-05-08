@@ -3754,7 +3754,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('vdot',
