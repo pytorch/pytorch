@@ -4792,9 +4792,10 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_gradgrad=False,
+           supports_gradgrad=True,
            supports_out=False,
-           autodiff_fusible_nodes=["aten::gelu"]),
+           autodiff_fusible_nodes=["aten::gelu"],
+           autodiff_nonfusible_nodes=[]),  # TODO: dont automatically propagate this
     OpInfo('nn.functional.hardswish',
            supports_autograd=True,
            assert_autodiffed=True,
