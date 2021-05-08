@@ -1336,7 +1336,7 @@ class TestLinalg(TestCase):
     def test_vector_norm(self, device, dtype):
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
-        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
+        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
         input_sizes = [
             (10, ),
             (4, 5),
@@ -1362,7 +1362,7 @@ class TestLinalg(TestCase):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}, norm_dtype={norm_dtype}'
             error_msg = None
             if input.numel() == 0:
-                if ord is not None and ord < 0:
+                if ord < 0:
                     error_msg = r'linalg.vector_norm of negative order cannot be performed on an empty tensor'
                 elif ord == inf and (dim is None or input.size(dim) == 0):
                     error_msg = (
@@ -1478,7 +1478,7 @@ class TestLinalg(TestCase):
             torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
             self.assertEqual(result, result_out, msg=msg)
 
-        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf]
         S = 10
         test_cases = [
             # input size, p settings, dim
@@ -1506,7 +1506,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
-        def run_test_case(input, p, dim, keepdim):
+        def run_test_case(input, ord, dim, keepdim):
             result = torch.linalg.norm(input, ord, dim, keepdim)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
@@ -1518,7 +1518,7 @@ class TestLinalg(TestCase):
             torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
             self.assertEqual(result, result_out, msg=msg)
 
-        ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro', None]
+        ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro']
         S = 10
         test_cases = [
             # input size, p settings, dim
@@ -2793,7 +2793,7 @@ class TestLinalg(TestCase):
 
             out_u = torch.empty(0, dtype=dtype, device=device)
             if svd == torch.linalg.svd:
-                msg = "but got VT with dtype Int"
+                msg = "but got Vh with dtype Int"
             else:
                 msg = "but got V with dtype Int"
             with self.assertRaisesRegex(RuntimeError, msg):
@@ -2865,15 +2865,15 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_compute_uv(self, device, dtype):
         """
-        Test the default case, compute_uv=True. Here we have the very same behavior as
-        numpy
+        Test the default case. Here we have the very same behavior as
+        NumPy with compute_uv=True.
         """
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
         for full_matrices in (True, False):
             # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
-            actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
+            actual = torch.linalg.svd(t, full_matrices)
             # sign/phase of the singular vectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual[0]), abs(expected[0]))
             self.assertEqual(actual[1], expected[1])
@@ -2882,38 +2882,9 @@ class TestLinalg(TestCase):
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
                    torch.empty_like(actual[2]))
-            out2 = torch.linalg.svd(t, full_matrices, compute_uv=True, out=out)
+            out2 = torch.linalg.svd(t, full_matrices, out=out)
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_linalg_svd_no_compute_uv(self, device, dtype):
-        """
-        Test the compute_uv=False case. Here we have a different return type than
-        numpy: numpy returns S, we return (empty, S, empty)
-        """
-        t = torch.randn((10, 11), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-
-        def is_empty(x):
-            return x.numel() == 0 and x.dtype == t.dtype and x.device == t.device
-
-        for full_matrices in (True, False):
-            # check linalg.svd vs numpy
-            np_s = np.linalg.svd(np_t, full_matrices, compute_uv=False)
-            USV = torch.linalg.svd(t, full_matrices, compute_uv=False)
-            assert is_empty(USV.U)
-            self.assertEqual(USV.S, np_s)
-            assert is_empty(USV.V)
-            # check linalg.svd vs linalg.svd(out=...)
-            out = (torch.empty_like(USV.U), torch.empty_like(USV.S), torch.empty_like(USV.V))
-            USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out)
-            assert USV.U is out[0]
-            assert USV.S is out[1]
-            assert USV.V is out[2]
-            self.assertEqual(USV.S, np_s)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack

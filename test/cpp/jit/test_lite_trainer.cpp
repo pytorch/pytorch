@@ -26,9 +26,7 @@ TEST(LiteTrainerTest, Params) {
       b = 1.0
       return self.foo * x + b
   )");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -198,9 +196,7 @@ TEST(LiteTrainerTest, SGD) {
       b = 1.0
       return self.foo * x + b
   )");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -252,7 +248,6 @@ TEST(LiteTrainerTest, SGD) {
 
 namespace {
 struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   explicit DummyDataset(size_t size = 100) : size_(size) {}
 
   int get(size_t index) override {
@@ -273,7 +268,6 @@ TEST(LiteTrainerTest, SequentialSampler) {
   const int kBatchSize = 10;
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           DummyDataset(25),
           kBatchSize);
   int i = 1;
