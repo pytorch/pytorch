@@ -178,7 +178,7 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
 
     def test_memory_profiler(self):
-        def run_profiler(tensor_creation_fn, metric):
+        def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
             with _profile(profile_memory=True, record_shapes=True, use_kineto=kineto_available()) as prof:
                 x = None
@@ -210,7 +210,7 @@ class TestProfiler(TestCase):
         def create_mkldnn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
 
-        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
+        stats = run_profiler(create_cpu_tensor)
         check_metrics(
             stats,
             "cpu_memory_usage",
@@ -224,9 +224,33 @@ class TestProfiler(TestCase):
             ]
         )
 
+        # if kineto_available():
+        #    with TemporaryFileName(mode="w+") as fname:
+        #        with profile(profile_memory=True) as prof:
+        #            x = None
+        #            with record_function("test_user_scope_alloc"):
+        #                x = create_cpu_tensor()
+        #            with record_function("test_user_scope_dealloc"):
+        #                del x
+        #        prof.export_chrome_trace(fname)
+        #        with io.open(fname, 'r') as f:
+        #            trace = json.load(f)
+        #            assert "traceEvents" in trace
+        #            events = trace["traceEvents"]
+        #            found_memory_events = False
+        #            for evt in events:
+        #                assert "name" in evt
+        #                if evt["name"] == "[memory]":
+        #                    found_memory_events = True
+        #                    assert "args" in evt
+        #                    assert "Device Type" in evt["args"]
+        #                    assert "Device Id" in evt["args"]
+        #                    assert "Bytes" in evt["args"]
+        #            assert found_memory_events
+
         if torch.cuda.is_available():
             create_cuda_tensor()
-            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
+            stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
                 "cuda_memory_usage",
@@ -250,7 +274,7 @@ class TestProfiler(TestCase):
 
         if torch._C.has_mkldnn:
             create_mkldnn_tensor()
-            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
+            stats = run_profiler(create_mkldnn_tensor)
             check_metrics(
                 stats,
                 "cpu_memory_usage",

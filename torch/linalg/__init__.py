@@ -1204,7 +1204,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
-linalg.svd(A, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
+linalg.svd(A, full_matrices=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition (SVD) of a matrix.
 
@@ -1243,11 +1243,10 @@ The parameter :attr:`full_matrices` chooses between the full (default) and reduc
 
 Differences with `numpy.linalg.svd`:
 
-- Unlike `numpy.linalg.svd`, this function always returns a tuple of three tensors.
-  When :attr:`compute_uv`\ `= False`, `U`, `Vh` are empty tensors.
-  This behavior may change in a future PyTorch release.
+- Unlike `numpy.linalg.svd`, this function always returns a tuple of three tensors
+  and it doesn't support `compute_uv` argument.
   Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
-  instead of :attr:`compute_uv`\ `= False`.
+  instead of `compute_uv=False`.
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
@@ -1295,12 +1294,9 @@ Args:
                                     SVD, and consequently,
                                     the shape of the returned tensors
                                     `U` and `Vh`. Default: `True`.
-    compute_uv (bool, optional): controls whether to compute `U` and `Vh`. Default: `True`.
 
 Keyword args:
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
-                           If :attr:`compute_uv`\ `= False`, the 1st and 3rd arguments must be
-                           tensors, but they are ignored. Default: `None`
 
 Returns:
     A named tuple `(U, S, Vh)` which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.

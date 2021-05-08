@@ -81,7 +81,6 @@ TEST(Distributed, InsertDeviceOptions) {
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   caffe2::addBlobDeviceOptions({{"X", d}, {"Y", d}, {"W", d}}, &nn);
 
@@ -102,7 +101,6 @@ TEST(Distributed, InsertDeviceOptionsFailureCase) {
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -155,7 +153,6 @@ TEST(Converter, InjectDataEdgeIndicators) {
 TEST(Converter, OverloadedConvertToNNModule) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   auto nn = caffe2::convertToNNModule(net, {{"X", d}, {"Y", d}, {"W", d}});
 
@@ -174,7 +171,6 @@ TEST(Converter, OverloadedConvertToNNModule) {
 TEST(Converter, OverloadedConvertToNNModuleFailure) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
