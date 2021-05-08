@@ -649,9 +649,9 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                     dist.barrier(group_id)
-                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.05)
+                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
             else:
-                time.sleep(timeout.total_seconds())
+                pass
 
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         @unittest.skipIf(
