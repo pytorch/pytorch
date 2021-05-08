@@ -290,7 +290,7 @@ void cpu_kernel(BinaryTensorIteratorBase& iter, func_t&& op) {
       });
     }
   });
-//  iter.cast_outputs();
+  iter.cast_output_if_necessary();
 }
 
 // This function helps write elementwise kernels that requires multiple outputs.
@@ -377,7 +377,7 @@ void cpu_kernel_vec(BinaryTensorIteratorBase& iter, func_t&& op, vec_func_t&& vo
       });
     }
   });
-// iter.cast_outputs();
+ iter.cast_output_if_necessary();
 }
 
 template <typename func_t>

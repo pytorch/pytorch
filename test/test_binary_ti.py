@@ -89,6 +89,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
 
+    """
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0, device=device) + torch.randn(0, 5, device=device))
@@ -103,11 +104,12 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(torch.randn(0, 7, 0, 6, 5, 0, 7, device=device),
                          torch.randn(0, 7, 0, 6, 5, 0, 1, device=device) + torch.randn(1, 1, 5, 1, 7, device=device))
         self.assertRaises(RuntimeError, lambda: torch.randn(7, 0, device=device) + torch.randn(2, 1, device=device))
+"""
 
     def test_basic(self, device):
         a = torch.randn(5, 7, device=device)
         b = torch.randn(5, 7, device=device)
-        ab = a - (-b) # bypass plus
+        ab = a - (-b)  # bypass plus
 
         # functional convention
         c = torch.add(a, b)
@@ -129,6 +131,25 @@ class TestBinaryUfuncs(TestCase):
 #        self.assertEqual(c, ab)
 
 
+        # type promotion
+        a = (torch.randn(5, 7, device=device) * 1000).to(dtype=torch.int)
+        b = torch.randn(5, 7, device=device) * 1000
+        ab = a - (-b)
+        c = torch.add(a, b)
+        self.assertEqual(c, ab)
+
+        # output cast
+        a = (torch.randn(5, 7, device=device) * 1000).to(dtype=torch.int)
+        b = (torch.randn(5, 7, device=device) * 1000).to(dtype=torch.int)
+        ab = torch.zeros(5, 7)
+        torch.sub(a, -b, out=ab)    # by pass plus
+
+        c = torch.zeros(5, 7)
+        torch.add(a, b, out=c)
+        self.assertEqual(c, ab)
+
+
+    """
     def test_add(self, device):
         dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
         for dtype in dtypes:
@@ -257,6 +278,7 @@ class TestBinaryUfuncs(TestCase):
         m2 = torch.tensor(4., dtype=torch.float64)
         self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
+"""
 
 instantiate_device_type_tests(TestBinaryUfuncs, globals(), except_for='meta')
 

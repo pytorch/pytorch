@@ -68,6 +68,8 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
       TensorOptions options,
       DimnameList names) override;
 
+  void cast_output_if_necessary();
+
   ScalarType common_dtype() const {
     return common_dtype_;
   }
@@ -77,6 +79,7 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
       return common_device_;
   }
 
+  // used in structural kernel implementation to check types, etc
   const Tensor& output() const {
       return out_;
   }
@@ -87,12 +90,15 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
 
   Tensor a_, b_;
   Tensor out_;
+
+  // optional, used when output cast is done via materialization
+  Tensor output_buffer_;
+
   FunctionConvention convention_;
 
   NameVector names_;
   DimVector shape_;
   ScalarType common_dtype_ = ScalarType::Undefined;
-  Device common_device_ = kCPU;
 
   int64_t numel_ = -1;
 
@@ -101,6 +107,11 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
   bool output_needs_resize_ = false;
   bool output_needs_type_promotion_ = false;
 
+
+  // "plan" related part
+  Device common_device_ = kCPU;
+  bool input_needs_fused_cast_ = false;
+
   void setup_type_and_device(const TensorIteratorConfig& config);
   int ntensors() const {
     return 3;
@@ -108,9 +119,23 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
 
   void compute_type_promotion();
 
-  StrideVector get_strides() const;
-  PtrVector get_base_ptrs() const;
-  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
+  // the output for for_each() to write to
+  // will return output_buffer_ if output type cast is required
+  const Tensor& get_foreach_output() const {
+    if (output_buffer_.defined()) {
+      return output_buffer_;
+    }
+    else {
+      return out_;
+    }
+  }
+
+  // output parameter is required since it may be out_ or output_buffer_
+  // avoid calling get_foreach_output() for each method
+  // TODO: probably don't need all the three metods (maybe one method to just set strides/data pointer up???)
+  StrideVector get_strides(const Tensor& output) const;
+  PtrVector get_base_ptrs(const Tensor& output) const;
+  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter, const Tensor& output) const;
 
   template <typename loop1d_t>
   auto loop_2d_from_1d(const loop1d_t& loop) {
