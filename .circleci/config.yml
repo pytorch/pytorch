@@ -294,7 +294,7 @@ pytorch_android_params: &pytorch_android_params
       default: ""
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
     DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -6515,11 +6515,11 @@ workflows:
           ios_platform: SIMULATOR
           name: pytorch_ios_12_0_0_x86_64_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-x86_64_lite_interpreter_build
+          build_environment: pytorch-ios-12.0.0-x86_64_full_jit_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_x86_64_lite_interpreter_build
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_x86_64_full_jit_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_build
           context: org-member
@@ -6534,12 +6534,12 @@ workflows:
           name: pytorch_ios_12_0_0_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
+          build_environment: pytorch-ios-12.0.0-arm64_full_jit_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_arm64_lite_interpreter_build
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_arm64_full_jit_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_custom_build
           context: org-member
