@@ -205,9 +205,32 @@ class ExprEval {
     }
   }
 
+  void call_raw(const std::vector<void*>& args) {
+    std::vector<void*> args_extended = args;
+    switch (dtype_.scalar_type()) {
+#define TYPE_CASE(Type, Name)                    \
+  case ScalarType::Name: {                       \
+    std::vector<Type> ret_val_arg(1);            \
+    args_extended.push_back(ret_val_arg.data()); \
+    codegen_->call_raw(args_extended);           \
+    ret_value_ = Value(ret_val_arg[0]);          \
+  } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      case ScalarType::Bool: {
+        std::vector<unsigned char> ret_val_arg(1);
+        args_extended.push_back(ret_val_arg.data());
+        codegen_->call_raw(args_extended);
+        ret_value_ = Value((bool)ret_val_arg[0]);
+      } break;
+      default:
+        throw unsupported_dtype();
+    }
+  }
+
   template <typename T>
-  T value(std::vector<void*>& args) {
-    call(args);
+  T value(const std::vector<void*>& args) {
+    call_raw(args);
     return ret_value_.as<T>();
   }
 
