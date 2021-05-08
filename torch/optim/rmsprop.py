@@ -19,7 +19,7 @@ class RMSprop(Optimizer):
     of the squared gradient. The weighted moving average is updated as follows:
     .. math::
         v_j := \alpha v_j + (1 - \alpha) g_j^2
-    
+
     where :math:`\alpha` is the decay rate, :math:`v_j` is the :math:`j`th entry of the
     weighted moving average, and :math:`g_j` is the :math:`j`th entry of the loss gradient.
 
