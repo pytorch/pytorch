@@ -254,6 +254,7 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
+option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
@@ -276,6 +277,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
@@ -324,6 +328,10 @@ if(WIN32)
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
+endif()
+
+if(USE_GLOO_WITH_OPENSSL)
+  set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
@@ -645,6 +653,10 @@ endif()
 
 if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
+endif()
+
+if(USE_SOURCE_DEBUG_ON_MOBILE)
+  string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
