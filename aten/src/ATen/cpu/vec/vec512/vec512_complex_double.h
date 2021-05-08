@@ -160,32 +160,22 @@ public:
   // Peter Cordes recommends not using _mm256_hadd_ps because it has a high latency
   // and blocks port longer than other clever alternatives.
   static __m512d hadd_pd(__m512d a, __m512d b) {
-    auto first_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 0);
-    auto second_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 1);
-    auto first_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 0);
-    auto second_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 1);
-    auto first_half_hadd = _mm256_hadd_pd(_mm256_castsi256_pd(first_half_a),
-                                          _mm256_castsi256_pd(first_half_b));
-    auto second_half_hadd = _mm256_hadd_pd(_mm256_castsi256_pd(second_half_a),
-                                           _mm256_castsi256_pd(second_half_b));
-    auto ret_val = _mm512_set1_pd(0.0);
-    ret_val = _mm512_insertf64x4(ret_val, first_half_hadd, 0);
-    ret_val = _mm512_insertf64x4(ret_val, second_half_hadd, 1);
-    return ret_val;
+    __m256d first_half_a = _mm512_extractf64x4_pd(a, 0);
+    __m256d second_half_a = _mm512_extractf64x4_pd(a, 1);
+    __m256d first_half_b = _mm512_extractf64x4_pd(b, 0);
+    __m256d second_half_b = _mm512_extractf64x4_pd(b, 1);
+    __m256d first_half_hadd = _mm256_hadd_pd(first_half_a, first_half_b);
+    __m256d second_half_hadd = _mm256_hadd_pd(second_half_a, second_half_b);
+    return _mm512_insertf64x4(_mm512_castpd256_pd512(first_half_hadd), second_half_hadd, 1);
   }
   static __m512d hsub_pd(__m512d a, __m512d b) {
-    auto first_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 0);
-    auto second_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 1);
-    auto first_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 0);
-    auto second_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 1);
-    auto first_half_hsub = _mm256_hsub_pd(_mm256_castsi256_pd(first_half_a),
-                                          _mm256_castsi256_pd(first_half_b));
-    auto second_half_hsub = _mm256_hsub_pd(_mm256_castsi256_pd(second_half_a),
-                                           _mm256_castsi256_pd(second_half_b));
-    auto ret_val = _mm512_set1_pd(0.0);
-    ret_val = _mm512_insertf64x4(ret_val, first_half_hsub, 0);
-    ret_val = _mm512_insertf64x4(ret_val, second_half_hsub, 1);
-    return ret_val;
+    __m256d first_half_a = _mm512_extractf64x4_pd(a, 0);
+    __m256d second_half_a = _mm512_extractf64x4_pd(a, 1);
+    __m256d first_half_b = _mm512_extractf64x4_pd(b, 0);
+    __m256d second_half_b = _mm512_extractf64x4_pd(b, 1);
+    __m256d first_half_hsub = _mm256_hsub_pd(first_half_a, first_half_b);
+    __m256d second_half_hsub = _mm256_hsub_pd(second_half_a, second_half_b);
+    return _mm512_insertf64x4(_mm512_castpd256_pd512(first_half_hsub), second_half_hsub, 1);
   }
   __m512d abs_2_() const {
     auto val_2 = _mm512_mul_pd(values, values);     // a*a     b*b
