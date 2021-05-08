@@ -106,34 +106,6 @@ TEST(MobileTest, NamedParameters) {
   }
 }
 
-TEST(MobileTest, SaveLoadData) {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
-  m.define(R"(
-    def add_it(self, x):
-      b = 4
-      return self.foo + x + b
-  )");
-  Module child("m2");
-  child.register_parameter("foo", 4 * torch::ones({}), false);
-  child.register_parameter("bar", 3 * torch::ones({}), false);
-  m.register_module("child1", child);
-  m.register_module("child2", child.clone());
-  auto full_params = m.named_parameters();
-
-  std::stringstream ss;
-  std::stringstream ss_data;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  mobile::_save_data(bc, ss_data);
-  auto mobile_params = mobile::_load_data(ss_data).named_parameters();
-  AT_ASSERT(full_params.size() == mobile_params.size());
-  for (const auto& e : full_params) {
-    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
-  }
-}
-
 TEST(MobileTest, SaveLoadParameters) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
