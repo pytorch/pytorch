@@ -1,4 +1,8 @@
+#include <cuda_runtime_api.h>
+
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/macros/Macros.h>
 
 #include <limits>
 
@@ -135,6 +139,20 @@ void set_device(DeviceIndex device) {
 
 void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+const char* get_cuda_check_prefix() noexcept {
+  static char* device_blocking_flag = getenv("CUDA_LAUNCH_BLOCKING");
+  static bool blocking_enabled =
+      (device_blocking_flag && atoi(device_blocking_flag));
+  if (blocking_enabled) {
+    return "CUDA error: ";
+  } else {
+    return "CUDA kernel errors might be "
+           "asynchronously reported at some other API call,so the "
+           "stacktrace below might be incorrect. For debugging "
+           "consider passing CUDA_LAUNCH_BLOCKING=1. CUDA error: ";
+  }
 }
 
 } // namespace cuda
