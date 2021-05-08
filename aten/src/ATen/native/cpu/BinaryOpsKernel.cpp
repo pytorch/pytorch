@@ -808,7 +808,7 @@ void fmod_kernel(TensorIterator& iter) {
   }
 }
 
-void logaddexp_kernel(TensorIterator& iter) {
+void logaddexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -832,7 +832,7 @@ void logaddexp_kernel(TensorIterator& iter) {
   });
 }
 
-void logaddexp2_kernel(TensorIterator& iter) {
+void logaddexp2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -858,7 +858,7 @@ void logaddexp2_kernel(TensorIterator& iter) {
   });
 }
 
-void gcd_kernel(TensorIterator& iter) {
+void gcd_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
       cpu_kernel(
           iter,
@@ -868,7 +868,7 @@ void gcd_kernel(TensorIterator& iter) {
     });
 }
 
-void lcm_kernel(TensorIterator& iter) {
+void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
       cpu_kernel(
           iter,
@@ -879,7 +879,7 @@ void lcm_kernel(TensorIterator& iter) {
     });
 }
 
-void hypot_kernel(TensorIterator& iter) {
+void hypot_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -892,7 +892,7 @@ void hypot_kernel(TensorIterator& iter) {
   });
 }
 
-void igamma_kernel(TensorIterator& iter) {
+void igamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igamma_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -905,7 +905,7 @@ void igamma_kernel(TensorIterator& iter) {
   });
 }
 
-void igammac_kernel(TensorIterator& iter) {
+void igammac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igammac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -918,7 +918,7 @@ void igammac_kernel(TensorIterator& iter) {
   });
 }
 
-void nextafter_kernel(TensorIterator& iter) {
+void nextafter_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,

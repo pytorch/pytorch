@@ -6049,6 +6049,38 @@ class DistributedTest:
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
+            # Test errors are raised when DDP and module parameters mismatch.
+            # This generally indicates a bug with DDP and is not expected to
+            # happen in user applications.
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            net_params, _ = net._build_params_for_reducer()
+            if self.rank == 0:
+                print(type(net_params[0][0]))
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Expected param to name mapping"
+            ):
+                net._build_param_to_name_mapping(net_params)
+
+            net_params[0] = net_params[0][:-3]
+            with self.assertRaisesRegex(ValueError, "Param with name"):
+                net._build_param_to_name_mapping(net_params)
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
         def test_ddp_build_param_to_name_mapping_requires_grad(self):
             class Net(nn.Module):
                 def __init__(self):

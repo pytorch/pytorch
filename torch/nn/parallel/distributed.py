@@ -654,6 +654,7 @@ class DistributedDataParallel(Module):
                     if param not in param_set:
                         raise ValueError(
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
+                            " This indicates a bug in DDP, please report an issue to PyTorch."
                         )
                     param_index = param_to_param_index[param]
                     param_index_to_param_fqn[param_index] = fqn
@@ -664,7 +665,8 @@ class DistributedDataParallel(Module):
                 (
                     "Expected param to name mapping to cover all parameters, but"
                     f" got conflicting lengths: {len(param_set)} vs "
-                    f"{len(param_index_to_param_fqn)}"
+                    f"{len(param_index_to_param_fqn)}. This indicates a bug in DDP"
+                    ", please report an issue to PyTorch."
                 )
             )
 
