@@ -16,6 +16,14 @@
 namespace torch {
 namespace jit {
 
+std::string TORCH_API get_jit_logging_levels() {
+  return JitLoggingConfig::getInstance().getLoggingLevels();
+}
+
+void TORCH_API set_jit_logging_levels(std::string level) {
+  JitLoggingConfig::getInstance().setLoggingLevels(level);
+}
+
 // gets a string representation of a node header
 // (e.g. outputs, a node kind and outputs)
 std::string getHeader(const Node* node) {
@@ -53,8 +61,9 @@ static std::unordered_map<std::string, size_t> parseJITLogOption(
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-  static const std::unordered_map<std::string, size_t> files_to_levels =
+  std::string log_levels = get_jit_logging_levels();
+  const char* c_log_level = log_levels.c_str();
+  const std::unordered_map<std::string, size_t> files_to_levels =
       parseJITLogOption(c_log_level);
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
