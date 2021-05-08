@@ -80,9 +80,8 @@ If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
 
-We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, math operations, linear algebra, reductions.
-And they are fast!
+We provide a wide variety of tensor routines which are fast enough to accelerate and fit your scientific computation needs
+such as slicing, indexing, math operations, linear algebra and reductions as well.
 
 ### Dynamic Neural Networks: Tape-Based Autograd
 
