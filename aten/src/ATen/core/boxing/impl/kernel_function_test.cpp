@@ -39,7 +39,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
@@ -51,7 +50,6 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
@@ -171,7 +169,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntOutput_when
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 3, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(9, result[0].toInt());
@@ -231,7 +228,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListOutput_
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 2, 4, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toIntVector().size());
@@ -246,7 +242,6 @@ std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<stri
   dict.insert("second", dummyTensor(DispatchKey::CUDA));
   return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
     dummyTensor(DispatchKey::CUDA),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5,
     c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
     c10::optional<int64_t>(c10::in_place, 0),
@@ -421,7 +416,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListInput_w
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
@@ -439,7 +433,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListInput_w
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
