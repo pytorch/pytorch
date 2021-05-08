@@ -1274,7 +1274,8 @@ std::vector<For*> LoopNest::distributeLoop(
   // Extract bodies for all the loops after distribution.
   std::vector<Block*> new_loop_bodies;
   auto new_loop_body = new Block({});
-  while (auto s = loop->body()->front()) {
+  while (!loop->body()->empty()) {
+    auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
     if (pivots.count(s)) {
