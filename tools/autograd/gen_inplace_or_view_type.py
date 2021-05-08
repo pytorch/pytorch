@@ -294,7 +294,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
             raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
 
         # See Note [ View + Inplace detection]
-        def get_creation_meta_in_mode(original):
+        def get_creation_meta_in_mode(original: str) -> str:
             creation_meta_with_grad_mode = f'(at::GradMode::is_enabled() ? {original} : CreationMeta::NO_GRAD_MODE)'
             return f'InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : {creation_meta_with_grad_mode}'
 
