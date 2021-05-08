@@ -17,12 +17,10 @@ struct TORCH_API BatchNormOptions {
 
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(c10::optional<double>, momentum) = 0.1;
 
   /// Whether to learn a scale and bias that are applied in an affine
@@ -80,12 +78,10 @@ struct TORCH_API BatchNormFuncOptions {
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(c10::optional<double>, momentum) = 0.1;
 
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 };
 

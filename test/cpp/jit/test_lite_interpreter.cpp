@@ -32,9 +32,7 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(torch::rand({1, 3, 128, 128}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(at::Scalar(2.0));
   auto ref = m.forward(inputs);
 
@@ -123,9 +121,7 @@ TEST(LiteInterpreterTest, Conv) {
   std::vector<torch::jit::IValue> inputs;
 
   Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
@@ -168,7 +164,6 @@ TEST(LiteInterpreterTest, Inline) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
@@ -239,7 +234,6 @@ TEST(LiteInterpreterTest, Prim) {
   )JIT");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -268,7 +262,6 @@ TEST(LiteInterpreterTest, PrimScalar) {
   )JIT");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -315,7 +308,6 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   ASSERT_THROWS_WITH_MESSAGE(
@@ -337,7 +329,6 @@ TEST(LiteInterpreterTest, SetState) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
 
@@ -966,7 +957,6 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.get_method("add_it")(inputs);
@@ -997,7 +987,6 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inputx = 5 * torch::ones({});
   auto inputy = 4 * torch::ones({});
   auto ref = m.run_method("add_three", inputx, inputy);
@@ -1073,7 +1062,6 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 
   for (auto& file_name : all_files) {
     if (file_name.find("extra/") == 0) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
@@ -1086,9 +1074,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   torch::jit::Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):

@@ -150,7 +150,6 @@ index_select_add(const Tensor &select_indices,
         /* block_size */ddim,
         /* has_weight */false,
         /* normalize_by_lengths */false,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         /* prefetch */16,
         /* is_weight_positional */false,
         /* use_offsets */true
@@ -312,7 +311,6 @@ index_select_scale_add(const Tensor &select_indices,
         /* block_size */ddim,
         /* has_weight */true,
         /* normalize_by_lengths */false,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         /* prefetch */16,
         /* is_weight_positional */false,
         /* use_offsets */true

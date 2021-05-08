@@ -220,9 +220,7 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& bias = getTensorInfoJit(node->input(2));
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& dilation = toIValue(node->input(5));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& groups = toIValue(node->input(6));
 
   // Everything should be statically known.
@@ -1472,7 +1470,6 @@ Tensor* computeMatmul(
   // an aten::matmul.
   // Native, even naive, lowering is beneficial when the sizes are small because
   // it allows to eliminate dispatch overhead.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
@@ -1507,7 +1504,6 @@ Tensor* computeConv2d(
   auto padding = _pair_int(inputs[4]);
   auto dilation = _pair_int(inputs[5]);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int groups = c10::get<int64_t>(inputs[6]);
 
   auto inpInfo = getTensorInfo(inp);
@@ -1887,7 +1883,6 @@ Tensor* tensorexpr::computeOperandValue(
                 tensorOrConstant(inputs[0], indices), // input
                 tensorOrConstant(inputs[3], {c}), // mean
                 tensorOrConstant(inputs[4], {c}), // var
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 constant(inputs[7]) // eps
             };
 
@@ -1911,7 +1906,6 @@ Tensor* tensorexpr::computeOperandValue(
             }
             // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
             if (hasBias) {
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = exprInputs[5];
             }
 
