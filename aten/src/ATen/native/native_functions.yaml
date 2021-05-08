@@ -306,6 +306,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: conj_out
+    SparseCPU, SparseCUDA: conj_out_sparse
 
 - func: _conj(Tensor self) -> Tensor
   variants: function
@@ -946,18 +947,22 @@
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: ceil_out
 
@@ -1893,18 +1898,22 @@
 
 - func: floor(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: floor_out
 
@@ -1968,23 +1977,31 @@
     CPU: from_file
 
 - func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: gcd_out
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
+  structured_delegate: gcd.out
   variants: function, method
 
 - func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: gcd.out
   variants: function, method
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lcm_out
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
+  structured_delegate: lcm.out
   variants: function, method
 
 - func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: lcm.out
   variants: function, method
 
 # NOTE [ grid_sampler Native Functions ]
@@ -2398,20 +2415,26 @@
     CPU, CUDA: log2_out
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logaddexp_out
 
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  structured_delegate: logaddexp.out
   dispatch:
     CompositeExplicitAutograd: logaddexp
 
 - func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logaddexp2_out
 
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  structured_delegate: logaddexp2.out
   dispatch:
     CompositeExplicitAutograd: logaddexp2
 
@@ -6314,18 +6337,17 @@
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ormqr_out
+    CPU, CUDA: ormqr_out
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ormqr
+    CPU, CUDA: ormqr
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _lu_with_info_cpu
-    CUDA: _lu_with_info_cuda
+    CPU, CUDA: _lu_with_info
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6335,12 +6357,6 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: lu_solve
-
-- func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _lu_solve_helper_cpu
-    CUDA: _lu_solve_helper_cuda
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
@@ -6432,18 +6448,22 @@
 
 - func: sign(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sign
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: sign.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sign_out
 
@@ -6538,57 +6558,61 @@
     CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: hypot_out
 
 - func: hypot(Tensor self, Tensor other) -> Tensor
+  structured_delegate: hypot.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: hypot
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: hypot.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: hypot_
 
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: igamma_out
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igamma.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: igamma.out
   variants: method
-  dispatch:
-    CPU, CUDA: igamma_
 
 - func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: igammac_out
 
 - func: igammac(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igammac.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: igammac
 
 - func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: igammac.out
   variants: method
-  dispatch:
-    CPU, CUDA: igammac_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: nextafter_out
 
 - func: nextafter(Tensor self, Tensor other) -> Tensor
+  structured_delegate: nextafter.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: nextafter
 
 - func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: nextafter.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: nextafter_
@@ -9571,13 +9595,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_vector_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_vector_norm
 
-- func: linalg_vector_norm.out(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_vector_norm_out

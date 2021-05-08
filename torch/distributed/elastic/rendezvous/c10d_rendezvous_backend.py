@@ -56,7 +56,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     @property
     def name(self) -> str:
         """See base class."""
-        return "c10d-experimental"
+        return "c10d"
 
     @property
     def store(self) -> Store:
