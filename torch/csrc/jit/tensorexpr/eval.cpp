@@ -976,7 +976,9 @@ SimpleIREvaluator::~SimpleIREvaluator() = default;
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   std::vector<void*> raw_args(args.size());
   for (size_t i = 0; i < args.size(); i++) {
-    raw_args[i] = args[i].data();
+    auto const& bufferArg = buffer_args()[i];
+    auto const& callArg = args[i];
+    raw_args[i] = argToPtr(bufferArg, callArg);
   }
   call_raw(raw_args);
 }
@@ -1003,7 +1005,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
 #define TYPE_CASE(Type, Name)                 \
   case ScalarType::Name: {                    \
     Type typed_data;                          \
-    memcpy(&typed_data, &data, sizeof(Type)); \
+    memcpy(&typed_data, data, sizeof(Type));  \
     impl_->bindVar(bufArg.var(), typed_data); \
     break;                                    \
   }
