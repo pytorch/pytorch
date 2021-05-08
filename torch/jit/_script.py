@@ -379,6 +379,17 @@ if _enabled:
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
 
+            # Do not overwrite methods that are already defined on C++
+            # ScriptModule object. This is necessary for supporting customized
+            # `_save_to_state_dict` and `load_from_state_dict`.
+            if hasattr(self._actual_script_module, attr):
+                # Temporarily limit preserving overwritable methods to those
+                # needed for customizing state_dict save/load behavior.
+                # TODO (gmagogsfm): Remove this limit once we test with other
+                # methods to make sure this BC-breaking change is safe.
+                if attr == "_save_to_state_dict" or attr == "_load_from_state_dict":
+                    return
+
             setattr(self._actual_script_module, attr, value)
 
         def define(self, src):
