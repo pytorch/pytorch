@@ -17,7 +17,6 @@ inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
   if (pos + 3 >= str.size())
     return c10::nullopt;
   size_t c = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 1, b = 64; i < 4; ++i, b /= 8) {
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int d = str[pos + i];
@@ -25,7 +24,6 @@ inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
       return c10::nullopt;
     c += b * (d - '0');
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (c >= 256)
     return c10::nullopt;
   return c;

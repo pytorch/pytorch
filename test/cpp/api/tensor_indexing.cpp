@@ -73,9 +73,7 @@ TEST(TensorIndexingTest, TensorIndex) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestNoIndices) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor tensor = torch::randn({20, 20});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor value = torch::randn({20, 20});
   std::vector<TensorIndex> indices;
 
@@ -91,33 +89,23 @@ TEST(TensorIndexingTest, TestNoIndices) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::randn({20, 20});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
     torch::Tensor result = at::index(tensor, {index});
     torch::Tensor result_with_init_list = tensor.index({index});
     ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::randn({20, 20});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({20}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({20}));
     ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::randn({20, 20});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({1, 20}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({1, 20}));
     ASSERT_TRUE(result.equal(result_with_init_list));
   }
@@ -125,14 +113,12 @@ TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestSingleInt) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleInt) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
   ASSERT_EQ(v.index({4, Slice(), 1}).sizes(), torch::IntArrayRef({7}));
@@ -144,7 +130,6 @@ TEST(TensorIndexingTest, TestMultipleInt) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestNone) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({None}).sizes(), torch::IntArrayRef({1, 5, 7, 3}));
   ASSERT_EQ(v.index({Slice(), None}).sizes(), torch::IntArrayRef({5, 1, 7, 3}));
@@ -154,25 +139,18 @@ TEST(TensorIndexingTest, TestNone) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestStep) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::arange(10);
   assert_tensor_equal(v.index({Slice(None, None, 1)}), v);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(v.index({Slice(None, None, 2)}), torch::tensor({0, 2, 4, 6, 8}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(v.index({Slice(None, None, 3)}), torch::tensor({0, 3, 6, 9}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(v.index({Slice(None, None, 11)}), torch::tensor({0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(v.index({Slice(1, 6, 2)}), torch::tensor({1, 3, 5}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestStepAssignment) {
   auto v = torch::zeros({4, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   v.index_put_({0, Slice(1, None, 2)}, torch::tensor({3., 4.}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(v.index({0}), torch::tensor({0., 3., 0., 4.}));
   assert_tensor_equal(v.index({Slice(1, None)}).sum(), torch::tensor(0));
 }
@@ -180,7 +158,6 @@ TEST(TensorIndexingTest, TestStepAssignment) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBoolIndices) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto v = torch::randn({5, 7, 3});
     auto boolIndices = torch::tensor({true, false, true, true, false}, torch::kBool);
     ASSERT_EQ(v.index({boolIndices}).sizes(), torch::IntArrayRef({3, 7, 3}));
@@ -205,19 +182,15 @@ TEST(TensorIndexingTest, TestBoolIndices) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto mask = torch::zeros({10}, torch::kBool);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = torch::ones({10, 10});
   y.index_put_({mask}, {y.index({mask})}, /*accumulate=*/true);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(y, torch::ones({10, 10}));
 }
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleBoolIndices) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   // note: these broadcast together and are transposed to the first dim
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
@@ -228,7 +201,6 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMask) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto v = torch::randn({5, 7, 3});
     auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
     {
@@ -248,15 +220,12 @@ TEST(TensorIndexingTest, TestByteMask) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMaskAccumulate) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto mask = torch::zeros({10}, torch::kUInt8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = torch::ones({10, 10});
   {
     WarningCapture warnings;
 
     y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assert_tensor_equal(y, torch::ones({10, 10}));
 
     ASSERT_EQ(count_substr_occurrences(warnings.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
@@ -265,7 +234,6 @@ TEST(TensorIndexingTest, TestByteMaskAccumulate) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestMultipleByteMask) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   // note: these broadcast together and are transposed to the first dim
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
@@ -281,9 +249,7 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteMask2d) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto c = torch::randn({5, 7});
   int64_t num_ones = (c > 0).sum().item().to<int64_t>();
   auto r = v.index({c > 0});
@@ -292,7 +258,6 @@ TEST(TensorIndexingTest, TestByteMask2d) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndices) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({3, 7, 3}));
   ASSERT_EQ(v.index({Slice(), torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
@@ -303,29 +268,24 @@ TEST(TensorIndexingTest, TestIntIndices) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndices2d) {
   // From the NumPy indexing example
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 12, torch::kLong).view({4, 3});
   auto rows = torch::tensor({{0, 0}, {3, 3}});
   auto columns = torch::tensor({{0, 2}, {0, 2}});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(x.index({rows, columns}), torch::tensor({{0, 2}, {9, 11}}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
   // From the NumPy indexing example
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 12, torch::kLong).view({4, 3});
   auto rows = torch::tensor({0, 3});
   auto columns = torch::tensor({0, 2});
   auto result = x.index({rows.index({Slice(), None}), columns});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(result, torch::tensor({{0, 2}, {9, 11}}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyIndex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 12).view({4, 3});
   auto idx = torch::tensor({}, torch::kLong);
   ASSERT_EQ(x.index({idx}).numel(), 0);
@@ -344,23 +304,18 @@ TEST(TensorIndexingTest, TestEmptyIndex) {
 TEST(TensorIndexingTest, TestEmptyNdimIndex) {
   torch::Device device(torch::kCPU);
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({5}, device);
     assert_tensor_equal(
       torch::empty({0, 2}, device),
       x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::empty({2, 0, 6, 4, 5}, device),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::empty({10, 0});
     ASSERT_EQ(x.index({torch::tensor({1, 2})}).sizes(), torch::IntArrayRef({2, 0}));
     ASSERT_EQ(x.index({torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)}).sizes(), torch::IntArrayRef({0}));
@@ -372,19 +327,15 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
 TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
   torch::Device device(torch::kCUDA);
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({5}, device);
     assert_tensor_equal(
       torch::empty({0, 2}, device),
       x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::empty({2, 0, 6, 4, 5}, device),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
 }
@@ -392,7 +343,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
   torch::Device device(torch::kCPU);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5}, device);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
@@ -401,7 +351,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
   torch::Device device(torch::kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5}, device);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(x.index({torch::empty({0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}), c10::Error);
@@ -410,7 +359,6 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptySlice) {
   torch::Device device(torch::kCPU);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({2, 3, 4, 5}, device);
   auto y = x.index({Slice(), Slice(), Slice(), 1});
   auto z = y.index({Slice(), Slice(1, 1), Slice()});
@@ -423,7 +371,6 @@ TEST(TensorIndexingTest, TestEmptySlice) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
   torch::Device device(torch::kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({2, 3, 4, 5}, device);
   auto y = x.index({Slice(), Slice(), Slice(), 1});
   auto z = y.index({Slice(), Slice(1, 1), Slice()});
@@ -472,12 +419,10 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     auto neg_ones_expanded = neg_ones.unsqueeze(0).unsqueeze(0);
     a.index_put_({true}, neg_ones_expanded);
     assert_tensor_equal(a, neg_ones);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a.index_put_({false}, 5);
     assert_tensor_equal(a, neg_ones);
     a.index_put_({true_tensor}, neg_ones_expanded * 2);
     assert_tensor_equal(a, neg_ones * 2);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a.index_put_({false_tensor}, 5);
     assert_tensor_equal(a, neg_ones * 2);
     a.index_put_({None}, neg_ones_expanded * 3);
@@ -526,7 +471,6 @@ TEST(TensorIndexingTest, TestSetitemExpansionError) {
   auto true_tensor = torch::tensor(true);
   auto a = torch::randn({2, 3});
   // check prefix with  non-1s doesn't work
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> tensor_sizes{5, 1};
   tensor_sizes.insert(
     tensor_sizes.end(),
@@ -579,7 +523,6 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
   a_set_with_number.index_put_({0}, b);
   a_set_with_scalar.index_put_({zero}, b);
   assert_tensor_equal(a_set_with_number, a_set_with_scalar);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   a.index_put_({1, zero}, 7.7);
   ASSERT_TRUE(a.index({1, 0}).allclose(torch::tensor(7.7)));
 
@@ -589,7 +532,6 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
   ASSERT_THROW(r.index_put_({Slice()}, 8.8), c10::Error);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(r.index_put_({zero}, 8.8), c10::Error);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   r.index_put_({"..."}, 9.9);
   ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
 }
@@ -597,10 +539,8 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
   // From the NumPy indexing example
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 12).to(torch::kLong).view({4, 3});
   assert_tensor_equal(x.index({Slice(1, 2), Slice(1, 3)}), x.index({Slice(1, 2), torch::tensor({1, 2})}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(x.index({Slice(1, 2), Slice(1, 3)}), torch::tensor({{4, 5}}));
 
   // Check that it is a copy
@@ -622,27 +562,21 @@ TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
 TEST(TensorIndexingTest, TestIntAssignment) {
   {
     auto x = torch::arange(0, 4).to(torch::kLong).view({2, 2});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x.index_put_({1}, 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assert_tensor_equal(x, torch::tensor({{0, 1}, {5, 5}}));
   }
 
   {
     auto x = torch::arange(0, 4).to(torch::kLong).view({2, 2});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x.index_put_({1}, torch::arange(5, 7).to(torch::kLong));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assert_tensor_equal(x, torch::tensor({{0, 1}, {5, 6}}));
   }
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestByteTensorAssignment) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
   auto b = torch::tensor({true, false, true, false}, torch::kByte);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = torch::tensor({3., 4., 5., 6.});
 
   {
@@ -654,16 +588,13 @@ TEST(TensorIndexingTest, TestByteTensorAssignment) {
   }
 
   assert_tensor_equal(x.index({0}), value);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(x.index({1}), torch::arange(4, 8).to(torch::kLong));
   assert_tensor_equal(x.index({2}), value);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(x.index({3}), torch::arange(12, 16).to(torch::kLong));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestVariableSlicing) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 16).view({4, 4});
   auto indices = torch::tensor({0, 1}, torch::kInt);
   int i = indices[0].item<int>();
@@ -673,22 +604,17 @@ TEST(TensorIndexingTest, TestVariableSlicing) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestEllipsisTensor) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 9).to(torch::kLong).view({3, 3});
   auto idx = torch::tensor({0, 2});
   assert_tensor_equal(x.index({"...", idx}), torch::tensor({{0, 2},
-                                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                                      {3, 5},
-                                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                                      {6, 8}}));
   assert_tensor_equal(x.index({idx, "..."}), torch::tensor({{0, 1, 2},
-                                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                                      {6, 7, 8}}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestOutOfBoundIndex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0, 100).view({2, 5, 10});
   ASSERT_THROWS_WITH(x.index({0, 5}), "index 5 is out of bounds for dimension 1 with size 5");
   ASSERT_THROWS_WITH(x.index({4, 5}), "index 4 is out of bounds for dimension 0 with size 2");
@@ -698,7 +624,6 @@ TEST(TensorIndexingTest, TestOutOfBoundIndex) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIndexingTest, TestZeroDimIndex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor(10);
 
   auto runner = [&]() -> torch::Tensor {
@@ -767,9 +692,7 @@ TEST(NumpyTests, TestEmptyFancyIndex) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestEllipsisIndex) {
   auto a = torch::tensor({{1, 2, 3},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {4, 5, 6},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {7, 8, 9}});
   ASSERT_FALSE(a.index({"..."}).is_same(a));
   assert_tensor_equal(a.index({"..."}), a);
@@ -796,13 +719,10 @@ TEST(NumpyTests, TestEllipsisIndex) {
 TEST(NumpyTests, TestSingleIntIndex) {
   // Single integer index selects one row
   auto a = torch::tensor({{1, 2, 3},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {4, 5, 6},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {7, 8, 9}});
 
   assert_tensor_equal(a.index({0}), torch::tensor({1, 2, 3}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(a.index({-1}), torch::tensor({7, 8, 9}));
 
   // Index out of bounds produces IndexError
@@ -819,9 +739,7 @@ TEST(NumpyTests, TestSingleIntIndex) {
 TEST(NumpyTests, TestSingleBoolIndex) {
   // Single boolean index
   auto a = torch::tensor({{1, 2, 3},
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    {4, 5, 6},
-                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                    {7, 8, 9}});
 
   assert_tensor_equal(a.index({true}), a.index({None}));
@@ -830,7 +748,6 @@ TEST(NumpyTests, TestSingleBoolIndex) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBooleanShapeMismatch) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto arr = torch::ones({5, 4, 3});
 
   auto index = torch::tensor({true});
@@ -882,25 +799,19 @@ TEST(NumpyTests, TestBooleanIndexingTwodim) {
   // Indexing a 2-dimensional array with
   // 2-dimensional boolean array
   auto a = torch::tensor({{1, 2, 3},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {4, 5, 6},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {7, 8, 9}});
   auto b = torch::tensor({{true, false, true},
                           {false, true, false},
                           {true, false, true}});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(a.index({b}), torch::tensor({1, 3, 5, 7, 9}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(a.index({b.index({1})}), torch::tensor({{4, 5, 6}}));
   assert_tensor_equal(a.index({b.index({0})}), a.index({b.index({2})}));
 
   // boolean assignment
   a.index_put_({b}, 0);
   assert_tensor_equal(a, torch::tensor({{0, 2, 0},
-                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {4, 0, 6},
-                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {0, 8, 0}}));
 }
 
@@ -939,24 +850,19 @@ TEST(NumpyTests, TestBooleanListIndexing) {
   // Indexing a 2-dimensional array with
   // boolean lists
   auto a = torch::tensor({{1, 2, 3},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {4, 5, 6},
-                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                           {7, 8, 9}});
   auto b = torch::tensor({true, false, false});
   auto c = torch::tensor({true, true, false});
   assert_tensor_equal(a.index({b}), torch::tensor({{1, 2, 3}}));
   assert_tensor_equal(a.index({b, b}), torch::tensor({1}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(a.index({c}), torch::tensor({{1, 2, 3}, {4, 5, 6}}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assert_tensor_equal(a.index({c, c}), torch::tensor({1, 5}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestEverythingReturnsViews) {
   // Before `...` would return a itself.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::tensor({5});
 
   ASSERT_FALSE(a.is_same(a.index({"..."})));
@@ -965,7 +871,6 @@ TEST(NumpyTests, TestEverythingReturnsViews) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBroaderrorsIndexing) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::zeros({5, 5});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({torch::tensor({0, 1}), torch::tensor({0, 1, 2})}), c10::Error);
@@ -975,19 +880,14 @@ TEST(NumpyTests, TestBroaderrorsIndexing) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestTrivialFancyOutOfBounds) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::zeros({5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ind = torch::ones({20}, torch::kInt64);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ind.index_put_({-1}, 10);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({ind}), c10::Error);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index_put_({ind}, 0), c10::Error);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ind = torch::ones({20}, torch::kInt64);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ind.index_put_({0}, 11);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(a.index({ind}), c10::Error);
@@ -998,9 +898,7 @@ TEST(NumpyTests, TestTrivialFancyOutOfBounds) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestIndexIsLarger) {
   // Simple case of fancy index broadcasting of the index.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::zeros({5, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   a.index_put_({torch::tensor({{0}, {1}, {2}}), torch::tensor({0, 1, 2})}, torch::tensor({2., 3., 4.}));
 
   ASSERT_TRUE((a.index({Slice(None, 3), Slice(None, 3)}) == torch::tensor({2., 3., 4.})).all().item<bool>());
@@ -1008,14 +906,10 @@ TEST(NumpyTests, TestIndexIsLarger) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NumpyTests, TestBroadcastSubspace) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = torch::zeros({100, 100});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto v = torch::arange(0., 100).index({Slice(), None});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = torch::arange(99, -1, -1).to(torch::kLong);
   a.index_put_({b}, v);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = b.to(torch::kDouble).unsqueeze(1).expand({100, 100});
   assert_tensor_equal(a, expected);
 }

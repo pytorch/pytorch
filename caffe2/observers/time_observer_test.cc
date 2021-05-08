@@ -17,7 +17,6 @@ class SleepOp final : public OperatorBase {
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
     StartAllObservers();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(3000));
     StopAllObservers();
     return true;
