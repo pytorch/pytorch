@@ -783,11 +783,17 @@ bool is_conv_transpose2d_module(
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(
+  bool regnorm = is_module(
       match,
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+  bool naivenorm = is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.mobile_cv.arch.layers.batch_norm.NaiveSyncBatchNorm");
+  return (regnorm || naivenorm);
 }
 
 bool is_batchnorm3d_module(

@@ -164,7 +164,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
   }
   pid_t tid = syscall(SYS_gettid);
   std::string backtrace = fmt::format(
-      "{} ({}), PID: {}, Thread {}: \n {}",
+      "{}({}), PID: {}, Thread {}: \n {}",
       fatalSignalName,
       fatalSignum,
       ::getpid(),
