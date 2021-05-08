@@ -12539,11 +12539,12 @@ class TestNNDeviceType(NNTestCase):
         self._test_module_empty_input(mod, inp)
 
     def test_one_hot(self, device):
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+        if self.device_type != 'cuda':  # cuda throws device assert for invalid data
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
 
         t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
