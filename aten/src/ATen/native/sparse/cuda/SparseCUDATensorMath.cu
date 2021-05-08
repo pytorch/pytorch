@@ -54,12 +54,12 @@ namespace {
 void s_addmm_out_csr_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int64_t k, Tensor& r_, const Scalar& beta, const Tensor& t, const Scalar& alpha, Tensor& crow_indices, Tensor& col_indices, Tensor& values, const Tensor& dense) {
 
   // No half support, so we don't have to use CUDATypeConversion
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       values.scalar_type(), "addmm_sparse_cuda", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
         Tensor r__;
-        if (cast_beta == 0) {
+        if (cast_beta == scalar_t(0)) {
           r_.zero_();
         } else if (!is_same_tensor(t, r_)) {
           r_.copy_(t);
@@ -342,7 +342,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND3(
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
@@ -357,7 +357,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND2(
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
@@ -434,9 +434,9 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
   Tensor t_values_ = t._values().to(commonDtype);
   Tensor s_values_ = src._values().to(commonDtype);
 
-  AT_DISPATCH_ALL_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
     at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_sparse_cuda", [&] {
-      if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
+      if (value.to<scalar_t>() != scalar_t(1)) {
         s_values_ = s_values_.mul(value);
       }
     });
@@ -692,7 +692,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto input_indices_ti = getTensorInfo<int64_t, int64_t>(input_indices_1D);
       auto input_indices_pos_ti = getTensorInfo<int64_t, int64_t>(input_indices_pos);
 
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_values.scalar_type(), "_sparse_sum_backward_cuda", [&] {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, grad_values.scalar_type(), "_sparse_sum_backward_cuda", [&] {
         auto grad_values_expand_ti = getTensorInfo<scalar_t, int64_t>(grad_values_expand);
         auto grad_input_values_ti = getTensorInfo<scalar_t, int64_t>(grad_input_values);
 
@@ -897,7 +897,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();

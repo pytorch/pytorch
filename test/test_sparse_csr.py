@@ -59,8 +59,8 @@ class TestSparseCSR(TestCase):
                                          device=device)
 
         self.assertEqual((2, 2), sparse.shape)
-        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
         # with size
@@ -72,37 +72,142 @@ class TestSparseCSR(TestCase):
                                          device=device)
 
         self.assertEqual((2, 10), sparse.shape)
-        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
-    @dtypes(torch.double)
-    def test_factory_size_check(self, device, dtype):
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                          include_bfloat16=False, include_complex=False))
+    def test_sparse_csr_constructor_unsafe(self, device, dtype):
+        sparse = torch._sparse_csr_tensor_unsafe([0, 2, 4],
+                                                 [0, 1, 0, 1],
+                                                 [1, 2, 3, 4],
+                                                 size=(2, 10),
+                                                 dtype=dtype,
+                                                 device=device)
+
+        self.assertEqual((2, 10), sparse.shape)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+        sparse = torch._sparse_csr_tensor_unsafe(torch.tensor([0, 2, 4]),
+                                                 torch.tensor([0, 1, 0, 1]),
+                                                 torch.tensor([1, 2, 3, 4]),
+                                                 size=(2, 10),
+                                                 dtype=dtype,
+                                                 device=device)
+
+        self.assertEqual((2, 10), sparse.shape)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+    def test_factory_type_invariants_check(self, device):
+        with self.assertRaisesRegex(RuntimeError, "both crow_indices and col_indices should have the same type."):
+            torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int64),
+                                    torch.tensor([0, 1, 0, 1], dtype=torch.int32),
+                                    torch.tensor([1, 2, 3, 4]),
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"\"csr_construct_check\" not implemented for 'Short'"):
+            torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int16),
+                                    torch.tensor([0, 1, 0, 1], dtype=torch.int16),
+                                    torch.tensor([1, 2, 3, 4]),
+                                    device=device)
+
+    def test_factory_layout_invariants_check(self, device):
+        with self.assertRaisesRegex(RuntimeError, "expected values to be a strided and contiguous tensor"):
+            values = torch.tensor([1.], device=device).expand(4,)
+            torch.sparse_csr_tensor(torch.tensor([0, 2, 4], device=device),
+                                    torch.tensor([0, 1, 0, 1], device=device),
+                                    values)
+
+        with self.assertRaisesRegex(RuntimeError, "expected col_indices to be a strided and contiguous tensor"):
+            col_indices = torch.tensor([0], device=device).expand(4,)
+            torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
+                                    col_indices,
+                                    torch.tensor([1, 2, 3, 4]))
+
+        with self.assertRaisesRegex(RuntimeError, "expected crow_indices to be a strided and contiguous tensor"):
+            crow_indices = torch.arange(6, device=device)
+            torch.sparse_csr_tensor(crow_indices[::2],
+                                    torch.tensor([0, 1, 0, 1], device=device),
+                                    torch.tensor([1, 2, 3, 4]))
+
+    def test_factory_shape_invariants_check(self, device):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
         size = (2, 10)
         torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), size,
-                                dtype=dtype, device=device)
+                                device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"size of a CSR tensor must be of length 2, but got: 3"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values),
+                                    size=(2, 10, 2),
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"crow_indices must have dim\=1 but got crow_indices\.dim\(\)\=2"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices).repeat(2, 1),
+                                    torch.tensor(col_indices),
+                                    torch.tensor(values),
+                                    size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"col_indices must have dim\=1 but got col_indices\.dim\(\)\=2"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices),
+                                    torch.tensor(col_indices).repeat(2, 1),
+                                    torch.tensor(values),
+                                    size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"values must have dim\=1 but got values\.dim\(\)\=2"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices),
+                                    torch.tensor(col_indices),
+                                    torch.tensor(values).repeat(2, 1),
+                                    size,
+                                    device=device)
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"crow_indices\.numel\(\) must be size\(0\) \+ 1, but got: 3"):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), (1, 1),
-                                    dtype=dtype, device=device)
+                                    device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "0th value of crow_indices must be 0"):
-            torch.sparse_csr_tensor(torch.tensor([-1, 0, 4]), torch.tensor(col_indices), torch.tensor(values), size,
-                                    dtype=dtype, device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "last value of crow_indices should be equal to the length of col_indices."):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 0, 0]), torch.tensor(values), size,
-                                    dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"col_indices and values must have equal sizes, " +
-                                    r"but got col_indices\.size\(0\): 4, values\.size\(0\): 5"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor([0, 0, 0, 0, 0]),
-                                    size, dtype=dtype, device=device)
+                                    r"but got col_indices\.size\(0\): 3, values\.size\(0\): 4"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 1, 0]), torch.tensor(values), size,
+                                    device=device)
+
+    def test_factory_indices_invariants_check(self, device):
+        crow_indices = [0, 2, 4]
+        col_indices = [0, 1, 0, 1]
+        values = [1, 2, 3, 4]
+        size = (2, 10)
+        with self.assertRaisesRegex(RuntimeError, "0th value of crow_indices must be 0."):
+            torch.sparse_csr_tensor(torch.tensor([-1, 0, 4]), torch.tensor(col_indices), torch.tensor(values), size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "last value of crow_indices should be equal to the length of col_indices."):
+            torch.sparse_csr_tensor(torch.tensor([0, 2, 5]), torch.tensor(col_indices), torch.tensor(values), size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"at position i \= 2," +
+                                    r" this condition crow_indices\[i - 1\] <\= crow_indices\[i\] fails"):
+            torch.sparse_csr_tensor(torch.tensor([0, 5, 4]), torch.tensor(col_indices), torch.tensor(values), size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"col_indices\.min\(\) should be greater or equal to zero"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, -1, 0, 1]), torch.tensor(values), size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"size\(1\) should be greater than col_indices\.max\(\)"):
+            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 11, 0, 1]), torch.tensor(values), size,
+                                    device=device)
 
     @onlyCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,

@@ -234,6 +234,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
         tensor = make_variable_non_differentiable_view(base, tensor);
       }
     }
+    return tensors;
   }
 
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;

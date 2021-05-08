@@ -6,12 +6,6 @@ on:
     - master
   pull_request:
 
-# note [local lint]
-# LOCAL_FILES in the jobs below is intended to be filled by local (i.e. on a
-# developer's machine) job in tools/actions_local_runner.py to pass only the
-# changed files to whatever tool is consuming the files. This helps speed up
-# local lints while keeping the linting code unified between local / CI.
-
 jobs:
   quick-checks:
     runs-on: ubuntu-18.04
@@ -196,13 +190,9 @@ jobs:
           pip install -r requirements-flake8.txt
           flake8 --version
       - name: Run flake8
-        env:
-          # See note [local lint]
-          LOCAL_FILES: ""
         run: |
           set -eux
-          # shellcheck disable=SC2086
-          flake8 $LOCAL_FILES | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
         if: github.event_name == 'pull_request'
         env:
@@ -374,6 +364,8 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install mypy==0.812
+          # Needed to check tools/render_junit.py
+          pip install junitparser rich
       - name: Run autogen
         run: |
           set -eux
@@ -381,10 +373,6 @@ jobs:
           time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
-        env:
-          # See note [local lint]
-          LOCAL_FILES: ""
         run: |
           set -eux
-          # shellcheck disable=SC2086
-          for CONFIG in mypy*.ini; do mypy --config="$CONFIG" $LOCAL_FILES; done
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
