@@ -853,7 +853,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
       CUDA_R_16F,
       CUDA_R_32F));
 #elif HIP_VERSION >= 210
-  TORCH_CUDABLAS_CHECK(rocblas_bfdot(
+  TORCH_CUDABLAS_CHECK(rocblas_hdot(
       handle,
       n,
       reinterpret_cast<const rocblas_half*>(x),
@@ -862,7 +862,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
       incy,
       reinterpret_cast<rocblas_half*>(result)));
 #else
-  AT_ERROR("Cublas_bfdot requires CUDA 8.0+");
+  AT_ERROR("Cublas_Hdot requires CUDA 8.0+");
 #endif
 }
 
@@ -882,7 +882,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       CUDA_R_32F));
 #elif HIP_VERSION >= 210
-  TORCH_CUDABLAS_CHECK(rocblas_hdot(
+  TORCH_CUDABLAS_CHECK(rocblas_bfdot(
       handle,
       n,
       reinterpret_cast<const rocblas_bfloat16*>(x),
@@ -891,7 +891,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       incy,
       reinterpret_cast<rocblas_bfloat16*>(result)));
 #else
-  AT_ERROR("Cublas_Hdot requires CUDA 8.0+");
+  AT_ERROR("Cublas_bfdot requires CUDA 8.0+");
 #endif
 }
 
