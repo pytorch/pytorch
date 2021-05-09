@@ -281,7 +281,6 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     loopnest.prepare_for_codegen()
     stmt = te.simplify(loopnest.root_stmt())
     cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + outs[0]])
-    alloc_results = [torch.empty(shape, dtype=dtype) for shape,dtype in outs[1]]
     if module_attrs:
         module_stuff = [fetch_attr(i.target).contiguous().data for i in module_attrs]
     else:
@@ -289,7 +288,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     def f(*inps, out_tensors=None):
         inps = fx_model.graph.flatten_inps(*inps)
         if out_tensors is None:
-            results = alloc_results
+            results = [torch.empty(shape, dtype=dtype) for shape,dtype in outs[1]]
+            # results = alloc_results
         else:
             results = out_tensors
         full_inps = module_stuff + list(inps) + results
