@@ -4690,7 +4690,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_matrix_exp,
            supports_out=False),
     OpInfo('matmul',
