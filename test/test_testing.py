@@ -1051,8 +1051,8 @@ class TestAsserts(TestCase):
         actual = torch.empty(2)
         expected = actual.tolist()
 
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(expected))):
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
                 fn()
 
     def test_unknown_type(self):
@@ -1103,22 +1103,10 @@ class TestAsserts(TestCase):
                 fn(msg=make_msg)
 
 
-def device_permutations(cuda_devices: List[str]) -> Iterator[Tuple[str, str]]:
-    """Yields all possible permutations of the CPU and the passed CUDA devices.
-
-    Yields:
-        Tuple[str, str]: Device combinations
-    """
-    if not cuda_devices:
-        return
-
-    yield from itertools.permutations(("cpu", *cuda_devices), 2)
-
-
 class TestAssertsMultiDevice(TestCase):
     @deviceCountAtLeast(1)
     def test_mismatching_device(self, devices):
-        for actual_device, expected_device in device_permutations(devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
             actual = torch.empty((), device=actual_device)
             expected = actual.clone().to(expected_device)
             for fn in assert_fns_with_inputs(actual, expected):
@@ -1127,7 +1115,7 @@ class TestAssertsMultiDevice(TestCase):
 
     @deviceCountAtLeast(1)
     def test_mismatching_device_no_check(self, devices):
-        for actual_device, expected_device in device_permutations(devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
             actual = torch.rand((), device=actual_device)
             expected = actual.clone().to(expected_device)
             for fn in assert_fns_with_inputs(actual, expected):
