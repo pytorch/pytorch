@@ -78,7 +78,7 @@ Run a quick sanity check in python:
 `functorch` is a PyTorch C++ Extension module. To install,
 
 - Install [PyTorch from source](https://github.com/pytorch/pytorch#from-source).
-3d2ce60 is a known commit that this project works with; commits after that
+8c0459 is a known commit that this project works with; commits after that
 should be fine but haven't been formally tested.
 - Run `python setup.py install`. You can use `DEBUG=1` to compile in debug mode.
 
