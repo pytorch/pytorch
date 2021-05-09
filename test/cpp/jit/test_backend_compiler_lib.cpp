@@ -88,7 +88,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
             instruction.size() > 15,
             "Constant value is expected in ",
             instruction);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto sub = instruction.substr(15);
         // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         const_val = stod(sub);
