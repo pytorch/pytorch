@@ -947,139 +947,6 @@ Examples::
             [1, 2, 2, 2]])
 """)
 
-vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
-
-Computes a vector norm.
-
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
-
-Supports inputs of float, double, cfloat and cdouble dtypes.
-Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
-
-- If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
-- If :attr:`dim` is an `int` or a `tuple`, the norm will be computed over these dimensions
-  and the other dimensions will be treated as batch dimensions.
-
-:attr:`ord` defines the vector norm that is computed. The following norms are supported:
-
-======================   ========================================================
-:attr:`ord`              vector norm
-======================   ========================================================
-`2` (default)            `2`-norm
-`inf`                    `max(abs(x))`
-`-inf`                   `min(abs(x))`
-`0`                      `sum(x != 0)`
-other `int` or `float`   `sum(abs(x)**\ `:attr:`ord`\ `)**(1./\ `:attr:`ord`\ `)`
-======================   ========================================================
-
-where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
-
-Args:
-    A (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions.
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
-    dim (int, Tuple[int], optional): dimensions over which to compute
-        the norm. See above for the behavior when :attr:`dim`\ `= None`.
-        Default: `None`
-    keepdim (bool, optional): If set to `True`, the reduced dimensions are retained
-        in the result as dimensions with shape one. Default: `False`
-
-Keyword args:
-    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
-
-Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
-
-Examples::
-
-    >>> from torch import linalg as LA
-    >>> a = torch.arange(9, dtype=torch.float) - 4
-    >>> a
-    tensor([-4., -3., -2., -1.,  0.,  1.,  2.,  3.,  4.])
-    >>> b = a.reshape((3, 3))
-    >>> b
-    tensor([[-4., -3., -2.],
-            [-1.,  0.,  1.],
-            [ 2.,  3.,  4.]])
-    >>> LA.vector_norm(a, ord=3.5)
-    tensor(5.4345)
-    >>> LA.vector_norm(b, ord=3.5)
-    tensor(5.4345)
-""")
-
-multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
-linalg.multi_dot(tensors, *, out=None)
-
-Efficiently multiplies two or more matrices by reordering the multiplications so that
-the fewest arithmetic operations are performed.
-
-Supports inputs of float, double, cfloat and cdouble dtypes.
-This function does not support batched inputs.
-Every tensor in :attr:`tensors` must be 2D, except for the first and last which
-may be 1D. If the first tensor is a 1D vector of shape `(n,)` it is treated as a row vector
-of shape `(1, n)`, similarly if the last tensor is a 1D vector of shape `(n,)` it is treated
-as a column vector of shape `(n, 1)`.
-
-If the first and last tensors are matrices, the output will be a matrix.
-However, if either is a 1D vector, then the output will be a 1D vector.
-
-Differences with `numpy.linalg.multi_dot`:
-
-- Unlike `numpy.linalg.multi_dot`, the first and last tensors must either be 1D or 2D
-  whereas NumPy allows them to be nD
-
-.. warning:: This function does not broadcast.
-
-.. note:: This function is implemented by chaining :func:`torch.mm` calls after
-          computing the optimal matrix multiplication order.
-
-.. note:: The cost of multiplying two matrices with shapes `(a, b)` and `(b, c)` is
-          `a * b * c`. Given matrices `A`, `B`, `C` with shapes `(10, 100)`,
-          `(100, 5)`, `(5, 50)` respectively, we can calculate the cost of different
-          multiplication orders as follows:
-
-          .. math::
-
-             \begin{align*}
-             \operatorname{cost}((AB)C) &= 10 \times 100 \times 5 + 10 \times 5 \times 50 = 7500 \\
-             \operatorname{cost}(A(BC)) &= 10 \times 100 \times 50 + 100 \times 5 \times 50 = 75000
-             \end{align*}
-
-          In this case, multiplying `A` and `B` first followed by `C` is 10 times faster.
-
-Args:
-    tensors (Sequence[Tensor]): two or more tensors to multiply. The first and last
-        tensors may be 1D or 2D. Every other tensor must be 2D.
-
-Keyword args:
-    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-
-Examples::
-
-    >>> from torch.linalg import multi_dot
-
-    >>> multi_dot([torch.tensor([1, 2]), torch.tensor([2, 3])])
-    tensor(8)
-    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([2, 3])])
-    tensor([8])
-    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([[2], [3]])])
-    tensor([[8]])
-
-    >>> a = torch.arange(2 * 3).view(2, 3)
-    >>> b = torch.arange(3 * 2).view(3, 2)
-    >>> c = torch.arange(2 * 2).view(2, 2)
-    >>> multi_dot((a, b, c))
-    tensor([[ 26,  49],
-            [ 80, 148]])
-
-    >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
-    tensor([[0., 0.],
-            [0., 0.]])
-""")
-
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
@@ -1201,6 +1068,212 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+""")
+
+vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
+linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes a vector norm.
+
+If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+- If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
+- If :attr:`dim` is an `int` or a `tuple`, the norm will be computed over these dimensions
+  and the other dimensions will be treated as batch dimensions.
+
+:attr:`ord` defines the vector norm that is computed. The following norms are supported:
+
+======================   ========================================================
+:attr:`ord`              vector norm
+======================   ========================================================
+`2` (default)            `2`-norm
+`inf`                    `max(abs(x))`
+`-inf`                   `min(abs(x))`
+`0`                      `sum(x != 0)`
+other `int` or `float`   `sum(abs(x)**\ `:attr:`ord`\ `)**(1./\ `:attr:`ord`\ `)`
+======================   ========================================================
+
+where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
+
+Args:
+    A (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions.
+    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
+    dim (int, Tuple[int], optional): dimensions over which to compute
+        the norm. See above for the behavior when :attr:`dim`\ `= None`.
+        Default: `None`
+    keepdim (bool, optional): If set to `True`, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: `False`
+
+Keyword args:
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
+        :attr:`dtype` before performing the operation, and the returned tensor's type
+        will be :attr:`dtype`. Default: `None`
+
+Returns:
+    A real-valued tensor, even when :attr:`A` is complex.
+
+Examples::
+
+    >>> from torch import linalg as LA
+    >>> a = torch.arange(9, dtype=torch.float) - 4
+    >>> a
+    tensor([-4., -3., -2., -1.,  0.,  1.,  2.,  3.,  4.])
+    >>> b = a.reshape((3, 3))
+    >>> b
+    tensor([[-4., -3., -2.],
+            [-1.,  0.,  1.],
+            [ 2.,  3.,  4.]])
+    >>> LA.vector_norm(a, ord=3.5)
+    tensor(5.4345)
+    >>> LA.vector_norm(b, ord=3.5)
+    tensor(5.4345)
+""")
+
+matrix_norm = _add_docstr(_linalg.linalg_matrix_norm, r"""
+linalg.matrix_norm(A, ord='fro', dim=(-2, -1), keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes a matrix norm.
+
+If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+The norm will be computed over the dimensions specified by the 2-tuple :attr:`dim`
+and the other dimensions will be treated as batch dimensions.
+
+:attr:`ord` defines the matrix norm that is computed. The following norms are supported:
+
+======================   ========================================================
+:attr:`ord`              matrix norm
+======================   ========================================================
+`'fro'` (default)        Frobenius norm
+`'nuc'`                  nuclear norm
+`inf`                    `max(sum(abs(x), dim=1))`
+`-inf`                   `min(sum(abs(x), dim=1))`
+`1`                      `max(sum(abs(x), dim=0))`
+`-1`                     `min(sum(abs(x), dim=0))`
+`2`                      largest singular value
+`-2`                     smallest singular value
+======================   ========================================================
+
+where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    ord (int, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `'fro'`
+    dim (Tuple[int, int], optional): dimensions over which to compute the norm. Default: `(-2, -1)`
+    keepdim (bool, optional): If set to `True`, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: `False`
+
+Keyword args:
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
+        :attr:`dtype` before performing the operation, and the returned tensor's type
+        will be :attr:`dtype`. Default: `None`
+
+Returns:
+    A real-valued tensor, even when :attr:`A` is complex.
+
+Examples::
+
+    >>> from torch import linalg as LA
+    >>> A = torch.arange(9, dtype=torch.float).reshape(3, 3)
+    >>> A
+    tensor([[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]])
+    >>> LA.matrix_norm(A)
+    tensor(14.2829)
+    >>> LA.matrix_norm(A, ord=-1)
+    tensor(9.)
+    >>> B = A.expand(2, -1, -1)
+    >>> B
+    tensor([[[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]],
+
+            [[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]]])
+    >>> LA.matrix_norm(B)
+    tensor([14.2829, 14.2829])
+    >>> LA.matrix_norm(B, dim=(0, 2))
+    tensor([ 3.1623, 10.0000, 17.2627])
+""")
+
+multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
+linalg.multi_dot(tensors, *, out=None)
+
+Efficiently multiplies two or more matrices by reordering the multiplications so that
+the fewest arithmetic operations are performed.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+This function does not support batched inputs.
+Every tensor in :attr:`tensors` must be 2D, except for the first and last which
+may be 1D. If the first tensor is a 1D vector of shape `(n,)` it is treated as a row vector
+of shape `(1, n)`, similarly if the last tensor is a 1D vector of shape `(n,)` it is treated
+as a column vector of shape `(n, 1)`.
+
+If the first and last tensors are matrices, the output will be a matrix.
+However, if either is a 1D vector, then the output will be a 1D vector.
+
+Differences with `numpy.linalg.multi_dot`:
+
+- Unlike `numpy.linalg.multi_dot`, the first and last tensors must either be 1D or 2D
+  whereas NumPy allows them to be nD
+
+.. warning:: This function does not broadcast.
+
+.. note:: This function is implemented by chaining :func:`torch.mm` calls after
+          computing the optimal matrix multiplication order.
+
+.. note:: The cost of multiplying two matrices with shapes `(a, b)` and `(b, c)` is
+          `a * b * c`. Given matrices `A`, `B`, `C` with shapes `(10, 100)`,
+          `(100, 5)`, `(5, 50)` respectively, we can calculate the cost of different
+          multiplication orders as follows:
+
+          .. math::
+
+             \begin{align*}
+             \operatorname{cost}((AB)C) &= 10 \times 100 \times 5 + 10 \times 5 \times 50 = 7500 \\
+             \operatorname{cost}(A(BC)) &= 10 \times 100 \times 50 + 100 \times 5 \times 50 = 75000
+             \end{align*}
+
+          In this case, multiplying `A` and `B` first followed by `C` is 10 times faster.
+
+Args:
+    tensors (Sequence[Tensor]): two or more tensors to multiply. The first and last
+        tensors may be 1D or 2D. Every other tensor must be 2D.
+
+Keyword args:
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> from torch.linalg import multi_dot
+
+    >>> multi_dot([torch.tensor([1, 2]), torch.tensor([2, 3])])
+    tensor(8)
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([2, 3])])
+    tensor([8])
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([[2], [3]])])
+    tensor([[8]])
+
+    >>> a = torch.arange(2 * 3).view(2, 3)
+    >>> b = torch.arange(3 * 2).view(3, 2)
+    >>> c = torch.arange(2 * 2).view(2, 2)
+    >>> multi_dot((a, b, c))
+    tensor([[ 26,  49],
+            [ 80, 148]])
+
+    >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
+    tensor([[0., 0.],
+            [0., 0.]])
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
