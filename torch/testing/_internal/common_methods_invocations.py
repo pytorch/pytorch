@@ -5799,8 +5799,9 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,), device_type='cuda'),
-               # logcumsumexp_backward not implemented for 'Half
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,), device_type='cuda'),
+               # logcumsumexp_backward not implemented for Half & BFloat16
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        dtypes=(torch.float16, torch.bfloat16), device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
