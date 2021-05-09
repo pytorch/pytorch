@@ -44,42 +44,18 @@ class PythonKeyTracer(Tracer):
 
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
-        """
-        Method that specifies the behavior of this ``Tracer`` when it encounters
-        a call to an ``nn.Module`` instance.
-
-        By default, the behavior is to check if the called module is a leaf module
-        via ``is_leaf_module``. If it is, emit a ``call_module`` node referring to
-        ``m`` in the ``Graph``. Otherwise, call the ``Module`` normally, tracing through
-        the operations in its ``forward`` function.
-
-        This method can be overridden to--for example--create nested traced
-        GraphModules, or any other behavior you would want while tracing across
-        ``Module`` boundaries.
-
-        Args:
-
-            m (Module): The module for which a call is being emitted
-            forward (Callable): The forward() method of the ``Module`` to be invoked
-            args (Tuple): args of the module callsite
-            kwargs (Dict): kwargs of the module callsite
-
-        Return:
-
-            The return value from the Module call. In the case that a ``call_module``
-            node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
-            value was returned from the ``Module`` invocation.
-        """
         return forward(*args, **kwargs)
 
-    def module_getattr(self, attr, attr_val):
+
+    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
         if isinstance(attr_val, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
-                    if n not in self.parameter_proxy_cache:
+                    if n not in parameter_proxy_cache:
                         proxy = self.create_proxy('get_attr', n, (), {})
-                        self.parameter_proxy_cache[n] = addPythonKey(PythonTensor(attr_val.shape, proxy))
-                    return self.parameter_proxy_cache[n]
+                        parameter_proxy_cache[n] = addPythonKey(PythonTensor(attr_val.shape, proxy))
+                    return parameter_proxy_cache[n]
+            return attr_val.data
         return attr_val
 
 def pythonkey_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
