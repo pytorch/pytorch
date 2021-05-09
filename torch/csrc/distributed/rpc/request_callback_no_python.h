@@ -47,19 +47,22 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
       std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
+      const c10::intrusive_ptr<OwnerRRef>& ownerRRef,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processBaseScriptRemoteCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   bool processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
       std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
+      const c10::intrusive_ptr<OwnerRRef>& ownerRRef,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   virtual void processPythonRemoteCall(
       RpcCommandBase& rpc,
@@ -72,7 +75,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   virtual void processPythonRRefFetchCall(
       RpcCommandBase& rpc,

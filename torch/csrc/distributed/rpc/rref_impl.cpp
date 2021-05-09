@@ -28,6 +28,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
   }
 }
 
+/*
 void blockCurrentStreams(const std::vector<c10::Event>& events) {
   for (const c10::Event& event : events) {
     c10::Device device{event.device_type(), event.device_index()};
@@ -36,6 +37,7 @@ void blockCurrentStreams(const std::vector<c10::Event>& events) {
     event.block(stream);
   }
 }
+*/
 
 } // namespace
 
@@ -273,9 +275,6 @@ const IValue& OwnerRRef::getValue() const {
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.
   }
-  // Before accessing the value in this RRef, current CUDA streams must wait
-  // for pending CUDA operations that create the value.
-  blockCurrentStreams(events_);
   return future_->constValue();
 }
 

@@ -47,6 +47,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
+  c10::MultiStreamGuard guard(
+          ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+
   // Metadata
   buffers.type = std::make_unique<MessageType>(rpcMessage.type());
   buffers.id = std::make_unique<int64_t>(rpcMessage.id());

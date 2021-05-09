@@ -761,7 +761,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     }
 
     auto ctxDevices = ctx->devices();
-    if (!ctxDevices.empty()) {
+    //if (!ctxDevices.empty()) {
       // FIXME: skipping this check when ctxDevices is empty to allow
       // RRef.to_here().
       for (const auto& tensor : responseMessage.tensors()) {
@@ -784,7 +784,9 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           break;
         }
       }
-    }
+    //}
+
+
 
     pipeWrite(
         pipe,
