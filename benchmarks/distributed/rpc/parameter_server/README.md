@@ -19,7 +19,9 @@
     - Update benchmark_class_helper.py to include your parameter_server class in the ps_map
     - Add configurations to parameter_server_configurations.json in the configurations directory
 5. Script
-    - Create a bash script for your experiment and add it to the bash_experiment_scripts directory
+    - Create bash scripts for your experiment and add them to the scripts directory
+6. Testing
+    - Add a test method for your script to test_scripts.py
 
 ## Trainer class
 
