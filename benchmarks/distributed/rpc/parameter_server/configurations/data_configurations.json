@@ -1,0 +1,20 @@
+{
+    "DummyData": {
+        "data_class": "DummyData",
+        "configurations": {
+            "max_val": 100,
+            "input_samples": 100,
+            "input_dim": 100,
+            "sparsity_percentage": 20
+        }
+    },
+    "DummyData2": {
+        "data_class": "DummyData",
+        "configurations": {
+            "max_val": 100,
+            "input_samples": 100,
+            "input_dim": 100,
+            "sparsity_percentage": 80
+        }
+    }
+}
