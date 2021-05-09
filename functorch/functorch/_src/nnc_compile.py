@@ -233,8 +233,6 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             # We simply map the input placeholder to a `te.Placeholder`, which
             # also represents an input to the NNC computation.
             if 'tensor_meta' not in node.meta:
-                env[node.name] = 0.2
-                import pdb; pdb.set_trace()
                 continue
             shapes = get_te_shapes(node.meta['tensor_meta'].shape)
             placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
