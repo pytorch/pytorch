@@ -47,6 +47,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
+  // The pickler below might allocate new tensors if RPC arguments contain
+  // Tensor views. Apply stream guard here to include those Tensor allocation
+  // operations to the streams.
   c10::MultiStreamGuard guard(
           ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
 
@@ -233,7 +236,12 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
 Message tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
-    TensorpipeReadBuffers&& buffers) {
+    TensorpipeReadBuffers&& buffers,
+    const std::shared_ptr<LazyStreamContext>& ctx) {
+
+  c10::MultiStreamGuard guard(
+        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+
   // Tensors
   std::vector<at::Tensor> tensors;
   const char* pickleData = buffers.pickle.data();
