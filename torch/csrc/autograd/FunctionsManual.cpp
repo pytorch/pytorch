@@ -2340,13 +2340,16 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   //   - diag zeroes out elements outside of the diagonal
   //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
 
+  // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
+  // decomposition is returned with eigenvectors normalized to have norm one.
+
   const auto gL = grads[0];
   const auto gV = grads[1];
   const auto Vh = V.transpose(-2, -1).conj();
 
   if (gV.defined()) {
-    const auto L_conj = L.conj();
-    auto Econj = L_conj.unsqueeze(-2) - L_conj.unsqueeze(-1);
+    const auto Lconj = L.conj();
+    auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
     if (at::GradMode::is_enabled()) {
       // Avoids differentiating through at infinity when doing gradgrad
       // 1 could be any number, as we are going to overwrite the diagonal
