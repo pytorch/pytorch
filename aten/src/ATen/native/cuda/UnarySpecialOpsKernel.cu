@@ -20,11 +20,14 @@ namespace at {
 namespace native {
 
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
-    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::exp2(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "exp2_cuda",
+      [&]() {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::exp2(a);
+        });
+      });
 }
 
 void i0_kernel_cuda(TensorIteratorBase& iter) {
@@ -52,17 +55,20 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void sinc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      if (a == scalar_t(0)) {
-        return scalar_t(1);
-      } else {
-        // NVCC says constexpr var is not accessible from device
-        scalar_t product = c10::detail::pi<scalar_t>() * a;
-        return std::sin(product) / product;
-      }
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "sinc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          if (a == scalar_t(0)) {
+            return scalar_t(1);
+          } else {
+            // NVCC says constexpr var is not accessible from device
+            scalar_t product = c10::detail::pi<scalar_t>() * a;
+            return std::sin(product) / product;
+          }
+        });
+      });
 }
 
 void logit_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
@@ -101,11 +107,14 @@ void erf_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void erfc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::erfc(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "erfc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::erfc(a);
+        });
+      });
 }
 
 void erfinv_kernel_cuda(TensorIteratorBase& iter) {
