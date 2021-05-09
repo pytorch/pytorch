@@ -64,7 +64,7 @@ _fork_rng_warned_already = False
 @contextlib.contextmanager
 def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices"):
     """
-    Forks the RNG, so that when you return, the RNG is reset
+    Forks the RNG(Random Number Generator), so that when you return, the RNG is reset
     to the state that it was previously in.
 
     Args:
