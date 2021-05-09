@@ -424,6 +424,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
 
     return result;
   });
+}
 
 Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   if (!self.is_complex()) {
