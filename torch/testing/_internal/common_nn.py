@@ -5371,7 +5371,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
         if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad) 
+            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
