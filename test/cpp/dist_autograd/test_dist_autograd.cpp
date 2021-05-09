@@ -68,7 +68,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   // Build autograd graph
   auto x = torch::randn({2, 2}, torch::requires_grad());
   auto y = torch::randn({2, 2}, torch::requires_grad());
-  z = (x * x + y * y).sum();
+  auto z = (x * x + y * y).sum();
   ASSERT_NE(nullptr, z.grad_fn());
 
   // Execute engine.
