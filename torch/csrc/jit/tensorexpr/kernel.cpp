@@ -1511,7 +1511,7 @@ Tensor* computeConv2d(
   auto bInfo = getTensorInfo(b);
   // Generate TE for depthwise convolutions.
   if (inpInfo && wInfo && bInfo &&
-      !conv2dIsSupported(
+      conv2dIsSupported(
           *inpInfo, *wInfo, *bInfo, strides, padding, dilation, groups)) {
     return conv2d_depthwise(inp, w, b, strides[0], padding[0], groups);
   }
