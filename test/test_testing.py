@@ -1051,7 +1051,7 @@ class TestAsserts(TestCase):
         actual = torch.empty(2)
         expected = actual.tolist()
 
-        for fn in self.assert_fns_with_inputs(actual, expected):
+        for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, str(type(expected))):
                 fn()
 
