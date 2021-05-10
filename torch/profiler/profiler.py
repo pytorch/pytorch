@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import tempfile
 from enum import Enum
@@ -367,6 +368,34 @@ class profile(object):
         """
         torch.autograd._add_metadata(key, value)
 
+    def get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
+
+    def get_cuda_devices(self):
+        if not torch.cuda.is_available():
+            return None
+
+        devices = []
+        device_count = torch.cuda.device_count()
+        for i in range(device_count):
+            device_prop = torch.cuda.get_device_properties(i)
+            devices.append({
+                "id": i,
+                "name": device_prop.name,
+                "multi_processor_count": device_prop.multi_processor_count,
+                "total_memory": device_prop.total_memory
+            })
+
+        return devices
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -400,6 +429,13 @@ class profile(object):
     def _start_trace(self):
         assert self.profiler is not None
         self.profiler._start_trace()
+
+        dist_info = self.get_distributed_info()
+        if dist_info:
+            self.add_metadata("distributed", json.dumps(dist_info).replace('"', '\\"'))
+        devices = self.get_cuda_devices()
+        if devices:
+            self.add_metadata("devices", json.dumps(devices).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None

@@ -187,7 +187,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-  m.def("_add_metadata", addMetadata);
+  m.def("_add_metadata", [](const std::string& key, const std::string& value) {
+    try {
+      addMetadata(key, value);
+    }
+    catch(const std::runtime_error& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+    }
+  });
 #endif
 
   m.def("kineto_available", []() {
