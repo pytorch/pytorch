@@ -108,6 +108,14 @@ class TORCH_API DistAutogradContext {
 
   void clearOutstandingRpcs();
 
+  // Record an event to mark the completion of gradient computation. These
+  // events will later help to properly synchronize gradients consumptions
+  // in getGradients(). We need these events because backward and
+  // optimizer.step are separate RPC calls, and will occur on different CUDA
+  // streams. Without synchronization, it is possible that gradients are
+  // consumed before they are ready.
+  void recordGradEvent(c10::Device device);
+
   const int64_t contextId_;
 
   // Set containing known worker IDs, used in cleaning up autograd context.
@@ -127,6 +135,10 @@ class TORCH_API DistAutogradContext {
   // which the gradient needs to be accumulated and the value is the gradient
   // that needs to be accumulated on that variable..
   c10::Dict<torch::Tensor, torch::Tensor> accumulatedGrads_;
+
+  // See comments for recordGradEvent(c10::Device device);
+  std::unordered_map<c10::Device, c10::Event> gradReadyEvents_;
+  const c10::impl::VirtualGuardImpl impl_;
 
   // The autograd GraphTask for the backward pass on this node for this context.
   std::shared_ptr<torch::autograd::GraphTask> graphTask_;
