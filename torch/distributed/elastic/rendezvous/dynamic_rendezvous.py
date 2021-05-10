@@ -407,6 +407,14 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
             if last_heartbeat < expire_time
         ]
 
+        if dead_nodes and log.isEnabledFor(logging.DEBUG):
+            node_list = ", ".join(f"'{dead_node}'" for dead_node in dead_nodes)
+
+            log.debug(
+                f"The node(s) {node_list} have no heartbeat and are removed from the rendezvous "
+                f"'{self._settings.run_id}'."
+            )
+
         for dead_node in dead_nodes:
             del self._state.last_heartbeats[dead_node]
 
