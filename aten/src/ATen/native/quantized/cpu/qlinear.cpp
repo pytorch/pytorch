@@ -39,6 +39,7 @@ at::Tensor PackedLinearWeight::apply_impl(
       "The dimension of input tensor should be larger than or equal to 2");
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
 
   auto packB = w.get();
@@ -50,6 +51,7 @@ at::Tensor PackedLinearWeight::apply_impl(
       "The number of rows in the packB should be equal to K: " +
           std::to_string(K));
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float input_scale_float = input.q_scale();
   int32_t input_zero_point_int32 = input.q_zero_point();
 
@@ -189,6 +191,7 @@ at::Tensor PackedLinearWeight::apply_impl(
                 packA.getRowOffsetBuffer(),
                 col_offsets.data(),
                 bias_ptr,
+                // NOLINTNEXTLINE(bugprone-argument-comment)
                 N, /*nCol=*/
                 1, /* groups*/
                 act_times_w_scale.data());
@@ -253,6 +256,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, input_scale, output_scale, requantization_scales);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -300,6 +304,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
     rows_input *= input_contig.size(i);
   }
@@ -326,10 +331,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       output_zero_point);
 
   auto output_min = ReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();

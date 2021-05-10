@@ -12,6 +12,7 @@ inline float logit(float p) {
   // it computes log(p / (1-p))
   // to avoid numeric issue, hard code p log(p) when p approaches 0
   float x = std::min(std::max(p, kLOG_THRESHOLD()), 1 - kLOG_THRESHOLD());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return -log(1. / x - 1.);
 }
 
@@ -66,10 +67,13 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   }
   return true;
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BernoulliJSD, BernoulliJSDOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BernoulliJSDGradient,
     BernoulliJSDGradientOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSD)
     .NumInputs(2)
     .NumOutputs(1)
@@ -80,6 +84,7 @@ where each is parametrized by a single probability.
     .Input(0, "X", "array of probabilities for prediction")
     .Input(0, "T", "array of probabilities for target")
     .Output(0, "L", "array of JSD losses");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSDGradient).NumInputs(3).NumOutputs(1);
 
 class GetBernoulliJSDGradient : public GradientMakerBase {
@@ -92,6 +97,7 @@ class GetBernoulliJSDGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BernoulliJSD, GetBernoulliJSDGradient);
 
 } // namespace caffe2

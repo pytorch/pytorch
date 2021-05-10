@@ -1,3 +1,4 @@
+#import <ATen/native/metal/MetalDevice.h>
 #import <ATen/native/metal/MetalShaders.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 
@@ -11,8 +12,10 @@
 #import <Foundation/NSProcessInfo.h>
 #endif
 
+using namespace at::native::metal;
 @implementation MPSCNNContext {
   std::mutex _pipelineCacheMutex;
+  MetalDeviceInfo _deviceInfo;
   NSMutableDictionary<NSString*, id<MTLComputePipelineState>>* _pipelineCache;
 }
 
@@ -21,11 +24,10 @@
   static MPSCNNContext* instance = nil;
   dispatch_once(&onceToken, ^{
     instance = [[MPSCNNContext alloc] init];
-    instance->_device = MTLCreateSystemDefaultDevice();
-    instance->_library = [instance.device
-        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
-                     options:nil
-                       error:nil];
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    instance->_device = device;
+    instance->_deviceInfo = createDeviceInfo(device);
+    instance->_library = nil;
     instance->_commandQueue = [instance.device newCommandQueue];
     instance->_pipelineCache =
         [NSMutableDictionary<NSString*, id<MTLComputePipelineState>> new];
@@ -37,6 +39,7 @@
 #if !defined(__APPLE__)
   return false;
 #elif TARGET_IPHONE_SIMULATOR
+  // TODO[T90135707]: Enable Metal on iOS Simulators
   return false;
 #elif TARGET_OS_IPHONE
   if (!MPSSupportsMTLDevice(_device)) {
@@ -45,8 +48,7 @@
   if ([UIDevice currentDevice].systemVersion.floatValue < 10.2) {
     return false;
   }
-  if (![MTLCreateSystemDefaultDevice()
-          supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
+  if (![_device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     return false;
   }
 #elif TARGET_OS_MAC
@@ -58,14 +60,18 @@
           isOperatingSystemAtLeastVersion:supportedVer]) {
     return false;
   }
-  if (![MTLCreateSystemDefaultDevice()
-          supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
+  if (![_device supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
     return false;
   }
 #else
   return false;
 #endif
-
+  NSError* error = [self compileProgram];
+  if (error) {
+    std::string compilationError = error.localizedDescription.UTF8String;
+    std::string deviceInfo = self.description.UTF8String;
+    TORCH_CHECK(false, compilationError + "\n" + deviceInfo);
+  }
   return _device && _library && _commandQueue;
 }
 
@@ -134,6 +140,31 @@
                               encoding:NSUTF8StringEncoding];
   _pipelineCache[kernel] = state;
   return state;
+}
+
+- (NSError*)compileProgram {
+  __block NSError* compilationError = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    NSError* localError = nil;
+    MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+    [options setLanguageVersion:_deviceInfo.languageVersion];
+    [options setFastMathEnabled:YES];
+    _library = [_device
+        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
+                     options:options
+                       error:&localError];
+    compilationError = localError;
+  });
+  return compilationError;
+}
+
+- (NSString*)description {
+  NSString* desc =
+      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
+                                 _deviceInfo.name.c_str(),
+                                 (unsigned long)_deviceInfo.languageVersion];
+  return desc;
 }
 
 @end

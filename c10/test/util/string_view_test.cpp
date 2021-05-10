@@ -7,9 +7,9 @@ using c10::string_view;
 namespace {
 namespace testutils {
 constexpr bool string_equal(const char* lhs, const char* rhs, size_t size) {
-  return (size == 0)
-      ? true
-      : (*lhs != *rhs) ? false : string_equal(lhs + 1, rhs + 1, size - 1);
+  return (size == 0)   ? true
+      : (*lhs != *rhs) ? false
+                       : string_equal(lhs + 1, rhs + 1, size - 1);
 }
 static_assert(string_equal("hi", "hi", 2), "");
 static_assert(string_equal("", "", 0), "");
@@ -71,6 +71,7 @@ static_assert(string_equal("hell", hell.data(), hell.size()), "");
 
 namespace test_string_constructor {
 void test_conversion_is_implicit(string_view a) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testStringConstructor) {
   std::string empty;
   EXPECT_EQ(0, string_view(empty).size());
@@ -84,6 +85,7 @@ TEST(StringViewTest, testStringConstructor) {
 } // namespace test_string_constructor
 
 namespace test_conversion_to_string {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testConversionToString) {
   string_view empty;
   EXPECT_EQ(0, std::string(empty).size());
@@ -107,6 +109,7 @@ constexpr string_view assign(string_view value) {
   result = value; // this is the assignment we're testing
   return result;
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testCopyAssignment) {
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
   {
@@ -175,6 +178,7 @@ static_assert('l' == hello.at(2), "");
 static_assert('l' == hello.at(3), "");
 static_assert('o' == hello.at(4), "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
       [] { string_view("")[1]; },
@@ -217,7 +221,7 @@ static_assert('o' == string_view("hello").back(), "");
 
 namespace test_data {
 static_assert(string_equal("hello", string_view("hello").data(), 5), "");
-}
+} // namespace test_data
 
 namespace test_size_length {
 static_assert(0 == string_view("").size(), "");
@@ -239,6 +243,7 @@ CONSTEXPR_EXCEPT_GCC5 string_view remove_prefix(string_view input, size_t len) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(
@@ -253,6 +258,7 @@ TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
   EXPECT_EQ(remove_prefix(string_view("hello"), 5), string_view(""));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingTooLargePrefix_thenThrows) {
   expectThrows<std::out_of_range>(
       [] { remove_prefix(string_view("hello"), 6); },
@@ -266,6 +272,7 @@ CONSTEXPR_EXCEPT_GCC5 string_view remove_suffix(string_view input, size_t len) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(
@@ -280,6 +287,7 @@ TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
   EXPECT_EQ(remove_suffix(string_view("hello"), 5), string_view(""));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenRemovingTooLargeSuffix_thenThrows) {
   expectThrows<std::out_of_range>(
       [] { remove_suffix(string_view("hello"), 6); },
@@ -294,6 +302,7 @@ CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
   swap(first, second);
   return std::make_pair(first, second);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testSwapFunction) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(string_view("second") == get().first, "");
@@ -312,6 +321,7 @@ CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
   first.swap(second);
   return std::make_pair(first, second);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testSwapMethod) {
 #if IS_NOT_GCC5_CONSTEXPR
   static_assert(string_view("second") == get().first, "");
@@ -324,41 +334,52 @@ TEST(StringViewTest, testSwapMethod) {
 } // namespace test_swap_method
 
 namespace test_copy {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingFullStringView_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[5];
   size_t num_copied = data.copy(result, 5);
   EXPECT_EQ(5, num_copied);
   EXPECT_TRUE(string_equal("hello", result, 5));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingSubstr_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   size_t num_copied = data.copy(result, 2, 2);
   EXPECT_EQ(2, num_copied);
   EXPECT_TRUE(string_equal("ll", result, 2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingTooMuch_thenJustCopiesLess) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[100];
   size_t num_copied = data.copy(result, 100, 2);
   EXPECT_EQ(3, num_copied);
   EXPECT_TRUE(string_equal("llo", result, 3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingJustAtRange_thenDoesntCrash) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[1];
   size_t num_copied = data.copy(result, 2, 5);
   EXPECT_EQ(0, num_copied);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCopyingOutOfRange_thenThrows) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
       [&] { data.copy(result, 2, 6); },
       "basic_string_view::copy: out of range. Index: 6, size: 5");
 }
@@ -383,6 +404,7 @@ static_assert(string_view("hello").substr(0, 100) == string_view("hello"), "");
 static_assert(string_view("hello").substr(1, 100) == string_view("ello"), "");
 static_assert(string_view("hello").substr(5, 100) == string_view(""), "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, whenCallingSubstrWithPosOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
       [] { string_view("hello").substr(6); },
@@ -1663,6 +1685,7 @@ void testOutputIterator(const std::string& str) {
   EXPECT_EQ(str, actual);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testOutputOperator) {
   testOutputIterator("");
   testOutputIterator("abc");
@@ -1670,6 +1693,7 @@ TEST(StringViewTest, testOutputOperator) {
 } // namespace test_output_operator
 
 namespace test_hash {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StringViewTest, testHash) {
   EXPECT_EQ(
       std::hash<string_view>()(string_view()), std::hash<string_view>()(""));

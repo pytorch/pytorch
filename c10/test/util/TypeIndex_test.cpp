@@ -59,13 +59,12 @@ static_assert(
     string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TopLevelName) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Dummy>().find("Dummy")
-    );
+  EXPECT_NE(
+      string_view::npos, get_fully_qualified_type_name<Dummy>().find("Dummy"));
 }
-}
+} // namespace test_top_level_name
 
 namespace test_nested_name {
 struct Dummy final {};
@@ -76,11 +75,11 @@ static_assert(
         get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, NestedName) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy")
-    );
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"));
 }
 } // namespace test_nested_name
 
@@ -101,17 +100,16 @@ static_assert(
             "test_type_template_parameter::Inner"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TypeTemplateParameter) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Outer<Inner>>().find(
-            "test_type_template_parameter::Outer")
-    );
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Outer<Inner>>().find(
-            "test_type_template_parameter::Inner")
-    );
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<Outer<Inner>>().find(
+          "test_type_template_parameter::Outer"));
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<Outer<Inner>>().find(
+          "test_type_template_parameter::Inner"));
 }
 } // namespace test_type_template_parameter
 
@@ -125,11 +123,11 @@ static_assert(
         get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, NonTypeTemplateParameter) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Class<38474355>>().find("38474355")
-    );
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<Class<38474355>>().find("38474355"));
 }
 } // namespace test_nontype_template_parameter
 
@@ -157,22 +155,20 @@ static_assert(
             .find("*"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, TypeComputationsAreResolved) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<typename Type<int>::type>().find("int")
-    );
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<typename Type<int>::type>().find("*")
-    );
-    // but with remove_pointer applied, there is no '*' in the type name anymore
-    EXPECT_EQ(
-        string_view::npos,
-        get_fully_qualified_type_name<
-            typename std::remove_pointer<typename Type<int>::type>::type>()
-            .find("*")
-    );
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<typename Type<int>::type>().find("*"));
+  // but with remove_pointer applied, there is no '*' in the type name anymore
+  EXPECT_EQ(
+      string_view::npos,
+      get_fully_qualified_type_name<
+          typename std::remove_pointer<typename Type<int>::type>::type>()
+          .find("*"));
 }
 
 struct Functor final {
@@ -185,12 +181,12 @@ static_assert(
             typename c10::guts::infer_function_traits_t<Functor>::func_type>(),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
-    EXPECT_EQ(
-        get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
-        get_fully_qualified_type_name<
-            typename c10::guts::infer_function_traits_t<Functor>::func_type>()
-    );
+  EXPECT_EQ(
+      get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
+      get_fully_qualified_type_name<
+          typename c10::guts::infer_function_traits_t<Functor>::func_type>());
 }
 } // namespace test_type_computations_are_resolved
 
@@ -209,17 +205,16 @@ static_assert(
             "test_function_arguments_and_returns::Dummy"),
     "");
 #endif
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeIndex, FunctionArgumentsAndReturns) {
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<Dummy(int)>().find(
-            "test_function_arguments_and_returns::Dummy")
-    );
-    EXPECT_NE(
-        string_view::npos,
-        get_fully_qualified_type_name<void(Dummy)>().find(
-            "test_function_arguments_and_returns::Dummy")
-    );
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<Dummy(int)>().find(
+          "test_function_arguments_and_returns::Dummy"));
+  EXPECT_NE(
+      string_view::npos,
+      get_fully_qualified_type_name<void(Dummy)>().find(
+          "test_function_arguments_and_returns::Dummy"));
 }
 } // namespace test_function_arguments_and_returns
 } // namespace

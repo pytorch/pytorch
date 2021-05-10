@@ -17,6 +17,7 @@ import unittest
 from itertools import product
 from typing import Dict, List
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch.multiprocessing as mp
@@ -26,15 +27,19 @@ from torch.distributed.elastic.multiprocessing.api import (
     RunProcsResult,
     Std,
     _validate_full_rank,
-    _wrap,
     to_map,
+    _wrap,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
 from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
+    IS_PYTORCH_CI,
+    IS_WINDOWS,
+    IS_MACOS,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 class RunProcResultsTest(unittest.TestCase):
@@ -54,7 +59,8 @@ class RunProcResultsTest(unittest.TestCase):
         pr_fail = RunProcsResult(failures={0: fail0})
         self.assertTrue(pr_fail.is_failed())
 
-    def test_get_failures(self):
+    @patch("torch.distributed.elastic.multiprocessing.errors.log")
+    def test_get_failures(self, log_mock):
         with mock.patch("time.time", side_effect=[3, 2, 1]):
             error_file0 = os.path.join(self.test_dir, "error0.json")
             error_file1 = os.path.join(self.test_dir, "error1.json")
@@ -126,15 +132,6 @@ def echo2(msg: str, fail: bool = False) -> str:
     return msg
 
 
-def echo3(msg: str, fail: bool = False) -> str:
-    """
-    returns ``msg`` or induces a SIGSEGV if ``fail`` is set
-    """
-    if fail:
-        ctypes.string_at(0)
-    return msg
-
-
 def echo_large(size: int) -> Dict[int, str]:
     """
     returns a large output ({0: test0", 1: "test1", ..., (size-1):f"test{size-1}"})
@@ -144,13 +141,30 @@ def echo_large(size: int) -> Dict[int, str]:
         out[idx] = f"test{idx}"
     return out
 
+
+def echo3(msg: str, fail: bool = False) -> str:
+    """
+    returns ``msg`` or induces a SIGSEGV if ``fail`` is set
+    """
+    if fail:
+        ctypes.string_at(0)
+    return msg
+
+
 def dummy_compute() -> torch.Tensor:
     """
     returns a predefined size random Tensor
     """
     return torch.rand(100, 100)
 
-def redirects() -> List[Std]:
+
+def redirects_oss_test() -> List[Std]:
+    return [
+        Std.NONE,
+    ]
+
+
+def redirects_all() -> List[Std]:
     return [
         Std.NONE,
         Std.OUT,
@@ -159,14 +173,18 @@ def redirects() -> List[Std]:
     ]
 
 
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS,
+    "tests incompatible with tsan or asan",
+)
 class StartProcessesTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
 
         if NO_MULTIPROCESSING_SPAWN:  # python 2.7 doesn't have spawn
-            self._start_methods = ["fork", "forkserver"]
+            self._start_methods = ["fork"]
         else:
-            self._start_methods = ["fork", "forkserver", "spawn"]
+            self._start_methods = ["fork", "spawn"]
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -197,37 +215,6 @@ class StartProcessesTest(unittest.TestCase):
         self.assertEqual(
             {0: Std.ERR, 1: Std.OUT}, to_map({0: Std.ERR, 1: Std.OUT}, local_world_size)
         )
-
-    def test_wrap(self):
-        none = ""
-        stdout_log = os.path.join(self.test_dir, "stdout.log")
-        stderr_log = os.path.join(self.test_dir, "stderr.log")
-        redirs = [
-            (none, none),
-            (none, stderr_log),
-            (stdout_log, none),
-            (stdout_log, stderr_log),
-        ]
-
-        for stdout_redir, stderr_redir in redirs:
-            queue = multiprocessing.SimpleQueue()
-            worker_finished_event_mock = mock.Mock()
-            _wrap(
-                local_rank=0,
-                fn=echo1,
-                args={0: ("hello",)},
-                envs={0: {"RANK": "0"}},
-                stdout_redirects={0: stdout_redir},
-                stderr_redirects={0: stderr_redir},
-                ret_vals={0: queue},
-                queue_finished_reading_event=worker_finished_event_mock,
-            )
-            self.assertEqual("hello_0", queue.get())
-            if stdout_redir:
-                self.assert_in_file(["hello stdout from 0"], stdout_log)
-            if stderr_redir:
-                self.assert_in_file(["hello stderr from 0"], stderr_log)
-            worker_finished_event_mock.wait.assert_called_once()
 
     def test_invalid_log_dir(self):
         with tempfile.NamedTemporaryFile(dir=self.test_dir) as not_a_dir:
@@ -307,50 +294,6 @@ class StartProcessesTest(unittest.TestCase):
         self.assertTrue(pc._stderr_tail.stopped())
         self.assertTrue(pc._stdout_tail.stopped())
 
-    ########################################
-    # start_processes as binary tests
-    ########################################
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
-    def test_function(self):
-        for start_method, redirs in product(self._start_methods, redirects()):
-            with self.subTest(start_method=start_method, redirs=redirs):
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=echo1,
-                    args={0: ("hello",), 1: ("hello",)},
-                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                    log_dir=self.log_dir(),
-                    start_method=start_method,
-                    redirects=redirs,
-                )
-
-                results = pc.wait(period=0.1)
-                nprocs = pc.nprocs
-
-                self.assert_pids_noexist(pc.pids())
-                self.assertEqual(
-                    {i: f"hello_{i}" for i in range(nprocs)}, results.return_values
-                )
-
-                for i in range(nprocs):
-                    if redirs & Std.OUT != Std.OUT:
-                        self.assertFalse(results.stdouts[i])
-                    if redirs & Std.ERR != Std.ERR:
-                        self.assertFalse(results.stderrs[i])
-                    if redirs & Std.OUT == Std.OUT:
-                        self.assert_in_file(
-                            [f"hello stdout from {i}"], results.stdouts[i]
-                        )
-                    if redirs & Std.ERR == Std.ERR:
-                        self.assert_in_file(
-                            [f"hello stderr from {i}"], results.stderrs[i]
-                        )
-
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
     def test_function_with_tensor(self):
         for start_method in self._start_methods:
             pc = start_processes(
@@ -368,94 +311,6 @@ class StartProcessesTest(unittest.TestCase):
                 self.assertIsInstance(return_value, torch.Tensor)
                 self.assertEqual((100, 100), return_value.shape)
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
-    def test_function_exit(self):
-        """
-        run 2x copies of echo1 fail (exit) the first
-        functions that exit from python do not generate an error file
-        (even if they are decorated with @record)
-        """
-
-        FAIL = 138
-        for start_method in self._start_methods:
-            with self.subTest(start_method=start_method):
-                log_dir = self.log_dir()
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=echo1,
-                    args={0: ("hello", FAIL), 1: ("hello",)},
-                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                    log_dir=log_dir,
-                    start_method=start_method,
-                    redirects={0: Std.ERR},
-                )
-
-                results = pc.wait(period=0.1)
-
-                self.assert_pids_noexist(pc.pids())
-                self.assertTrue(results.is_failed())
-                self.assertEqual(1, len(results.failures))
-                self.assertFalse(results.return_values)
-
-                failure = results.failures[0]
-                error_file = failure.error_file
-
-                self.assertEqual(FAIL, failure.exitcode)
-                self.assertEqual("<N/A>", failure.signal_name())
-                self.assertEqual(pc.pids()[0], failure.pid)
-                self.assertEqual("<N/A>", error_file)
-                self.assertEqual(
-                    f"Process failed with exitcode {FAIL}", failure.message
-                )
-                self.assertLessEqual(failure.timestamp, int(time.time()))
-
-                self.assert_in_file([f"exit {FAIL} from 0"], results.stderrs[0])
-                self.assertFalse(results.stdouts[0])
-                self.assertFalse(results.stderrs[1])
-                self.assertFalse(results.stdouts[1])
-                self.assertTrue(pc._stderr_tail.stopped())
-                self.assertTrue(pc._stdout_tail.stopped())
-
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
-    def test_function_signal(self):
-        """
-        run 2x copies of echo3, induce a segfault on first
-        """
-        SEGFAULT = True
-        for start_method, redirs in product(self._start_methods, redirects()):
-            with self.subTest(start_method=start_method):
-                log_dir = self.log_dir()
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=echo3,
-                    args={0: ("hello", SEGFAULT), 1: ("world",)},
-                    envs={0: {}, 1: {}},
-                    log_dir=log_dir,
-                    start_method=start_method,
-                    redirects=redirs,
-                )
-
-                results = pc.wait(period=0.1)
-
-                self.assert_pids_noexist(pc.pids())
-                self.assertEqual(1, len(results.failures))
-                self.assertFalse(results.return_values)
-
-                failure = results.failures[0]
-                error_file = failure.error_file
-
-                self.assertEqual(-signal.SIGSEGV, failure.exitcode)
-                self.assertEqual("SIGSEGV", failure.signal_name())
-                self.assertEqual(pc.pids()[0], failure.pid)
-                self.assertEqual(os.path.join(log_dir, "0", "error.json"), error_file)
-
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
     def test_void_function(self):
         for start_method in self._start_methods:
             with self.subTest(start_method=start_method):
@@ -497,9 +352,6 @@ class StartProcessesTest(unittest.TestCase):
                 for i in range(pc.nprocs):
                     self.assertEqual(size, len(results.return_values[i]))
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
     def test_function_raise(self):
         """
         run 2x copies of echo2, raise an exception on the first
@@ -539,31 +391,6 @@ class StartProcessesTest(unittest.TestCase):
                 self.assertTrue(pc._stderr_tail.stopped())
                 self.assertTrue(pc._stdout_tail.stopped())
 
-    def test_function_redirect_and_tee(self):
-        for start_method in self._start_methods:
-            with self.subTest(start_method=start_method):
-                log_dir = self.log_dir()
-                pc = start_processes(
-                    name="trainer",
-                    entrypoint=echo1,
-                    args={0: ("hello",), 1: ("world",)},
-                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                    log_dir=log_dir,
-                    start_method="fork",
-                    redirects={0: Std.ERR, 1: Std.NONE},
-                    tee={0: Std.OUT, 1: Std.ERR},
-                )
-
-                result = pc.wait()
-
-                self.assertFalse(result.is_failed())
-                self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
-                self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
-                self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
-                self.assertFalse(pc.stdouts[1])
-                self.assertTrue(pc._stderr_tail.stopped())
-                self.assertTrue(pc._stdout_tail.stopped())
-
     ########################################
     # start_processes as binary tests
     ########################################
@@ -571,40 +398,6 @@ class StartProcessesTest(unittest.TestCase):
     def bin(self, name: str):
         dir = os.path.dirname(__file__)
         return os.path.join(dir, "bin", name)
-
-    def test_binary(self):
-        for redirs in redirects():
-            with self.subTest(redirs=redirs):
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=self.bin("echo1.py"),
-                    args={0: ("hello",), 1: ("hello",)},
-                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                    log_dir=self.log_dir(),
-                    redirects=redirs,
-                )
-
-                results = pc.wait(period=0.1)
-
-                self.assert_pids_noexist(pc.pids())
-                # currently binaries return {rank: None}
-                self.assertEqual(2, len(results.return_values))
-                self.assertFalse(results.is_failed())
-
-                nprocs = pc.nprocs
-                for i in range(nprocs):
-                    if redirs & Std.OUT != Std.OUT:
-                        self.assertFalse(results.stdouts[i])
-                    if redirs & Std.ERR != Std.ERR:
-                        self.assertFalse(results.stderrs[i])
-                    if redirs & Std.OUT == Std.OUT:
-                        self.assert_in_file(
-                            [f"hello stdout from {i}"], results.stdouts[i]
-                        )
-                    if redirs & Std.ERR == Std.ERR:
-                        self.assert_in_file(
-                            [f"hello stderr from {i}"], results.stderrs[i]
-                        )
 
     def test_binary_exit(self):
         FAIL = 138
@@ -663,52 +456,15 @@ class StartProcessesTest(unittest.TestCase):
                 log_dir=self.log_dir(),
             )
 
-    def test_binary_signal(self):
-        pc = start_processes(
-            name="echo",
-            entrypoint=self.bin("echo3.py"),
-            args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
-            envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-            log_dir=self.log_dir(),
-        )
-
-        results = pc.wait(period=0.1)
-
-        self.assert_pids_noexist(pc.pids())
-        self.assertTrue(results.is_failed())
-        self.assertEqual(1, len(results.failures))
-
-        failure = results.failures[0]
-        self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
-        self.assertEqual("SIGSEGV", failure.signal_name())
-        self.assertEqual("<NONE>", failure.error_file_data["message"])
-
-    def test_binary_redirect_and_tee(self):
-        pc = start_processes(
-            name="trainer",
-            entrypoint=self.bin("echo1.py"),
-            args={0: ("hello",), 1: ("world",)},
-            envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-            log_dir=self.log_dir(),
-            start_method="fork",
-            redirects={0: Std.ERR, 1: Std.NONE},
-            tee={0: Std.OUT, 1: Std.ERR},
-        )
-
-        result = pc.wait()
-
-        self.assertFalse(result.is_failed())
-        self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
-        self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
-        self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
-        self.assertFalse(pc.stdouts[1])
-        self.assertTrue(pc._stderr_tail.stopped())
-        self.assertTrue(pc._stdout_tail.stopped())
-
     def test_validate_full_rank(self):
         with self.assertRaises(RuntimeError):
             _validate_full_rank({}, 10, "")
 
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
     def test_multiprocessing_context_poll_raises_exception(self):
         mp_context = MultiprocessContext(
             name="test_mp",
@@ -734,3 +490,303 @@ class StartProcessesTest(unittest.TestCase):
             self.assertEqual(1, len(run_result.failures))
             failure = run_result.failures[0]
             self.assertEqual("Signal 1 (SIGHUP) received by PID 123", failure.message)
+
+
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS,
+    "tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows",
+)
+class StartProcessesListTest(StartProcessesTest):
+    ########################################
+    # start_processes as binary tests
+    ########################################
+    def test_function(self):
+        for start_method, redirs in product(self._start_methods, redirects_oss_test()):
+            with self.subTest(start_method=start_method, redirs=redirs):
+                pc = start_processes(
+                    name="echo",
+                    entrypoint=echo1,
+                    args={0: ("hello",), 1: ("hello",)},
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=self.log_dir(),
+                    start_method=start_method,
+                    redirects=redirs,
+                )
+
+                results = pc.wait(period=0.1)
+                nprocs = pc.nprocs
+
+                self.assert_pids_noexist(pc.pids())
+                self.assertEqual(
+                    {i: f"hello_{i}" for i in range(nprocs)}, results.return_values
+                )
+
+                for i in range(nprocs):
+                    if redirs & Std.OUT != Std.OUT:
+                        self.assertFalse(results.stdouts[i])
+                    if redirs & Std.ERR != Std.ERR:
+                        self.assertFalse(results.stderrs[i])
+                    if redirs & Std.OUT == Std.OUT:
+                        self.assert_in_file(
+                            [f"hello stdout from {i}"], results.stdouts[i]
+                        )
+                    if redirs & Std.ERR == Std.ERR:
+                        self.assert_in_file(
+                            [f"hello stderr from {i}"], results.stderrs[i]
+                        )
+
+    def test_binary(self):
+        for redirs in redirects_oss_test():
+            with self.subTest(redirs=redirs):
+                pc = start_processes(
+                    name="echo",
+                    entrypoint=self.bin("echo1.py"),
+                    args={0: ("hello",), 1: ("hello",)},
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=self.log_dir(),
+                    redirects=redirs,
+                )
+
+                results = pc.wait(period=0.1)
+
+                self.assert_pids_noexist(pc.pids())
+                # currently binaries return {rank: None}
+                self.assertEqual(2, len(results.return_values))
+                self.assertFalse(results.is_failed())
+
+                nprocs = pc.nprocs
+                for i in range(nprocs):
+                    if redirs & Std.OUT != Std.OUT:
+                        self.assertFalse(results.stdouts[i])
+                    if redirs & Std.ERR != Std.ERR:
+                        self.assertFalse(results.stderrs[i])
+                    if redirs & Std.OUT == Std.OUT:
+                        self.assert_in_file(
+                            [f"hello stdout from {i}"], results.stdouts[i]
+                        )
+                    if redirs & Std.ERR == Std.ERR:
+                        self.assert_in_file(
+                            [f"hello stderr from {i}"], results.stderrs[i]
+                        )
+
+    def test_binary_redirect_and_tee(self):
+        pc = start_processes(
+            name="trainer",
+            entrypoint=self.bin("echo1.py"),
+            args={0: ("hello",), 1: ("world",)},
+            envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+            log_dir=self.log_dir(),
+            start_method="fork",
+            redirects={0: Std.ERR, 1: Std.NONE},
+            tee={0: Std.OUT, 1: Std.ERR},
+        )
+
+        result = pc.wait()
+
+        self.assertFalse(result.is_failed())
+        self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
+        self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
+        self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
+        self.assertFalse(pc.stdouts[1])
+        self.assertTrue(pc._stderr_tail.stopped())
+        self.assertTrue(pc._stdout_tail.stopped())
+
+
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_PYTORCH_CI,
+    "tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows",
+)
+class StartProcessesNotCITest(StartProcessesTest):
+    def test_wrap_bad(self):
+        none = ""
+        stdout_log = os.path.join(self.test_dir, "stdout.log")
+        stderr_log = os.path.join(self.test_dir, "stderr.log")
+        redirs = [
+            (none, none),
+            (none, stderr_log),
+            (stdout_log, none),
+            (stdout_log, stderr_log),
+        ]
+
+        for stdout_redir, stderr_redir in redirs:
+            queue = multiprocessing.SimpleQueue()
+            worker_finished_event_mock = mock.Mock()
+            _wrap(
+                local_rank=0,
+                fn=echo1,
+                args={0: ("hello",)},
+                envs={0: {"RANK": "0"}},
+                stdout_redirects={0: stdout_redir},
+                stderr_redirects={0: stderr_redir},
+                ret_vals={0: queue},
+                queue_finished_reading_event=worker_finished_event_mock,
+            )
+            self.assertEqual("hello_0", queue.get())
+            if stdout_redir:
+                self.assert_in_file(["hello stdout from 0"], stdout_log)
+            if stderr_redir:
+                self.assert_in_file(["hello stderr from 0"], stderr_log)
+            worker_finished_event_mock.wait.assert_called_once()
+
+    def test_function_failure_signal(self):
+        """
+        run 2x copies of echo3, induce a segfault on first
+        """
+        SEGFAULT = True
+        for start_method, redirs in product(self._start_methods, redirects_all()):
+            with self.subTest(start_method=start_method):
+                log_dir = self.log_dir()
+                pc = start_processes(
+                    name="echo",
+                    entrypoint=echo3,
+                    args={0: ("hello", SEGFAULT), 1: ("world",)},
+                    envs={0: {}, 1: {}},
+                    log_dir=log_dir,
+                    start_method=start_method,
+                    redirects=redirs,
+                )
+
+                results = pc.wait(period=0.1)
+
+                self.assert_pids_noexist(pc.pids())
+                self.assertEqual(1, len(results.failures))
+                self.assertFalse(results.return_values)
+
+                failure = results.failures[0]
+                error_file = failure.error_file
+
+                self.assertEqual(-signal.SIGSEGV, failure.exitcode)
+                self.assertEqual("SIGSEGV", failure.signal_name())
+                self.assertEqual(pc.pids()[0], failure.pid)
+                self.assertEqual(os.path.join(log_dir, "0", "error.json"), error_file)
+
+    def test_binary_signal(self):
+        pc = start_processes(
+            name="echo",
+            entrypoint=self.bin("echo3.py"),
+            args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
+            envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+            log_dir=self.log_dir(),
+        )
+
+        results = pc.wait(period=0.1)
+
+        self.assert_pids_noexist(pc.pids())
+        self.assertTrue(results.is_failed())
+        self.assertEqual(1, len(results.failures))
+
+        failure = results.failures[0]
+        self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
+        self.assertEqual("SIGSEGV", failure.signal_name())
+        self.assertEqual("<NONE>", failure.error_file_data["message"])
+
+    def test_function_redirect_and_tee(self):
+        for start_method in self._start_methods:
+            with self.subTest(start_method=start_method):
+                log_dir = self.log_dir()
+                pc = start_processes(
+                    name="trainer",
+                    entrypoint=echo1,
+                    args={0: ("hello",), 1: ("world",)},
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=log_dir,
+                    start_method="fork",
+                    redirects={0: Std.ERR, 1: Std.NONE},
+                    tee={0: Std.OUT, 1: Std.ERR},
+                )
+
+                result = pc.wait()
+
+                self.assertFalse(result.is_failed())
+                self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
+                self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
+                self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
+                self.assertFalse(pc.stdouts[1])
+                self.assertTrue(pc._stderr_tail.stopped())
+                self.assertTrue(pc._stdout_tail.stopped())
+
+    def test_function(self):
+        for start_method, redirs in product(self._start_methods, redirects_all()):
+            with self.subTest(start_method=start_method, redirs=redirs):
+                pc = start_processes(
+                    name="echo",
+                    entrypoint=echo1,
+                    args={0: ("hello",), 1: ("hello",)},
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=self.log_dir(),
+                    start_method=start_method,
+                    redirects=redirs,
+                )
+
+                results = pc.wait(period=0.1)
+                nprocs = pc.nprocs
+
+                self.assert_pids_noexist(pc.pids())
+                self.assertEqual(
+                    {i: f"hello_{i}" for i in range(nprocs)}, results.return_values
+                )
+
+                for i in range(nprocs):
+                    if redirs & Std.OUT != Std.OUT:
+                        self.assertFalse(results.stdouts[i])
+                    if redirs & Std.ERR != Std.ERR:
+                        self.assertFalse(results.stderrs[i])
+                    if redirs & Std.OUT == Std.OUT:
+                        self.assert_in_file(
+                            [f"hello stdout from {i}"], results.stdouts[i]
+                        )
+                    if redirs & Std.ERR == Std.ERR:
+                        self.assert_in_file(
+                            [f"hello stderr from {i}"], results.stderrs[i]
+                        )
+
+    def test_function_exit(self):
+        """
+        run 2x copies of echo1 fail (exit) the first
+        functions that exit from python do not generate an error file
+        (even if they are decorated with @record)
+        """
+
+        FAIL = 138
+        for start_method in self._start_methods:
+            with self.subTest(start_method=start_method):
+                log_dir = self.log_dir()
+                pc = start_processes(
+                    name="echo",
+                    entrypoint=echo1,
+                    args={0: ("hello", FAIL), 1: ("hello",)},
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=log_dir,
+                    start_method=start_method,
+                    redirects={0: Std.ERR},
+                )
+
+                results = pc.wait(period=0.1)
+
+                self.assert_pids_noexist(pc.pids())
+                self.assertTrue(results.is_failed())
+                self.assertEqual(1, len(results.failures))
+                self.assertFalse(results.return_values)
+
+                failure = results.failures[0]
+                error_file = failure.error_file
+
+                self.assertEqual(FAIL, failure.exitcode)
+                self.assertEqual("<N/A>", failure.signal_name())
+                self.assertEqual(pc.pids()[0], failure.pid)
+                self.assertEqual("<N/A>", error_file)
+                self.assertEqual(
+                    f"Process failed with exitcode {FAIL}", failure.message
+                )
+                self.assertLessEqual(failure.timestamp, int(time.time()))
+
+                self.assert_in_file([f"exit {FAIL} from 0"], results.stderrs[0])
+                self.assertFalse(results.stdouts[0])
+                self.assertFalse(results.stderrs[1])
+                self.assertFalse(results.stdouts[1])
+                self.assertTrue(pc._stderr_tail.stopped())
+                self.assertTrue(pc._stdout_tail.stopped())
+
+
+if __name__ == "__main__":
+    run_tests()

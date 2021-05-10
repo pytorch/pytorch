@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
-#include <ATen/cuda/CubUtils.cuh>
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at {
@@ -104,7 +104,7 @@ Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out){
   TORCH_CHECK(self.device() == out.device(), "expected self and out to be on the same device, but got out on ",
   out.device(), " and self on ", self.device());
   TORCH_CHECK(self.dim() <= MAX_DIMS, "nonzero is not supported for tensor with more than ", MAX_DIMS, " dimensions");
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
     self.scalar_type(), "nonzero_cuda",
     [&] {nonzero_cuda_out_impl<scalar_t>(self, out);});
   return out;

@@ -140,8 +140,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.2.0 # Deviating from major.minor to conform to nvidia's Docker image names
+  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
@@ -197,6 +197,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2
@@ -316,6 +317,7 @@ docker build \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
+       --build-arg "BREAKPAD=${BREAKPAD}" \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \

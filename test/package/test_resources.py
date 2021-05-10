@@ -11,7 +11,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
@@ -25,15 +25,15 @@ class TestResources(PackageTestCase):
             # Layout looks like:
             #    package
             #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
+            #    │   ├── a.txt
+            #    │   ├── b.txt
+            #    │   ├── c.txt
+            #    │   └── three/
+            #    │       ├── d.txt
+            #    │       └── e.txt
             #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #       ├── f.txt
+            #       └── g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

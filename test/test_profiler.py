@@ -1,6 +1,7 @@
 import collections
 import gc
 import io
+import json
 import os
 import unittest
 
@@ -14,7 +15,8 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
-    kineto_available, profile, record_function, DeviceType, ProfilerActivity
+    kineto_available, profile, record_function, supported_activities,
+    DeviceType, ProfilerActivity
 )
 
 try:
@@ -176,7 +178,7 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
 
     def test_memory_profiler(self):
-        def run_profiler(tensor_creation_fn, metric):
+        def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
             with _profile(profile_memory=True, record_shapes=True, use_kineto=kineto_available()) as prof:
                 x = None
@@ -208,7 +210,7 @@ class TestProfiler(TestCase):
         def create_mkldnn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
 
-        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
+        stats = run_profiler(create_cpu_tensor)
         check_metrics(
             stats,
             "cpu_memory_usage",
@@ -222,9 +224,33 @@ class TestProfiler(TestCase):
             ]
         )
 
+        # if kineto_available():
+        #    with TemporaryFileName(mode="w+") as fname:
+        #        with profile(profile_memory=True) as prof:
+        #            x = None
+        #            with record_function("test_user_scope_alloc"):
+        #                x = create_cpu_tensor()
+        #            with record_function("test_user_scope_dealloc"):
+        #                del x
+        #        prof.export_chrome_trace(fname)
+        #        with io.open(fname, 'r') as f:
+        #            trace = json.load(f)
+        #            assert "traceEvents" in trace
+        #            events = trace["traceEvents"]
+        #            found_memory_events = False
+        #            for evt in events:
+        #                assert "name" in evt
+        #                if evt["name"] == "[memory]":
+        #                    found_memory_events = True
+        #                    assert "args" in evt
+        #                    assert "Device Type" in evt["args"]
+        #                    assert "Device Id" in evt["args"]
+        #                    assert "Bytes" in evt["args"]
+        #            assert found_memory_events
+
         if torch.cuda.is_available():
             create_cuda_tensor()
-            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
+            stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
                 "cuda_memory_usage",
@@ -248,7 +274,7 @@ class TestProfiler(TestCase):
 
         if torch._C.has_mkldnn:
             create_mkldnn_tensor()
-            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
+            stats = run_profiler(create_mkldnn_tensor)
             check_metrics(
                 stats,
                 "cpu_memory_usage",
@@ -412,12 +438,11 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1)
         self.assertIn("FLOPS", profiler_output)
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_profiler_api(self):
         called_num = [0]
 
-        use_cuda = torch.cuda.is_available()
-        with _profile(use_cuda=use_cuda, use_kineto=True):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        with profile(activities=supported_activities()):
             self.payload(use_cuda=use_cuda)
 
         def trace_handler(p):
@@ -428,11 +453,7 @@ class TestProfiler(TestCase):
             called_num[0] += 1
 
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities(),
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
@@ -447,11 +468,7 @@ class TestProfiler(TestCase):
 
         # case without schedule
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities()
         ) as p:
             self.payload(use_cuda=use_cuda)
             self.payload(use_cuda=use_cuda)
@@ -481,6 +498,7 @@ class TestProfiler(TestCase):
                 assert is_int, "Invalid stacks record"
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.cuda.is_available()
         with _profile(use_cuda=use_cuda, use_kineto=True):
@@ -514,6 +532,80 @@ class TestProfiler(TestCase):
                 file_num += 1
             self.assertEqual(file_num, 3)
 
+        # test case for gzip file format
+        with TemporaryDirectoryName() as dname:
+            with profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU
+                ] + ([
+                    torch.profiler.ProfilerActivity.CUDA
+                ] if use_cuda else []),
+                schedule=torch.profiler.schedule(
+                    wait=1,
+                    warmup=1,
+                    active=2,
+                    repeat=3),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname, use_gzip=True)
+            ) as p:
+                for _ in range(18):
+                    self.payload(use_cuda=use_cuda)
+                    p.step()
+
+            self.assertTrue(os.path.exists(dname))
+            file_num = 0
+            for file_name in os.listdir(dname):
+                parts = file_name.split('.')
+                self.assertTrue(len(parts) > 4)
+                self.assertTrue(parts[-5].isdigit() and int(parts[-5]) > 0, "Wrong tracing file name pattern")
+                self.assertEqual(parts[-4:], ['pt', 'trace', 'json', 'gz'])
+                file_num += 1
+            self.assertEqual(file_num, 3)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_metadata(self):
+        t1, t2 = torch.ones(1), torch.ones(1)
+        with profile() as prof:
+            torch.add(t1, t2)
+            prof.add_metadata("test_key1", "test_value1")
+            prof.add_metadata("test_key2", "test_value2")
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                assert "metadata" in trace
+                metadata = trace["metadata"]
+                assert "test_key1" in metadata
+                assert metadata["test_key1"] == "test_value1"
+                assert "test_key2" in metadata
+                assert metadata["test_key2"] == "test_value2"
+
+    def test_profiler_tracing(self):
+        with _profile(use_kineto=kineto_available()) as prof:
+            t1, t2 = torch.ones(1), torch.ones(1)
+            torch.add(t1, t2)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            # read the trace and expect valid json
+            # if the JSON generated by export_chrome_trace is not valid, this will throw and fail the test.
+            with io.open(fname, 'r') as f:
+                json.load(f)
+
+        # Same test but for cuda.
+        if not torch.cuda.is_available():
+            return
+
+        device = torch.device("cuda:0")
+        with _profile(use_cuda=True, use_kineto=kineto_available()) as prof:
+            t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
+            torch.add(t1, t2)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            # Now validate the json
+            with io.open(fname, 'r') as f:
+                json.load(f)
 
 if __name__ == '__main__':
     run_tests()

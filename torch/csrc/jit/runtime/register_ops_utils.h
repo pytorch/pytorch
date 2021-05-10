@@ -66,7 +66,6 @@ inline void noop(Stack* n) {}
 // result will always be a even number. Due to symmetricity, it also applies to
 // negative cases.
 inline double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
 }
 
@@ -91,6 +90,7 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
@@ -105,15 +105,18 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 TORCH_API void checkDoubleInRange(double a);
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
 }
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t ceil(double a) {
   checkDoubleInRange(a);
   return std::ceil(a);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t r = a % b;
@@ -137,6 +140,7 @@ double degrees(double x);
 double radians(double x);
 
 // reference function THPVariable_to in python_variable_methods.cpp
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static at::Tensor to_dispatch(
     at::Tensor self,
     c10::optional<at::Device> device,
@@ -370,6 +374,7 @@ template <typename T>
 void listContains(Stack* stack) {
   auto key = pop(stack).to<T>();
   auto list = pop(stack).to<c10::List<T>>();
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const T& item : list) {
     if (item == key) {
       push(stack, true);

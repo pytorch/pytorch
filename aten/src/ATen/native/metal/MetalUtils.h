@@ -1,15 +1,22 @@
 #include <ATen/Tensor.h>
+#include <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <ATen/native/metal/MetalCommandBuffer.h>
 #include <ATen/native/metal/MetalTensorImpl.h>
 #include <ATen/native/metal/MetalTensorImplStorage.h>
 #include <vector>
 
+#if (defined(__ARM_NEON__) || defined(__ARM_NEON))
+typedef float16_t fp16_t;
+#else
+typedef uint16_t fp16_t;
+#endif
+
 namespace at {
 namespace native {
 namespace metal {
 
-std::vector<uint16_t> Fp32ToFp16(const std::vector<float>& src);
-std::vector<float> Fp16ToFp32(const std::vector<uint16_t>& src);
+std::vector<fp16_t> Fp32ToFp16(const std::vector<float>& src);
+std::vector<float> Fp16ToFp32(const std::vector<fp16_t>& src);
 
 std::vector<float> NCHWToNC4(
     const float* src,
@@ -17,6 +24,30 @@ std::vector<float> NCHWToNC4(
 std::vector<float> NC4ToNCHW(
     const float* src,
     const std::vector<int64_t>& sizes);
+
+// The MPSCNNConvolution class takes weights in the order
+// [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
+static inline std::vector<float> permuteWeights(
+    const float* src,
+    const std::vector<int64_t>& sizes) {
+  const int64_t M = sizes[0];
+  const int64_t Cf = sizes[1];
+  const int64_t kH = sizes[2];
+  const int64_t kW = sizes[3];
+  std::vector<float> packedWeights(M * kH * kW * Cf);
+  for (auto m = 0; m < M; ++m) {
+    for (auto c = 0; c < Cf; ++c) {
+      for (auto kh = 0; kh < kH; ++kh) {
+        for (auto kw = 0; kw < kW; ++kw) {
+          int64_t oc = m * kH * kW * Cf + kh * kW * Cf + kw * Cf + c;
+          int64_t ic = m * Cf * kH * kW + c * kH * kW + kh * kW + kw;
+          packedWeights[oc] = src[ic];
+        }
+      }
+    }
+  }
+  return packedWeights;
+}
 
 // When copying the result back to a CPU tensor, the memory format becomes NCHW.
 // Thus,we compute the strides based on contiguous memory format.
@@ -63,8 +94,19 @@ static inline MetalCommandBuffer* getCommandBufferFromTensor(
   TORCH_CHECK(tensor.is_metal());
   auto implStorage = getTensorImplStorage(tensor);
   MetalCommandBuffer* cmdBuffer = implStorage.texture()->commandBuffer();
-  TORCH_CHECK(cmdBuffer);
+  if (!cmdBuffer || !cmdBuffer.valid) {
+    cmdBuffer = [MetalCommandBuffer currentBuffer];
+  }
   return cmdBuffer;
+}
+
+template<typename T>
+id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
+    id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+          newBufferWithLength:src.size() * sizeof(T)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
+    return buffer;
 }
 
 } // namespace metal
