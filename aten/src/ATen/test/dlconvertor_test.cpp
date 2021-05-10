@@ -11,7 +11,6 @@
 using namespace at;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestDlconvertor, TestDlconvertor) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   Tensor a = rand({3, 4});
@@ -24,7 +23,6 @@ TEST(TestDlconvertor, TestDlconvertor) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestDlconvertor, TestDlconvertorNoStrides) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   Tensor a = rand({3, 4});
