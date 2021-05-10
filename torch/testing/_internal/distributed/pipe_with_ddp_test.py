@@ -39,14 +39,14 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @dist_init
     @skip_if_rocm
     def test_basic_nccl_ckpt_always(self):
-        self._run_basic_test("nccl", "always")
+        self._run_basic_test("nccl", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
     @skip_if_rocm
     def test_basic_nccl_ckpt_except_last(self):
-        self._run_basic_test("nccl", "except_last")
+        self._run_basic_test("nccl", "except_last", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
@@ -67,16 +67,16 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @dist_init
     @skip_if_rocm
     def test_basic_gloo_ckpt_always(self):
-        self._run_basic_test("gloo", "always")
+        self._run_basic_test("gloo", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
     def test_basic_gloo_ckpt_except_last(self):
-        self._run_basic_test("gloo", "except_last")
+        self._run_basic_test("gloo", "except_last", static_graph=True)
 
-    def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False):
+    def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False, static_graph=False):
         dist.init_process_group(
             backend="nccl",
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
@@ -107,6 +107,8 @@ class PipeWithDDPTest(RpcAgentTestFixture):
         )
         model = Pipe(model, chunks=2, checkpoint=checkpoint)
         model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)
+        if static_graph:
+            model._set_static_graph()
         out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()
         out.sum().backward()
 

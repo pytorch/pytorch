@@ -652,7 +652,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
         "1) Use of a module parameter outside the `forward` function. ",
         "Please make sure model parameters are not shared across multiple ",
         "concurrent forward-backward passes. or try to use _set_static_graph() ",
-        "as a workaround if this module parameter does not change ",
+        "as a workaround if this module graph does not change ",
         "during training loop.",
         "2) Reused parameters in multiple reentrant backward passes. For ",
         "example, if you use multiple `checkpoint` functions to wrap the ",
@@ -680,7 +680,8 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
         "`find_unused_parameters=False` to ",
         "`torch.nn.parallel.DistributedDataParallel`. If unused parameters ",
         "in the model do not change over iterations, You can try to use ",
-        "_set_static_graph() as a workaround.");
+        "_set_static_graph() as a workaround if this module graph does not ",
+        "change during training loop.");
     TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
 }
@@ -1093,7 +1094,9 @@ void Reducer::reset_bucket_counting() {
     bucket.pending = bucket.replicas.size();
   }
 
-  numGradHooksTriggeredMapPerIteration_ = numGradHooksTriggeredMap_;
+  if (static_graph_) {
+    numGradHooksTriggeredMapPerIteration_ = numGradHooksTriggeredMap_;
+  }
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1106,6 +1109,10 @@ void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
+
+  RECORD_FUNCTION(
+      "torch.distributed.ddp.reducer::search_unused_parameters",
+      std::vector<c10::IValue>());
 
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {

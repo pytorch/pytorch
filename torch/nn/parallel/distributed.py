@@ -1419,3 +1419,11 @@ class DistributedDataParallel(Module):
         self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()
+        if self.find_unused_parameters:
+            warnings.warn(
+                "You passed find_unused_parameters=true to DistributedDataParallel, ",
+                "_set_static_graph() will detect unused parameters automatically, so "
+                "you do not need to set find_unused_parameters=true, just be sure these "
+                "unused parameters will not change during training loop while calling "
+                "_set_static_graph()."
+            )

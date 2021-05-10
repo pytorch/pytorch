@@ -77,7 +77,7 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend(self) -> None:
         backend = create_backend(self._params)
 
-        self.assertEqual(backend.name, "etcd-experimental")
+        self.assertEqual(backend.name, "etcd-v2")
         self.assertEqual(backend.key, "/torch/elastic/rendezvous/" + self._params.run_id)
         self.assertEqual(backend.ttl, 7200)
         self.assertEqual(backend.client.host, self._server.get_host())
