@@ -868,7 +868,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 
 template <>
 void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 11000
   TORCH_CUDABLAS_CHECK(cublasDotEx(
       handle,
       n,
