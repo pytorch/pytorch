@@ -36,10 +36,37 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
+
+namespace {
+// The *dynamic* torch deploy interpreter id associated with this copy
+// of the interpreter.  This is initialized immediately after dlopen by
+// set_python_interpreter_id.  For the base interpreter (no torchdeploy),
+// the ID is always zero, and we constexpr it for easier optimization
+#ifdef USE_DEPLOY
+int16_t self_interpreter_id = INT16_MIN;
+#else
+constexpr int16_t self_interpreter_id = 0;
+#endif
+}
+
+namespace torch {
+namespace impl {
+
+void set_python_interpreter_id(int16_t id) {
+#ifdef USE_DEPLOY
+  self_interpreter_id = id;
+#else
+  TORCH_INTERNAL_ASSERT(false, "cannot set interpreter id for non-torchdeploy python bindings");
+#endif
+}
+
+} // namespace impl
+} // namespace torch
 
 namespace py = pybind11;
 
@@ -55,49 +82,110 @@ static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
-#ifdef USE_DEPLOY
-// used only in libtorch_deployinterpreter.so
-// there are muliple copies of the python interpreter that
-// can shared Tensors, so rather than use their internal pointer
-// to a PyObject use a library-local map.
-static std::unordered_map<void*, PyObject*> impl_to_pyobj;
+// NB: mut_pyobj can probably be non-atomic
 
-void set_pyobj(const Variable& self, PyObject* pyobj) {
-  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
-  void* key = self.unsafeGetTensorImpl();
-  if (!pyobj) {
-    impl_to_pyobj.erase(key);
-    return;
+// The code below only matters for torchdeploy; without torchdeploy the
+// only possible tagged state is TAGGED_BY_US and no races are possible.
+//
+// With torchdeploy, we have these invariants:
+//  - A given TensorImpl's interpreter tag can only go from uninitialized to
+//    tagged; once tagged, this is a quiescent state
+//  - A thread may mutate the PyObject field of a TensorImpl if and only if it
+//    holds the GIL for the interpreter tagged on the TensorImpl.  (If the
+//    TensorImpl is not tagged, it must first atomically claim its tag before it
+//    can validly write)
+//
+// InterpreterTagStatus describes what the state of its interpreter tag
+// is, relative to the thread currently holding the GIL.
+enum class InterpreterTagStatus {
+  // We just allocated the Tensor, it hasn't escaped to other threads,
+  // we know that it definitely hasn't been tagged to be associated
+  // with an interpreter.
+  DEFINITELY_UNINITIALIZED,
+  // We queried the interpreter field and it looked uninitialized.  But
+  // another thread may have raced with us to tag it with some other
+  // interpreter id.  So we will have to do a CEX to make sure we can
+  // actually nab it.
+  MAYBE_UNINITIALIZED,
+  // We queried the interpreter field and it was tagged to belong to us.
+  // This means we have sole write access (as we hold the GIL for this
+  // interpreter)
+  TAGGED_BY_US,
+  // Someone else tagged this.  We can't use this TensorImpl from Python.
+  TAGGED_BY_OTHER,
+};
+
+// init_pyobj is called when we believe that the Tensor in question has
+// never been associated an interpreter.  In this case, it is understood
+// that the interpreter is -1 and the pyobj is nullptr
+void init_pyobj(const Variable& self, PyObject* pyobj, InterpreterTagStatus status) {
+  switch (status) {
+    case InterpreterTagStatus::DEFINITELY_UNINITIALIZED:
+      self.unsafeGetTensorImpl()->mut_pyobj_interpreter().store(self_interpreter_id, std::memory_order_release);
+      break;
+    case InterpreterTagStatus::MAYBE_UNINITIALIZED:
+      {
+        int16_t expected = -1;
+        bool r = self.unsafeGetTensorImpl()->mut_pyobj_interpreter().compare_exchange_strong(expected, self_interpreter_id);
+        TORCH_CHECK(r, "failed");
+      }
+      break;
+    case InterpreterTagStatus::TAGGED_BY_US:
+      break;
+    case InterpreterTagStatus::TAGGED_BY_OTHER:
+      TORCH_CHECK(false, "cannot allocate PyObject for Tensor on interpreter ", self_interpreter_id,
+        " that has already been used by another torch deploy interpreter ",
+        self.unsafeGetTensorImpl()->mut_pyobj_interpreter().load());
   }
-  impl_to_pyobj[key] = pyobj;
+
+  // we are the ONLY thread that can have gotten to this point.  It is not
+  // possible to conflict with another zero interpreter as access is protected
+  // by GIL
+  self.unsafeGetTensorImpl()->mut_pyobj().store(pyobj, std::memory_order_relaxed);
 }
 
-PyObject* pyobj(const Variable& self) {
-  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-  auto it = impl_to_pyobj.find(self.unsafeGetTensorImpl());
-  return it == impl_to_pyobj.end() ? nullptr : it->second;
-}
-#else
+// set_pyobj is called when we know the tensor is for our interpreter.  Can
+// directly do unsynchronized access
 void set_pyobj(const Variable& self, PyObject* pyobj) {
   TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
-  self.unsafeGetTensorImpl()->set_pyobj(pyobj);
+  self.unsafeGetTensorImpl()->mut_pyobj().store(pyobj, std::memory_order_relaxed);
 }
 
-PyObject* pyobj(const Variable& self) {
+InterpreterTagStatus check_pyobj(const Variable& self) {
   TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-  return self.unsafeGetTensorImpl()->pyobj();
+  int16_t interpreter = self.unsafeGetTensorImpl()->mut_pyobj_interpreter().load(std::memory_order_acquire);
+  if (interpreter == -1) {
+    // NB: This never returns DEFINITELY_UNINITIALIZED because there is
+    // always the possibility that another thread races to initialize
+    // after we query here.  The only time when we can conclude a tensor
+    // is definitely uninitialized is when we have just allocated it and
+    // it cannot have escaped to other threads yet
+    return InterpreterTagStatus::MAYBE_UNINITIALIZED;
+  } else if (interpreter == self_interpreter_id) {
+    return InterpreterTagStatus::TAGGED_BY_US;
+  } else {
+    return InterpreterTagStatus::TAGGED_BY_OTHER;
+  }
 }
-#endif
+
+PyObject* unchecked_pyobj(const Variable& self) {
+  // Side condition: when interpreter == 0, any other writer to mut_pyobj is
+  // guaranteed to also hold the GIL
+  return self.unsafeGetTensorImpl()->mut_pyobj().load(std::memory_order_relaxed);
+}
 
 // Creates a new Python object for a Variable. The Variable must not already
-// have a PyObject* associated with it.
-static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
+// have a PyObject* associated with it for any interpreter, and also must not
+// be already tagged by another interpreter.  If unchecked, then we assume that
+// our interpreter has already tagged this Varible, and we can do a direct
+// setter.
+static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var, InterpreterTagStatus status)
 {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
-    set_pyobj(v->cdata, obj);
+    init_pyobj(v->cdata, obj, status);
   }
   return obj;
 }
@@ -108,12 +196,24 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  if (auto obj = pyobj(var)) {
-    Py_INCREF(obj);
-    return obj;
+  auto status = check_pyobj(var);
+  switch (status) {
+    case InterpreterTagStatus::MAYBE_UNINITIALIZED:
+      return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var), status);
+    case InterpreterTagStatus::TAGGED_BY_US:
+      if (auto obj = unchecked_pyobj(var)) {
+        Py_INCREF(obj);
+        return obj;
+      }
+      // TODO: to be eliminated by PyObject preservation
+      return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var), status);
+    case InterpreterTagStatus::TAGGED_BY_OTHER:
+      TORCH_CHECK(false, "cannot use a Tensor on interpreter ", self_interpreter_id,
+        " that has already been used by another torch deploy interpreter ",
+        var.unsafeGetTensorImpl()->mut_pyobj_interpreter().load());
+    default:
+      TORCH_INTERNAL_ASSERT(false);
   }
-
-  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
 }
 
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
@@ -194,7 +294,7 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  return THPVariable_NewWithVar((PyTypeObject*)cls, self.alias());
+  return THPVariable_NewWithVar((PyTypeObject*)cls, self.alias(), InterpreterTagStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -221,7 +321,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   auto var = data.set_requires_grad(r.toBool(2));
-  return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
+  return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var), InterpreterTagStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -951,7 +1051,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
   TORCH_CHECK(type != &THPVariableType, "Cannot directly construct _TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
   auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
-  return THPVariable_NewWithVar(type, std::move(tensor));
+  // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
+  // given a raw pointer that will refcount bump
+  return THPVariable_NewWithVar(type, std::move(tensor), InterpreterTagStatus::MAYBE_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 

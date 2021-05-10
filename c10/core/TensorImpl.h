@@ -1301,12 +1301,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     version_counter_.bump();
   }
 
-  inline void set_pyobj(PyObject* pyobj) noexcept {
-    pyobj_ = pyobj;
-  }
-
-  inline PyObject* pyobj() const noexcept {
+  // TODO: safer version
+  std::atomic<PyObject*>& mut_pyobj() noexcept {
     return pyobj_;
+  }
+  std::atomic<int16_t>& mut_pyobj_interpreter() noexcept {
+    return pyobj_interpreter_;
   }
 
  private:
@@ -2014,7 +2014,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // When a PyObject dies, you are obligated to clear this field
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
-  PyObject* pyobj_ = nullptr;
+
+  // TODO: collapse these into a single field on 64-bit
+  // NB: interpreter tag is 16-bits, even though as an atomic it has to take
+  // up an entire word, to ensure that we can safely fold it into pyobj
+  // for the packed pointer optimization
+  //
+  // What memory_order do we need?  pyobj_interpreter_ is monotonic: it
+  // moves from -1 to some positive integer and can never change afterwards
+  // (this is the poisoning invariant).  Furthemore, it is OK to attempt to
+  // allocate a PyObject and then fail to write it later, we can just lose
+  // the PyObject, no biggy.  Finally, the circumstance we are allowed read
+  // the object are only when the tag matches, which implies an external
+  // synchronization with the write (because you take out the GIL for
+  // that interpreter before doing anything with the object).  Pretty sure
+  // relaxed is good enough for this case.
+  //
+  // pyobj_interpreter_ == 0 is distinguished for the main process Python
+  // interpreter (it is picked to be 0 so we can avoid masking in the packed
+  // 64-bit case in the common case).
+  std::atomic<int16_t> pyobj_interpreter_;
+  std::atomic<PyObject*> pyobj_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
@@ -2159,6 +2179,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    autograd metadata pointer
 //    named tensor metadata pointer
 //    version counter pointer
+//    interpreter header
 //    PyObject pointer
 //    SizesAndStrides size/pointer
 //    SizesAndStrides sizes (pre-allocated 0)
@@ -2178,7 +2199,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //
 static_assert(
     sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-        sizeof(TensorImpl) == sizeof(int64_t) * 23,
+        sizeof(TensorImpl) == sizeof(int64_t) * 24,
     "You changed the size of TensorImpl on 64-bit arch."
     "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

@@ -11,6 +11,7 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
 #include <map>
@@ -489,6 +490,7 @@ torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
 
 extern "C" __attribute__((visibility("default")))
 torch::deploy::InterpreterImpl*
-new_interpreter_impl(void) {
+new_interpreter_impl(int16_t interpreter_id) {
+  torch::impl::set_python_interpreter_id(interpreter_id);
   return new ConcreteInterpreterImpl();
 }

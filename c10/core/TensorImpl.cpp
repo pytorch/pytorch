@@ -85,6 +85,8 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(-1),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -111,6 +113,8 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(-1),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),

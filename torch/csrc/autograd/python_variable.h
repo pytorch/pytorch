@@ -7,6 +7,14 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/THP_export.h>
 
+namespace torch {
+namespace impl {
+
+void set_python_interpreter_id(int16_t);
+
+} // namespace impl
+} // namespace torch
+
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPVariable {
