@@ -212,11 +212,15 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
+        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
+        cusolver_available = (version >= (10, 2))
+
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
-        # cases m < n are only supported on CPU
+        # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if device == 'cpu' else [])
+        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
         # that is why we use `cond=1.0`, the mean to cut roughly half of all
@@ -386,7 +390,11 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'parameter `driver` should be one of \(gels, gelsy, gelsd, gelss\)'):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
 
-        if device != 'cpu':
+        # cuSOLVER path supports underdetermined systems
+        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
+        cusolver_not_available = (version < (10, 1))
+
+        if device != 'cpu' and cusolver_not_available:
             a = torch.rand(2, 3, dtype=dtype, device=device)
             b = torch.rand(2, 1, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, r'only overdetermined systems'):
@@ -1499,24 +1507,29 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
-    # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
-    # their matrix norm results match
+    # This test compares torch.linalg.norm, torch.linalg.matrix_norm and numpy.linalg.norm to
+    # ensure that their matrix norm results match.
     @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim):
+            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             result = torch.linalg.norm(input, ord, dim, keepdim)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
 
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            self.assertEqual(result, result_numpy, msg=msg)
+            def check(op):
+                result = op(input, ord, dim, keepdim)
+                self.assertEqual(result, result_numpy, msg=msg)
+                result_out = torch.empty_like(result)
+                op(input, ord, dim, keepdim, out=result_out)
+                self.assertEqual(result, result_out, msg=msg)
 
-            result_out = torch.empty_like(result)
-            torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
-            self.assertEqual(result, result_out, msg=msg)
+            check(torch.linalg.norm)
+            if ord is not None and dim is not None:
+                check(torch.linalg.matrix_norm)
 
         ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro']
         S = 10
@@ -1531,8 +1544,10 @@ class TestLinalg(TestCase):
             ((S, S, S, S), ord_matrix, (-3, 2)),
         ]
         L = 1_000
+
         if dtype == torch.double:
             test_cases.append(((L, L), ord_matrix, None))
+
         for keepdim in [True, False]:
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
@@ -1765,6 +1780,29 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 2e-5})
+    def test_matrix_norm(self, device, dtype):
+        # Test only inputs for which torch.linalg.matrix_norm diverges from torch.linalg.norm
+        A = make_tensor((2, 2, 2), device, dtype)
+
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a matrix.*'):
+            torch.linalg.matrix_norm(make_tensor((2,), device, dtype))
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a 2-tuple.*'):
+            torch.linalg.matrix_norm(A, dim=(0,))
+        with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
+            torch.linalg.matrix_norm(A, ord=0)
+        with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
+            torch.linalg.matrix_norm(A, ord=3.0)
+
+        # Test dim=None behavior
+        ref = torch.linalg.norm(A, dim=(-2, -1))
+        res = torch.linalg.matrix_norm(A)
+        self.assertEqual(ref, res)
+
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
@@ -1864,15 +1902,22 @@ class TestLinalg(TestCase):
         def run_test_case(input, ord, dim, keepdim, should_error):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             input_numpy = input.cpu().numpy()
+            ops = [torch.linalg.norm]
+
+            if ord is not None and dim is not None:
+                ops.append(torch.linalg.matrix_norm)
+
             if should_error:
                 with self.assertRaises(ValueError):
                     np.linalg.norm(input_numpy, ord, dim, keepdim)
-                with self.assertRaises(IndexError):
-                    torch.linalg.norm(input, ord, dim, keepdim)
+                for op in ops:
+                    with self.assertRaises(IndexError):
+                        op(input, ord, dim, keepdim)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
-                result = torch.linalg.norm(input, ord, dim, keepdim)
-                self.assertEqual(result, result_numpy, msg=msg)
+                for op in ops:
+                    result = op(input, ord, dim, keepdim)
+                    self.assertEqual(result, result_numpy, msg=msg)
 
         ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
         S = 10
@@ -1886,6 +1931,7 @@ class TestLinalg(TestCase):
             ((0, 0, S), [1, 2, inf, -1, -2, -inf], (0, 1)),
             ((0, 0, S), [1, 2, inf, -1, -2, -inf], (1, 0)),
         ]
+
         for keepdim in [True, False]:
             for input_size, error_ords, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
