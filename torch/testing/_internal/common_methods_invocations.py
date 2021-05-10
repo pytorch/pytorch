@@ -4709,9 +4709,9 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/55755
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cpu', dtypes=(torch.float16,)),
-               # Backward for BFloat16 isn't supported because of
-               # RuntimeError: CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when 
-               # calling `cublasGemmStridedBatchedExFix
+               # Backward for BFloat16 isn't supported because of the error
+               # "RuntimeError: CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when
+               # calling cublasGemmStridedBatchedExFix."
                SkipInfo('TestOpInfo', 'test_supported_backward',
                         device_type='cuda', dtypes=(torch.bfloat16,)),)),
     OpInfo('max',
