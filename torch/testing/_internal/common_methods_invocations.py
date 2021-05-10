@@ -4815,7 +4815,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hardshrink,
            supports_gradgrad=True,
            supports_out=False,
-           autodiff_fusible_nodes=["aten::hardshrink"]),
+           autodiff_nonfusible_nodes=["aten::hardshrink"]),
     OpInfo('mm',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
