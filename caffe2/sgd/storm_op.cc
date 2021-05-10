@@ -6,7 +6,6 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Storm, StormOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Storm)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(3)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -46,7 +45,6 @@ for new_moment by using the gradient from the current iteration.
 REGISTER_CPU_OPERATOR(SparseStorm, SparseStormOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseStorm)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(3)
     .EnforceOneToOneInplace()
@@ -63,7 +61,6 @@ as in the dense case.
     .Input(2, "grad_sq_sum", "Sum of observed squared gradients.")
     .Input(3, "grad", "Gradients computed.")
     .Input(4, "indices", "Sparse indices.")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "Learning rate, k in the original paper.")
     .Output(0, "output_param", "Updated parameters.")
     .Output(1, "output_moment", "Updated moment.")
