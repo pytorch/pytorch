@@ -4,6 +4,7 @@ import argparse
 
 REPO_ROOT = os.path.dirname(os.path.dirname(__name__))
 CONFIG_YML = os.path.join(REPO_ROOT, ".circleci", "config.yml")
+WORKFLOWS_DIR = os.path.join(REPO_ROOT, ".github", "workflows")
 
 
 parser = argparse.ArgumentParser(description="make config.yml only have a specific set of jobs")
@@ -74,3 +75,6 @@ config_yml["workflows"] = new_workflows
 
 
 yaml.dump(config_yml, open(CONFIG_YML, "w"))
+
+for f in os.listdir(WORKFLOWS_DIR):
+    os.remove(os.path.join(WORKFLOWS_DIR, f))
