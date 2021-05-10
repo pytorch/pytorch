@@ -684,7 +684,6 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       clamp_node_creator(body_node, prim::MKLDNNHardTanh, 0., 6.);
       continue;
     }

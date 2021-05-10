@@ -6,7 +6,6 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Adadelta, AdadeltaOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Adadelta)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(3)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -44,7 +43,6 @@ and returns (new_param, new_moment, new_moment_delta).
 REGISTER_CPU_OPERATOR(SparseAdadelta, SparseAdadeltaOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdadelta)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(3)
     .EnforceOneToOneInplace()
@@ -61,7 +59,6 @@ runs the dense AdaDelta update on (param, grad, moment[indices],
     .Input(2, "moment_delta", "Average of squared parameter updates")
     .Input(3, "indices", "Sparse indices")
     .Input(4, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated average squared gradient")
