@@ -580,6 +580,12 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    @_wrap_type_error_to_not_implemented
+    def __rmatmul__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
+        return torch.matmul(other, self)
+
     __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
