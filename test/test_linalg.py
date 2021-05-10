@@ -5359,7 +5359,6 @@ class TestLinalg(TestCase):
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
-
                 P, L, U = torch.lu_unpack(a_LU, pivots)
                 P_ = P.cpu().numpy()
                 L_ = L.cpu().numpy()
@@ -5378,7 +5377,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
 
                     k = min(rows, columns)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=nopiv.dtype).expand(a.shape[:-2] + (k, )))
+                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
                     if not singular:
                         # It is not guaranteed that LU factorization
                         # without pivoting is able to determine if a

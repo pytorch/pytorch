@@ -41,7 +41,7 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
 
-void apply_lu_cusolver_looped(Tensor& self, Tensor& pivots, Tensor& infos, bool get_pivots);
+void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 
 #endif  // USE_CUSOLVER
 

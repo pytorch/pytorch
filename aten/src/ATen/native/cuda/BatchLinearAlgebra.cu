@@ -1926,7 +1926,7 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
 
 #ifdef USE_CUSOLVER
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-  if (batch_size == 1 || (batch_size <= 8 && m <= 512)) {
+  if (batch_size == 1 || (batch_size <= 8 && m <= 512) || !use_magma_) {
     // The 'apply_' word is used for templated by dtype functions that call an API routine
     // underneath. Since the cusolver API has a slightly different structure we do not prepend
     // aplly_ to this function.

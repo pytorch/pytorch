@@ -1462,40 +1462,6 @@ void xgeqrf<c10::complex<double>>(CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<double
       info));
 }
 
-void xgetrf_buffersize(CUDASOLVER_XGETRF_BUFFERSIZE_ARGTYPES) {
-  TORCH_CUSOLVER_CHECK(cusolverDnXgetrf_bufferSize(
-    handle,
-    params,
-    m,
-    n,
-    dataTypeA,
-    A,
-    lda,
-    computeType,
-    workspaceInBytesOnDevice,
-    workspaceInBytesOnHost
-  ));
-}
-
-void xgetrf(CUDASOLVER_XGETRF_ARGTYPES) {
-  TORCH_CUSOLVER_CHECK(cusolverDnXgetrf(
-    handle,
-    params,
-    m,
-    n,
-    dataTypeA,
-    A,
-    lda,
-    ipiv,
-    computeType,
-    workspace_device,
-    workspaceInBytesOnDevice,
-    workspace_host,
-    workspaceInBytesOnHost,
-    info
-  ));
-}
-
 template <>
 void xsyevd_bufferSize<float>(
     cusolverDnHandle_t handle,
