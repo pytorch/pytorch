@@ -24,15 +24,16 @@
 #include <c10/macros/Export.h>
 
 #if defined(__clang__)
-  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-  #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
-  #define __ubsan_ignore_signed_int_overflow__ __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_float_divide_by_zero__ \
+  __attribute__((no_sanitize("float-divide-by-zero")))
+#define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+#define __ubsan_ignore_signed_int_overflow__ \
+  __attribute__((no_sanitize("signed-integer-overflow")))
 #else
-  #define __ubsan_ignore_float_divide_by_zero__
-  #define __ubsan_ignore_undefined__
-  #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_float_divide_by_zero__
+#define __ubsan_ignore_undefined__
+#define __ubsan_ignore_signed_int_overflow__
 #endif
-
 
 // Detect address sanitizer as some stuff doesn't work with it
 #undef C10_ASAN_ENABLED
@@ -56,7 +57,6 @@
 #if !defined(C10_ASAN_ENABLED)
 #define C10_ASAN_ENABLED 0
 #endif
-
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
@@ -84,6 +84,11 @@
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
+#ifdef __has_cpp_attribute
+#define C10_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#define C10_HAS_CPP_ATTRIBUTE(x) (0)
+#endif
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 
@@ -108,24 +113,25 @@
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
 #define C10_NODISCARD
 #if defined(__has_cpp_attribute)
-# if __has_cpp_attribute(nodiscard)
-#  undef C10_NODISCARD
-#  define C10_NODISCARD [[nodiscard]]
-# endif
+#if __has_cpp_attribute(nodiscard)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[nodiscard]]
+#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
-# if __has_cpp_attribute(clang::warn_unused_result)
-// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
-// on Windows; if it is, better fix it.
-#  undef C10_NODISCARD
-#  define C10_NODISCARD [[clang::warn_unused_result]]
-# endif
+#if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering
+// https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
+// fix it.
+#undef C10_NODISCARD
+#define C10_NODISCARD [[clang::warn_unused_result]]
+#endif
 #endif
 
 // suppress an unused variable.
 #if defined(_MSC_VER) && !defined(__clang__)
-#define C10_UNUSED __pragma(warning(suppress: 4100 4101))
+#define C10_UNUSED __pragma(warning(suppress : 4100 4101))
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
@@ -135,16 +141,28 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
-namespace c10 { namespace cuda {} }
-namespace c10 { namespace hip {} }
+namespace c10 {
+namespace cuda {}
+} // namespace c10
+namespace c10 {
+namespace hip {}
+} // namespace c10
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
 // This is only for backwards compatibility. Please use the symbols from the
 // c10 namespace where possible.
-namespace caffe2 { using namespace c10; }
-namespace at { using namespace c10; }
-namespace at { namespace cuda { using namespace c10::cuda; }}
+namespace caffe2 {
+using namespace c10;
+}
+namespace at {
+using namespace c10;
+}
+namespace at {
+namespace cuda {
+using namespace c10::cuda;
+}
+} // namespace at
 
 // WARNING!!! THIS IS A GIANT HACK!!!
 // This line means you cannot simultaneously include c10/hip
@@ -154,7 +172,11 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // from at::cuda.  This namespace makes that happen.  When
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
-namespace at { namespace cuda { using namespace c10::hip; }}
+namespace at {
+namespace cuda {
+using namespace c10::hip;
+}
+} // namespace at
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -169,11 +191,11 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 // without it.
 //
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
-#define C10_LIKELY(expr)    (__builtin_expect(static_cast<bool>(expr), 1))
-#define C10_UNLIKELY(expr)  (__builtin_expect(static_cast<bool>(expr), 0))
+#define C10_LIKELY(expr) (__builtin_expect(static_cast<bool>(expr), 1))
+#define C10_UNLIKELY(expr) (__builtin_expect(static_cast<bool>(expr), 0))
 #else
-#define C10_LIKELY(expr)    (expr)
-#define C10_UNLIKELY(expr)  (expr)
+#define C10_LIKELY(expr) (expr)
+#define C10_UNLIKELY(expr) (expr)
 #endif
 
 /// C10_NOINLINE - Functions whose declaration is annotated with this will not
@@ -194,19 +216,35 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_ALWAYS_INLINE inline
 #endif
 
+// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
+#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
+#define C10_FALLTHROUGH [[fallthrough]]
+#else
+#define C10_FALLTHROUGH
+#endif
+
 #include <sstream>
 #include <string>
+
+#ifdef __HIPCC__
+// Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
+// We do this #include here so that C10_HOST_DEVICE and friends will Just Work.
+// See https://github.com/ROCm-Developer-Tools/HIP/issues/441
+#include <hip/hip_runtime.h>
+#endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
 #define C10_HOST __host__
-// constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5),
-// 1536 for Geforce Ampere (8.6),
-// and 2048 for all other architectures. You'll get warnings if you exceed these constants.
-// Hence, the following macros adjust the input values from the user to resolve potential warnings.
+// constants from
+// (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
+// The maximum number of threads per multiprocessor is 1024 for Turing
+// architecture (7.5), 1536 for Geforce Ampere (8.6), and 2048 for all other
+// architectures. You'll get warnings if you exceed these constants. Hence, the
+// following macros adjust the input values from the user to resolve potential
+// warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
 #elif __CUDA_ARCH__ == 860
@@ -216,25 +254,39 @@ constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
 // CUDA_MAX_THREADS_PER_BLOCK is same for all architectures currently
 constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
-// CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block size.
-// 256 is a good number for this fallback and should give good occupancy and
-// versatility across all architectures.
+// CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block
+// size. 256 is a good number for this fallback and should give good occupancy
+// and versatility across all architectures.
 constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // NOTE: if you are thinking of constexpr-ify the inputs to launch bounds, it
 //       turns out that although __launch_bounds__ can take constexpr, it
 //       can't take a constexpr that has anything to do with templates.
 //       Currently we use launch_bounds that depend on template arguments in
-//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and
-//       C10_MIN_BLOCKS_PER_SM are kept as macros.
-// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU.
-// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
+//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK
+//       and C10_MIN_BLOCKS_PER_SM are kept as macros.
+// Suppose you were planning to write __launch_bounds__(a, b), based on your
+// performance tuning on a modern GPU. Instead, you should write
+// __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
 // which will also properly respect limits on old architectures.
-#define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) : CUDA_THREADS_PER_BLOCK_FALLBACK)
-#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) ? (blocks_per_sm) : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) / (threads_per_block))))
+#define C10_MAX_THREADS_PER_BLOCK(val)           \
+  (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) \
+                                         : CUDA_THREADS_PER_BLOCK_FALLBACK)
+#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm)        \
+  ((((threads_per_block) * (blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) \
+        ? (blocks_per_sm)                                              \
+        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block)-1) /         \
+           (threads_per_block))))
 // C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
-#define C10_LAUNCH_BOUNDS_0 __launch_bounds__(256, 4) // default launch bounds that should give good occupancy and versatility across all architectures.
-#define C10_LAUNCH_BOUNDS_1(max_threads_per_block) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))))
-#define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))), (C10_MIN_BLOCKS_PER_SM((max_threads_per_block), (min_blocks_per_sm))))
+#define C10_LAUNCH_BOUNDS_0 \
+  __launch_bounds__(        \
+      256, 4) // default launch bounds that should give good occupancy and
+              // versatility across all architectures.
+#define C10_LAUNCH_BOUNDS_1(max_threads_per_block) \
+  __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))))
+#define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) \
+  __launch_bounds__(                                                  \
+      (C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))),           \
+      (C10_MIN_BLOCKS_PER_SM((max_threads_per_block), (min_blocks_per_sm))))
 #else
 #define C10_HOST_DEVICE
 #define C10_HOST
@@ -266,14 +318,12 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
-  C10_IMPORT
+C10_IMPORT
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
-    __host__ __device__
+__host__ __device__
 #endif // __CUDA_ARCH__
- void _wassert(
-    wchar_t const* _Message,
-    wchar_t const* _File,
-    unsigned _Line);
+    void
+    _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
 }
 #endif
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
@@ -297,8 +347,8 @@ __host__ __device__
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
-    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
-                  __func__);                                             \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #endif // __APPLE__
 

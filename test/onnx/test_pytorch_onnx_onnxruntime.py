@@ -1080,7 +1080,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(ClampMaxModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_clamp_dyn(self):
         class ClampMaxModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1106,6 +1106,27 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 8).float()
         self.run_test(ClampMinMaxModel(), x)
+
+        class ClampTensorModel(torch.nn.Module):
+            def forward(self, x, min, max):
+                return x.clamp(min, max)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        z = torch.randn(3, 4)
+        self.run_test(ClampTensorModel(), (x, y, z))
+
+        class ClampTensorMinModel(torch.nn.Module):
+            def forward(self, x, min):
+                return x.clamp(min=min)
+
+        self.run_test(ClampTensorMinModel(), (x, y))
+
+        class ClampTensorMaxModel(torch.nn.Module):
+            def forward(self, x, max):
+                return x.clamp(max=max)
+
+        self.run_test(ClampTensorMaxModel(), (x, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
@@ -2714,6 +2735,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    def test_std_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
     def test_var(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -2771,6 +2801,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
         self.run_test(model, x)
 
     def test_var_mean(self):
@@ -2848,6 +2887,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    def test_var_mean_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
     def test_std_mean(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -2896,6 +2944,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
         self.run_test(model, x)
 
     def test_bitshift(self):
@@ -7075,7 +7132,7 @@ class TestONNXRuntime(unittest.TestCase):
         running_mean = model.bn.running_mean
         running_var = model.bn.running_var
         saved_mean = x.mean((0, 2, 3))
-        saved_var = x.var((0, 2, 3))
+        saved_var = x.var((0, 2, 3), correction=1)
 
         pytorch_out = [out.detach().numpy(),
                        running_mean.cpu().numpy(), running_var.cpu().numpy(),
