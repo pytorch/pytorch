@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Any, Optional, overload, Union, TypeVar, Tuple, Sequence
+from typing import Any, List, Optional, overload, Union, TypeVar, Tuple, Sequence
 from torch import Tensor
 from torch.types import _dtype, _device
 
