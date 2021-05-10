@@ -191,7 +191,6 @@ int load_nnapi_model(
           CAFFE_ENFORCE(len == 12);
           uint32_t buffer_number = *(uint32_t*)stored_pointer;
           uint32_t buffer_offset = *(uint32_t*)(stored_pointer + 4);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           uint32_t operand_length = *(uint32_t*)(stored_pointer + 8);
           CAFFE_ENFORCE(buffer_number < num_buffers);
           CAFFE_ENFORCE(buffer_offset + operand_length >= buffer_offset);  // No integer overflow
