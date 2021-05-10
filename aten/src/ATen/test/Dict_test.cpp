@@ -113,7 +113,6 @@ TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
 TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
   bool found_first = false;
   bool found_second = false;
@@ -122,7 +121,6 @@ TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (iter->key() == 5) {
       EXPECT_EQ("5", iter->value());
       EXPECT_FALSE(found_second);
@@ -139,7 +137,6 @@ TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
 TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
   bool found_first = false;
   bool found_second = false;
@@ -148,7 +145,6 @@ TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
       EXPECT_EQ("3", elem.value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (elem.key() == 5) {
       EXPECT_EQ("5", elem.value());
       EXPECT_FALSE(found_second);
@@ -165,7 +161,6 @@ TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
 TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict_.insert(5, "5");
   const Dict<int64_t, string>& dict = dict_;
   bool found_first = false;
@@ -175,7 +170,6 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (iter->key() == 5) {
       EXPECT_EQ("5", iter->value());
       EXPECT_FALSE(found_second);
@@ -192,7 +186,6 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
 TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
   Dict<int64_t, string> dict_;
   dict_.insert(3, "3");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict_.insert(5, "5");
   const Dict<int64_t, string>& dict = dict_;
   bool found_first = false;
@@ -202,7 +195,6 @@ TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
       EXPECT_EQ("3", elem.value());
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (elem.key() == 5) {
       EXPECT_EQ("5", elem.value());
       EXPECT_FALSE(found_second);
@@ -281,7 +273,6 @@ TEST(DictTest, givenMutableDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) 
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
@@ -303,7 +294,6 @@ TEST(DictTest, givenConstDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
   dict_.insert(3, "3");
   dict_.insert(4, "4");
   const Dict<int64_t, string>& dict = dict_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
@@ -327,7 +317,6 @@ TEST(DictTest, whenCallingContainsWithNonExistingKey_thenReturnsFalse) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DictTest, whenCallingReserve_thenDoesntCrash) {
   Dict<int64_t, string> dict;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.reserve(100);
 }
 
@@ -503,13 +492,11 @@ TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_then
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert(5, "5");
 
   (*dict.find(3)).setValue(dict.find(4)->value());
   EXPECT_EQ("4", dict.find(3)->value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.find(3)->setValue(dict.find(5)->value());
   EXPECT_EQ("5", dict.find(3)->value());
 }
@@ -556,7 +543,6 @@ TEST(DictTest, dictTensorAsKey) {
   EXPECT_EQ("three", found_key1->value());
 
   Dict<at::Tensor, string>::iterator found_nokey1 = dict.find(at::tensor(3));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Dict<at::Tensor, string>::iterator found_nokey2 = dict.find(at::tensor(5));
   EXPECT_EQ(dict.end(), found_nokey1);
   EXPECT_EQ(dict.end(), found_nokey2);
