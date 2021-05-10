@@ -1336,7 +1336,7 @@ class DistributedDataParallel(Module):
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
-    def get_ddp_logging_data(self):
+    def _get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
@@ -1349,7 +1349,7 @@ class DistributedDataParallel(Module):
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
-    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
+    def _set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
