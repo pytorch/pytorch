@@ -336,6 +336,7 @@ class PackageImporter(Importer):
         path = None
         parent = name.rpartition(".")[0]
         if parent:
+            child = ".".join(name.split(".")[1:])
             if parent not in self.modules:
                 self._gcd_import(parent)
             # Crazy side-effects!
@@ -345,8 +346,11 @@ class PackageImporter(Importer):
             try:
                 path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
-                msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
-                raise ModuleNotFoundError(msg, name=name) from None
+                # Manipulation of sys.modules can lead to the corner case where
+                # modules are registered as attributes on non-package modules.
+                if type(getattr(parent_module, child, None)) != types.ModuleType:
+                    msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
+                    raise ModuleNotFoundError(msg, name=name) from None
 
         module = self._load_module(name, parent)
 
@@ -487,6 +491,7 @@ class PackageImporter(Importer):
                 return node
             if isinstance(node, _ModuleNode):
                 name = ".".join(atoms[:i])
+                print(f"full name: {atoms}")
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
