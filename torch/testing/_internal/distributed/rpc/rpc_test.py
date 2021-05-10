@@ -491,10 +491,12 @@ def async_add_multi_fanout(to, x, num, step):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor",)
+    __slots__ = ("tensor", "lock")
 
     def __init__(self, t):
         self.tensor = t
+        # Add one non-picklable field, to ensure it's ignored/skipped.
+        self.lock = Lock()
 
 
 # Copied from test/test_cuda.py.

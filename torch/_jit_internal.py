@@ -31,6 +31,11 @@ if sys.version_info[:2] > (3, 7):
 else:
     from typing_extensions import Final
 
+try:
+    from _thread import LockType
+except ImportError:
+    from _dummy_thread import LockType
+
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
@@ -1132,8 +1137,15 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, torch.Tensor):
             self.tensors.append(obj)
             return ""
-        else:
-            return None
+        # Since we just want to extract tensors, we don't mind if an object is
+        # unpicklable if it doesn't contain tensors, as we can just ignore/skip
+        # it. To play it safe, we only do so for common objects that we're sure
+        # don't contain tensors. Feel free to add new types gere. Note also that
+        # even if a type isn't listed here this won't block users, since thet
+        # can just add a __getstate__ or __reduce__ method to their class.
+        if isinstance(obj, LockType):
+            return ""
+        return None
 
 
 def _extract_tensors(obj):
