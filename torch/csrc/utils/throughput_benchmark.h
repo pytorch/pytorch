@@ -52,7 +52,6 @@ struct BenchmarkConfig {
   int num_warmup_iters{1};
   // Number of iterations the benchmark should run with. This number is separate
   // from the warmup iterations
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t num_iters{100};
   // If set autograd profiler will be enabled. I.e. this variable would be created
   // before the main benchmark loop (but after the warmup):
