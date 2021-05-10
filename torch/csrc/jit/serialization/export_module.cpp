@@ -33,6 +33,9 @@
 namespace torch {
 namespace jit {
 
+static constexpr const char* kArchiveNameConstants = "constants";
+static constexpr const char* kArchiveNameBytecode = "bytecode";
+
 char const* toString(OpCode op);
 
 namespace {
@@ -192,7 +195,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
+       {kArchiveNameConstants, Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
 
@@ -345,7 +348,7 @@ void ScriptModuleSerializer::serialize(
       constant_table_.begin(), constant_table_.end());
   writeArchive(
       c10::ivalue::Tuple::create(ivalue_constants),
-      /*archive_name=*/"constants",
+      /*archive_name=*/kArchiveNameConstants,
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/");
   if (bytecode_format) {
@@ -364,6 +367,7 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
+    bool use_tensors_archive_table,
     bool tensor_cdata_naming_scheme) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
@@ -390,28 +394,59 @@ void ScriptModuleSerializer::writeArchive(
         }
         return tensor_names.back();
       });
+  if (use_tensors_archive_table && !tensors_archive_table_.empty()) {
+    data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+  }
   data_pickle.protocol();
   data_pickle.pushIValue(value);
   data_pickle.stop();
   // write out tensor data
   size_t i = 0;
+  std::string prefix = archive_name + "/";
+
+  // TODO: currently there exists logic only for archive constant and
+  // bytecode, to avoid exporting duplicate tensors. The logic can be more
+  // generic such that it can be used by other tensors from other archive, to
+  // avoid deduplicating tensors among different archives.
+
+  // Store all tensors from archives `constants` to tensors_archive_table_
+  if (archive_name == kArchiveNameConstants) {
+    const auto tensor_candidates = data_pickle.tensorData();
+    for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
+         tensor_index++) {
+      tensors_archive_table_[tensor_candidates[tensor_index]] =
+          std::make_pair(kArchiveNameConstants, tensor_index);
+    }
+  }
+
+  // Export deduplicate tensors only if use_tensors_archive_table is set to
+  // true and archive name is `bytecode`
+  bool can_use_tensors_archive_table =
+      (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
+
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
   const std::vector<std::string>& pre_serialized_files =
       writer_.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string file_name = tensor_dir + tensor_names[i++];
+    std::string fname = tensor_dir + tensor_names[i++];
     if (tensor_cdata_naming_scheme &&
         std::find(
-            pre_serialized_files.begin(),
-            pre_serialized_files.end(),
-            file_name) != pre_serialized_files.end()) {
+            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
+            pre_serialized_files.end()) {
       // storage has been serialzed already, skip
       continue;
     }
-    writer_.writeRecord(
-        file_name, writable_td.data(), writable_td.sizeInBytes());
+    if (can_use_tensors_archive_table) {
+      const auto found = tensors_archive_table_.find(td);
+      if (found == tensors_archive_table_.end()) {
+        writer_.writeRecord(
+            fname, writable_td.data(), writable_td.sizeInBytes());
+      }
+    } else {
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    }
   }
 
   std::string fname = archive_dir + archive_name + ".pkl";
@@ -632,6 +667,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
+      /*use_tensors_archive_table=*/false,
       /*tensor_cdata_naming_scheme=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
@@ -644,6 +680,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
+      /*use_tensors_archive_table=*/false,
       /*tensor_cdata_naming_scheme=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
