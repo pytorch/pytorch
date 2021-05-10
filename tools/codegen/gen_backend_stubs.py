@@ -1,3 +1,6 @@
+import sys
+sys.path.append("../..")
+
 import pathlib
 import argparse
 import os
