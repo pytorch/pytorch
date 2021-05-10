@@ -2251,31 +2251,6 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     return list(generate_samples())
 
 
-def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
-    # not needed once OpInfo tests support Iterables
-    def generate_samples():
-        for lu_sample in sample_inputs_lu(op_info, device, dtype, requires_grad, **kwargs):
-            lu_data, pivots = lu_sample.input.lu()
-            yield SampleInput(lu_data, args=(pivots,))
-
-            # generate rectangular inputs
-            lu_data_shape = lu_data.shape
-            batch_shape = lu_data_shape[:-2]
-            n = lu_data_shape[-2]
-
-            for shape_inc in ((1, 0), (0, 1)):
-                lu_data, pivots = make_tensor(
-                    batch_shape + (n + shape_inc[0], n + shape_inc[1]),
-                    device, dtype,
-                    requires_grad=False,
-                    low=None, high=None
-                ).lu()
-                lu_data.requires_grad_(requires_grad)
-                yield SampleInput(lu_data, args=(pivots,))
-
-    return list(generate_samples())
-
-
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4720,21 +4695,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-           )),
-    OpInfo('lu_unpack',
-           op=torch.lu_unpack,
-           dtypes=floating_and_complex_types(),
-           supports_inplace_autograd=False,
-           # we use in-place operations which cannot be avoided.
-           # This cases vmap failures, hence we skip batched gradient checks
-           check_batched_grad=False,
-           supports_out=True,
-           sample_inputs_func=sample_inputs_lu_unpack,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # cuda gradchecks are slow
-               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
            )),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
