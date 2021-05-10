@@ -85,7 +85,7 @@ class Functional(ModelLayer):
                     continue
                 if shapes[blob] == []:
                     # Scalar type
-                    shape = tuple()
+                    shape = tuple()  # type: ignore[var-annotated]
                 elif shapes[blob][0] == 0:
                     shape = tuple(shapes[blob][1:])
                 else:

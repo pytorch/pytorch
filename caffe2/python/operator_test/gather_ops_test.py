@@ -101,7 +101,7 @@ class TestGatherOps(serial.SerializedTestCase):
     @given(batch_num=st.integers(1, 40),
            rows_num=st.integers(1, 6),
            index_num=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_gather_ops_match_outer(self, batch_num, rows_num, index_num, gc, dc):
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
@@ -123,7 +123,7 @@ class TestGatherOps(serial.SerializedTestCase):
     @given(batch_num=st.integers(1, 40),
            rows_num=st.integers(1, 6),
            index_num=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_batch_gather_op_match_outer(self, batch_num, rows_num, index_num, gc, dc):
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
@@ -150,7 +150,7 @@ class TestGatherOps(serial.SerializedTestCase):
            index_num=st.integers(1, 10),
            index_num2=st.integers(1, 10),
            axis2_num=st.integers(1, 10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=None, max_examples=50)
     def test_gather_op_match_outer_axis2_data4D_ind4D(
         self, batch_num, rows_num, axis2_num, index_num, index_num2, gc, dc

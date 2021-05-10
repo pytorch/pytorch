@@ -69,7 +69,7 @@ def share_grad_blobs(
                 activations.append(b)
 
     # Remove last activations, as they are usually accessed externally
-    activations = set(activations[:-2])
+    activations = set(activations[:-2])  # type: ignore[assignment]
 
     # Gradient ops
     grad_op_indices = []
@@ -83,7 +83,7 @@ def share_grad_blobs(
             if is_grad_blob(b) or (share_activations and b in activations):
                 shared_blobs.add(b)
     start_time = time.time()
-    optim_str = C.memonger_compute_blob_recycling_for_dag(
+    optim_str = C.memonger_compute_blob_recycling_for_dag(  # type: ignore[attr-defined]
         netproto.SerializeToString(),
         [str(s).encode('utf-8') for s in losses],
         grad_op_indices,
@@ -115,7 +115,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
         return b not in external_input and b not in external_output
 
     activation_blobs = set()
-    seen_as_output = set()
+    seen_as_output = set()  # type: ignore[var-annotated]
     ops = list(net.Proto().op)
     op_indices = [index for index, op in enumerate(net.Proto().op)]
 
@@ -134,7 +134,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
         assert not op.is_gradient_op, \
             "You can only pass inference-only nets to optimize_inference_for_dag"
     start_time = time.time()
-    optim_str = C.memonger_compute_blob_recycling_for_dag(
+    optim_str = C.memonger_compute_blob_recycling_for_dag(  # type: ignore[attr-defined]
         netproto.SerializeToString(),
         [str(s).encode('utf-8') for s in input_blobs],
         op_indices,
@@ -199,13 +199,13 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
         return sizeof * np.prod(shapes[blob])
 
     protos = [split_net(proto) for proto in protos]
-    allocs_by_ops = collections.defaultdict(lambda: 0)
+    allocs_by_ops = collections.defaultdict(lambda: 0)  # type: ignore[var-annotated]
 
     # Evaluate
     current_allocated = 0
     max_allocated = 0
     total_allocated = 0
-    allocated = set()
+    allocated = set()  # type: ignore[var-annotated]
     for proto in protos:
         for op in proto.op:
             if op.type == "Free" or op.type == "Alias":
@@ -471,7 +471,7 @@ def compute_ranges(linearized_ops, blob_sizes=None):
     if not blob_sizes:
         log.warning('Provide blob sizes to get more accurate assignments.')
 
-    blobs = collections.defaultdict(
+    blobs = collections.defaultdict(  # type: ignore[var-annotated]
         lambda: LiveRange(defined=None, used=None, size=None))
     for i, op in enumerate(linearized_ops):
         for blob in op.input:
@@ -664,7 +664,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
 
     init_assignment = init_assignment or []
     # best_assignments[k]: best assignments for first k blobs ranges_sorted[0:(k+1)]
-    best_assignments = []
+    best_assignments = []  # type: ignore[var-annotated]
     # Find best assignment for blobs ranges_sorted[0:ii]
     for ii, cur_range in enumerate(ranges_sorted):
         # closest best_assignment that is independent of ranges_sorted[ii]
@@ -823,7 +823,7 @@ class AssignmentAlgorithm(enum.Enum):
 
 def optimize_inference_fast(net, static_blobs):
     optim = caffe2_pb2.NetDef()
-    optim_str = C.memonger_optimize_inference_net(
+    optim_str = C.memonger_optimize_inference_net(  # type: ignore[attr-defined]
         net.SerializeToString(),
         [str(s).encode('utf-8') for s in static_blobs]
     )
@@ -914,8 +914,8 @@ def verify_graph_equality(net_a, net_b):
     """
 
     def parent_list(ops):
-        parent_list = [[] for _ in ops]
-        edge_owner = {}
+        parent_list = [[] for _ in ops]  # type: ignore[var-annotated]
+        edge_owner = {}  # type: ignore[var-annotated]
         for i, op in enumerate(ops):
             for blob in op.input:
                 parent_id = edge_owner.get(blob)

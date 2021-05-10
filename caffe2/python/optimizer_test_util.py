@@ -44,12 +44,12 @@ class OptimizerTestBase(object):
         sq = model.SquaredL2Distance([out, 'label'])
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
-        self.assertIsInstance(grad_map['fc_w'], core.BlobReference)
+        self.assertIsInstance(grad_map['fc_w'], core.BlobReference)  # type: ignore[attr-defined]
         return (model, perfect_model, data, label)
 
     def testDense(self):
         model, perfect_model, data, label = self._createDense()
-        optimizer = self.build_optimizer(model)
+        optimizer = self.build_optimizer(model)  # type: ignore[attr-defined]
         workspace.FeedBlob('data', data[0])
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
@@ -65,7 +65,7 @@ class OptimizerTestBase(object):
             workspace.FetchBlob('fc_w'),
             atol=1e-2
         )
-        self.check_optimizer(optimizer)
+        self.check_optimizer(optimizer)  # type: ignore[attr-defined]
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def testGPUDense(self, dtype=core.DataType.FLOAT):
@@ -84,9 +84,9 @@ class OptimizerTestBase(object):
         brew.fc(model, 'fc_cpu', 'fc2', dim_in=1, dim_out=10, axis=0)
 
         # Create optimizer in default device scope
-        self.build_optimizer(model)
+        self.build_optimizer(model)  # type: ignore[attr-defined]
 
-        if self._skip_gpu:
+        if self._skip_gpu:  # type: ignore[attr-defined]
             return
 
         # Run net to see it does not crash
@@ -116,8 +116,8 @@ class OptimizerTestBase(object):
         sq = model.SquaredL2Distance([out, 'label'])
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
-        self.assertIsInstance(grad_map['w'], core.GradientSlice)
-        optimizer = self.build_optimizer(model)
+        self.assertIsInstance(grad_map['w'], core.GradientSlice)  # type: ignore[attr-defined]
+        optimizer = self.build_optimizer(model)  # type: ignore[attr-defined]
 
         workspace.CreateBlob('indices')
         workspace.CreateBlob('label')
@@ -145,7 +145,7 @@ class OptimizerTestBase(object):
                 workspace.FetchBlob('w'),
                 atol=1e-2
             )
-        self.check_optimizer(optimizer)
+        self.check_optimizer(optimizer)  # type: ignore[attr-defined]
 
 
 class LRModificationTestBase(object):
@@ -175,8 +175,8 @@ class LRModificationTestBase(object):
 
     def test_global_norm_based_gradient_clipping(self):
         max_gradient_norm = 1.0
-        model, perfect_model, data, label = self._createDense()
-        opt = self.build_optimizer(model, max_gradient_norm=max_gradient_norm)
+        model, perfect_model, data, label = self._createDense()  # type: ignore[attr-defined]
+        opt = self.build_optimizer(model, max_gradient_norm=max_gradient_norm)  # type: ignore[attr-defined]
 
         params = []
         for param in model.GetParams(top_scope=True):
@@ -191,7 +191,7 @@ class LRModificationTestBase(object):
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net, True)
-        self.assertIsNotNone(opt._lr_multiplier)
+        self.assertIsNotNone(opt._lr_multiplier)  # type: ignore[attr-defined]
 
         # Run net once
         idx = np.random.randint(data.shape[0])
@@ -207,13 +207,13 @@ class LRModificationTestBase(object):
         norm_ratio = workspace.FetchBlob(
             'norm_clipped_grad_update/norm_ratio')
         np.testing.assert_almost_equal(norm_ratio, reference)
-        self.assertTrue(
+        self.assertTrue(  # type: ignore[attr-defined]
             reference < 1.0, "Bad test, gradient not being scaled."
         )
 
     def test_lr_injection(self):
-        model, perfect_model, data, label = self._createDense()
-        opt = self.build_optimizer(
+        model, perfect_model, data, label = self._createDense()  # type: ignore[attr-defined]
+        opt = self.build_optimizer(  # type: ignore[attr-defined]
             model, max_gradient_norm=1, allow_lr_injection=True
         )
 
@@ -223,15 +223,15 @@ class LRModificationTestBase(object):
         workspace.CreateNet(model.net, True)
 
         # Test LR injection initialized properly
-        self.assertIsNotNone(opt._lr_multiplier)
-        self.assertEqual(optimizer.get_lr_injection(), 1)
+        self.assertIsNotNone(opt._lr_multiplier)  # type: ignore[attr-defined]
+        self.assertEqual(optimizer.get_lr_injection(), 1)  # type: ignore[attr-defined]
 
         # Test that we're able to modify the value of the lr_injection
         optimizer.set_lr_injection(0)
-        self.assertEqual(optimizer.get_lr_injection(), 0)
+        self.assertEqual(optimizer.get_lr_injection(), 0)  # type: ignore[attr-defined]
 
         # Test that setting the lr_injector properly propagates to the
         # lr_multiplier. Here, we have both lr_injector and norm_ratio that
         # affect the lr_multiplier
         workspace.RunNet(model.net.Proto().name)
-        self.assertEqual(workspace.FetchBlob('lr_multiplier'), 0)
+        self.assertEqual(workspace.FetchBlob('lr_multiplier'), 0)  # type: ignore[attr-defined]

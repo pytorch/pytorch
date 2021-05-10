@@ -50,7 +50,7 @@ def _getGradientOrNone(op_proto):
 
 # necessary to support converting jagged lists into numpy arrays
 def _transformList(l):
-    ret = np.empty(len(l), dtype=np.object)
+    ret = np.empty(len(l), dtype=np.object)  # type: ignore[attr-defined]
     for (i, arr) in enumerate(l):
         ret[i] = arr
     return ret

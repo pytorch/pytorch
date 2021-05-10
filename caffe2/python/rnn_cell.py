@@ -831,10 +831,10 @@ class DropoutCell(RNNCell):
         self.use_cudnn = use_cudnn
         super(DropoutCell, self).__init__(**kwargs)
 
-        self.prepare_input = internal_cell.prepare_input
-        self.get_output_state_index = internal_cell.get_output_state_index
-        self.get_state_names = internal_cell.get_state_names
-        self.get_output_dim = internal_cell.get_output_dim
+        self.prepare_input = internal_cell.prepare_input  # type: ignore[assignment]
+        self.get_output_state_index = internal_cell.get_output_state_index  # type: ignore[assignment]
+        self.get_state_names = internal_cell.get_state_names  # type: ignore[assignment]
+        self.get_output_dim = internal_cell.get_output_dim  # type: ignore[assignment]
 
         self.mask = 0
 
@@ -961,7 +961,7 @@ class MultiRNNCell(RNNCell):
         self.output_connected_layers.append(len(self.cells) - 1)
         self.output_indices.append(output_index_per_layer[-1])
 
-        self.state_names = []
+        self.state_names = []  # type: ignore[var-annotated]
         for i, cell in enumerate(self.cells):
             self.state_names.extend(
                 map(self.layer_scoper(i), cell.get_state_names())
@@ -1454,7 +1454,7 @@ class MILSTMWithAttentionCell(AttentionCell):
             forward_only=False,
             drop_states=False,
         )
-        super(MILSTMWithAttentionCell, self).__init__(
+        super(MILSTMWithAttentionCell, self).__init__(  # type: ignore[call-arg]
             encoder_output_dim=encoder_output_dim,
             encoder_outputs=encoder_outputs,
             decoder_cell=decoder_cell,
@@ -1630,7 +1630,7 @@ class UnrolledCell(RNNCell):
                 )
             all_states.append(states)
 
-        all_states = zip(*all_states)
+        all_states = zip(*all_states)  # type: ignore[assignment]
         all_states = [
             model.net.Concat(
                 list(full_output),
@@ -1786,7 +1786,7 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
 
         param_extract_net = core.Net("lstm_param_extractor")
         param_extract_net.AddExternalInputs([input_blob, weights])
-        param_extract_mapping = {}
+        param_extract_mapping = {}  # type: ignore[var-annotated]
 
         # Populate the weights-blob from blobs containing parameters for
         # the individual components of the LSTM, such as forget/input gate

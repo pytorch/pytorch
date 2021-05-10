@@ -32,7 +32,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         quantize_groupwise=st.booleans(),
         relu=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_depthwise_3x3_conv(
@@ -74,7 +74,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         )
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         if relu:
             op_engine_list = [
@@ -187,7 +187,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
         quantize_groupwise=st.just(True),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_depthwise_3x3x3_conv(
@@ -231,7 +231,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         )
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op = "ConvRelu" if fuse_relu else "Conv"
         op_engine_list = [(op, ""), (op, "DNNLOWP"), ("Int8" + op, "DNNLOWP")]

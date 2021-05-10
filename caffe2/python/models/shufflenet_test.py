@@ -13,7 +13,7 @@ import caffe2.python.models.imagenet_trainer_test_utils as utils
 
 
 class ShufflenetMemongerTest(hu.HypothesisTestCase):
-    @given(with_shapes=st.booleans(), **hu.gcs_cpu_only)
+    @given(with_shapes=st.booleans(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(max_examples=2, deadline=None)
     def test_shufflenet_shared_grads(self, with_shapes, gc, dc):
         results = utils.test_shared_grads(
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     import random
     random.seed(2006)
     # pyre-fixme[10]: Name `workspace` is used but not defined in the current scope
-    workspace.GlobalInit([
+    workspace.GlobalInit([  # type: ignore[name-defined]
         'caffe2',
         '--caffe2_log_level=0',
         '--caffe2_print_blob_sizes_at_exit=0',

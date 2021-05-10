@@ -212,7 +212,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=1000)
     def test_bbox_transform(
@@ -280,7 +280,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=1000)
     def test_bbox_transform_batch(
@@ -334,9 +334,9 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
                 offset += num_rois
 
             if len(box_out) > 0:
-                box_out = np.vstack(box_out)
+                box_out = np.vstack(box_out)  # type: ignore[assignment]
             else:
-                box_out = np.empty(deltas.shape).astype(np.float32)
+                box_out = np.empty(deltas.shape).astype(np.float32)  # type: ignore[assignment]
             return [box_out, roi_counts]
 
         op = core.CreateOperator(

@@ -27,7 +27,7 @@ class TestComputeEqualizationScaleOp(hu.HypothesisTestCase):
         n=st.integers(1, 50),
         k=st.integers(1, 50),
         rnd_seed=st.integers(1, 5),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_compute_equalization_scale(self, m, n, k, rnd_seed, gc, dc):
         np.random.seed(rnd_seed)

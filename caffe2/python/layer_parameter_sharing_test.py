@@ -140,7 +140,7 @@ class ParameterSharingTest(LayersTestCase):
         train_net = core.Net('train_net')
         for layer in self.model.layers:
             layer.add_operators(train_net, train_init_net)
-        op_outputs = []
+        op_outputs = []  # type: ignore[var-annotated]
         for op in train_init_net._net.op:
             op_outputs.extend(op.output)
 

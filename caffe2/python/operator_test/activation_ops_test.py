@@ -264,7 +264,7 @@ class TestActivations(serial.SerializedTestCase):
 
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
-           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_mish(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)

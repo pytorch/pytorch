@@ -102,7 +102,7 @@ def downloadModel(model, args):
             response = ""
             query = "Model already exists, continue? [y/N] "
             try:
-                response = raw_input(query)
+                response = raw_input(query)  # type: ignore[name-defined]
             except NameError:
                 response = input(query)
             if response.upper() == 'N' or not response:
@@ -190,7 +190,7 @@ class ModelDownloader:
             debug_str += "c2_init_pb ParseFromString = " + str(len_read) + "\n"
         c2_init_net.name = model_name + '_init'
 
-        with open(os.path.join(model_dir, 'value_info.json')) as f:
+        with open(os.path.join(model_dir, 'value_info.json')) as f:  # type: ignore[assignment]
             value_info = json.load(f)
         return c2_init_net, c2_predict_net, value_info, debug_str
 

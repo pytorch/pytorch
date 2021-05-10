@@ -28,7 +28,7 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_rowwise_dnnlowp_fully_connected_int(
         self,
@@ -85,7 +85,7 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         b = np.random.randn(output_channels).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("FC", ""),

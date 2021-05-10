@@ -31,13 +31,13 @@ def fork_add(t1, t2, dst: str):
 class JitDistAutogradTest(RpcAgentTestFixture):
     @dist_init
     def test_get_gradients(self):
-        dst_rank = self.rank
+        dst_rank = self.rank  # type: ignore[attr-defined]
 
         @torch.jit.script
         def dist_get_gradients(context_id: int) -> (Dict[Tensor, Tensor]):
             return dist_autograd.get_gradients(context_id)
 
-        FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
+        FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
@@ -46,26 +46,26 @@ class JitDistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward(context_id, [t3.sum()])
             grads = dist_get_gradients(context_id)
 
-            self.assertEqual(2, len(grads))
-            self.assertIn(t1, grads)
-            self.assertIn(t2, grads)
-            self.assertEqual(torch.ones(3, 3), grads[t1])
-            self.assertEqual(torch.ones(3, 3), grads[t2])
+            self.assertEqual(2, len(grads))  # type: ignore[attr-defined]
+            self.assertIn(t1, grads)  # type: ignore[attr-defined]
+            self.assertIn(t2, grads)  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones(3, 3), grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones(3, 3), grads[t2])  # type: ignore[attr-defined]
 
     @dist_init
     def test_dist_backward(self):
-        if self.rank != 0:
+        if self.rank != 0:  # type: ignore[attr-defined]
             return
 
         @torch.jit.script
         def dist_backward_script(context_id: int, loss: torch.Tensor):
             dist_autograd.backward(context_id, [loss])
 
-        FileCheck().check("dist_backward").run(str(dist_backward_script.graph))
+        FileCheck().check("dist_backward").run(str(dist_backward_script.graph))  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
             t2 = torch.rand(3, 3, requires_grad=True)
-            dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+            dst_worker_name = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
             loss = rpc.rpc_sync(dst_worker_name, torch.add, args=(t1, t2)).sum()
             dist_backward_script(context_id, loss)
 
@@ -74,19 +74,19 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
-            dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+            dst_worker_name = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
             res = fork_add(t1, t2, dst_worker_name)
             loss = res.sum()
             dist_autograd.backward(context_id, [loss])
 
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(2, len(grads))
-            self.assertIn(t1, grads)
-            self.assertIn(t2, grads)
+            self.assertEqual(2, len(grads))  # type: ignore[attr-defined]
+            self.assertIn(t1, grads)  # type: ignore[attr-defined]
+            self.assertIn(t2, grads)  # type: ignore[attr-defined]
 
     @dist_init
     def test_restore_context_after_swtich_to_jit_thread(self):
-        if self.rank != 0:
+        if self.rank != 0:  # type: ignore[attr-defined]
             return
 
         @torch.jit.script
@@ -107,8 +107,8 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         with dist_autograd.context() as context_id:
             t1 = torch.ones((2, 3), requires_grad=True)
             t2 = torch.ones((2, 3), requires_grad=True)
-            dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+            dst_worker_name = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
             loss0, loss1 = forward_script(context_id, dst_worker_name, t1, t2)
             dist_autograd.backward(context_id, [loss0, loss1])
             grad0, grad1 = dist_autograd.get_gradients(context_id)
-            self.assertEqual(grad0, grad1)
+            self.assertEqual(grad0, grad1)  # type: ignore[attr-defined]

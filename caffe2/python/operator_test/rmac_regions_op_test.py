@@ -39,9 +39,9 @@ class RMACRegionsOpTest(hu.HypothesisTestCase):
             Wd = 0
             Hd = 0
             if H < W:
-                Wd = idx
+                Wd = idx  # type: ignore[assignment]
             elif H > W:
-                Hd = idx
+                Hd = idx  # type: ignore[assignment]
 
             regions_xywh = []
             for l in range(1, scales + 1):

@@ -43,7 +43,7 @@ def _init_output(output, capacity, global_init_net, global_exit_net):
         writer = out_queue.writer()
     elif isinstance(output, Writer):
         assert capacity is None, 'capacity would not be used.'
-        out_queue = None
+        out_queue = None  # type: ignore[assignment]
         writer = output
     elif hasattr(output, 'writer'):
         assert capacity is None, 'capacity would not be used.'
@@ -425,7 +425,7 @@ class NetProcessor(object):
     def __call__(self, rec):
         assert not self._frozen
         prefix = NetBuilder.current().name + '/'
-        blob_remap = {}
+        blob_remap = {}  # type: ignore[var-annotated]
         for net in self.thread_init_nets:
             new_net, _ = core.clone_and_bind_net(
                 net, str(net) + prefix, prefix, blob_remap)

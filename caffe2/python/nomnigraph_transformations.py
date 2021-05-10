@@ -36,14 +36,14 @@ def transpose_network(nn):
             # weights need to be transformed
             for idx in range(2):
                 new_inp = nn.createUniqueDataNode(inputs[idx].name)
-                transp = dfg.createNode(ng.NeuralNetOperator("NCHW2NHWC"))
+                transp = dfg.createNode(ng.NeuralNetOperator("NCHW2NHWC"))  # type: ignore[call-arg]
                 nn.createEdge(inputs[idx], transp)
                 nn.createEdge(transp, new_inp)
                 outgoing[inputs[idx]].append(transp)
                 inputs[idx] = new_inp
             for idx in range(len(outputs)):
                 new_outp = nn.createUniqueDataNode(outputs[idx].name)
-                transp = dfg.createNode(ng.NeuralNetOperator("NHWC2NCHW"))
+                transp = dfg.createNode(ng.NeuralNetOperator("NHWC2NCHW"))  # type: ignore[call-arg]
                 nn.createEdge(transp, outputs[idx])
                 nn.createEdge(new_outp, transp)
                 incoming[outputs[idx]] = new_outp

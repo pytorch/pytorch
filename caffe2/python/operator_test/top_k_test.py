@@ -18,7 +18,7 @@ class TestTopK(serial.SerializedTestCase):
         in_dims = X.shape
         out_dims = list(in_dims)
         out_dims[axis] = k
-        out_dims = tuple(out_dims)
+        out_dims = tuple(out_dims)  # type: ignore[assignment]
         if axis == -1:
             axis = len(in_dims) - 1
         prev_dims = 1

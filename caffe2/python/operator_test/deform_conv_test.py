@@ -84,7 +84,7 @@ def _conv_2d_shuffle_offsets(
     e = []
     for v in o:
         e.append([[v] * int(dims[1])] * int(dims[0]))
-    w0 = [[w0] * input_channels] * output_channels
+    w0 = [[w0] * input_channels] * output_channels  # type: ignore[list-item]
     return (
         np.array([e] * batch_size).astype(np.float32),
         utils.NCHW2NHWC(np.array(w0).astype(np.float32)),
@@ -106,7 +106,7 @@ class TestConvolution(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 3),
-        **hu.gcs_gpu_only
+        **hu.gcs_gpu_only  # type: ignore[arg-type]
     )
     def test_null_offset_convolution(
         self,
@@ -220,7 +220,7 @@ class TestConvolution(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 4),
-        **hu.gcs_gpu_only
+        **hu.gcs_gpu_only  # type: ignore[arg-type]
     )
     def test_flat_input_convolution(
         self,
@@ -318,7 +318,7 @@ class TestConvolution(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 4),
-        **hu.gcs_gpu_only
+        **hu.gcs_gpu_only  # type: ignore[arg-type]
     )
     def test_shuffle_input_convolution(
         self,
@@ -432,7 +432,7 @@ class TestConvolution(hu.HypothesisTestCase):
         shared_buffer=st.booleans(),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 3),
-        **hu.gcs_gpu_only
+        **hu.gcs_gpu_only  # type: ignore[arg-type]
     )
     def test_conv_separate_stride_pad_gradients(
         self,
@@ -520,7 +520,7 @@ class TestConvolution(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 3),
-        **hu.gcs_gpu_only
+        **hu.gcs_gpu_only  # type: ignore[arg-type]
     )
     def test_conv_gradients(
         self,

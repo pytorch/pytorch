@@ -159,7 +159,7 @@ def fuse_first_bn(net, params, removed_tensors):
 
 def fuse_bn(net, params, ignore_failure):
     # Run until we hit a fixed point
-    removed_tensors = []
+    removed_tensors = []  # type: ignore[var-annotated]
     while True:
         (next_net, next_params, removed_tensors) = \
             fuse_first_bn(net, params, removed_tensors)
@@ -188,7 +188,7 @@ def fuse_first_mul_add(net, params, removed_tensors):
         if len(blob_uses(net, current.output[0])) != 1:
             raise Exception("Failure to fuse")
 
-        log.info("Fusing at index %s", i)
+        log.info("Fusing at index %s", i)  # type: ignore[name-defined]
         mul_ = current
         add_ = next_
         batch_norm = copy.deepcopy(mul_)
@@ -221,7 +221,7 @@ def fuse_first_mul_add(net, params, removed_tensors):
 
 def fuse_mul_add(net, params):
     # Run until we hit a fixed point
-    removed_tensors = []
+    removed_tensors = []  # type: ignore[var-annotated]
     while True:
         (next_net, next_params, removed_tensors) = \
             fuse_first_mul_add(net, params, removed_tensors)
@@ -276,7 +276,7 @@ def fuse_conv_relu(net):
         op.device_option.CopyFrom(device_option)
 
     new_net = caffe2_pb2.NetDef()
-    new_net.ParseFromString(C.transform_optimizeForMKLDNN(net.SerializeToString()))
+    new_net.ParseFromString(C.transform_optimizeForMKLDNN(net.SerializeToString()))  # type: ignore[attr-defined]
     return new_net
 
 
@@ -327,8 +327,8 @@ def Optimize(args):
                                    atol=1e-3,
                                    rtol=1e-3)
 
-    for i, o in enumerate(predict_net.op):
-        print("op[{}]: {}".format(i, o.type))
+    for i, o in enumerate(predict_net.op):  # type: ignore[assignment]
+        print("op[{}]: {}".format(i, o.type))  # type: ignore[attr-defined]
     init_net = gen_init_net_from_blobs(param_dict)
     with open('init_net.pb', 'wb') as f:
         f.write(init_net.SerializeToString())

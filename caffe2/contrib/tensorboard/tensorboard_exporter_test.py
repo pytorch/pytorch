@@ -674,7 +674,7 @@ class TensorboardExporterTest(unittest.TestCase):
         model.net.RunAllOnGPU()
         model.param_init_net.RunAllOnGPU()
         model.AddGradientOperators([loss], skip=1)
-        track_blob_names = {}
+        track_blob_names = {}  # type: ignore[var-annotated]
         graph = tb.cnn_to_graph_def(
             model,
             track_blob_names=track_blob_names,

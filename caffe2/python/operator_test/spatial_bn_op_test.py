@@ -213,8 +213,8 @@ class TestSpatialBN(serial.SerializedTestCase):
 
             C = X.shape[1]
             reduce_size = batch_size * size * size
-            saved_mean = np.mean(X, (0, 2, 3))
-            saved_var = np.var(X, (0, 2, 3))
+            saved_mean = np.mean(X, (0, 2, 3))  # type: ignore[assignment]
+            saved_var = np.var(X, (0, 2, 3))  # type: ignore[assignment]
             if reduce_size == 1:
                 unbias_scale = float('inf')
             else:

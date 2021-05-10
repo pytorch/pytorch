@@ -42,7 +42,7 @@ class TestUtilityOps(serial.SerializedTestCase):
                 "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc
             )
 
-            def slice_ref(x, starts, ends):
+            def slice_ref(x, starts, ends):  # type: ignore[misc]
                 slc = [slice(None)] * x.ndim
                 slc[dim] = slice(slice_start, slice_end)
                 return [x[slc]]
@@ -331,7 +331,7 @@ class TestUtilityOps(serial.SerializedTestCase):
                         min_value=0, max_value=len(tup[1]) - 1)),
             )
         ),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_lengths_gather(self, inputs, gc, dc):
         items = inputs[0]
@@ -358,7 +358,7 @@ class TestUtilityOps(serial.SerializedTestCase):
 
     @given(
         inputs=hu.lengths_tensor(),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_lengths_to_ranges(self, inputs, gc, dc):
         _, lengths = inputs
@@ -452,7 +452,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             (2, 10000, 20000),
             (2, 10000, -1),
         ):
-            inputs = [np.array(v) for v in inputs]
+            inputs = [np.array(v) for v in inputs]  # type: ignore[attr-defined]
             op = core.CreateOperator(
                 "Range",
                 names[len(inputs) - 1],

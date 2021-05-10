@@ -18,8 +18,8 @@ class PackedFCTest(hu.HypothesisTestCase):
            M=st.integers(16, 32),
            K=st.integers(128, 1024),
            N=st.integers(128, 1024),
-           **hu.gcs_cpu_only)
-    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
+    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),  # type: ignore[attr-defined]
                      "Intel MKL sgemm_pack has a known numerical issue with "
                      "non-avx2 machines that will be fixed in a later build.")
     def test_packed_fc(self, seed, M, K, N, gc, dc):
@@ -44,12 +44,12 @@ class PackedFCTest(hu.HypothesisTestCase):
             )
             self.assertReferenceChecks(gc, op, [X, W, b], ref)
 
-    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),
+    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),  # type: ignore[attr-defined]
                      "Intel MKL sgemm_pack has a known numerical issue with "
                      "non-avx2 machines that will be fixed in a later build.")
     @given(axis=st.integers(min_value=1, max_value=4),
            num_output=st.integers(min_value=4, max_value=8),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_packed_fc_axis(self, axis, num_output, gc, dc):
         np.random.seed(1701)
         X = np.random.randn(1, 2, 3, 2, 1).astype(np.float32)

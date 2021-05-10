@@ -37,11 +37,11 @@ def _cudnn_supports(dilation=False, nhwc=False, backward=False):
 def _cudnn_convolution_algo_count(direction):
     try:
         if direction == "fwd":
-            return st.integers(0, C.cudnn_convolution_fwd_algo_count - 1)
+            return st.integers(0, C.cudnn_convolution_fwd_algo_count - 1)  # type: ignore[attr-defined]
         elif direction == "dgrad":
-            return st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1)
+            return st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1)  # type: ignore[attr-defined]
         elif direction == "wgrad":
-            return st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1)
+            return st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1)  # type: ignore[attr-defined]
         else:
             assert False
     except Exception:
@@ -573,7 +573,7 @@ class TestConvolution(serial.SerializedTestCase):
         force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
         force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
-        **hu.gcs_no_hip
+        **hu.gcs_no_hip  # type: ignore[arg-type]
     )  # MIOPEN doesn't support 3D conv yet
     @settings(deadline=10000)
     def test_3d_convolution_cudnn_nchw(
@@ -759,7 +759,7 @@ class TestConvolution(serial.SerializedTestCase):
             )
         ),
         engine=st.sampled_from(["CUDNN", ""]),
-        **hu.gcs_no_hip
+        **hu.gcs_no_hip  # type: ignore[arg-type]
     )
     @settings(deadline=1000)
     def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
@@ -875,7 +875,7 @@ class TestConvolution(serial.SerializedTestCase):
                     else:
                         op_cudnn = False  # the default
                     if op_engine is not None:
-                        kwargs["engine"] = op_engine
+                        kwargs["engine"] = op_engine  # type: ignore[assignment]
 
                     calculated_cudnn = kwargs.get("use_cudnn", model_default)
                     expected_engine = kwargs.get(

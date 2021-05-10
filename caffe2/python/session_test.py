@@ -47,7 +47,7 @@ class TestLocalSession(TestCase):
         src_ds = Dataset(src_blobs)
         dst_ds = Dataset(dst_blobs)
 
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             out1 = pipe(src_ds.reader(), processor=proc1)
             out2 = pipe(out1, processor=proc2)
             pipe(out2, dst_ds.writer())

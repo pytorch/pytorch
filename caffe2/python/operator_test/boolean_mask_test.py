@@ -14,7 +14,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
     @given(x=hu.tensor1d(min_len=1,
                          max_len=100,
                          elements=hu.floats(min_value=0.5, max_value=1.0)),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_boolean_mask_gradient(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",

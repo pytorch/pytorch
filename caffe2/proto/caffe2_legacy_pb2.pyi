@@ -13,7 +13,7 @@ import typing_extensions
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor = ...
 
 global___LegacyPadding = LegacyPadding
-class _LegacyPadding(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[LegacyPadding], type):
+class _LegacyPadding(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[LegacyPadding], type):  # type: ignore[type-var]
     DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
     NOTSET = LegacyPadding.V(0)
     VALID = LegacyPadding.V(1)

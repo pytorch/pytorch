@@ -42,9 +42,9 @@ class TestMPI(hu.HypothesisTestCase):
     def test_broadcast(self, X, root, device_option, gc, dc):
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
-        X = COMM.bcast(X)
-        root = COMM.bcast(root)
-        device_option = COMM.bcast(device_option)
+        X = COMM.bcast(X)  # type: ignore[union-attr]
+        root = COMM.bcast(root)  # type: ignore[union-attr]
+        device_option = COMM.bcast(device_option)  # type: ignore[union-attr]
         X[:] = RANK
         self.assertTrue(
             workspace.RunOperatorOnce(
@@ -67,9 +67,9 @@ class TestMPI(hu.HypothesisTestCase):
     def test_reduce(self, X, root, device_option, gc, dc):
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
-        X = COMM.bcast(X)
-        root = COMM.bcast(root)
-        device_option = COMM.bcast(device_option)
+        X = COMM.bcast(X)  # type: ignore[union-attr]
+        root = COMM.bcast(root)  # type: ignore[union-attr]
+        device_option = COMM.bcast(device_option)  # type: ignore[union-attr]
         X[:] = RANK
         self.assertTrue(
             workspace.RunOperatorOnce(
@@ -94,10 +94,10 @@ class TestMPI(hu.HypothesisTestCase):
     def test_allreduce(self, X, root, device_option, inplace, gc, dc):
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
-        X = COMM.bcast(X)
-        root = COMM.bcast(root)
-        device_option = COMM.bcast(device_option)
-        inplace = COMM.bcast(inplace)
+        X = COMM.bcast(X)  # type: ignore[union-attr]
+        root = COMM.bcast(root)  # type: ignore[union-attr]
+        device_option = COMM.bcast(device_option)  # type: ignore[union-attr]
+        inplace = COMM.bcast(inplace)  # type: ignore[union-attr]
         X[:] = RANK
         self.assertTrue(
             workspace.RunOperatorOnce(
@@ -106,7 +106,7 @@ class TestMPI(hu.HypothesisTestCase):
                     device_option=device_option)))
         # Use mpi4py's broadcast to make sure that all copies have the same
         # tensor size.
-        X = COMM.bcast(X)
+        X = COMM.bcast(X)  # type: ignore[union-attr]
         X[:] = RANK
         self.assertTrue(workspace.FeedBlob("X", X, device_option))
         mpi_op = core.CreateOperator(
@@ -129,10 +129,10 @@ class TestMPI(hu.HypothesisTestCase):
             gc, dc):
         # Use mpi4py's broadcast to make sure that all nodes inherit the
         # same hypothesis test.
-        X = COMM.bcast(X)
-        device_option = COMM.bcast(device_option)
-        specify_send_blob = COMM.bcast(specify_send_blob)
-        specify_recv_blob = COMM.bcast(specify_recv_blob)
+        X = COMM.bcast(X)  # type: ignore[union-attr]
+        device_option = COMM.bcast(device_option)  # type: ignore[union-attr]
+        specify_send_blob = COMM.bcast(specify_send_blob)  # type: ignore[union-attr]
+        specify_recv_blob = COMM.bcast(specify_recv_blob)  # type: ignore[union-attr]
         X[:] = RANK
 
         self.assertTrue(
@@ -190,7 +190,7 @@ class TestMPI(hu.HypothesisTestCase):
                     tag_blob = workspace.FetchBlob("tag")
                     np.testing.assert_array_equal(tag_blob, tag)
                 # simply wait for the guys to finish
-                COMM.barrier()
+                COMM.barrier()  # type: ignore[union-attr]
         workspace.ResetWorkspace()
 
 if __name__ == "__main__":

@@ -41,13 +41,13 @@ def create_db(output_file):
             tensor_protos = caffe2_pb2.TensorProtos()
             img_tensor = tensor_protos.protos.add()
             img_tensor.dims.extend(img_data.shape)
-            img_tensor.data_type = 1
+            img_tensor.data_type = 1  # type: ignore[assignment]
 
             flatten_img = img_data.reshape(np.prod(img_data.shape))
             img_tensor.float_data.extend(flatten_img)
 
             label_tensor = tensor_protos.protos.add()
-            label_tensor.data_type = 2
+            label_tensor.data_type = 2  # type: ignore[assignment]
             label_tensor.int32_data.append(label)
             txn.put(
                 '{}'.format(j).encode('ascii'),

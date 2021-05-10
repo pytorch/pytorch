@@ -47,7 +47,7 @@ def allcompare_process(filestore_dir, process_id, data, num_procs):
     )
 
     model = ModelHelper()
-    model._rendezvous = rendezvous
+    model._rendezvous = rendezvous  # type: ignore[attr-defined]
 
     workspace.FeedBlob("test_data", data)
 

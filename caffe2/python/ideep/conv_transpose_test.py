@@ -26,7 +26,7 @@ class ConvTransposeTest(hu.HypothesisTestCase):
            training_mode=st.booleans(),
            compute_dX=st.booleans(),
            **mu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, timeout=100)  # type: ignore[call-arg]
     def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
                                              size, input_channels,
                                              output_channels, batch_size,

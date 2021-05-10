@@ -13,7 +13,7 @@ import typing_extensions
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor = ...
 
 global___DeviceTypeProto = DeviceTypeProto
-class _DeviceTypeProto(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DeviceTypeProto], type):
+class _DeviceTypeProto(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DeviceTypeProto], type):  # type: ignore[type-var]
     DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
     PROTO_CPU = DeviceTypeProto.V(0)
     PROTO_CUDA = DeviceTypeProto.V(1)
@@ -44,7 +44,7 @@ PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = DeviceTypeProto.V(11)
 
 class TensorProto(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
-    class _DataType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DataType], type):
+    class _DataType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DataType], type):  # type: ignore[type-var]
         DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
         UNDEFINED = TensorProto.DataType.V(0)
         FLOAT = TensorProto.DataType.V(1)
@@ -79,7 +79,7 @@ class TensorProto(google.protobuf.message.Message):
     ZERO_COLLISION_HASH = TensorProto.DataType.V(14)
     REBATCHING_BUFFER = TensorProto.DataType.V(15)
 
-    class _SerializationFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SerializationFormat], type):
+    class _SerializationFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SerializationFormat], type):  # type: ignore[type-var]
         DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
         FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
         FMT_BFLOAT16 = TensorProto.SerializationFormat.V(1)
@@ -255,7 +255,7 @@ global___TensorShapes = TensorShapes
 
 class TensorBoundShape(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
-    class _DimType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DimType], type):
+    class _DimType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DimType], type):  # type: ignore[type-var]
         DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
         UNKNOWN = TensorBoundShape.DimType.V(0)
         CONSTANT = TensorBoundShape.DimType.V(1)
@@ -712,7 +712,7 @@ global___DBReaderProto = DBReaderProto
 
 class BlobSerializationOptions(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
-    class _FloatFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[FloatFormat], type):
+    class _FloatFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[FloatFormat], type):  # type: ignore[type-var]
         DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
         FLOAT_DEFAULT = BlobSerializationOptions.FloatFormat.V(0)
         FLOAT_PROTOBUF = BlobSerializationOptions.FloatFormat.V(1)
@@ -757,11 +757,11 @@ global___SerializationOptions = SerializationOptions
 DeviceType = int
 
 # These are freedom-patched into caffe2_pb2 in caffe2/proto/__init__.py
-CPU: int = DeviceType.PROTO_CPU
-CUDA: int = DeviceType.PROTO_CUDA
-MKLDNN: int = DeviceType.PROTO_MKLDNN
-OPENGL: int = DeviceType.PROTO_OPENGL
-OPENCL: int = DeviceType.PROTO_OPENCL
-IDEEP: int = DeviceType.PROTO_IDEEP
-HIP: int = DeviceType.PROTO_HIP
-COMPILE_TIME_MAX_DEVICE_TYPES: int = DeviceType.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES
+CPU: int = DeviceType.PROTO_CPU  # type: ignore[attr-defined]
+CUDA: int = DeviceType.PROTO_CUDA  # type: ignore[attr-defined]
+MKLDNN: int = DeviceType.PROTO_MKLDNN  # type: ignore[attr-defined]
+OPENGL: int = DeviceType.PROTO_OPENGL  # type: ignore[attr-defined]
+OPENCL: int = DeviceType.PROTO_OPENCL  # type: ignore[attr-defined]
+IDEEP: int = DeviceType.PROTO_IDEEP  # type: ignore[attr-defined]
+HIP: int = DeviceType.PROTO_HIP  # type: ignore[attr-defined]
+COMPILE_TIME_MAX_DEVICE_TYPES: int = DeviceType.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES  # type: ignore[attr-defined]

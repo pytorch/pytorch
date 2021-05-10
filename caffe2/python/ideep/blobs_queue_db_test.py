@@ -96,10 +96,10 @@ class BlobsQueueDBTest(unittest.TestCase):
     def _create_test_tensor_protos(self, idx):
         item = caffe2_pb2.TensorProtos()
         data = item.protos.add()
-        data.data_type = core.DataType.STRING
+        data.data_type = core.DataType.STRING  # type: ignore[assignment]
         data.string_data.append("foo{}".format(idx).encode('utf-8'))
         label = item.protos.add()
-        label.data_type = core.DataType.INT32
+        label.data_type = core.DataType.INT32  # type: ignore[assignment]
         label.int32_data.append(1)
 
         return item.SerializeToString()

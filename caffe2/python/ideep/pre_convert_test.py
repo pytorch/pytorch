@@ -91,7 +91,7 @@ class PreConvertTest(hu.HypothesisTestCase):
                     self.assertTrue(False)
 
             workspace.ResetWorkspace()
-            workspace.SwitchWorkspace(old_ws_name)
+            workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 if __name__ == "__main__":
     unittest.main()

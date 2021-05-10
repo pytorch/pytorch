@@ -20,14 +20,14 @@ def has_blob(proto, needle):
 
 
 def count_blobs(proto):
-    blobs = set()
+    blobs = set()  # type: ignore[var-annotated]
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
     return len(blobs)
 
 
 def count_shared_blobs(proto):
-    blobs = set()
+    blobs = set()  # type: ignore[var-annotated]
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
     return len([b for b in blobs if "_shared" in b])

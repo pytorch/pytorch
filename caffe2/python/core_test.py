@@ -255,25 +255,25 @@ class TestExternalInputs(test_util.TestCase):
     def testAddExternalInputShouldRaiseIfDuplicate(self):
         net = core.Net("test")
         net.AddExternalInput(
-            schema.Struct(("x", schema.Scalar(np.float))),
+            schema.Struct(("x", schema.Scalar(np.float))),  # type: ignore[attr-defined]
         )
         with self.assertRaises(AssertionError):
             net.AddExternalInput(
-                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float))),  # type: ignore[attr-defined]
             )
 
     def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
         net = core.Net("test")
         with self.assertRaises(AssertionError):
             net.AddExternalInput(
-                schema.Struct(("x", schema.Scalar(np.float))),
-                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float))),  # type: ignore[attr-defined]
+                schema.Struct(("x", schema.Scalar(np.float))),  # type: ignore[attr-defined]
             )
 
     def testSetInputRecordWithBlobs(self):
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(
-            ("x", schema.Scalar(np.float)),
+            ("x", schema.Scalar(np.float)),  # type: ignore[attr-defined]
         ))
         input_record = net.set_input_record(record)
         self.assertTrue(net.BlobIsDefined(input_record.x()))
@@ -281,7 +281,7 @@ class TestExternalInputs(test_util.TestCase):
 
     def testSetInputRecordWithoutBlobs(self):
         net = core.Net("test")
-        record = schema.Struct(("x", schema.Scalar(np.float)))
+        record = schema.Struct(("x", schema.Scalar(np.float)))  # type: ignore[attr-defined]
         input_record = net.set_input_record(record)
         self.assertTrue(net.BlobIsDefined(input_record.x()))
         self.assertIn(input_record.x(), net.external_inputs)
@@ -491,8 +491,8 @@ class TestOperatorTraceback(test_util.TestCase):
     def test_operator_constructor_traceback(self):
         net = core.Net("test")
         a, b = net.AddExternalInput("a", "b")
-        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
-        func = cf.f_code.co_name
+        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno  # type: ignore[union-attr]
+        func = cf.f_code.co_name  # type: ignore[union-attr]
         with self.assertRaises(Exception):
             workspace.RunNetOnce(net)
         with self.assertRaises(Exception):
@@ -503,8 +503,8 @@ class TestOperatorTraceback(test_util.TestCase):
         net = core.Net("test")
         a = net.AddExternalInput("a")
         workspace.blobs[a] = np.array([1, 2, 3], dtype=np.float32)
-        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
-        func = cf.f_code.co_name
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno  # type: ignore[union-attr]
+        func = cf.f_code.co_name  # type: ignore[union-attr]
         with self.assertRaises(Exception):
             workspace.RunNetOnce(net)
         workspace.CreateNet(net)
@@ -515,8 +515,8 @@ class TestOperatorTraceback(test_util.TestCase):
     def test_c_workspace_constructor(self):
         net = core.Net("test")
         a, b = net.AddExternalInput("a", "b")
-        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
-        func = cf.f_code.co_name
+        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno  # type: ignore[union-attr]
+        func = cf.f_code.co_name  # type: ignore[union-attr]
         ws = workspace.C.Workspace()
         with self.assertRaises(Exception):
             ws.run(net)
@@ -527,8 +527,8 @@ class TestOperatorTraceback(test_util.TestCase):
     def test_c_workspace_runtime(self):
         net = core.Net("test")
         a = net.AddExternalInput("a")
-        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
-        func = cf.f_code.co_name
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno  # type: ignore[union-attr]
+        func = cf.f_code.co_name  # type: ignore[union-attr]
         ws = workspace.C.Workspace()
         ws.create_blob(str(a)).feed(np.array([1, 2, 3], dtype=np.float32))
         ws.create_net(net)
@@ -540,8 +540,8 @@ class TestOperatorTraceback(test_util.TestCase):
         net = core.Net("test")
         net.Proto().type = 'dag'  # this runs operators on background threads
         a = net.AddExternalInput("a")
-        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
-        func = cf.f_code.co_name
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno  # type: ignore[union-attr]
+        func = cf.f_code.co_name  # type: ignore[union-attr]
         workspace.FeedBlob(a, np.array([1, 2, 3], dtype=np.float32))
         with self.assertRaises(Exception) as enforceNotMet:
             workspace.RunNetOnce(net)
@@ -553,7 +553,7 @@ class TestCreatePlan(test_util.TestCase):
 
     def test_create_plan_from_proto_correctly(self):
         from caffe2.python.net_builder import ops
-        with Node('trainer'), Task(name='my_task', num_instances=2) as task:
+        with Node('trainer'), Task(name='my_task', num_instances=2) as task:  # type: ignore[attr-defined]
             with ops.task_init():
                 globl = ops.Const(0)
             with ops.task_instance_init():

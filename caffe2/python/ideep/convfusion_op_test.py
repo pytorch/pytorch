@@ -114,7 +114,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Y2 - Y0)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -381,7 +381,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             input_channels, input_channels, 1, 1).astype(np.float32) - 0.5
         b = np.random.rand(input_channels).astype(np.float32) - 0.5
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
         workspace.ResetWorkspace()
         workspace.FeedBlob('X0', X, dc[0])
         workspace.FeedBlob('w0', w, dc[0])
@@ -577,7 +577,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(S2 - S0)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -686,7 +686,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(S2 - S0)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -774,7 +774,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Y - Y1)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -855,7 +855,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Y - Y1)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 if __name__ == "__main__":
     unittest.main()

@@ -190,32 +190,32 @@ def Allreduce8(net, blobs, reduced_affix, gpu_indices):
             device_option=OnGPU(gpu_indices[i])
         )
     # Reduction level 3: this involves a copy.
-    reduced_4_copy = reduced[4].Copy(
+    reduced_4_copy = reduced[4].Copy(  # type: ignore[attr-defined]
         [],
         str(reduced[4]) + '_copy',
         device_option=OnGPU(gpu_indices[0])
     )
-    reduced[0] = reduced[0].Add(
+    reduced[0] = reduced[0].Add(  # type: ignore[attr-defined]
         reduced_4_copy,
         reduced[0],
         device_option=OnGPU(gpu_indices[0])
     )
     # Broadcast level 1
-    reduced[4] = reduced[0].Copy(
+    reduced[4] = reduced[0].Copy(  # type: ignore[attr-defined]
         [],
         reduced[4],
         device_option=OnGPU(gpu_indices[4])
     )
     # Broadcast level 2
     for i in [2, 6]:
-        reduced[i] = reduced[i - 2].Copy(
+        reduced[i] = reduced[i - 2].Copy(  # type: ignore[attr-defined]
             [],
             reduced[i],
             device_option=OnGPU(gpu_indices[i])
         )
     # Broadcast level 3
     for i in [1, 3, 5, 7]:
-        reduced[i] = reduced[i - 1].Copy(
+        reduced[i] = reduced[i - 1].Copy(  # type: ignore[attr-defined]
             [],
             blobs[i] + reduced_affix,
             device_option=OnGPU(gpu_indices[i])
@@ -242,7 +242,7 @@ def AllreduceFallback(net, blobs, reduced_affix, gpu_indices):
     else:
         reduced[0] = blobs[0]
     # do temp copy and add
-    temp_name = reduced[0] + '_temp_copy'
+    temp_name = reduced[0] + '_temp_copy'  # type: ignore[operator]
     for i in range(1, len(gpu_indices)):
         temp = net.Copy(
             blobs[i],

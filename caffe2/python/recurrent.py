@@ -114,7 +114,7 @@ def recurrent_net(
         backward_cell_net.Proto().external_input.extend(scratches)
         backward_cell_net.Proto().type = 'simple'
     else:
-        backward_cell_net = None
+        backward_cell_net = None  # type: ignore[assignment]
 
     all_inputs = [i[1] for i in inputs] + [
         x[1] for x in initial_cell_inputs] + references

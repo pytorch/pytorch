@@ -20,7 +20,7 @@ def calculate_ap(predictions, labels):
         sortind = np.argsort(-scores, kind='mergesort')
         truth = label[sortind]
         precision = np.cumsum(truth) / num_range
-        ap[k] = precision[truth.astype(np.bool)].sum() / max(1, truth.sum())
+        ap[k] = precision[truth.astype(np.bool)].sum() / max(1, truth.sum())  # type: ignore[attr-defined]
     return ap
 
 
@@ -34,7 +34,7 @@ class TestAPMeterOps(hu.HypothesisTestCase):
                             dtype=np.int32,
                             elements=st.integers(min_value=0,
                                                  max_value=1)),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_average_precision(self, predictions, labels, gc, dc):
         op = core.CreateOperator(
             "APMeter",
@@ -62,7 +62,7 @@ class TestAPMeterOps(hu.HypothesisTestCase):
                             dtype=np.int32,
                             elements=st.integers(min_value=0,
                                                  max_value=1)),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_average_precision_small_buffer(self, predictions, labels, gc, dc):
         op_small_buffer = core.CreateOperator(
             "APMeter",

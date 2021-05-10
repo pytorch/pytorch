@@ -52,7 +52,7 @@ class PoolTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **mu.gcs_cpu_ideep)
+           **mu.gcs_cpu_ideep)  # type: ignore[arg-type]
     def test_int8_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
                          method, gc, dc):
@@ -143,7 +143,7 @@ class PoolTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 
 

@@ -123,7 +123,7 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
         max_value=st.integers(min_value=100, max_value=1000),
         discrete=st.booleans(),
         p=st.floats(min_value=0, max_value=0.9),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_bisect_percentil_op_large(
         self, N, lengths, max_value, discrete, p, gc, dc
@@ -167,11 +167,11 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
             pct_upper.extend(pct_upper_cur)
             pct_raw_data.extend(pct_raw_data_cur)
 
-        pct_lower = np.array(pct_lower, dtype=np.float32)
-        pct_upper = np.array(pct_upper, dtype=np.float32)
-        pct_mapping = (pct_lower + pct_upper) / 2.
+        pct_lower = np.array(pct_lower, dtype=np.float32)  # type: ignore[assignment]
+        pct_upper = np.array(pct_upper, dtype=np.float32)  # type: ignore[assignment]
+        pct_mapping = (pct_lower + pct_upper) / 2.  # type: ignore[operator]
         raw_data = np.array(raw_data, dtype=np.float32)
-        pct_raw_data = np.array(pct_raw_data, dtype=np.float32)
+        pct_raw_data = np.array(pct_raw_data, dtype=np.float32)  # type: ignore[assignment]
 
         self.compare_reference(
             raw_data, pct_raw_data, pct_mapping, pct_lower, pct_upper, lengths)

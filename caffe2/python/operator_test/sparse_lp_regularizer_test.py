@@ -33,7 +33,7 @@ class TestSparseLpNorm(hu.HypothesisTestCase):
            p=st.integers(min_value=1, max_value=2),
            reg_lambda=st.floats(min_value=1e-4, max_value=1e-1),
            data_strategy=st.data(),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_sparse_lpnorm(self, inputs, p, reg_lambda, data_strategy, gc, dc):
 
         param, = inputs

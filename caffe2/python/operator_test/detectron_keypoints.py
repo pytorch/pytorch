@@ -32,8 +32,8 @@ def heatmaps_to_keypoints(maps, rois):
     heights = rois[:, 3] - rois[:, 1]
     widths = np.maximum(widths, 1)
     heights = np.maximum(heights, 1)
-    widths_ceil = np.ceil(widths).astype(np.int)
-    heights_ceil = np.ceil(heights).astype(np.int)
+    widths_ceil = np.ceil(widths).astype(np.int)  # type: ignore[attr-defined]
+    heights_ceil = np.ceil(heights).astype(np.int)  # type: ignore[attr-defined]
 
     num_keypoints = np.maximum(maps.shape[1], _NUM_KEYPOINTS)
 
@@ -171,13 +171,13 @@ and super simple, though we need a linear solver.
                 deltaY = 0
                 deltaScore = maxScore
             else:
-                deltaY = (b[1] * A[0][0] - b[0] * A[1][0]) / div
-                deltaX = (b[0] * A[1][1] - b[1] * A[0][1]) / div
+                deltaY = (b[1] * A[0][0] - b[0] * A[1][0]) / div  # type: ignore[assignment]
+                deltaX = (b[0] * A[1][1] - b[1] * A[0][1]) / div  # type: ignore[assignment]
                 # clip delta if going out-of-range of 3x3 grid
                 if abs(deltaX) > 1.5 or abs(deltaY) > 1.5:
                     scale = 1.5 / max(abs(deltaX), abs(deltaY))
-                    deltaX *= scale
-                    deltaY *= scale
+                    deltaX *= scale  # type: ignore[assignment]
+                    deltaY *= scale  # type: ignore[assignment]
                 # score = f(0) + f'(0)*x + 1/2 * f''(0) * x^2
                 #    = f(0) - b*x + 1/2*x*A*x
                 deltaScore = (

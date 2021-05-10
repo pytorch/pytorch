@@ -20,7 +20,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         N=st.integers(32, 256),
         M=st.integers(1, 3),
         is_empty=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_elementwise_sum_int(self, N, M, is_empty, gc, dc):
         if is_empty:
@@ -84,7 +84,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_dnnlowp_elementwise_sum_int_inplace(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -150,7 +150,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_dnnlowp_elementwise_sum_relu_int(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -214,7 +214,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_dnnlowp_elementwise_sum_relu_int_inplace(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]

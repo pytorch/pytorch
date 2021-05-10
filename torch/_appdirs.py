@@ -512,7 +512,7 @@ def _get_win_folder_from_registry(csidl_name):
 
 
 def _get_win_folder_with_pywin32(csidl_name):
-    from win32com.shell import shellcon, shell
+    from win32com.shell import shellcon, shell  # type: ignore[import]
     dir = shell.SHGetFolderPath(0, getattr(shellcon, csidl_name), 0, 0)
     # Try to make this a unicode path because SHGetFolderPath does
     # not return unicode strings when there is unicode data in the
@@ -529,7 +529,7 @@ def _get_win_folder_with_pywin32(csidl_name):
                 break
         if has_high_char:
             try:
-                import win32api
+                import win32api  # type: ignore[import]
                 dir = win32api.GetShortPathName(dir)
             except ImportError:
                 pass
@@ -548,7 +548,7 @@ def _get_win_folder_with_ctypes(csidl_name):
     }[csidl_name]
 
     buf = ctypes.create_unicode_buffer(1024)
-    ctypes.windll.shell32.SHGetFolderPathW(None, csidl_const, None, 0, buf)
+    ctypes.windll.shell32.SHGetFolderPathW(None, csidl_const, None, 0, buf)  # type: ignore[attr-defined]
 
     # Downgrade to short path name if have highbit chars. See
     # <http://bugs.activestate.com/show_bug.cgi?id=85099>.
@@ -559,18 +559,18 @@ def _get_win_folder_with_ctypes(csidl_name):
             break
     if has_high_char:
         buf2 = ctypes.create_unicode_buffer(1024)
-        if ctypes.windll.kernel32.GetShortPathNameW(buf.value, buf2, 1024):
+        if ctypes.windll.kernel32.GetShortPathNameW(buf.value, buf2, 1024):  # type: ignore[attr-defined]
             buf = buf2
 
     return buf.value
 
 def _get_win_folder_with_jna(csidl_name):
     import array
-    from com.sun import jna
-    from com.sun.jna.platform import win32
+    from com.sun import jna  # type: ignore[import]
+    from com.sun.jna.platform import win32  # type: ignore[import]
 
     buf_size = win32.WinDef.MAX_PATH * 2
-    buf = array.zeros('c', buf_size)
+    buf = array.zeros('c', buf_size)  # type: ignore[attr-defined]
     shell = win32.Shell32.INSTANCE
     shell.SHGetFolderPath(None, getattr(win32.ShlObj, csidl_name), None, win32.ShlObj.SHGFP_TYPE_CURRENT, buf)
     dir = jna.Native.toString(buf.tostring()).rstrip("\0")
@@ -583,7 +583,7 @@ def _get_win_folder_with_jna(csidl_name):
             has_high_char = True
             break
     if has_high_char:
-        buf = array.zeros('c', buf_size)
+        buf = array.zeros('c', buf_size)  # type: ignore[attr-defined]
         kernel = win32.Kernel32.INSTANCE
         if kernel.GetShortPathName(dir, buf, buf_size):
             dir = jna.Native.toString(buf.tostring()).rstrip("\0")
@@ -592,15 +592,15 @@ def _get_win_folder_with_jna(csidl_name):
 
 if system == "win32":
     try:
-        import win32com.shell
+        import win32com.shell  # type: ignore[import]
         _get_win_folder = _get_win_folder_with_pywin32
     except ImportError:
         try:
-            from ctypes import windll
+            from ctypes import windll  # type: ignore[attr-defined]
             _get_win_folder = _get_win_folder_with_ctypes
         except ImportError:
             try:
-                import com.sun.jna
+                import com.sun.jna  # type: ignore[import]
                 _get_win_folder = _get_win_folder_with_jna
             except ImportError:
                 _get_win_folder = _get_win_folder_from_registry

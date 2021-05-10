@@ -837,7 +837,7 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
         if final_dropout:
             # dropout ratio of 0.0 used to test mechanism but not interfere
             # with numerical tests
-            attention_cell = rnn_cell.DropoutCell(
+            attention_cell = rnn_cell.DropoutCell(  # type: ignore[assignment]
                 internal_cell=attention_cell,
                 dropout_ratio=0.0,
                 name='dropout',
@@ -846,7 +846,7 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
             )
 
         attention_cell = (
-            attention_cell if T is None
+            attention_cell if T is None  # type: ignore[assignment]
             else rnn_cell.UnrolledCell(attention_cell, T)
         )
 
@@ -898,7 +898,7 @@ def prepare_mul_rnn(model, input_blob, shape, T, outputs_with_grad, num_layers):
     cells = [MulCell(name="layer_{}".format(i)) for i in range(num_layers)]
     cell = rnn_cell.MultiRNNCell(name="multi_mul_rnn", cells=cells)
     if T is not None:
-        cell = rnn_cell.UnrolledCell(cell, T=T)
+        cell = rnn_cell.UnrolledCell(cell, T=T)  # type: ignore[assignment]
     states = [
         model.param_init_net.ConstantFill(
             [], "initial_state_{}".format(i), value=1.0, shape=[1, n, d])
@@ -961,7 +961,7 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_unroll_lstm(self, input_tensor, dim_out, outputs_with_grads,
                          **kwargs):
         lstms = [
-            _prepare_rnn(
+            _prepare_rnn(  # type: ignore[misc]
                 *input_tensor.shape,
                 create_rnn=rnn_cell.LSTM,
                 outputs_with_grads=outputs_with_grads,
@@ -1064,7 +1064,7 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_layered_lstm(self, input_tensor, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             for memory_optim in [False, True]:
-                _, net, inputs = _prepare_rnn(
+                _, net, inputs = _prepare_rnn(  # type: ignore[misc]
                     *input_tensor.shape,
                     create_rnn=rnn_cell.LSTM,
                     outputs_with_grads=outputs_with_grads,

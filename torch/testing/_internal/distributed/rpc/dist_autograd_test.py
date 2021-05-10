@@ -127,7 +127,7 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 def _all_contexts_cleaned_up(timeout_seconds=10):
     global known_context_ids
     start = time.time()
-    context_id_to_raised = set()
+    context_id_to_raised = set()  # type: ignore[var-annotated]
     while (
         time.time() - start < timeout_seconds
         and context_id_to_raised != known_context_ids
@@ -210,11 +210,11 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
 
     def _next_rank(self):
         if hasattr(self, "dst_rank"):
-            self.dst_rank = (self.dst_rank + 1) % self.world_size
-            if self.dst_rank == self.rank:
+            self.dst_rank = (self.dst_rank + 1) % self.world_size  # type: ignore[has-type]
+            if self.dst_rank == self.rank:  # type: ignore[attr-defined]
                 return self._next_rank()
         else:
-            self.dst_rank = (self.rank + 1) % self.world_size
+            self.dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
         return self.dst_rank
 
     def _check_rpc_done(self, rank_distance):
@@ -236,13 +236,13 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         ngrads = 0
         for i in range(0, nargs):
             if local_grads[i] is not None:
-                self.assertIn(args[i], grads)
-                self.assertEqual(local_grads[i], grads[args[i]])
+                self.assertIn(args[i], grads)  # type: ignore[attr-defined]
+                self.assertEqual(local_grads[i], grads[args[i]])  # type: ignore[attr-defined]
                 ngrads += 1
             else:
-                self.assertNotIn(args[i], grads)
+                self.assertNotIn(args[i], grads)  # type: ignore[attr-defined]
 
-        self.assertEqual(ngrads, len(grads))
+        self.assertEqual(ngrads, len(grads))  # type: ignore[attr-defined]
 
 
 class DistAutogradTest(CommonDistAutogradTest):
@@ -250,23 +250,23 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_autograd_context(self):
         # Verify max possible id.
         max_auto_increment = 281474976710655
-        self.assertEqual(
-            max_auto_increment + (self.worker_id << 48), dist_autograd._get_max_id()
+        self.assertEqual(  # type: ignore[attr-defined]
+            max_auto_increment + (self.worker_id << 48), dist_autograd._get_max_id()  # type: ignore[attr-defined]
         )
 
         context_ids = []
         for i in range(200):
             with dist_autograd.context() as context_id:
-                self.assertEqual(
+                self.assertEqual(  # type: ignore[attr-defined]
                     context_id,
                     dist_autograd._retrieve_context(context_id)._context_id(),
                 )
                 # First 16 bits should be worker_id.
-                self.assertEqual(self.worker_id, context_id >> 48)
+                self.assertEqual(self.worker_id, context_id >> 48)  # type: ignore[attr-defined]
                 context_ids.append(context_id)
 
         for context_id in context_ids:
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError,
                 "Could not find autograd context with id: {}".format(context_id),
             ):
@@ -276,7 +276,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_nested_context(self):
         with dist_autograd.context() as context_id:
             # Nested contexts not supported.
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "Already have an autograd context id for this thread"
             ):
                 with dist_autograd.context() as context_id:
@@ -300,18 +300,18 @@ class DistAutogradTest(CommonDistAutogradTest):
     ):
         # Retrieve the next functions in the graph.
         next_funcs = send_function.next_functions
-        self.assertEqual(2, len(next_funcs))
+        self.assertEqual(2, len(next_funcs))  # type: ignore[attr-defined]
 
         # We should now hit t1 and t2 in the autograd graph.
-        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
-        self.assertEqual(t1, next_funcs[0][0].variable)
-        self.assertEqual(0, next_funcs[0][1])
-        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
-        self.assertEqual(t2, next_funcs[1][0].variable)
-        self.assertEqual(0, next_funcs[1][1])
+        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())  # type: ignore[attr-defined]
+        self.assertEqual(t1, next_funcs[0][0].variable)  # type: ignore[attr-defined]
+        self.assertEqual(0, next_funcs[0][1])  # type: ignore[attr-defined]
+        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())  # type: ignore[attr-defined]
+        self.assertEqual(t2, next_funcs[1][0].variable)  # type: ignore[attr-defined]
+        self.assertEqual(0, next_funcs[1][1])  # type: ignore[attr-defined]
 
         # Test recv functions.
-        self.assertEqual(ret.grad_fn, recv_function)
+        self.assertEqual(ret.grad_fn, recv_function)  # type: ignore[attr-defined]
 
     # For a context passed from previous nested chain calls, this rank
     # receives two tensors t1 and t2, executes torch.add(t1, t2) and sends
@@ -326,20 +326,20 @@ class DistAutogradTest(CommonDistAutogradTest):
     def _verify_graph_for_rpc_call_exec(self, send_function):
         # Verify next function is AddBackward0
         next_funcs = send_function.next_functions
-        self.assertEqual(1, len(next_funcs))
+        self.assertEqual(1, len(next_funcs))  # type: ignore[attr-defined]
         add_backward_fn = next_funcs[0][0]
-        self.assertEqual("AddBackward0", add_backward_fn.name())
+        self.assertEqual("AddBackward0", add_backward_fn.name())  # type: ignore[attr-defined]
 
         # Verify the next two functions are the same recv backward function.
         next_funcs = add_backward_fn.next_functions
-        self.assertEqual(2, len(next_funcs))
-        self.assertEqual(
+        self.assertEqual(2, len(next_funcs))  # type: ignore[attr-defined]
+        self.assertEqual(  # type: ignore[attr-defined]
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
         )
-        self.assertEqual(
+        self.assertEqual(  # type: ignore[attr-defined]
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
         )
-        self.assertEqual(next_funcs[0][0], next_funcs[1][0])
+        self.assertEqual(next_funcs[0][0], next_funcs[1][0])  # type: ignore[attr-defined]
 
     # For a context passed from previous nested chain calls, this rank
     # receives two tensors t1 and t2, forwards t1 and t2 tensors using
@@ -356,34 +356,34 @@ class DistAutogradTest(CommonDistAutogradTest):
     #           t3.recvRpcBackward
     def _verify_graph_for_nested_rpc_call(self, ctx):
         send_functions = ctx._send_functions()
-        self.assertEqual(2, len(send_functions))
+        self.assertEqual(2, len(send_functions))  # type: ignore[attr-defined]
 
         # For send function when making nest rpc call,
         # next functions of the send function are two recv functions
         # for received two tensors from previous call
         next_funcs = list(send_functions.values())[0].next_functions
-        self.assertEqual(2, len(next_funcs))
-        self.assertEqual(
+        self.assertEqual(2, len(next_funcs))  # type: ignore[attr-defined]
+        self.assertEqual(  # type: ignore[attr-defined]
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
         )
-        self.assertEqual(
+        self.assertEqual(  # type: ignore[attr-defined]
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
         )
-        self.assertEqual(next_funcs[0][0], next_funcs[1][0])
+        self.assertEqual(next_funcs[0][0], next_funcs[1][0])  # type: ignore[attr-defined]
 
         # For send function when returning resonpose to previous call
         # next function of the send function is the recv function
         # for received tensor result returned from nested call
         next_funcs = list(send_functions.values())[1].next_functions
-        self.assertEqual(1, len(next_funcs))
-        self.assertEqual(
+        self.assertEqual(1, len(next_funcs))  # type: ignore[attr-defined]
+        self.assertEqual(  # type: ignore[attr-defined]
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
         )
 
     def _test_graph(self, fn, exec_mode):
-        dst_rank = (self.rank + 1) % self.world_size
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
 
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -403,11 +403,11 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             # Verify graph for current context id.
             ctx = dist_autograd._current_context()
-            self.assertEqual(context_id, ctx._context_id())
+            self.assertEqual(context_id, ctx._context_id())  # type: ignore[attr-defined]
             send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
+            self.assertEqual(1, len(send_functions))  # type: ignore[attr-defined]
             recv_functions = ctx._recv_functions()
-            self.assertEqual(1, len(recv_functions))
+            self.assertEqual(1, len(recv_functions))  # type: ignore[attr-defined]
             self._verify_graph_for_first_rpc_call(
                 list(send_functions.values())[0],
                 list(recv_functions.values())[0],
@@ -421,18 +421,18 @@ class DistAutogradTest(CommonDistAutogradTest):
             # Verify graph for previous context id.
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
+            self.assertEqual(1, len(send_functions))  # type: ignore[attr-defined]
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
             # this barrier is needed so one worker does not clean up their
             # autograd context before another worker tries to access it.
             dist.barrier()
 
         # autograd context should be cleaned up by now.
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError):  # type: ignore[attr-defined]
             ctx = dist_autograd._retrieve_context(context_id)
 
         # No autograd context available.
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError):  # type: ignore[attr-defined]
             ctx = dist_autograd._current_context()
 
     @dist_init
@@ -453,9 +453,9 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     # 3-layer nested calls
     def _test_graph_for_py_nested_call(self, exec_mode):
-        dst_rank = (self.rank + 1) % self.world_size
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
 
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -481,7 +481,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             for rd in [1, 2, 3]:
                 rpc.rpc_sync(
-                    worker_name((self.rank + rd) % self.world_size),
+                    worker_name((self.rank + rd) % self.world_size),  # type: ignore[attr-defined]
                     _set_rpc_done,
                     args=(context_id, rd),
                 )
@@ -500,11 +500,11 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             # Verify first graph for current context id.
             ctx = dist_autograd._current_context()
-            self.assertEqual(context_id, ctx._context_id())
+            self.assertEqual(context_id, ctx._context_id())  # type: ignore[attr-defined]
             send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
+            self.assertEqual(1, len(send_functions))  # type: ignore[attr-defined]
             recv_functions = ctx._recv_functions()
-            self.assertEqual(1, len(recv_functions))
+            self.assertEqual(1, len(recv_functions))  # type: ignore[attr-defined]
             self._verify_graph_for_first_rpc_call(
                 list(send_functions.values())[0],
                 list(recv_functions.values())[0],
@@ -524,7 +524,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             # verify last graph for rpc call execution.
             ctx = dist_autograd._retrieve_context(ctx_ids[3])
             send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
+            self.assertEqual(1, len(send_functions))  # type: ignore[attr-defined]
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
             # this barrier is needed so one worker does not clean up their
             # autograd context before another worker tries to access it.
@@ -540,9 +540,9 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     # Rank0->Rank1->Rank0
     def _test_graph_for_py_nested_call_itself(self, exec_mode):
-        dst_rank = (self.rank + 1) % self.world_size
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
 
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -554,7 +554,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     args=(
                         t1,
                         t2,
-                        (self.rank - 1 + self.world_size) % self.world_size,
+                        (self.rank - 1 + self.world_size) % self.world_size,  # type: ignore[attr-defined]
                         self.world_size,
                         0,
                     ),
@@ -566,7 +566,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     args=(
                         t1,
                         t2,
-                        (self.rank - 1 + self.world_size) % self.world_size,
+                        (self.rank - 1 + self.world_size) % self.world_size,  # type: ignore[attr-defined]
                         self.world_size,
                         0,
                     ),
@@ -575,7 +575,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
             rpc.rpc_sync(
-                worker_name((self.rank + 1) % self.world_size),
+                worker_name((self.rank + 1) % self.world_size),  # type: ignore[attr-defined]
                 _set_rpc_done,
                 args=(context_id, 1),
             )
@@ -586,11 +586,11 @@ class DistAutogradTest(CommonDistAutogradTest):
             # Another one is for prev context id when this rank make
             # nested call.
             ctx = dist_autograd._current_context()
-            self.assertEqual(context_id, ctx._context_id())
+            self.assertEqual(context_id, ctx._context_id())  # type: ignore[attr-defined]
             send_functions = ctx._send_functions()
-            self.assertEqual(2, len(send_functions))
+            self.assertEqual(2, len(send_functions))  # type: ignore[attr-defined]
             recv_functions = ctx._recv_functions()
-            self.assertEqual(2, len(recv_functions))
+            self.assertEqual(2, len(recv_functions))  # type: ignore[attr-defined]
             self._verify_graph_for_first_rpc_call(
                 list(send_functions.values())[0],
                 list(recv_functions.values())[1],
@@ -618,8 +618,8 @@ class DistAutogradTest(CommonDistAutogradTest):
         self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
 
     def _test_no_graph_with_tensors_not_require_grad(self, exec_mode):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        dst_rank = (self.rank + 1) % self.world_size
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
@@ -640,9 +640,9 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             ctx = dist_autograd._current_context()
             send_functions = ctx._send_functions()
-            self.assertEqual(len(send_functions), 0)
+            self.assertEqual(len(send_functions), 0)  # type: ignore[attr-defined]
             recv_functions = ctx._recv_functions()
-            self.assertEqual(len(recv_functions), 0)
+            self.assertEqual(len(recv_functions), 0)  # type: ignore[attr-defined]
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
@@ -652,7 +652,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             #
             # rpc/remote with udf (_set_rpc_done here) also always passes the
             # autograd context to the callee due to the same reason.
-            self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))
+            self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))  # type: ignore[attr-defined]
             dist.barrier()
 
     @dist_init
@@ -664,8 +664,8 @@ class DistAutogradTest(CommonDistAutogradTest):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
 
     def _test_grad_only_on_return_value(self, exec_mode):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        dst_rank = (self.rank + 1) % self.world_size
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(worker_name(dst_rank), ret_requires_grad)
@@ -685,9 +685,9 @@ class DistAutogradTest(CommonDistAutogradTest):
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
             grads = dist_autograd.get_gradients(ctx_ids[1])
-            self.assertEqual(1, len(grads))
-            self.assertIn(requires_grad_tensor, grads)
-            self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
+            self.assertEqual(1, len(grads))  # type: ignore[attr-defined]
+            self.assertIn(requires_grad_tensor, grads)  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])  # type: ignore[attr-defined]
             # due to the above get_gradients call, ensure that dist autograd
             # contexts aren't cleaned up until all workers exit context managers
             dist.barrier()
@@ -719,7 +719,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
-            self.assertEqual(torch.stack(tensors), ret)
+            self.assertEqual(torch.stack(tensors), ret)  # type: ignore[attr-defined]
 
             # Verify appropriate tensors have been attached the autograd graph.
             next_funcs = list(
@@ -727,16 +727,16 @@ class DistAutogradTest(CommonDistAutogradTest):
             )[0].next_functions
             idx = 0
             for i in range(len(next_funcs)):
-                self.assertEqual(
+                self.assertEqual(  # type: ignore[attr-defined]
                     "torch::autograd::AccumulateGrad", next_funcs[i][0].name()
                 )
-                self.assertEqual(tensors[i], next_funcs[i][0].variable)
+                self.assertEqual(tensors[i], next_funcs[i][0].variable)  # type: ignore[attr-defined]
 
             # Verify that the worker id has been recorded in the context
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 1)
-            self.assertEqual(worker_ids, {dst_rank})
+            self.assertEqual(len(worker_ids), 1)  # type: ignore[attr-defined]
+            self.assertEqual(worker_ids, {dst_rank})  # type: ignore[attr-defined]
 
     @dist_init
     def test_rpc_complex_args(self):
@@ -747,7 +747,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         self._test_rpc_complex_args(ExecMode.REMOTE)
 
     def context_cleanup_test_helper(self, rpc_args, func, nested=False):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         # test that in dist autograd, in the case that tensors communicated over RPC do
         # NOT require grad, we still cleanup the dist autograd contexts created
@@ -755,11 +755,11 @@ class DistAutogradTest(CommonDistAutogradTest):
         # communicated over RPC even if tensor arguments do not require grad, as
         #  it is possible that the response could.
         if nested:
-            dst_rank = (self.rank + 1) % self.world_size
+            dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
             nested_dst_rank = (dst_rank + 1) % self.world_size
             dst_ranks = {dst_rank}
         else:
-            dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+            dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             for dst_rank in dst_ranks:
@@ -774,14 +774,14 @@ class DistAutogradTest(CommonDistAutogradTest):
                         args=(context_id, 2),
                     )
         # the thread's context id should be cleaned up
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError):  # type: ignore[attr-defined]
             dist_autograd._retrieve_context(context_id)
         # Ensure all peers have finished mutating the
         # `known_context_ids` set.
         dist.barrier()
         # check that all contexts have been cleaned up.
         success = _all_contexts_cleaned_up()
-        self.assertTrue(success)
+        self.assertTrue(success)  # type: ignore[attr-defined]
 
     @dist_init
     def test_context_cleanup_tensor_with_grad(self):
@@ -802,7 +802,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_context_cleanup_nested_rpc(self):
         t1 = torch.ones(3, 3, requires_grad=True)
         t2 = torch.zeros(3, 3, requires_grad=True)
-        dst_rank = (self.rank + 1) % self.world_size
+        dst_rank = (self.rank + 1) % self.world_size  # type: ignore[attr-defined]
         args = (t1, t2, dst_rank, self.world_size, 0)
         self.context_cleanup_test_helper(
             rpc_args=args, func=my_py_nested_call, nested=True
@@ -810,7 +810,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_worker_ids_recorded(self):
-        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             # if no tensors require grad, we should still record worker_ids, as
             # the autograd context ID is still passed to other workers.
@@ -824,7 +824,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             # all worker_ids in dst_ranks should be recorded.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
-            self.assertEqual(worker_ids, dst_ranks)
+            self.assertEqual(worker_ids, dst_ranks)  # type: ignore[attr-defined]
 
             # worker_ids should be recorded when tensors do require grad
             t1.requires_grad = True
@@ -838,7 +838,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 )
             # all worker_ids in dst_ranks should be recorded.
             worker_ids = ctx._known_worker_ids()
-            self.assertEqual(worker_ids, dst_ranks)
+            self.assertEqual(worker_ids, dst_ranks)  # type: ignore[attr-defined]
 
     @dist_init
     def test_dist_autograd_profiling(self):
@@ -858,12 +858,12 @@ class DistAutogradTest(CommonDistAutogradTest):
         recv_event = get_event("RecvRpcBackward")
         backward_event = get_event("torch::distributed::autograd::backward")
         # There should be at least 1 send and recv_events each, corresponding to send/recv functions executed.
-        self.assertEqual(send_event.count, 1)
-        self.assertEqual(recv_event.count, 1)
+        self.assertEqual(send_event.count, 1)  # type: ignore[attr-defined]
+        self.assertEqual(recv_event.count, 1)  # type: ignore[attr-defined]
         # The CPU total for backward event should be great than send and recv, since
         # applying those functions in the backwards pass is a subset of the entire backward pass.
-        self.assertGreater(backward_event.cpu_time_total, send_event.cpu_time_total)
-        self.assertGreater(backward_event.cpu_time_total, recv_event.cpu_time_total)
+        self.assertGreater(backward_event.cpu_time_total, send_event.cpu_time_total)  # type: ignore[attr-defined]
+        self.assertGreater(backward_event.cpu_time_total, recv_event.cpu_time_total)  # type: ignore[attr-defined]
 
     @dist_init
     def test_error_in_context(self):
@@ -871,7 +871,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             t1 = torch.rand(3, 3, requires_grad=True)
             t2 = torch.rand(6, 6, requires_grad=True)
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError):  # type: ignore[attr-defined]
                 # This should throw an error since matrix sizes don't match.
                 rpc.rpc_sync(
                     worker_name(self._next_rank()), torch.matmul, args=(t1, t2)
@@ -888,21 +888,21 @@ class DistAutogradTest(CommonDistAutogradTest):
                 args=(t1, t2)).sum()
 
             dist_autograd.backward(context_id, [loss], retain_graph=True)
-            self.assertIsNone(t1.grad)
-            self.assertIsNone(t2.grad)
+            self.assertIsNone(t1.grad)  # type: ignore[attr-defined]
+            self.assertIsNone(t2.grad)  # type: ignore[attr-defined]
 
             # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
             loss_local = torch.add(t1, t2).sum()
             loss_local.backward()
-            self.assertIsNotNone(t1.grad)
-            self.assertIsNotNone(t2.grad)
+            self.assertIsNotNone(t1.grad)  # type: ignore[attr-defined]
+            self.assertIsNotNone(t2.grad)  # type: ignore[attr-defined]
 
             t1_grad_before = t1.grad
             t2_grad_before = t2.grad
             dist_autograd.backward(context_id, [loss])
-            self.assertEqual(t1_grad_before, t1.grad)
-            self.assertEqual(t2_grad_before, t2.grad)
+            self.assertEqual(t1_grad_before, t1.grad)  # type: ignore[attr-defined]
+            self.assertEqual(t2_grad_before, t2.grad)  # type: ignore[attr-defined]
 
     def _test_backward_simple(self, dst):
         # Run the same code locally and with dist autograd and verify gradients
@@ -927,7 +927,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_simple_self(self):
-        self._test_backward_simple(self.rank)
+        self._test_backward_simple(self.rank)  # type: ignore[attr-defined]
 
     # The current rank first creates a tensor on the rref_owner, and then passes
     # the rref with another tensor to the callee to run either my_rref_add or
@@ -957,11 +957,11 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             # verify grads on caller
             grads = dist_autograd.get_gradients(context_id)
-            self.assertIn(t2, grads)
-            self.assertEqual(grads[t2], t2.grad)
+            self.assertIn(t2, grads)  # type: ignore[attr-defined]
+            self.assertEqual(grads[t2], t2.grad)  # type: ignore[attr-defined]
 
             # verify grads on rref owner
-            self.assertTrue(
+            self.assertTrue(  # type: ignore[attr-defined]
                 rpc.rpc_sync(
                     rref_owner,
                     _compare_owner_value,
@@ -977,15 +977,15 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_rref_multi(self):
-        if self.rank > 0:
+        if self.rank > 0:  # type: ignore[attr-defined]
             callee = "worker0"
             rref_owner = callee
             self._test_backward_rref(callee, rref_owner)
 
     @dist_init
     def test_backward_rref_nested(self):
-        callee = worker_name((self.rank + 1) % self.world_size)
-        rref_owner = worker_name((self.rank + 2) % self.world_size)
+        callee = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
+        rref_owner = worker_name((self.rank + 2) % self.world_size)  # type: ignore[attr-defined]
         self._test_backward_rref(callee, rref_owner)
 
     # In this test, every rank will serve as a parameter server (ps) and a
@@ -1007,7 +1007,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
         # create rref on self
         rref_t1 = rpc.remote(
-            worker_name(self.rank),
+            worker_name(self.rank),  # type: ignore[attr-defined]
             create_ref_fn,
             args=())
 
@@ -1017,9 +1017,9 @@ class DistAutogradTest(CommonDistAutogradTest):
         for rank_diff in rank_diffs:
             futures.append(
                 rpc.rpc_async(
-                    worker_name((self.rank + rank_diff) % self.world_size),
+                    worker_name((self.rank + rank_diff) % self.world_size),  # type: ignore[attr-defined]
                     trainer_fn,
-                    args=(rref_t1, t2, worker_name(self.rank), rank_diff),
+                    args=(rref_t1, t2, worker_name(self.rank), rank_diff),  # type: ignore[attr-defined]
                 )
             )
 
@@ -1035,8 +1035,8 @@ class DistAutogradTest(CommonDistAutogradTest):
             ctx_id = ctx_ids[rank_diff]
             grads = dist_autograd.get_gradients(ctx_id)
             local_t1 = rref_t1.to_here()
-            self.assertIn(local_t1, grads)
-            self.assertEqual(grads[local_t1], t1.grad)
+            self.assertIn(local_t1, grads)  # type: ignore[attr-defined]
+            self.assertEqual(grads[local_t1], t1.grad)  # type: ignore[attr-defined]
 
         # unblock trainers
         _set_rpc_done(None, 0)
@@ -1171,7 +1171,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         t.join(10)  # Wait for 10s.
 
         # Verify thread is still alive (indicating backward hasn't completed yet).
-        self.assertTrue(t.is_alive())
+        self.assertTrue(t.is_alive())  # type: ignore[attr-defined]
 
     @dist_init
     def test_backward_autograd_engine_error(self):
@@ -1197,7 +1197,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 worker_name(self._next_rank()), torch.div, args=(val, t2)
             )
 
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "Error on Node [0-9]+: Simulate error on backward pass"
             ):
                 # Run backwards, and validate we receive an error.
@@ -1210,7 +1210,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     )
     def test_backward_node_failure(self):
         rpc._set_rpc_timeout(5)  # 5 seconds
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -1223,7 +1223,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             dist.barrier()
 
             # Kill all odd rank nodes.
-            if self.rank % 2 == 0:
+            if self.rank % 2 == 0:  # type: ignore[attr-defined]
                 shutdown_error_regex = self.get_shutdown_error_regex()
                 # Wait for all other nodes to die.
                 for rank in range(self.world_size):
@@ -1232,7 +1232,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex()
-                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):  # type: ignore[attr-defined]
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward(context_id, [res.sum()])
@@ -1246,7 +1246,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         t2 = torch.rand((3, 3), requires_grad=True)
 
         context_id = 100  # dummy context_id
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegex(  # type: ignore[attr-defined]
             RuntimeError,
             "Could not find autograd context with id: {}".format(context_id),
         ):
@@ -1257,7 +1257,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_without_rpc(self):
-        dst_rank = self.rank
+        dst_rank = self.rank  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
@@ -1265,38 +1265,38 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             dist_autograd.backward(context_id, [t3.sum()])
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(2, len(grads))
-            self.assertIn(t1, grads)
-            self.assertIn(t2, grads)
-            self.assertEqual(torch.ones(3, 3), grads[t1])
-            self.assertEqual(torch.ones(3, 3), grads[t2])
+            self.assertEqual(2, len(grads))  # type: ignore[attr-defined]
+            self.assertIn(t1, grads)  # type: ignore[attr-defined]
+            self.assertIn(t2, grads)  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones(3, 3), grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones(3, 3), grads[t2])  # type: ignore[attr-defined]
 
     @dist_init
     def test_backward_invalid_args(self):
         with dist_autograd.context() as context_id:
 
-            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
-                dist_autograd.backward(context_id, None)
+            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):  # type: ignore[attr-defined]
+                dist_autograd.backward(context_id, None)  # type: ignore[arg-type]
 
-            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
-                dist_autograd.backward(None, None)
+            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):  # type: ignore[attr-defined]
+                dist_autograd.backward(None, None)  # type: ignore[arg-type]
 
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "No tensors provided for gradient computation"
             ):
                 dist_autograd.backward(context_id, [])
 
-            with self.assertRaisesRegex(RuntimeError, "requires_grad not set on"):
+            with self.assertRaisesRegex(RuntimeError, "requires_grad not set on"):  # type: ignore[attr-defined]
                 t = torch.rand(3, 3)
                 dist_autograd.backward(context_id, [t])
 
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "is not a scalar, all roots need to be scalar"
             ):
                 t = torch.rand(3, 3, requires_grad=True)
                 dist_autograd.backward(context_id, [t])
 
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "does not have a valid gradient function"
             ):
                 t = torch.rand(1, requires_grad=True)
@@ -1418,7 +1418,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 DistAutogradTest._nested_rpc_call_backward_error,
                 args=(t1, t2, self._next_rank()),
             )
-            with self.assertRaisesRegex(
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
                 RuntimeError, "Simulate error on backward pass"
             ):
                 dist_autograd.backward(context_id, [loss.sum()])
@@ -1433,7 +1433,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_backward_node_failure_python_udf(self):
         # Set a short timeout to quickly time out failed RPCs.
         rpc._set_rpc_timeout(5)  # 5 seconds
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -1449,17 +1449,17 @@ class DistAutogradTest(CommonDistAutogradTest):
             dist.barrier()
 
             # Kill rank 2 (last hop of nested rpc) and verify rank 0 receives an error.
-            if self.rank == 2:
+            if self.rank == 2:  # type: ignore[attr-defined]
                 return
 
             store = dist.distributed_c10d._get_default_store()
-            if self.rank == 0:
+            if self.rank == 0:  # type: ignore[attr-defined]
                 # Wait for rank 2 to die.
                 shutdown_error_regex = self.get_shutdown_error_regex()
                 wait_until_node_failure(2, shutdown_error_regex)
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex().
-                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):  # type: ignore[attr-defined]
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
 
@@ -1499,8 +1499,8 @@ class DistAutogradTest(CommonDistAutogradTest):
             dist_autograd.backward(context_id, [loss.sum()])
 
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(t1.grad, grads[t1])
-            self.assertEqual(t2.grad, grads[t2])
+            self.assertEqual(t1.grad, grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(t2.grad, grads[t2])  # type: ignore[attr-defined]
 
     _test_clean_context_backward_context_id = None
 
@@ -1538,7 +1538,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         It is fine for the 'backward' call to throw an exception in this test,
         but the process should not crash.
         """
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         context = dist_autograd._new_context()
         context_id = context._context_id()
@@ -1546,8 +1546,8 @@ class DistAutogradTest(CommonDistAutogradTest):
 
         # Send the context id to all nodes.
         for i in range(0, self.world_size):
-            if i != self.rank:
-                rank_distance = (i - self.rank + self.world_size) % self.world_size
+            if i != self.rank:  # type: ignore[attr-defined]
+                rank_distance = (i - self.rank + self.world_size) % self.world_size  # type: ignore[attr-defined]
                 rpc.rpc_sync(
                     worker_name(i),
                     _set_rpc_done,
@@ -1557,7 +1557,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         dist.barrier()
 
         # Verify all context ids have been received.
-        self.assertEqual(self.world_size - 1, len(known_context_ids))
+        self.assertEqual(self.world_size - 1, len(known_context_ids))  # type: ignore[attr-defined]
 
         t1 = torch.rand((3, 3), requires_grad=True)
         for i in range(0, 100):
@@ -1567,10 +1567,10 @@ class DistAutogradTest(CommonDistAutogradTest):
         # Call MyBackwardFunc as the first op of the backward pass to
         # ensure we release the context early in the backward pass.
         t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
-        self.assertEqual(100, len(context._send_functions()))
+        self.assertEqual(100, len(context._send_functions()))  # type: ignore[attr-defined]
 
         context_id = 100  # dummy context_id
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegex(  # type: ignore[attr-defined]
             RuntimeError,
             "Could not find autograd context with id: {}".format(context_id),
         ):
@@ -1639,7 +1639,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 args=(remote_embedding, context_id),
             )
 
-            self.assertEqual(local_grad.to_dense(), remote_grad)
+            self.assertEqual(local_grad.to_dense(), remote_grad)  # type: ignore[attr-defined]
 
     @classmethod
     def _mixed_requires_grad(cls, t1, t2):
@@ -1657,14 +1657,14 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ret = self._exec_func(
                     exec_mode, DistAutogradTest._mixed_requires_grad, t1, t2
                 )
-                self.assertEqual(t1 * t2, ret)
+                self.assertEqual(t1 * t2, ret)  # type: ignore[attr-defined]
                 dist_autograd.backward(context_id, [ret.sum()])
-                self.assertTrue(t1.requires_grad)
-                self.assertFalse(t2.requires_grad)
+                self.assertTrue(t1.requires_grad)  # type: ignore[attr-defined]
+                self.assertFalse(t2.requires_grad)  # type: ignore[attr-defined]
                 grads = dist_autograd.get_gradients(context_id)
-                self.assertIn(t1, grads)
-                self.assertNotIn(t2, grads)
-                self.assertEqual(t2, grads[t1])
+                self.assertIn(t1, grads)  # type: ignore[attr-defined]
+                self.assertNotIn(t2, grads)  # type: ignore[attr-defined]
+                self.assertEqual(t2, grads[t1])  # type: ignore[attr-defined]
 
     class TestDebugInfoFunc(Function):
         @staticmethod
@@ -1686,7 +1686,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_debug_info(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -1695,7 +1695,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             res = {}
             res[i] = t1
             for rank in range(self.world_size):
-                if rank != self.rank:
+                if rank != self.rank:  # type: ignore[attr-defined]
                     res[i + 1] = rpc.rpc_sync(
                         worker_name(rank), torch.add, args=(res[i], t2)
                     )
@@ -1707,7 +1707,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             i += 1
 
             for rank in range(self.world_size):
-                if rank != self.rank:
+                if rank != self.rank:  # type: ignore[attr-defined]
                     res[i + 1] = rpc.rpc_sync(
                         worker_name(rank), torch.add, args=(res[i], t2)
                     )
@@ -1718,11 +1718,11 @@ class DistAutogradTest(CommonDistAutogradTest):
             debug_info = dist_autograd._get_debug_info()
             num_autograd_context = int(debug_info["num_autograd_contexts"])
             # Need atleast one context and not more than 4.
-            self.assertTrue(num_autograd_context >= 1 and num_autograd_context <= 4)
+            self.assertTrue(num_autograd_context >= 1 and num_autograd_context <= 4)  # type: ignore[attr-defined]
 
         for rd in range(self.world_size - 1):
             rpc.rpc_sync(
-                worker_name((self.rank + rd + 1) % self.world_size),
+                worker_name((self.rank + rd + 1) % self.world_size),  # type: ignore[attr-defined]
                 _set_rpc_done,
                 args=(context_id, rd + 1),
             )
@@ -1732,15 +1732,15 @@ class DistAutogradTest(CommonDistAutogradTest):
         # Validate information
         debug_info = dist_autograd._get_debug_info()
         assert debug_info is not None
-        self.assertEqual(0, int(debug_info["num_current_backward_passes"]))
+        self.assertEqual(0, int(debug_info["num_current_backward_passes"]))  # type: ignore[attr-defined]
         # only have `num_current_backward_passes` and `num_autograd contexts`
-        self.assertTrue(len(debug_info) == 2)
+        self.assertTrue(len(debug_info) == 2)  # type: ignore[attr-defined]
 
-        self.assertTrue(_all_contexts_cleaned_up())
+        self.assertTrue(_all_contexts_cleaned_up())  # type: ignore[attr-defined]
 
         # All contexts should be cleaned up.
         debug_info = dist_autograd._get_debug_info()
-        self.assertEqual(0, int(debug_info["num_autograd_contexts"]))
+        self.assertEqual(0, int(debug_info["num_autograd_contexts"]))  # type: ignore[attr-defined]
 
     @staticmethod
     def _workload_thread():
@@ -1762,8 +1762,8 @@ class DistAutogradTest(CommonDistAutogradTest):
         hammering a single node with a lot of backward() calls.
         """
 
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        if self.rank != 0:
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
+        if self.rank != 0:  # type: ignore[attr-defined]
             # All other ranks schedule work on rank 0.
             threads = []
             for i in range(20):
@@ -1795,11 +1795,11 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             # Verify the gradients are same for local and remote execution.
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(2, len(grads))
-            self.assertIn(t1, grads)
-            self.assertIn(t2, grads)
-            self.assertEqual(t1.grad, grads[t1])
-            self.assertEqual(t2.grad, grads[t2])
+            self.assertEqual(2, len(grads))  # type: ignore[attr-defined]
+            self.assertIn(t1, grads)  # type: ignore[attr-defined]
+            self.assertIn(t2, grads)  # type: ignore[attr-defined]
+            self.assertEqual(t1.grad, grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(t2.grad, grads[t2])  # type: ignore[attr-defined]
 
     @staticmethod
     def _test_nested_backward_accumulate_grads(t1, t2, dst_rank):
@@ -1836,7 +1836,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init(clean_shutdown=False)
     def test_multiple_backward_with_errors(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
@@ -1849,7 +1849,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 # Run backward in a loop multiple times.
                 for i in range(100):
                     if i < 50:
-                        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
+                        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):  # type: ignore[attr-defined]
                             dist_autograd.backward(context_id, [loss], retain_graph=True)
                     elif i > 50:
                         # Recovered from error.
@@ -1927,8 +1927,8 @@ class DistAutogradTest(CommonDistAutogradTest):
         with dist_autograd.context() as context_id:
             dist_autograd.backward(context_id, [NonContGradFunc.apply(MyFunc.apply(a, b))])
             grads = dist_autograd.get_gradients(context_id)
-            self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)
-            self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)
+            self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)  # type: ignore[attr-defined]
+            self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)  # type: ignore[attr-defined]
 
         # test case that should trigger no copy for a
         with dist_autograd.context() as context_id:
@@ -1937,7 +1937,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             p_g = MyFuncSingleGrad.static_grad_ptr
             p_a = grads[a].data_ptr()
             # Verify there was no clone.
-            self.assertTrue(p_a == p_g)
+            self.assertTrue(p_a == p_g)  # type: ignore[attr-defined]
 
         # Test case that should trigger copy for both of a,b. This is
         # different in the distributed autograd case since we hold
@@ -1949,10 +1949,10 @@ class DistAutogradTest(CommonDistAutogradTest):
             p_a = grads[a].data_ptr()
             p_b = grads[b].data_ptr()
             # check a,b uses different grad buffer
-            self.assertFalse(p_a == p_b)
+            self.assertFalse(p_a == p_b)  # type: ignore[attr-defined]
             # both should be copied.
-            self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)
-            self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)
+            self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)  # type: ignore[attr-defined]
+            self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)  # type: ignore[attr-defined]
 
     @dist_init
     def test_no_grad_copy_sparse(self):
@@ -1984,7 +1984,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 i = torch.ones(1, 1, dtype=torch.long)
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
-                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))  # type: ignore[attr-defined]
                 NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
                 return ngrad, ngrad
 
@@ -2003,7 +2003,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             p_g = MyFunc.static_grad_ptr
             p_a = grads[a]._values().data_ptr()
             # check a uses the same buffer
-            self.assertTrue(p_a == p_g)
+            self.assertTrue(p_a == p_g)  # type: ignore[attr-defined]
 
             # Run backwards multiple times.
             for i in range(10):
@@ -2019,10 +2019,10 @@ class DistAutogradTest(CommonDistAutogradTest):
             p_a = grads[a]._values().data_ptr()
             p_b = grads[b]._values().data_ptr()
             # check a,b uses different grad buffer
-            self.assertFalse(p_a == p_b)
+            self.assertFalse(p_a == p_b)  # type: ignore[attr-defined]
             # Verify we cloned both grads.
-            self.assertFalse(p_a == p_g)
-            self.assertFalse(p_b == p_g)
+            self.assertFalse(p_a == p_g)  # type: ignore[attr-defined]
+            self.assertFalse(p_b == p_g)  # type: ignore[attr-defined]
 
             # Run backwards multiple times to verify accumulation.
             for i in range(10):
@@ -2062,12 +2062,12 @@ class DistAutogradTest(CommonDistAutogradTest):
             grads = dist_autograd.get_gradients(context_id)
             p_g = MyFunc.static_grad_ptr
             p_a = grads[a]._values().data_ptr()
-            self.assertIsNotNone(MyFunc.static_grad_indices_ref)
-            self.assertIsNotNone(MyFunc.static_grad_values_ref)
+            self.assertIsNotNone(MyFunc.static_grad_indices_ref)  # type: ignore[attr-defined]
+            self.assertIsNotNone(MyFunc.static_grad_values_ref)  # type: ignore[attr-defined]
             # grad would be stolen, since static_grad_indices_ref and
             # static_grad_values_ref are holding onto views and don't bump the
             # refcount.
-            self.assertTrue(p_g == p_a)
+            self.assertTrue(p_g == p_a)  # type: ignore[attr-defined]
 
     @dist_init
     def test_post_hooks(self):
@@ -2095,10 +2095,10 @@ class DistAutogradTest(CommonDistAutogradTest):
         with dist_autograd.context() as context_id:
             loss = a.sum()
             dist_autograd.backward(context_id, [loss])
-            self.assertEqual(5, self.hook_called_times)
+            self.assertEqual(5, self.hook_called_times)  # type: ignore[attr-defined]
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(1, len(grads))
-            self.assertTrue(t in grads)
+            self.assertEqual(1, len(grads))  # type: ignore[attr-defined]
+            self.assertTrue(t in grads)  # type: ignore[attr-defined]
 
     @staticmethod
     def _slow_add(t1, t2):
@@ -2116,7 +2116,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         t3.requires_grad = True
         t3.sum().backward()
 
-        dst = worker_name((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
         rref = rpc.remote(dst, DistAutogradTest._slow_add, args=(t1, t2))
 
         with dist_autograd.context() as context_id:
@@ -2127,7 +2127,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             # thread_local states properly when jumping across threads on the
             # server side.
             dist_autograd.backward(context_id, [loss])
-            self.assertTrue(
+            self.assertTrue(  # type: ignore[attr-defined]
                 rpc.rpc_sync(
                     dst,
                     _compare_owner_value,
@@ -2147,9 +2147,9 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
             t3 = t1 + t2
             dist_autograd.backward(context_id, [t3.sum()])
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(2, len(grads))
-            self.assertEqual(t1.grad, grads[t1])
-            self.assertEqual(t2.grad, grads[t2])
+            self.assertEqual(2, len(grads))  # type: ignore[attr-defined]
+            self.assertEqual(t1.grad, grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(t2.grad, grads[t2])  # type: ignore[attr-defined]
 
     @skip_if_lt_x_gpu(1)
     @dist_init
@@ -2203,14 +2203,14 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.
     def context_cleanup_test_helper(self, rpc_args, func):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)  # type: ignore[attr-defined]
 
         # test that in dist autograd, in the case that tensors communicated over RPC do
         # NOT require grad, we still cleanup the dist autograd contexts created
         # on other nodes. This is because the autograd context is still
         # communicated over RPC even if tensor arguments do not require grad, as
         # it is possible that the response could.
-        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}  # type: ignore[attr-defined]
 
         with dist_autograd.context() as context_id:
             for dst_rank in dst_ranks:
@@ -2219,14 +2219,14 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
         # the thread's context id should be cleaned up
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError):  # type: ignore[attr-defined]
             dist_autograd._retrieve_context(context_id)
         # Ensure all peers have finished mutating the
         # `known_context_ids` set.
         dist.barrier()
         # check that all contexts have been cleaned up.
         success = _all_contexts_cleaned_up()
-        self.assertTrue(success)
+        self.assertTrue(success)  # type: ignore[attr-defined]
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
@@ -2238,10 +2238,10 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
-        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
-        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
-        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)  # type: ignore[attr-defined]
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)  # type: ignore[attr-defined]
+        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)  # type: ignore[attr-defined]
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)  # type: ignore[attr-defined]
 
 
 class WrapperModule(nn.Module):
@@ -2262,29 +2262,29 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(4)
     def test_device_maps_backward_pass(self):
         options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
 
         # The reverse of this device mapping should be used for the backward pass.
-        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})  # type: ignore[attr-defined]
 
         rpc.init_rpc(
-            name=worker_name(self.rank),
+            name=worker_name(self.rank),  # type: ignore[attr-defined]
             backend=self.rpc_backend,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
             world_size=self.world_size,
             rpc_backend_options=options,
         )
 
-        t1 = torch.rand(10, device=self.rank, requires_grad=True)
-        t2 = torch.rand(10, device=self.rank, requires_grad=True)
+        t1 = torch.rand(10, device=self.rank, requires_grad=True)  # type: ignore[attr-defined]
+        t2 = torch.rand(10, device=self.rank, requires_grad=True)  # type: ignore[attr-defined]
         with dist_autograd.context() as context_id:
             res = rpc.rpc_sync(dst, torch.add, args=(t1, t2))
             dist_autograd.backward(context_id, [res.sum()])
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(torch.ones(10), grads[t1])
-            self.assertEqual(torch.ones(10), grads[t2])
-            self.assertEqual(t1.device, grads[t1].device)
-            self.assertEqual(t2.device, grads[t2].device)
+            self.assertEqual(torch.ones(10), grads[t1])  # type: ignore[attr-defined]
+            self.assertEqual(torch.ones(10), grads[t2])  # type: ignore[attr-defined]
+            self.assertEqual(t1.device, grads[t1].device)  # type: ignore[attr-defined]
+            self.assertEqual(t2.device, grads[t2].device)  # type: ignore[attr-defined]
 
         rpc.shutdown()
 
@@ -2308,15 +2308,15 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
     def test_dist_autograd_sync_streams(self):
 
         options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
 
         # The reverse of this device mapping should be used for the backward pass.
-        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})  # type: ignore[attr-defined]
 
         rpc.init_rpc(
-            name=worker_name(self.rank),
+            name=worker_name(self.rank),  # type: ignore[attr-defined]
             backend=self.rpc_backend,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
             world_size=self.world_size,
             rpc_backend_options=options,
         )
@@ -2324,7 +2324,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
         local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
-            input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
+            input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)  # type: ignore[attr-defined]
             # Run local autograd
             result = input * 2.0
             r = random.random()
@@ -2339,7 +2339,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
                 # Compare grads.
                 grads = dist_autograd.get_gradients(context_id)
-                self.assertEqual(input.grad, grads[input])
+                self.assertEqual(input.grad, grads[input])  # type: ignore[attr-defined]
 
         rpc.shutdown()
 
@@ -2347,17 +2347,17 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
     def test_gradients_synchronizations(self):
         options = self.rpc_backend_options
         for peer_rank in range(self.world_size):
-            options.set_device_map(worker_name(peer_rank), {self.rank: peer_rank})
+            options.set_device_map(worker_name(peer_rank), {self.rank: peer_rank})  # type: ignore[attr-defined]
 
         rpc.init_rpc(
-            name=worker_name(self.rank),
+            name=worker_name(self.rank),  # type: ignore[attr-defined]
             backend=self.rpc_backend,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
             world_size=self.world_size,
             rpc_backend_options=options,
         )
 
-        if self.rank == 0:
+        if self.rank == 0:  # type: ignore[attr-defined]
             # this is master
             layers = [nn.Linear(2000, 2000) for _ in range(self.world_size - 1)]
             local_layers = [l.to(0) for l in layers]
@@ -2369,7 +2369,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                     args=(layers[rank - 1], rank)
                 ))
 
-            x = torch.randn(5000, 2000).to(0)
+            x = torch.randn(5000, 2000).to(0)  # type: ignore[call-overload]
             # local iteration
             local_model = nn.Sequential(*local_layers)
             local_model(x).sum().backward()
@@ -2388,6 +2388,6 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                 for i in range(len(futs)):
                     local_gradients = [p.grad for p in local_layers[i].parameters()]
                     for g1, g2 in zip(futs[i].wait(), local_gradients):
-                        self.assertEqual(g1, g2)
+                        self.assertEqual(g1, g2)  # type: ignore[attr-defined]
 
         rpc.shutdown()

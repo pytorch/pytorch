@@ -8,7 +8,7 @@ from hypothesis import given, settings
 
 
 class TestHistogram(hu.HypothesisTestCase):
-    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)
+    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_histogram__device_consistency(self, rows, cols, gc, dc):
         X = np.random.rand(rows, cols)

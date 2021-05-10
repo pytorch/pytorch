@@ -41,7 +41,7 @@ def RegisterOpsLibrary(name):
     _LAZY_IMPORTED_DYNDEPS.add(name)
 
 
-_LAZY_IMPORTED_DYNDEPS = set()
+_LAZY_IMPORTED_DYNDEPS = set()  # type: ignore[var-annotated]
 _error_handler = None
 
 
@@ -74,7 +74,7 @@ def _import_lazy():
         return
     for name in list(_LAZY_IMPORTED_DYNDEPS):
         try:
-            dyndep.InitOpLibrary(name, trigger_lazy=False)
+            dyndep.InitOpLibrary(name, trigger_lazy=False)  # type: ignore[attr-defined]
         except BaseException as e:
             if _error_handler:
                 _error_handler(e)

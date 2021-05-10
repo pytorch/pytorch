@@ -20,7 +20,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             arr = []
             constant_values = 0
             if data.dtype.char == 'S':
-                constant_values = ''
+                constant_values = ''  # type: ignore[assignment]
             if max_length is None:
                 max_length = np.max(lengths)
             start = 0
@@ -47,7 +47,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
                     pad_length = max_length - length
                     presence_arr.append(
                         np.pad(
-                            np.ones((length), dtype=np.bool), ((0, pad_length)),
+                            np.ones((length), dtype=np.bool), ((0, pad_length)),  # type: ignore[attr-defined]
                             mode=str("constant")
                         )
                     )
@@ -182,7 +182,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
 
     @given(
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_pack_ops_str(self, gc, dc):
         # GPU does not support string. Test CPU implementation only.
@@ -305,7 +305,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         presence_mask = workspace.FetchBlob('p')
         expected_presence_mask = np.array(
             [[True, False, False], [True, True, False], [True, True, True]],
-            dtype=np.bool
+            dtype=np.bool  # type: ignore[attr-defined]
         )
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
         np.testing.assert_array_equal(presence_mask, expected_presence_mask)
@@ -325,7 +325,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         expected_output_shape = (0, 0)
         self.assertEquals(output.shape, expected_output_shape)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_out_of_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 4
@@ -348,7 +348,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             exception=RuntimeError
         )
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_under_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 2

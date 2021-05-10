@@ -18,7 +18,7 @@ class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
         N=st.integers(0, 64),
         D=st.integers(4, 64),
         forget_bias=st.integers(0, 4),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_lstm_unit(self, N, D, forget_bias, gc, dc):

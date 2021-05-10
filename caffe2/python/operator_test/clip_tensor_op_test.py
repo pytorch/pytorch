@@ -18,7 +18,7 @@ class TestClipTensorByScalingOp(serial.SerializedTestCase):
            additional_threshold=st.floats(0.1, 10),
            use_additional_threshold=st.booleans(),
            inplace=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_clip_tensor_by_scaling(self, n, d, threshold, additional_threshold,
                                     use_additional_threshold, inplace, gc, dc):

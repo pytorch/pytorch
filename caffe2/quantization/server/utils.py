@@ -169,7 +169,7 @@ def fuse_first_bn(net, params, removed_tensors, begin_op_index):
 
 def fuse_bn(net, params, ignore_failure):
     # Run until we hit a fixed point
-    removed_tensors = []
+    removed_tensors = []  # type: ignore[var-annotated]
     begin_op_index = 0
     while True:
         (next_net, next_params, removed_tensors, begin_op_index) = fuse_first_bn(
@@ -228,7 +228,7 @@ def fuse_first_scale(net, params, removed_tensors):
 
 def fuse_scale(net, params, ignore_failure):
     # Run until we hit a fixed point
-    removed_tensors = []
+    removed_tensors = []  # type: ignore[var-annotated]
     while True:
         (next_net, next_params, removed_tensors) = fuse_first_scale(
             net, params, removed_tensors
@@ -367,7 +367,7 @@ def add_version_to_conv_bias(net, init_net):
     scale for each of the ops. To achieve this, we just duplicate those bias
     blobs that are used by multiple Conv ops before performing int8 rewrite.
     """
-    bias_count = defaultdict(int)
+    bias_count = defaultdict(int)  # type: ignore[var-annotated]
     for op in net._net.op:
         if "Conv" in op.type and len(op.input) >= 3:
             bias_count[op.input[2]] += 1
@@ -377,7 +377,7 @@ def add_version_to_conv_bias(net, init_net):
         if bias_count[op.output[0]] > 1:
             bias_fill_op[op.output[0]] = op
 
-    bias_version = defaultdict(int)
+    bias_version = defaultdict(int)  # type: ignore[var-annotated]
     for op in net._net.op:
         if "Conv" in op.type and len(op.input) >= 3:
             bias = op.input[2]

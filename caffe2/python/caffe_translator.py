@@ -9,7 +9,7 @@ import re
 import numpy as np  # noqa
 
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
-from caffe.proto import caffe_pb2
+from caffe.proto import caffe_pb2  # type: ignore[import]
 from caffe2.python import core, utils, workspace
 from google.protobuf import text_format
 
@@ -128,9 +128,9 @@ def _RemoveLegacyPad(net, net_params, input_dims):
         ws = workspace.C.Workspace()
 
         external_input = net.op[0].input[0]
-        ws.create_blob(external_input).feed_blob(dummy_input)
+        ws.create_blob(external_input).feed_blob(dummy_input)  # type: ignore[attr-defined]
         for param in net_params.protos:
-            ws.create_blob(param.name) \
+            ws.create_blob(param.name) \  # type: ignore[attr-defined]
               .feed_blob(utils.Caffe2TensorToNumpyArray(param))
 
         for i in range(len(net.op)):
@@ -194,7 +194,7 @@ def _GetInputDims(caffe_net):
 
 
 class TranslatorRegistry(object):
-    registry_ = {}
+    registry_ = {}  # type: ignore[var-annotated]
 
     @classmethod
     def Register(cls, op_name):
@@ -913,7 +913,7 @@ if __name__ == '__main__':
 
     with open(input_proto) as f:
         text_format.Merge(f.read(), caffenet)
-    with open(input_caffemodel, 'rb') as f:
+    with open(input_caffemodel, 'rb') as f:  # type: ignore[assignment]
         caffenet_pretrained.ParseFromString(f.read())
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True,
@@ -930,9 +930,9 @@ if __name__ == '__main__':
     net.external_output.extend([external_output])
     init_net = ConvertTensorProtosToInitNet(pretrained_params, external_input)
 
-    with open(output_predict_net, 'wb') as f:
+    with open(output_predict_net, 'wb') as f:  # type: ignore[assignment]
         f.write(net.SerializeToString())
     with open(output_predict_net + 'txt', 'w') as f:
         f.write(str(net))
-    with open(output_init_net, 'wb') as f:
+    with open(output_init_net, 'wb') as f:  # type: ignore[assignment]
         f.write(init_net.SerializeToString())

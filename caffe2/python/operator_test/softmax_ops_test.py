@@ -257,7 +257,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    @given(**hu.gcs_gpu_only)
+    @given(**hu.gcs_gpu_only)  # type: ignore[arg-type]
     def test_softmax_with_loss_large(self, gc, dc):
         np.random.seed(2603)
         for n in [32]:

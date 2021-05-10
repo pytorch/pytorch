@@ -368,8 +368,8 @@ class TestYellowFin(OptimizerTestBase, TestCase):
 
         # a hack to create an object with __dict__
         param_info = lambda: None
-        param_info.blob = w
-        param_info.grad = grad
+        param_info.blob = w  # type: ignore[attr-defined]
+        param_info.grad = grad  # type: ignore[attr-defined]
 
         optimizer.YellowFinOptimizer(
             alpha=alpha,

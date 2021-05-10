@@ -39,7 +39,7 @@ def sparse_lengths_mean_ref(D, I, L):
 
 class TesterBase:
     def segment_reduce_op(self, data, segment_ids, reducer, indices=None):
-        segments = self.split(data, segment_ids, indices)
+        segments = self.split(data, segment_ids, indices)  # type: ignore[attr-defined]
         output = np.zeros((len(segments), ) + data.shape[1:])
         for i, segment in enumerate(segments):
             if len(segment) > 0:
@@ -57,12 +57,12 @@ class TesterBase:
         output,
         indices=None
     ):
-        segments = self.split(data, segment_ids, indices)
+        segments = self.split(data, segment_ids, indices)  # type: ignore[attr-defined]
         segment_grads = [
             reducer_grad(grad_out[i], [output[i]], [segment])
             for i, segment in enumerate(segments)
         ]
-        return self.unsplit(data.shape[1:], segment_grads, segment_ids)
+        return self.unsplit(data.shape[1:], segment_grads, segment_ids)  # type: ignore[attr-defined]
 
     def _test(self, prefix, input_strategy, refs, gpu=False, **kwargs):
         tester = self
@@ -113,7 +113,7 @@ class TesterBase:
                 kwargs = {}
                 if grad_check:
                     kwargs['output_to_grad'] = 'output'
-                    kwargs['grad_reference'] = seg_reduce_grad
+                    kwargs['grad_reference'] = seg_reduce_grad  # type: ignore[assignment]
                 self.assertReferenceChecks(
                     device_option=gc,
                     op=op,
@@ -382,7 +382,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
                 max_value=5,
                 allow_empty=True
             ),
-            REFERENCES_ALL + REFERENCES_LENGTHS_ONLY,
+            REFERENCES_ALL + REFERENCES_LENGTHS_ONLY,  # type: ignore[operator]
         )(self)
 
     def test_sparse_lengths_ops(self):
@@ -629,7 +629,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_legacy_sparse_and_lengths_sum_gradient(self, gc, dc):
         X = np.random.rand(3, 64).astype(np.float32)
         Y = np.asarray([20, 20, 10]).astype(np.int32)

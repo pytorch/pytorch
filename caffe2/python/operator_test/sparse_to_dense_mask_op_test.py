@@ -13,7 +13,7 @@ import numpy as np
 class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           use_length=st.booleans(), **hu.gcs_cpu_only)
+           use_length=st.booleans(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
@@ -46,7 +46,7 @@ class TestFcOperator(hu.HypothesisTestCase):
             gc, op, input_data, 1, [0])
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           use_length=st.booleans(), **hu.gcs_cpu_only)
+           use_length=st.booleans(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
@@ -80,7 +80,7 @@ class TestFcOperator(hu.HypothesisTestCase):
             gc, op, input_data, 1, [0])
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           dim=st.integers(1, 3), **hu.gcs_cpu_only)
+           dim=st.integers(1, 3), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_sparse_to_dense_mask_high_dim(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1

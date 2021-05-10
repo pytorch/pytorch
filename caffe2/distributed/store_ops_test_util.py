@@ -48,7 +48,7 @@ class StoreOpsTests(object):
     @classmethod
     def test_set_get(cls, create_store_handler_fn):
         # Queue for assertion errors on subprocesses
-        queue = Queue()
+        queue = Queue()  # type: ignore[var-annotated]
 
         # Start N processes in the background
         num_procs = 4

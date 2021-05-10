@@ -20,7 +20,7 @@ def id_list_batch(draw):
     inputs = []
     for _ in range(num_inputs):
         size = draw(st.integers(5, 10))
-        values = draw(hnp.arrays(values_dtype, size, st.integers(1, 10)))
+        values = draw(hnp.arrays(values_dtype, size, st.integers(1, 10)))  # type: ignore[misc]
         lengths = draw(hu.lengths(len(values),
                                   min_segments=batch_size,
                                   max_segments=batch_size))

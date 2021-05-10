@@ -88,15 +88,15 @@ def set_request_only(field):
     for f in field.all_scalars():
         categorical_limit, expected_value = None, None
         if not f.metadata:
-            feature_specs = schema.FeatureSpec(feature_is_request_only=True)
+            feature_specs = schema.FeatureSpec(feature_is_request_only=True)  # type: ignore[call-arg]
         elif not f.metadata.feature_specs:
             categorical_limit = f.metadata.categorical_limit
             expected_value = f.metadata.expected_value
-            feature_specs = schema.FeatureSpec(feature_is_request_only=True)
+            feature_specs = schema.FeatureSpec(feature_is_request_only=True)  # type: ignore[call-arg]
         else:
             categorical_limit = f.metadata.categorical_limit
             expected_value = f.metadata.expected_value
-            feature_specs = schema.FeatureSpec(
+            feature_specs = schema.FeatureSpec(  # type: ignore[call-arg]
                 feature_type=f.metadata.feature_specs.feature_type,
                 feature_names=f.metadata.feature_specs.feature_names,
                 feature_ids=f.metadata.feature_specs.feature_ids,

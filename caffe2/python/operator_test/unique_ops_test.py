@@ -44,7 +44,7 @@ class TestUniqueOps(serial.SerializedTestCase):
             # allow negatives
             elements=st.integers(min_value=-10, max_value=10)),
         return_remapping=st.booleans(),
-        **hu.gcs_no_hip
+        **hu.gcs_no_hip  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_unique_op(self, X, return_remapping, gc, dc):

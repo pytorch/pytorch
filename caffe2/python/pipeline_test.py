@@ -53,7 +53,7 @@ class TestPipeline(TestCase):
         src_ds = Dataset(src_blobs)
         dst_ds = Dataset(dst_blobs)
 
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             out1 = pipe(
                 src_ds.reader(),
                 output=Queue(

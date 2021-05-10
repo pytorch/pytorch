@@ -35,7 +35,7 @@ def InitOpsLibrary(name, trigger_lazy=True):
     _init_impl(name, trigger_lazy=trigger_lazy)
 
 
-_IMPORTED_DYNDEPS = set()
+_IMPORTED_DYNDEPS = set()  # type: ignore[var-annotated]
 dll_lock = Lock()
 
 

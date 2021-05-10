@@ -61,7 +61,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             allreduce, input_device_options)
         for output in outputs:
             np.testing.assert_array_equal(outputs[0], output)
-            self.assertEqual(outputs[0].tobytes(), output.tobytes())
+            self.assertEqual(outputs[0].tobytes(), output.tobytes())  # type: ignore[attr-defined]
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
@@ -122,7 +122,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             allgather, input_device_options)
         for output in outputs:
             np.testing.assert_array_equal(outputs[0], output)
-            self.assertEqual(outputs[0].tobytes(), output.tobytes())
+            self.assertEqual(outputs[0].tobytes(), output.tobytes())  # type: ignore[attr-defined]
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000))
@@ -136,8 +136,8 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         def reduce_scatter(*args):
             assert len(args) == n
             reduced = sum(args)
-            assert len(reduced.shape) > 1
-            ref = [reduced[i, :] for i in range(n)]
+            assert len(reduced.shape) > 1  # type: ignore[union-attr]
+            ref = [reduced[i, :] for i in range(n)]  # type: ignore[index]
             return ref
 
         self.assertReferenceChecks(

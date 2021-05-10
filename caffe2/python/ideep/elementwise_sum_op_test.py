@@ -44,7 +44,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            inputs=st.integers(2, 7),
            inplace=st.booleans(),
-           **mu.gcs_cpu_ideep)
+           **mu.gcs_cpu_ideep)  # type: ignore[arg-type]
     def test_elementwise_sum_fallback(self,
                                       size,
                                       input_channels,
@@ -84,7 +84,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            inputs=st.integers(2, 7),
            inplace=st.booleans(),
-           **mu.gcs_cpu_ideep)
+           **mu.gcs_cpu_ideep)  # type: ignore[arg-type]
     def test_int8_elementwise_sum(self,
                                  size,
                                  input_channels,
@@ -184,7 +184,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,7 +44,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(workspace.HasBlob("testblob"), True)
         blobs = workspace.Blobs()
         self.assertEqual(len(blobs), 1)
-        self.assertEqual(blobs[0], "testblob")
+        self.assertEqual(blobs[0], "testblob")  # type: ignore[index]
 
     def testGetOperatorCost(self):
         op = core.CreateOperator(
@@ -113,20 +113,20 @@ class TestWorkspace(unittest.TestCase):
         """ test in-place modification """
         ws.create_blob("tensor").feed(np.array([1.1, 1.2, 1.3]))
         tensor = ws.blobs["tensor"].tensor()
-        tensor.data[0] = 3.3
+        tensor.data[0] = 3.3  # type: ignore[attr-defined]
         val = np.array([3.3, 1.2, 1.3])
-        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(tensor.data, val)  # type: ignore[attr-defined]
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         """ test in-place initialization """
         tensor.init([2, 3], core.DataType.INT32)
         for x in range(2):
             for y in range(3):
-                tensor.data[x, y] = 0
-        tensor.data[1, 1] = 100
+                tensor.data[x, y] = 0  # type: ignore[attr-defined]
+        tensor.data[1, 1] = 100  # type: ignore[attr-defined]
         val = np.zeros([2, 3], dtype=np.int32)
         val[1, 1] = 100
-        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(tensor.data, val)  # type: ignore[attr-defined]
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         """ strings cannot be initialized from python """
@@ -134,22 +134,22 @@ class TestWorkspace(unittest.TestCase):
             tensor.init([3, 4], core.DataType.STRING)
 
         """ feed (copy) data into tensor """
-        val = np.array([[b'abc', b'def'], [b'ghi', b'jkl']], dtype=np.object)
-        tensor.feed(val)
-        self.assertEquals(tensor.data[0, 0], b'abc')
+        val = np.array([[b'abc', b'def'], [b'ghi', b'jkl']], dtype=np.object)  # type: ignore[attr-defined]
+        tensor.feed(val)  # type: ignore[attr-defined]
+        self.assertEquals(tensor.data[0, 0], b'abc')  # type: ignore[attr-defined]
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         val = np.array([1.1, 10.2])
-        tensor.feed(val)
+        tensor.feed(val)  # type: ignore[attr-defined]
         val[0] = 5.2
-        self.assertEquals(tensor.data[0], 1.1)
+        self.assertEquals(tensor.data[0], 1.1)  # type: ignore[attr-defined]
 
         """ fetch (copy) data from tensor """
         val = np.array([1.1, 1.2])
-        tensor.feed(val)
-        val2 = tensor.fetch()
-        tensor.data[0] = 5.2
-        val3 = tensor.fetch()
+        tensor.feed(val)  # type: ignore[attr-defined]
+        val2 = tensor.fetch()  # type: ignore[attr-defined]
+        tensor.data[0] = 5.2  # type: ignore[attr-defined]
+        val3 = tensor.fetch()  # type: ignore[attr-defined]
         np.testing.assert_array_equal(val, val2)
         self.assertEquals(val3[0], 5.2)
 
@@ -180,7 +180,7 @@ class TestWorkspace(unittest.TestCase):
         np.testing.assert_array_equal(fetched_again, 2.0)
 
     def testFetchFeedBlobTypes(self):
-        for dtype in [np.float16, np.float32, np.float64, np.bool,
+        for dtype in [np.float16, np.float32, np.float64, np.bool,  # type: ignore[attr-defined]
                       np.int8, np.int16, np.int32, np.int64,
                       np.uint8, np.uint16]:
             try:
@@ -196,16 +196,16 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
-        data = np.zeros((2, 3, 4)).astype(np.bool)
-        data.flat[::2] = True
+        data = np.zeros((2, 3, 4)).astype(np.bool)  # type: ignore[attr-defined]
+        data.flat[::2] = True  # type: ignore[index]
         self.assertEqual(workspace.FeedBlob("testblob_types", data), True)
         fetched_back = workspace.FetchBlob("testblob_types")
         self.assertEqual(fetched_back.shape, (2, 3, 4))
-        self.assertEqual(fetched_back.dtype, np.bool)
+        self.assertEqual(fetched_back.dtype, np.bool)  # type: ignore[attr-defined]
         np.testing.assert_array_equal(fetched_back, data)
 
     def testGetBlobSizeBytes(self):
-        for dtype in [np.float16, np.float32, np.float64, np.bool,
+        for dtype in [np.float16, np.float32, np.float64, np.bool,  # type: ignore[attr-defined]
                       np.int8, np.int16, np.int32, np.int64,
                       np.uint8, np.uint16]:
             data = np.random.randn(2, 3).astype(dtype)
@@ -314,7 +314,7 @@ class TestWorkspace(unittest.TestCase):
 
 class TestMultiWorkspaces(unittest.TestCase):
     def setUp(self):
-        workspace.SwitchWorkspace("default")
+        workspace.SwitchWorkspace("default")  # type: ignore[call-overload]
         workspace.ResetWorkspace()
 
     def testCreateWorkspace(self):
@@ -326,12 +326,12 @@ class TestMultiWorkspaces(unittest.TestCase):
         self.assertEqual(workspace.HasBlob("testblob"), True)
         self.assertEqual(workspace.SwitchWorkspace("test", True), None)
         self.assertEqual(workspace.HasBlob("testblob"), False)
-        self.assertEqual(workspace.SwitchWorkspace("default"), None)
+        self.assertEqual(workspace.SwitchWorkspace("default"), None)  # type: ignore[call-overload]
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
         try:
             # The following should raise an error.
-            workspace.SwitchWorkspace("non-existing")
+            workspace.SwitchWorkspace("non-existing")  # type: ignore[call-overload]
             # so this should never happen.
             self.assertEqual(True, False)
         except RuntimeError:
@@ -468,7 +468,7 @@ class TestCppEnforceAsException(test_util.TestCase):
 class TestCWorkspace(htu.HypothesisTestCase):
     def test_net_execution(self):
         ws = workspace.C.Workspace()
-        self.assertEqual(ws.nets, {})
+        self.assertEqual(ws.nets, {})  # type: ignore[attr-defined]
         self.assertEqual(ws.blobs, {})
         net = core.Net("test-net")
         net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
@@ -481,10 +481,10 @@ class TestCWorkspace(htu.HypothesisTestCase):
         # Overwrite can also be a kwarg.
         ws.create_net(net, overwrite=True)
         self.assertIn("testblob", ws.blobs)
-        self.assertEqual(len(ws.nets), 1)
+        self.assertEqual(len(ws.nets), 1)  # type: ignore[attr-defined]
         net_name = net.Proto().name
         self.assertIn("test-net", net_name)
-        net = ws.nets[net_name].run()
+        net = ws.nets[net_name].run()  # type: ignore[attr-defined]
         blob = ws.blobs["testblob"]
         np.testing.assert_array_equal(
             np.ones((1, 2, 3, 4), dtype=np.float32),
@@ -509,7 +509,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net.ConstantFill([], [blob_name], shape=[1], value=value)
         ws.run(net)
         self.assertIn(blob_name, ws.blobs)
-        self.assertNotIn(net_name, ws.nets)
+        self.assertNotIn(net_name, ws.nets)  # type: ignore[attr-defined]
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
 
@@ -527,7 +527,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
         ws.run(plan)
         self.assertIn(blob_name, ws.blobs)
-        self.assertIn(net.Name(), ws.nets)
+        self.assertIn(net.Name(), ws.nets)  # type: ignore[attr-defined]
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
 
@@ -540,7 +540,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net.ConstantFill([], [blob_name], shape=[1], value=value)
         ws.create_net(net).run()
         self.assertIn(blob_name, ws.blobs)
-        self.assertIn(net.Name(), ws.nets)
+        self.assertIn(net.Name(), ws.nets)  # type: ignore[attr-defined]
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
 
@@ -554,7 +554,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         blob = ws.blobs[name]
         np.testing.assert_equal(value, ws.blobs[name].fetch())
         serde_blob = ws.create_blob("{}_serde".format(name))
-        serde_blob.deserialize(blob.serialize(name))
+        serde_blob.deserialize(blob.serialize(name))  # type: ignore[attr-defined]
         np.testing.assert_equal(value, serde_blob.fetch())
 
     @given(name=st.text(), value=st.text())
@@ -566,7 +566,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         blob = ws.blobs[name]
         self.assertEqual(value, ws.blobs[name].fetch())
         serde_blob = ws.create_blob("{}_serde".format(name))
-        serde_blob.deserialize(blob.serialize(name))
+        serde_blob.deserialize(blob.serialize(name))  # type: ignore[attr-defined]
         self.assertEqual(value, serde_blob.fetch())
 
     def test_exception(self):
@@ -715,7 +715,7 @@ class MyModule(torch.jit.ScriptModule):
         return x + y + z
 
     @torch.jit.script_method
-    def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations
+    def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations  # type: ignore[name-defined]
         # type: (List[Tensor]) -> Tensor
         return tensor_list[0] + tensor_list[1] + tensor_list[2]
 
@@ -813,7 +813,7 @@ class TestScriptModule(test_util.TestCase):
             try:
                 shutil.rmtree(tmpdir)
             except OSError as e:
-                if e.errno != errno.ENOENT:
+                if e.errno != errno.ENOENT:  # type: ignore[name-defined]
                     raise
 
 

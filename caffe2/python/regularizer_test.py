@@ -89,7 +89,7 @@ class TestRegularizer(LayersTestCase):
         eps=hu.floats(min_value=1e-6, max_value=1e-4),
         ub=hu.floats(min_value=-1.0, max_value=1.0),
         lb=hu.floats(min_value=-1.0, max_value=1.0),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc):
         if ub - (eps if right_open else 0.) < lb + (eps if left_open else 0.):

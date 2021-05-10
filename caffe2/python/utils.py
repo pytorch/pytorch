@@ -67,7 +67,7 @@ def Caffe2TensorToNumpyArray(tensor):
             tensor.int64_data, dtype=np.int64).reshape(tensor.dims)
     elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
         return np.asarray(
-            tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data
+            tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data  # type: ignore[attr-defined]
     elif tensor.data_type == caffe2_pb2.TensorProto.INT16:
         return np.asarray(
             tensor.int32_data, dtype=np.int16).reshape(tensor.dims)  # pb.INT16=>np.int16 use int32_data
@@ -92,28 +92,28 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
     if name:
         tensor.name = name
     if arr.dtype == np.float32:
-        tensor.data_type = caffe2_pb2.TensorProto.FLOAT
+        tensor.data_type = caffe2_pb2.TensorProto.FLOAT  # type: ignore[assignment]
         tensor.float_data.extend(list(arr.flatten().astype(float)))
     elif arr.dtype == np.float64:
-        tensor.data_type = caffe2_pb2.TensorProto.DOUBLE
+        tensor.data_type = caffe2_pb2.TensorProto.DOUBLE  # type: ignore[assignment]
         tensor.double_data.extend(list(arr.flatten().astype(np.float64)))
     elif arr.dtype == np.int64:
-        tensor.data_type = caffe2_pb2.TensorProto.INT64
+        tensor.data_type = caffe2_pb2.TensorProto.INT64  # type: ignore[assignment]
         tensor.int64_data.extend(list(arr.flatten().astype(np.int64)))
-    elif arr.dtype == np.int or arr.dtype == np.int32:
-        tensor.data_type = caffe2_pb2.TensorProto.INT32
-        tensor.int32_data.extend(arr.flatten().astype(np.int).tolist())
+    elif arr.dtype == np.int or arr.dtype == np.int32:  # type: ignore[attr-defined]
+        tensor.data_type = caffe2_pb2.TensorProto.INT32  # type: ignore[assignment]
+        tensor.int32_data.extend(arr.flatten().astype(np.int).tolist())  # type: ignore[attr-defined]
     elif arr.dtype == np.int16:
-        tensor.data_type = caffe2_pb2.TensorProto.INT16
+        tensor.data_type = caffe2_pb2.TensorProto.INT16  # type: ignore[assignment]
         tensor.int32_data.extend(list(arr.flatten().astype(np.int16)))  # np.int16=>pb.INT16 use int32_data
     elif arr.dtype == np.uint16:
-        tensor.data_type = caffe2_pb2.TensorProto.UINT16
+        tensor.data_type = caffe2_pb2.TensorProto.UINT16  # type: ignore[assignment]
         tensor.int32_data.extend(list(arr.flatten().astype(np.uint16)))  # np.uint16=>pb.UNIT16 use int32_data
     elif arr.dtype == np.int8:
-        tensor.data_type = caffe2_pb2.TensorProto.INT8
+        tensor.data_type = caffe2_pb2.TensorProto.INT8  # type: ignore[assignment]
         tensor.int32_data.extend(list(arr.flatten().astype(np.int8)))   # np.int8=>pb.INT8 use int32_data
     elif arr.dtype == np.uint8:
-        tensor.data_type = caffe2_pb2.TensorProto.UINT8
+        tensor.data_type = caffe2_pb2.TensorProto.UINT8  # type: ignore[assignment]
         tensor.int32_data.extend(list(arr.flatten().astype(np.uint8)))   # np.uint8=>pb.UNIT8 use int32_data
     else:
         # TODO: complete the data type: bool, float16, byte, string
@@ -379,7 +379,7 @@ def EnumClassKeyVals(cls):
     # cls can only be derived from object
     assert type(cls) == type
     # Enum attribute keys are all capitalized and values are strings
-    enum = {}
+    enum = {}  # type: ignore[var-annotated]
     for k in dir(cls):
         if k == k.upper():
             v = getattr(cls, k)

@@ -86,11 +86,11 @@ class TestHsm(hu.HypothesisTestCase):
         scores = workspace.FetchBlob('scores')
 
         def simulation_hsm_search():
-            names = []
-            scores = []
+            names = []  # type: ignore[var-annotated]
+            scores = []  # type: ignore[var-annotated]
             for line in struct:
-                s, e = line[0], line[0] + line[1]
-                score = np.dot(X, w[s:e].transpose()) + b[s:e]
+                s, e = line[0], line[0] + line[1]  # type: ignore[operator]
+                score = np.dot(X, w[s:e].transpose()) + b[s:e]  # type: ignore[misc]
                 score = np.exp(score - np.max(score, axis=1, keepdims=True))
                 score /= score.sum(axis=1, keepdims=True)
                 score = -np.log(score)
@@ -106,11 +106,11 @@ class TestHsm(hu.HypothesisTestCase):
                 else:
                     score[score - scores[idx] > beam] = np.inf
 
-                for i, name in enumerate(line[2]):
+                for i, name in enumerate(line[2]):  # type: ignore[var-annotated]
                     scores.append(score[i])
                     names.append(name)
-            scores = np.vstack(scores)
-            return names, scores.transpose()
+            scores = np.vstack(scores)  # type: ignore[assignment]
+            return names, scores.transpose()  # type: ignore[attr-defined]
 
         p_names, p_scores = simulation_hsm_search()
         idx = np.argsort(p_scores, axis=1)
@@ -177,7 +177,7 @@ class TestHsm(hu.HypothesisTestCase):
     # Test to compare gradient calculated using the gradient operator and the
     # symmetric derivative calculated using Euler Method
     # TODO : convert to both cpu and gpu test when ready.
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_hsm_gradient(self, gc, dc):
         samples = 10
@@ -211,7 +211,7 @@ class TestHsm(hu.HypothesisTestCase):
         workspace.GlobalInit(['caffe2'])
         labelSet = list(range(0, 6))
         counts = [1, 2, 3, 4, 5, 6]
-        labels = sum([[l] * c for (l, c) in zip(labelSet, counts)], [])
+        labels = sum([[l] * c for (l, c) in zip(labelSet, counts)], [])  # type: ignore[var-annotated]
         Y = np.array(labels).astype(np.int64)
         workspace.FeedBlob("labels", Y)
         arg = caffe2_pb2.Argument()

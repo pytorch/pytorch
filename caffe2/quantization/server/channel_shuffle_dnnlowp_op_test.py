@@ -17,7 +17,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         groups=st.sampled_from([1, 4, 8, 9]),
         n=st.integers(0, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_channel_shuffle(self, channels_per_group, groups, n, order, gc, dc):
@@ -69,7 +69,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
     @given(
         channels_per_group=st.integers(min_value=32, max_value=128),
         n=st.integers(0, 2),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_channel_shuffle_fast_path(self, channels_per_group, n, gc, dc):

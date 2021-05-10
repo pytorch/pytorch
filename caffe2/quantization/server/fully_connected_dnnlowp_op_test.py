@@ -34,7 +34,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         fuse_relu=st.booleans(),
         output_packed_bias=st.booleans(),
         use_input_qparam=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_fully_connected_int(
         self,
@@ -96,7 +96,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         b = np.random.randn(output_channels).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [("FC", "")]
         if fuse_relu:
@@ -253,7 +253,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 bias_int32 = self.ws.blobs["B_q32"].fetch()
                 if do_quantize_weight:
                     np.testing.assert_equal(
-                        bias_int32[0], np.round(b / (x_q_param.scale * w_q_param.scale))
+                        bias_int32[0], np.round(b / (x_q_param.scale * w_q_param.scale))  # type: ignore[union-attr]
                     )
                 np.testing.assert_equal(bias_int32[0].dtype, np.int32)
 

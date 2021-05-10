@@ -35,14 +35,14 @@ def runShardedTrainLoop(opts, myTrainFun):
     ret = None
 
     pretrained_model = ""
-    shard_results = []
+    shard_results = []  # type: ignore[var-annotated]
 
     for epoch in range(start_epoch,
                        opts['epoch_iter']['num_epochs'],
                        opts['epoch_iter']['num_epochs_per_flow_schedule']):
         # must support checkpoint or the multiple schedule will always
         # start from initial state
-        checkpoint_model = None if epoch == start_epoch else ret['model']
+        checkpoint_model = None if epoch == start_epoch else ret['model']  # type: ignore[index]
         pretrained_model = None if epoch > start_epoch else pretrained_model
         shard_results = []
         # with LexicalContext('epoch{}_gang'.format(epoch),gang_schedule=False):

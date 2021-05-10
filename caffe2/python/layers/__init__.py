@@ -32,7 +32,7 @@ def find_subclasses_recursively(base_cls, sub_cls):
 
 import_recursive(sys.modules[__name__])
 
-model_layer_subcls = set()
+model_layer_subcls = set()  # type: ignore[var-annotated]
 find_subclasses_recursively(layers.ModelLayer, model_layer_subcls)
 
 for cls in list(model_layer_subcls):

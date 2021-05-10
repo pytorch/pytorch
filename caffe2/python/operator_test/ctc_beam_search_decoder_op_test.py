@@ -24,7 +24,7 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
         alphabet_size=st.sampled_from([1, 2, 32, 128, 512]),
         beam_width=st.sampled_from([1, 2, 16, None]),
         num_candidates=st.sampled_from([1, 2]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None, max_examples=30)
     def test_ctc_beam_search_decoder(
@@ -68,7 +68,7 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
             val = np.array([]).astype(np.int32)
 
             for i in range(batch):
-                Pb, Pnb = defaultdict(Counter), defaultdict(Counter)
+                Pb, Pnb = defaultdict(Counter), defaultdict(Counter)  # type: ignore[var-annotated]
                 Pb[0][()] = 1
                 Pnb[0][()] = 0
                 A_prev = [()]
@@ -84,7 +84,7 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
                                 Pb[t][l] += ctc[t][c] * (Pb[t - 1][l] + Pnb[t - 1][l])
                             else:
                                 l_plus = l + (c,)
-                                if len(l) > 0 and c == l[-1]:
+                                if len(l) > 0 and c == l[-1]:  # type: ignore[misc]
                                     Pnb[t][l_plus] += ctc[t][c] * Pb[t - 1][l]
                                     Pnb[t][l] += ctc[t][c] * Pnb[t - 1][l]
                                 else:

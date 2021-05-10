@@ -118,7 +118,7 @@ class AdaptiveWeight(ModelLayer):
         if self.pos_optim_method == "log_barrier":
             regularizer = LogBarrier(reg_lambda=self.reg_lambda)
         elif self.pos_optim_method == "pos_grad_proj":
-            regularizer = BoundedGradientProjection(lb=0, left_open=True)
+            regularizer = BoundedGradientProjection(lb=0, left_open=True)  # type: ignore[assignment]
         else:
             raise TypeError(
                 "unknown positivity optimization method: {}".format(

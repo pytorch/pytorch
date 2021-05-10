@@ -82,8 +82,8 @@ def save_caffe2_net(net, file, output_txt=False):
     with open(file, "wb") as f:
         f.write(net.SerializeToString())
     if output_txt:
-        with open(file + "txt", "w") as f:
-            f.write(str(net))
+        with open(file + "txt", "w") as f:  # type: ignore[assignment]
+            f.write(str(net))  # type: ignore[arg-type]
 
 
 def benchmark_caffe2_model(init_net, predict_net, warmup_iters=3, main_iters=10, layer_details=True):

@@ -16,8 +16,8 @@ class TestBindings(test_util.TestCase):
     def test_simple(self):
         nn = ng.NNModule()
         dfg = nn.dataFlow
-        dfg.createNode(ng.NeuralNetData("X"))
-        dfg.createNode(ng.NeuralNetOperator("FC"))
+        dfg.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        dfg.createNode(ng.NeuralNetOperator("FC"))  # type: ignore[call-arg]
         assert len(nn.dataFlow.getMutableNodes()) == 2
 
     def test_core_net_simple(self):
@@ -87,9 +87,9 @@ class TestBindings(test_util.TestCase):
     def test_edges_simple(self):
         nn = ng.NNModule()
         dfg = nn.dataFlow
-        x = dfg.createNode(ng.NeuralNetData("X"))
-        w = dfg.createNode(ng.NeuralNetData("W"))
-        op = dfg.createNode(ng.NeuralNetOperator("Op"))
+        x = dfg.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        w = dfg.createNode(ng.NeuralNetData("W"))  # type: ignore[call-arg]
+        op = dfg.createNode(ng.NeuralNetOperator("Op"))  # type: ignore[call-arg]
 
         with self.assertRaises(Exception):
             dfg.createEdge(x, w)
@@ -101,10 +101,10 @@ class TestBindings(test_util.TestCase):
 
         # subgraph
         sg = ng.NNSubgraph()
-        sg.addNode(x)
-        sg.addNode(op)
-        sg.induceEdges()
-        assert len(sg) == 2
+        sg.addNode(x)  # type: ignore[attr-defined]
+        sg.addNode(op)  # type: ignore[attr-defined]
+        sg.induceEdges()  # type: ignore[attr-defined]
+        assert len(sg) == 2  # type: ignore[arg-type]
 
         # subgraph dot generation
         assert(str(sg).startswith("digraph G"))
@@ -118,9 +118,9 @@ class TestBindings(test_util.TestCase):
         data = []
         ops = []
         for _ in range(size):
-            data.append(dfg.createNode(ng.NeuralNetData("X")))
+            data.append(dfg.createNode(ng.NeuralNetData("X")))  # type: ignore[call-arg]
         for i in range(size):
-            ops.append(dfg.createNode(ng.NeuralNetOperator("Op" + str(i))))
+            ops.append(dfg.createNode(ng.NeuralNetOperator("Op" + str(i))))  # type: ignore[call-arg]
 
         for i in range(size):
             for j in range(size):
@@ -146,18 +146,18 @@ class TestBindings(test_util.TestCase):
     def test_debug(self):
         nn = ng.NNModule()
         dfg = nn.dataFlow
-        dfg.createNode(ng.NeuralNetData("X"))
-        dfg.createNode(ng.NeuralNetData("W"))
-        dfg.createNode(ng.NeuralNetOperator("Op"))
+        dfg.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        dfg.createNode(ng.NeuralNetData("W"))  # type: ignore[call-arg]
+        dfg.createNode(ng.NeuralNetOperator("Op"))  # type: ignore[call-arg]
 
         ng.render(nn.dataFlow)
 
     def test_match_graph_node(self):
         mg = ng.NNMatchGraph()
-        mg.createNode(ng.NeuralNetOperator("test"))
+        mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
         nn = ng.NNModule()
-        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
-        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
         nn.dataFlow.createEdge(x, test)
 
         count = 0
@@ -170,10 +170,10 @@ class TestBindings(test_util.TestCase):
 
     def test_match_graph_node_strict(self):
         mg = ng.NNMatchGraph()
-        mg.createNode(ng.NeuralNetOperator("test"), strict=True)
+        mg.createNode(ng.NeuralNetOperator("test"), strict=True)  # type: ignore[attr-defined]
         nn = ng.NNModule()
-        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
-        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
         nn.dataFlow.createEdge(test, x)
 
         count = 0
@@ -186,16 +186,16 @@ class TestBindings(test_util.TestCase):
 
     def test_match_graph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
-        testm = mg.createNode(ng.NeuralNetOperator("test"))
-        mg.createEdge(test2m, xm)
-        mg.createEdge(xm, testm)
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
+        mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
         nn = ng.NNModule()
-        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
-        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
-        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))  # type: ignore[call-arg]
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
         nn.dataFlow.createEdge(test2, x)
         nn.dataFlow.createEdge(x, test)
 
@@ -208,16 +208,16 @@ class TestBindings(test_util.TestCase):
 
     def test_delete_subgraph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
-        testm = mg.createNode(ng.NeuralNetOperator("test"))
-        mg.createEdge(test2m, xm)
-        mg.createEdge(xm, testm)
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
+        mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
         nn = ng.NNModule()
-        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
-        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
-        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))  # type: ignore[call-arg]
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
         nn.dataFlow.createEdge(test2, x)
         nn.dataFlow.createEdge(x, test)
 
@@ -228,31 +228,31 @@ class TestBindings(test_util.TestCase):
 
     def test_replace_subraph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
-        testm = mg.createNode(ng.NeuralNetOperator("test"))
-        mg.createEdge(test2m, xm)
-        mg.createEdge(xm, testm)
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
+        mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
         nn = ng.NNModule()
-        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
-        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
-        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))  # type: ignore[call-arg]
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
         nn.dataFlow.createEdge(test2, x)
         nn.dataFlow.createEdge(x, test)
 
         for m in nn.match(mg):
             match = m
-        new_op = nn.dataFlow.createNode(ng.NeuralNetOperator("new_op"))
+        new_op = nn.dataFlow.createNode(ng.NeuralNetOperator("new_op"))  # type: ignore[call-arg]
         nn.replaceSubgraph(match, new_op, [], [])
         assert len(nn.controlFlow) == 1
         assert nn.controlFlow[0].name == "new_op"
 
     def test_genericGraph(self):
         g = ng.Graph()
-        n1 = g.createNode("hello1")
-        n2 = g.createNode("hello2")
-        e = g.createEdge(n1, n2)
+        n1 = g.createNode("hello1")  # type: ignore[attr-defined]
+        n2 = g.createNode("hello2")  # type: ignore[attr-defined]
+        e = g.createEdge(n1, n2)  # type: ignore[attr-defined]
         ng.render(g)
 
     def test_createUniqueDataNode(self):
@@ -260,7 +260,7 @@ class TestBindings(test_util.TestCase):
         nn = ng.NNModule(net)
         n1 = nn.createUniqueDataNode("a")
         self.assertEqual(n1.name[0], "a")
-        n2 = nn.dataFlow.createNode(ng.Operator("test1"))
+        n2 = nn.dataFlow.createNode(ng.Operator("test1"))  # type: ignore[call-arg]
         nn.createEdge(n1, n2)
         n3 = nn.createUniqueDataNode("a")
         nn.createEdge(n2, n3)
@@ -296,9 +296,9 @@ class TestBindings(test_util.TestCase):
     def test_node_interactions(self):
         nn = ng.NNModule()
         dfg = nn.dataFlow
-        test1 = dfg.createNode(ng.Operator("test1"))
-        test2 = dfg.createNode(ng.Operator("test2"))
-        x = dfg.createNode(ng.Data("x"))
+        test1 = dfg.createNode(ng.Operator("test1"))  # type: ignore[call-arg]
+        test2 = dfg.createNode(ng.Operator("test2"))  # type: ignore[call-arg]
+        x = dfg.createNode(ng.Data("x"))  # type: ignore[call-arg]
         dfg.createEdge(test1, x)
         dfg.createEdge(x, test2)
         p = test2.getOperatorPredecessors()
@@ -306,8 +306,8 @@ class TestBindings(test_util.TestCase):
         assert p[0] == test1
 
         # Add another node
-        test3 = dfg.createNode(ng.Operator("test3"))
-        y = dfg.createNode(ng.Data("y"))
+        test3 = dfg.createNode(ng.Operator("test3"))  # type: ignore[call-arg]
+        y = dfg.createNode(ng.Data("y"))  # type: ignore[call-arg]
         dfg.createEdge(test3, y)
         dfg.createEdge(y, test2)
         p = test2.getOperatorPredecessors()
@@ -328,7 +328,7 @@ class TestBindings(test_util.TestCase):
 
     def test_delete_node(self):
         nn = ng.NNModule()
-        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         nn.dataFlow.deleteNode(node)
         assert len(nn.dataFlow.getMutableNodes()) == 0
 
@@ -337,7 +337,7 @@ class TestBindings(test_util.TestCase):
         net.FC(["X", "W"], ["Y"])
         nn = ng.NNModule(net)
         fc = nn.controlFlow[0]
-        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         nn.replaceProducer(fc.outputs[0], test_op)
         nn.deleteNode(fc)
         assert len(nn.controlFlow) == 1
@@ -349,7 +349,7 @@ class TestBindings(test_util.TestCase):
         net.FC(["X", "W2"], ["Y2"])
         nn = ng.NNModule(net)
         fc = nn.controlFlow[0]
-        test_tensor = nn.dataFlow.createNode(ng.NeuralNetData("T"))
+        test_tensor = nn.dataFlow.createNode(ng.NeuralNetData("T"))  # type: ignore[call-arg]
         nn.replaceAllUsesWith(fc.inputs[0], test_tensor)
 
         for op in nn.controlFlow:
@@ -360,7 +360,7 @@ class TestBindings(test_util.TestCase):
         net.FC(["X", "W"], ["Y"])
         nn = ng.NNModule(net)
         fc = nn.controlFlow[0]
-        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         nn.replaceAsConsumer(fc, test_op)
         nn.deleteNode(fc)
         assert len(nn.controlFlow) == 1
@@ -370,14 +370,14 @@ class TestBindings(test_util.TestCase):
 
     def test_annotation_basic(self):
         annot = ng.Annotation()
-        annot.setDevice("woot")
-        assert annot.getDevice() == "woot"
-        annot.setDeviceType(7)
-        assert annot.getDeviceType() == 7
+        annot.setDevice("woot")  # type: ignore[attr-defined]
+        assert annot.getDevice() == "woot"  # type: ignore[attr-defined]
+        annot.setDeviceType(7)  # type: ignore[attr-defined]
+        assert annot.getDeviceType() == 7  # type: ignore[attr-defined]
 
     def test_annotation_from_graph(self):
         nn = ng.NNModule()
-        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         annot = node.getAnnotation()
         annot.setDeviceType(7)
         node.setAnnotation(annot)
@@ -397,7 +397,7 @@ class TestBindings(test_util.TestCase):
 
     def test_annotation_device_option(self):
         nn = ng.NNModule()
-        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         d = caffe2_pb2.DeviceOption()
         d.node_name = "test"
         node.annotation.device_option = d
@@ -407,7 +407,7 @@ class TestBindings(test_util.TestCase):
 
     def test_has_device_option(self):
         nn = ng.NNModule()
-        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
         assert not node.annotation.hasDeviceOption()
         d = caffe2_pb2.DeviceOption()
         node.annotation.device_option = d
@@ -415,14 +415,14 @@ class TestBindings(test_util.TestCase):
 
     def test_distributed_annotations(self):
         nn = ng.NNModule()
-        key = nn.dataFlow.createNode(ng.NeuralNetData("key"))
-        length = nn.dataFlow.createNode(ng.NeuralNetData("length"))
-        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        key = nn.dataFlow.createNode(ng.NeuralNetData("key"))  # type: ignore[call-arg]
+        length = nn.dataFlow.createNode(ng.NeuralNetData("length"))  # type: ignore[call-arg]
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))  # type: ignore[call-arg]
 
         annot = ng.Annotation()
-        annot.setKeyNode(key)
-        annot.setLengthNode(length)
-        annot.setComponentLevels(["", "test", "woot"])
+        annot.setKeyNode(key)  # type: ignore[attr-defined]
+        annot.setLengthNode(length)  # type: ignore[attr-defined]
+        annot.setComponentLevels(["", "test", "woot"])  # type: ignore[attr-defined]
 
         node.setAnnotation(annot)
 

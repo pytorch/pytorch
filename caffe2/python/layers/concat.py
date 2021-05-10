@@ -117,8 +117,8 @@ class Concat(ModelLayer):
             record_to_concat
         )
         if concated_feature_to_index:
-            metadata = schema.Metadata(
-                feature_specs=schema.FeatureSpec(
+            metadata = schema.Metadata(  # type: ignore[call-arg]
+                feature_specs=schema.FeatureSpec(  # type: ignore[call-arg]
                     feature_to_index=concated_feature_to_index
                 )
             )

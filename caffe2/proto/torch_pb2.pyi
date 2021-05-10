@@ -14,7 +14,7 @@ import typing_extensions
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor = ...
 
 global___ProtoVersion = ProtoVersion
-class _ProtoVersion(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[ProtoVersion], type):
+class _ProtoVersion(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[ProtoVersion], type):  # type: ignore[type-var]
     DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
     PROTO_VERSION_NEWEST = ProtoVersion.V(6)
 class ProtoVersion(metaclass=_ProtoVersion):

@@ -44,7 +44,7 @@ class SelectRecordByContext(ModelLayer):
             if (default_output_record_field is not None) else None
         )
         ref_record = input_record[0]
-        for record in input_record:
+        for record in input_record:  # type: ignore[attr-defined]
             assert schema.equal_schemas(record, ref_record,
                                         check_field_metas=check_field_metas)
 

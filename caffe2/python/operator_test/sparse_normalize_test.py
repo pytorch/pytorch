@@ -23,7 +23,7 @@ class TestSparseNormalize(hu.HypothesisTestCase):
         norm=st.floats(min_value=1.0, max_value=4.0),
         data_strategy=st.data(),
         use_fp16=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_sparse_normalize(
         self, inputs, use_max_norm, norm, data_strategy, use_fp16, gc, dc

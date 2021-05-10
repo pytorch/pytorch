@@ -76,7 +76,7 @@ class CNNModelHelper(ModelHelper):
         self.net.PadImage(blob_in, blob_out, **kwargs)
 
     def ConvNd(self, *args, **kwargs):
-        return brew.conv_nd(
+        return brew.conv_nd(  # type: ignore[misc]
             self,
             *args,
             use_cudnn=self.use_cudnn,
@@ -98,7 +98,7 @@ class CNNModelHelper(ModelHelper):
         )
 
     def ConvTranspose(self, *args, **kwargs):
-        return brew.conv_transpose(
+        return brew.conv_transpose(  # type: ignore[misc]
             self,
             *args,
             use_cudnn=self.use_cudnn,
@@ -120,7 +120,7 @@ class CNNModelHelper(ModelHelper):
         )
 
     def GroupConv_Deprecated(self, *args, **kwargs):
-        return brew.group_conv_deprecated(
+        return brew.group_conv_deprecated(  # type: ignore[misc]
             self,
             *args,
             use_cudnn=self.use_cudnn,
@@ -146,29 +146,29 @@ class CNNModelHelper(ModelHelper):
         return brew.fc_sparse(self, *args, **kwargs)
 
     def Dropout(self, *args, **kwargs):
-        return brew.dropout(
+        return brew.dropout(  # type: ignore[misc]
             self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
         )
 
     def LRN(self, *args, **kwargs):
-        return brew.lrn(
+        return brew.lrn(  # type: ignore[misc]
             self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
         )
 
     def Softmax(self, *args, **kwargs):
-        return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)
+        return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)  # type: ignore[misc]
 
     def SpatialBN(self, *args, **kwargs):
-        return brew.spatial_bn(self, *args, order=self.order, **kwargs)
+        return brew.spatial_bn(self, *args, order=self.order, **kwargs)  # type: ignore[misc]
 
     def SpatialGN(self, *args, **kwargs):
-        return brew.spatial_gn(self, *args, order=self.order, **kwargs)
+        return brew.spatial_gn(self, *args, order=self.order, **kwargs)  # type: ignore[misc]
 
     def InstanceNorm(self, *args, **kwargs):
-        return brew.instance_norm(self, *args, order=self.order, **kwargs)
+        return brew.instance_norm(self, *args, order=self.order, **kwargs)  # type: ignore[misc]
 
     def Relu(self, *args, **kwargs):
-        return brew.relu(
+        return brew.relu(  # type: ignore[misc]
             self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
         )
 
@@ -187,7 +187,7 @@ class CNNModelHelper(ModelHelper):
         return brew.sum(self, *args, **kwargs)
 
     def Transpose(self, *args, **kwargs):
-        return brew.transpose(self, *args, use_cudnn=self.use_cudnn, **kwargs)
+        return brew.transpose(self, *args, use_cudnn=self.use_cudnn, **kwargs)  # type: ignore[misc]
 
     def Iter(self, *args, **kwargs):
         return brew.iter(self, *args, **kwargs)
@@ -196,15 +196,15 @@ class CNNModelHelper(ModelHelper):
         return brew.accuracy(self, *args, **kwargs)
 
     def MaxPool(self, *args, **kwargs):
-        return brew.max_pool(
+        return brew.max_pool(  # type: ignore[misc]
             self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
         )
 
     def MaxPoolWithIndex(self, *args, **kwargs):
-        return brew.max_pool_with_index(self, *args, order=self.order, **kwargs)
+        return brew.max_pool_with_index(self, *args, order=self.order, **kwargs)  # type: ignore[misc]
 
     def AveragePool(self, *args, **kwargs):
-        return brew.average_pool(
+        return brew.average_pool(  # type: ignore[misc]
             self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
         )
 
@@ -233,7 +233,7 @@ class CNNModelHelper(ModelHelper):
         return device_option
 
     @property
-    def GPU(self, gpu_id=0):
+    def GPU(self, gpu_id=0):  # type: ignore[misc]
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = gpu_id

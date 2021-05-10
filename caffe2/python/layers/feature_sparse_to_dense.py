@@ -57,7 +57,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
             elif feature_specs.feature_type == "ID_LIST":
                 outputs.append(
-                    (
+                    (  # type: ignore[arg-type]
                         field,
                         schema.Struct(
                             (
@@ -79,7 +79,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
             elif feature_specs.feature_type == "ID_SCORE_LIST":
                 outputs.append(
-                    (
+                    (  # type: ignore[arg-type]
                         field,
                         schema.Struct(
                             (
@@ -111,7 +111,7 @@ class FeatureSparseToDense(ModelLayer):
                 # Even though they should match dimensions from feature config,
                 # we keep ranges blob to check input data later.
                 outputs.append(
-                    (
+                    (  # type: ignore[arg-type]
                         field,
                         schema.Struct(
                             (
@@ -139,7 +139,7 @@ class FeatureSparseToDense(ModelLayer):
                 # generic type enum 1. If new types are implemented, we need to
                 # modify the ParseGeneric operator, and this part accordingly
                 outputs.append(
-                    (
+                    (  # type: ignore[arg-type]
                         field,
                         schema.Struct(
                             (
@@ -177,7 +177,7 @@ class FeatureSparseToDense(ModelLayer):
         # not worse it?
         for field, feature_specs in input_specs:
             schema.attach_metadata_to_scalars(
-                self.output_schema[field], schema.Metadata(feature_specs=feature_specs)
+                self.output_schema[field], schema.Metadata(feature_specs=feature_specs)  # type: ignore[call-arg]
             )
 
     # Add operators to all types that need to be densified

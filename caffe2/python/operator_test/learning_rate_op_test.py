@@ -17,7 +17,7 @@ import numpy as np
 
 
 class TestLearningRate(serial.SerializedTestCase):
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=None, max_examples=50)
     def test_alter_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
@@ -46,7 +46,7 @@ class TestLearningRate(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [iter], ref)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_hill_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
 
@@ -83,7 +83,7 @@ class TestLearningRate(serial.SerializedTestCase):
         )
         self.assertReferenceChecks(gc, op, [iter], ref)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_slope_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
 
@@ -118,7 +118,7 @@ class TestLearningRate(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [iter], ref)
 
     @given(
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10)
     def test_gate_learningrate(self, gc, dc):

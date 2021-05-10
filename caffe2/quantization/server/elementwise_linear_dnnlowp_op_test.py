@@ -21,7 +21,7 @@ class DNNLowPElementwiseLinearOpTest(hu.HypothesisTestCase):
         empty_batch=st.booleans(),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_elementwise_linear_int(
         self, N, D, empty_batch, in_quantized, out_quantized, gc, dc

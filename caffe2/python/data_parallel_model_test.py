@@ -131,7 +131,7 @@ class DataParallelModelTest(TestCase):
 
     def run_test_locally(self, fn, device_option=None, **kwargs):
         # Queue for assertion errors on subprocesses
-        queue = Queue()
+        queue = Queue()  # type: ignore[var-annotated]
 
         # Capture any exception thrown by the subprocess
         def run_fn(*args, **kwargs):
@@ -504,12 +504,12 @@ class DataParallelModelTest(TestCase):
                 dY = np.array(dY_blob, dtype=np.float32)
                 dY_arr.append(dY)
                 dBias_arr.append(np.array(np.sum(dY, axis=0), dtype=np.float32))
-            dBias = np.sum(dBias_arr, dtype=np.float32)
+            dBias = np.sum(dBias_arr, dtype=np.float32)  # type: ignore[arg-type]
             dBias_avg = dBias / num_devices
             for device in devices:
                 dBiasActual = np.sum(workspace.FetchBlob("{}_{}/bn_out_b_grad"
                     .format(device_type, device)), dtype=np.float32)
-                self.assertTrue(np.isclose([dBiasActual], [dBias], atol=tolerance))
+                self.assertTrue(np.isclose([dBiasActual], [dBias], atol=tolerance))  # type: ignore[arg-type]
 
             # dGamma
             # Sum dGamma values over all devices to find the average gradient
@@ -717,7 +717,7 @@ class DataParallelModelTest(TestCase):
         workspace.RunNetOnce(model_combine.param_init_net)
         workspace.RunNetOnce(model_combine.net)
         two_device_bn_out_vals = []
-        two_device_grads = {}
+        two_device_grads = {}  # type: ignore[var-annotated]
         for device in devices:
             bn_out_blob = "{}_{}/bn_out".format(device_type, device)
             two_device_bn_out_vals.append(workspace.FetchBlob(bn_out_blob))

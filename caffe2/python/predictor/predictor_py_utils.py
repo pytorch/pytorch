@@ -109,7 +109,7 @@ def GetBlobs(meta_net_def, key):
 
 
 def GetBlobsByTypePrefix(meta_net_def, blob_type_prefix):
-    blob_map = {}
+    blob_map = {}  # type: ignore[var-annotated]
     for b in meta_net_def.blobs:
         if b.key.startswith(blob_type_prefix):
             for blob in b.value:

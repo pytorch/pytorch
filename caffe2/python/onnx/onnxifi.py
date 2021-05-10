@@ -13,14 +13,14 @@ def onnxifi_set_option(option_name, option_value):
     """
     Set onnxifi option
     """
-    return C.onnxifi_set_option(option_name, str(option_value))
+    return C.onnxifi_set_option(option_name, str(option_value))  # type: ignore[attr-defined]
 
 
 def onnxifi_get_option(option_name):
     """
     Get onnxifi option
     """
-    return C.onnxifi_get_option(option_name)
+    return C.onnxifi_get_option(option_name)  # type: ignore[attr-defined]
 
 def onnxifi_caffe2_net(
         pred_net,
@@ -46,12 +46,12 @@ def onnxifi_caffe2_net(
             tbs = caffe2_pb2.TensorBoundShape()
             tbs.name = k
             tbs.shape.dims.extend(v)
-            tbs.dim_type.extend([caffe2_pb2.TensorBoundShape.CONSTANT] * len(tbs.shape.dims))
-            tbs.dim_type[0] = caffe2_pb2.TensorBoundShape.BATCH
+            tbs.dim_type.extend([caffe2_pb2.TensorBoundShape.CONSTANT] * len(tbs.shape.dims))  # type: ignore[list-item]
+            tbs.dim_type[0] = caffe2_pb2.TensorBoundShape.BATCH  # type: ignore[call-overload]
             shape_hints.shapes.extend([tbs])
         shape_hints.max_batch_size = max_batch_size
         shape_hints.max_feature_len = max_seq_size
-    pred_net_str = C.onnxifi(pred_net.SerializeToString(),
+    pred_net_str = C.onnxifi(pred_net.SerializeToString(),  # type: ignore[attr-defined]
                              shape_hints.SerializeToString(),
                              block_list if block_list else [],
                              weight_names if weight_names is not None else [],

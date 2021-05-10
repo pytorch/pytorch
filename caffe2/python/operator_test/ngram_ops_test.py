@@ -20,7 +20,7 @@ class TestNGramOps(hu.HypothesisTestCase):
         out_of_vcb=st.floats(min_value=0, max_value=0.5),
         max_categorical_limit=st.integers(min_value=5, max_value=20),
         max_in_vcb_val=st.integers(min_value=1000, max_value=10000),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_ngram_from_categorical_op(
         self,
@@ -58,7 +58,7 @@ class TestNGramOps(hu.HypothesisTestCase):
                     val += base * r
                     floats[i][j] = vcb[k][r]
             expected_output.append(val)
-        expected_output = np.array(expected_output, dtype=np.int32)
+        expected_output = np.array(expected_output, dtype=np.int32)  # type: ignore[assignment]
 
         workspace.ResetWorkspace()
         workspace.FeedBlob('floats', floats)

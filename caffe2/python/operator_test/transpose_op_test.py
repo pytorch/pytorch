@@ -55,7 +55,7 @@ class TestTransposeOp(serial.SerializedTestCase):
 
     @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(X=hu.tensor(dtype=np.float32), use_axes=st.booleans(),
-           **hu.gcs_cuda_only)
+           **hu.gcs_cuda_only)  # type: ignore[arg-type]
     def test_transpose_cudnn(self, X, use_axes, gc, dc):
         ndim = len(X.shape)
         axes = np.arange(ndim)

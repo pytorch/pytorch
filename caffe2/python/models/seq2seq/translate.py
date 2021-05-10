@@ -53,12 +53,12 @@ class Seq2SeqModelCaffe2EnsembleDecoderBase(metaclass=ABCMeta):
     def load_models(self):
         db_reader = 'reader'
         for model, scope_name in zip(
-            self.models,
-            self.decoder_scope_names,
+            self.models,  # type: ignore[attr-defined]
+            self.decoder_scope_names,  # type: ignore[attr-defined]
         ):
             params_for_current_model = [
                 param
-                for param in self.model.GetAllParams()
+                for param in self.model.GetAllParams()  # type: ignore[attr-defined]
                 if str(param).startswith(scope_name)
             ]
             assert workspace.RunOperatorOnce(core.CreateOperator(
@@ -518,7 +518,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
             hyp_index = prev_index_beam_list[i][hyp_index][0]
             i -= 1
 
-        attention_weights_per_token = reversed(attention_weights_per_token)
+        attention_weights_per_token = reversed(attention_weights_per_token)  # type: ignore[assignment]
         # encoder_inputs are reversed, see get_batch func
         attention_weights_per_token = [
             list(reversed(attention_weights))[:len(numberized_input)]

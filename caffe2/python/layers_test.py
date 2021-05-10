@@ -393,7 +393,7 @@ class TestLayers(LayersTestCase):
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.ListWithEvicted(
                     schema.Scalar(np.int64,
-                                  metadata=schema.Metadata(categorical_limit=1)),)),)),
+                                  metadata=schema.Metadata(categorical_limit=1)),)),)),  # type: ignore[call-arg]
         ))
         embedding_dim = 8
         lengths_blob = record.sparse.sparse_feature_0.lengths.get()
@@ -432,7 +432,7 @@ class TestLayers(LayersTestCase):
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.List(
                     schema.Scalar(np.int64,
-                                  metadata=schema.Metadata(categorical_limit=1000)))),
+                                  metadata=schema.Metadata(categorical_limit=1000)))),  # type: ignore[call-arg]
             )),
         ))
         embedding_dim = 64
@@ -478,7 +478,7 @@ class TestLayers(LayersTestCase):
             self.model.net,
             schema.List(schema.Scalar(
                 np.int64,
-                metadata=schema.Metadata(categorical_limit=60000)
+                metadata=schema.Metadata(categorical_limit=60000)  # type: ignore[call-arg]
             ))
         )
         use_divide_mod = use_divide_mod if use_hashing is False else False
@@ -508,7 +508,7 @@ class TestLayers(LayersTestCase):
     def testSparseFeatureHashIdScoreList(self, use_hashing, modulo):
         record = schema.NewRecord(self.model.net,
                 schema.Map(schema.Scalar(np.int64,
-                    metadata=schema.Metadata(
+                    metadata=schema.Metadata(  # type: ignore[call-arg]
                         categorical_limit=60000)),
                     np.float32))
 
@@ -533,7 +533,7 @@ class TestLayers(LayersTestCase):
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.List(
                     schema.Scalar(np.int64,
-                                  metadata=schema.Metadata(categorical_limit=1000)))),
+                                  metadata=schema.Metadata(categorical_limit=1000)))),  # type: ignore[call-arg]
             )),
         ))
 
@@ -547,7 +547,7 @@ class TestLayers(LayersTestCase):
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.List(
                     schema.Scalar(np.int64,
-                                  metadata=schema.Metadata(categorical_limit=1000)))),
+                                  metadata=schema.Metadata(categorical_limit=1000)))),  # type: ignore[call-arg]
             )),
         ))
 
@@ -599,7 +599,7 @@ class TestLayers(LayersTestCase):
                 ('id_score_list_0', schema.Map(
                     schema.Scalar(
                         np.int64,
-                        metadata=schema.Metadata(
+                        metadata=schema.Metadata(  # type: ignore[call-arg]
                             categorical_limit=1000
                         ),
                     ),
@@ -650,7 +650,7 @@ class TestLayers(LayersTestCase):
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.List(
                     schema.Scalar(np.int64,
-                                  metadata=schema.Metadata(categorical_limit=1000)))),
+                                  metadata=schema.Metadata(categorical_limit=1000)))),  # type: ignore[call-arg]
             )),
         ))
 
@@ -665,7 +665,7 @@ class TestLayers(LayersTestCase):
                 ('id_score_list_0', schema.Map(
                     schema.Scalar(
                         np.int64,
-                        metadata=schema.Metadata(
+                        metadata=schema.Metadata(  # type: ignore[call-arg]
                             categorical_limit=1000
                         ),
                     ),
@@ -1120,7 +1120,7 @@ class TestLayers(LayersTestCase):
         expect = (5, 6,)
         if not use_layer_norm_op:
             X = X.reshape(10, 6)
-            expect = (6,)
+            expect = (6,)  # type: ignore[assignment]
         input_record = self.new_record(schema.Scalar((np.float32, expect)))
         schema.FeedRecord(input_record, [X])
         ln_output = self.model.LayerNormalization(
@@ -1222,9 +1222,9 @@ class TestLayers(LayersTestCase):
         indices = np.array([1, 3, 4], dtype=np.int32)
         dense = np.array(list(range(20)), dtype=np.float32).reshape(10, 2)
         lengths = np.array(list(range(10)), dtype=np.int32)
-        items = np.array(list(range(lengths.sum())), dtype=np.int64)
-        items_lengths = np.array(list(range(lengths.sum())), dtype=np.int32)
-        items_items = np.array(list(range(items_lengths.sum())), dtype=np.int64)
+        items = np.array(list(range(lengths.sum())), dtype=np.int64)  # type: ignore[call-overload]
+        items_lengths = np.array(list(range(lengths.sum())), dtype=np.int32)  # type: ignore[call-overload]
+        items_items = np.array(list(range(items_lengths.sum())), dtype=np.int64)  # type: ignore[call-overload]
         record = self.new_record(schema.Struct(
             ('dense', schema.Scalar(np.float32)),
             ('sparse', schema.Struct(
@@ -1560,7 +1560,7 @@ class TestLayers(LayersTestCase):
             schema.Metadata(
                 categorical_limit=100000000,
                 expected_value=99,
-                feature_specs=schema.FeatureSpec(
+                feature_specs=schema.FeatureSpec(  # type: ignore[call-arg]
                     feature_ids=[1, 100, 1001]
                 )
             )
@@ -1657,7 +1657,7 @@ class TestLayers(LayersTestCase):
             inputs.append(values)
         input_schema = schema.Tuple(
             *[schema.List(
-                schema.Scalar(dtype=np.int64, metadata=schema.Metadata(
+                schema.Scalar(dtype=np.int64, metadata=schema.Metadata(  # type: ignore[call-arg]
                     categorical_limit=20
                 ))) for _ in range(num_inputs)]
         )
@@ -2347,7 +2347,7 @@ class TestLayers(LayersTestCase):
         input_specs = [
             (
                 float_features_column,
-                schema.FeatureSpec(
+                schema.FeatureSpec(  # type: ignore[call-arg]
                     feature_type=float_features_type,
                     feature_ids=float_features_ids,
                     feature_names=feature_names,
@@ -2355,7 +2355,7 @@ class TestLayers(LayersTestCase):
             ),
             (
                 id_list_features_column,
-                schema.FeatureSpec(
+                schema.FeatureSpec(  # type: ignore[call-arg]
                     feature_type=id_list_features_type,
                     feature_ids=id_list_features_ids,
                     feature_names=feature_names,
@@ -2363,7 +2363,7 @@ class TestLayers(LayersTestCase):
             ),
             (
                 id_score_list_features_column,
-                schema.FeatureSpec(
+                schema.FeatureSpec(  # type: ignore[call-arg]
                     feature_type=id_score_list_features_type,
                     feature_ids=id_score_list_features_ids,
                     feature_names=feature_names,
@@ -2412,7 +2412,7 @@ class TestLayers(LayersTestCase):
             schema.Map(
                 schema.Scalar(
                     np.int64,
-                    metadata=schema.Metadata(
+                    metadata=schema.Metadata(  # type: ignore[call-arg]
                         categorical_limit=1000
                     ),
                 ),
@@ -2430,7 +2430,7 @@ class TestLayers(LayersTestCase):
             schema.List(
                 schema.Scalar(
                     np.int64,
-                    metadata=schema.Metadata(categorical_limit=1000)
+                    metadata=schema.Metadata(categorical_limit=1000)  # type: ignore[call-arg]
                 )
             )
         )
@@ -2446,7 +2446,7 @@ class TestLayers(LayersTestCase):
             schema.Map(
                 schema.Scalar(
                     np.int64,
-                    metadata=schema.Metadata(categorical_limit=1000),
+                    metadata=schema.Metadata(categorical_limit=1000),  # type: ignore[call-arg]
                 ),
                 np.float32,
             ),

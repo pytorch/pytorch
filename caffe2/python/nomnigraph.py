@@ -23,18 +23,18 @@ class NNModule(object):
                 serialized_device_map = {}
                 for k in device_map:
                     serialized_device_map[k] = device_map[k].SerializeToString()
-                self._NNModule = C.NNModuleFromProtobufDistributed(
+                self._NNModule = C.NNModuleFromProtobufDistributed(  # type: ignore[attr-defined]
                     serialized_proto, serialized_device_map
                 )
             # Default
             elif serialized_proto:
-                self._NNModule, self._OpList = C.NNModuleFromProtobuf(serialized_proto)
+                self._NNModule, self._OpList = C.NNModuleFromProtobuf(serialized_proto)  # type: ignore[attr-defined]
             else:
                 raise Exception(
                     "NNModule can be constructed with core.Net or caffe2_pb2.NetDef types"
                 )
         else:
-            self._NNModule = C.NNModule()
+            self._NNModule = C.NNModule()  # type: ignore[attr-defined]
 
     @property
     def dataFlow(self):
@@ -75,13 +75,13 @@ class NNModule(object):
         return self._NNModule.dataFlow().replaceNode(old_node, new_node)
 
     def replaceProducer(self, tensor, new_producer):
-        C.replaceProducer(tensor, new_producer)
+        C.replaceProducer(tensor, new_producer)  # type: ignore[attr-defined]
 
     def replaceAllUsesWith(self, old_tensor, new_tensor):
-        C.replaceAllUsesWith(old_tensor, new_tensor)
+        C.replaceAllUsesWith(old_tensor, new_tensor)  # type: ignore[attr-defined]
 
     def replaceAsConsumer(self, old_consumer, new_consumer):
-        C.replaceAsConsumer(old_consumer, new_consumer)
+        C.replaceAsConsumer(old_consumer, new_consumer)  # type: ignore[attr-defined]
 
     def replaceSubgraph(self, subgraph, new_node, inputs, outputs):
         self._NNModule.replaceSubgraph(subgraph, new_node, inputs, outputs)
@@ -102,7 +102,7 @@ class NNModule(object):
 
     def match(self, pattern):
         for n in self.dataFlow.getMutableNodes():
-            m = C.matchSubgraph(n, pattern)
+            m = C.matchSubgraph(n, pattern)  # type: ignore[attr-defined]
             if m:
                 yield m
 
@@ -116,7 +116,7 @@ def render(s):
     if cmd_exists("graph-easy"):
         p = Popen("graph-easy", stdin=PIPE)
         try:
-            p.stdin.write(s.encode("utf-8"))
+            p.stdin.write(s.encode("utf-8"))  # type: ignore[union-attr]
         except IOError as e:
             if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
                 pass
@@ -124,7 +124,7 @@ def render(s):
                 # Raise any other error.
                 raise
 
-        p.stdin.close()
+        p.stdin.close()  # type: ignore[union-attr]
         p.wait()
     else:
         print(s)

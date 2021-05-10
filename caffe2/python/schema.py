@@ -69,7 +69,7 @@ FeatureSpec = namedtuple(
 )
 
 # pyre-fixme[16]: `FeatureSpec.__new__` has no attribute `__defaults__`
-FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)  # type: ignore[attr-defined]
 
 
 class Metadata(
@@ -93,7 +93,7 @@ class Metadata(
 
 
 # pyre-fixme[16]: `Metadata.__new__` has no attribute `__defaults__`
-Metadata.__new__.__defaults__ = (None, None, None)
+Metadata.__new__.__defaults__ = (None, None, None)  # type: ignore[attr-defined]
 
 
 class Field(object):
@@ -403,8 +403,8 @@ class Struct(Field):
             assert field[0] != 'lengths', (
                 'Struct cannot contain a field named `lengths`.'
             )
-        fields = [(name, _normalize_field(field)) for name, field in fields]
-        self.fields = OrderedDict()
+        fields = [(name, _normalize_field(field)) for name, field in fields]  # type: ignore[assignment]
+        self.fields = OrderedDict()  # type: ignore[var-annotated]
         for name, field in fields:
             if FIELD_SEPARATOR in name:
                 name, field = self._struct_from_nested_name(name, field)
@@ -973,7 +973,7 @@ def from_dtype(dtype, _outer_shape=()):
     if not dtype.fields:
         return Scalar(dtype)
 
-    struct_fields = []
+    struct_fields = []  # type: ignore[var-annotated]
     for name, (fdtype, offset) in dtype.fields:
         assert offset == 0, ('Fields with byte offsets are not supported.')
         struct_fields += (name, from_dtype(fdtype, _outer_shape=shape))
@@ -1253,11 +1253,11 @@ def InitEmptyRecord(net, schema_or_record, enforce_types=False):
 
 
 _DATA_TYPE_FOR_DTYPE = [
-    (np.str, core.DataType.STRING),
+    (np.str, core.DataType.STRING),  # type: ignore[attr-defined]
     (np.float16, core.DataType.FLOAT16),
     (np.float32, core.DataType.FLOAT),
     (np.float64, core.DataType.DOUBLE),
-    (np.bool, core.DataType.BOOL),
+    (np.bool, core.DataType.BOOL),  # type: ignore[attr-defined]
     (np.int8, core.DataType.INT8),
     (np.int16, core.DataType.INT16),
     (np.int32, core.DataType.INT32),

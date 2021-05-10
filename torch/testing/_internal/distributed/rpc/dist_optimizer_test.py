@@ -96,8 +96,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)  # type: ignore[attr-defined]
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -118,21 +118,21 @@ class DistOptimizerTest(RpcAgentTestFixture):
             loss = torch.add(output2.wait(), t1).sum()
 
             dist_autograd.backward(context_id, [loss])
-            with self.assertRaisesRegex(Exception, "Error running optimizer"):
+            with self.assertRaisesRegex(Exception, "Error running optimizer"):  # type: ignore[attr-defined]
                 dist_optim.step(context_id)
 
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)  # type: ignore[attr-defined]
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
         remote_param1 = remote_method(MyModule.get_w, remote_module1)
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
 
-        with self.assertRaisesRegex(Exception, "Error creating optimizer."):
+        with self.assertRaisesRegex(Exception, "Error creating optimizer."):  # type: ignore[attr-defined]
             dist_optim = DistributedOptimizer(
                 OptimizerFailingOnConstructor, [remote_param1, remote_param2]
             )
@@ -159,8 +159,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)  # type: ignore[attr-defined]
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)  # type: ignore[attr-defined]
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -170,8 +170,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         old_w1_remote = remote_param1.to_here()
 
         # sanity check: local and remote initial weights should match
-        self.assertEqual(old_w1, remote_param1.to_here())
-        self.assertEqual(old_w2, remote_param2.to_here())
+        self.assertEqual(old_w1, remote_param1.to_here())  # type: ignore[attr-defined]
+        self.assertEqual(old_w2, remote_param2.to_here())  # type: ignore[attr-defined]
 
         dist_optim = DistributedOptimizer(
             optim_cls, [remote_param1, remote_param2], *args, **kwargs
@@ -192,11 +192,11 @@ class DistOptimizerTest(RpcAgentTestFixture):
             new_w2 = rpc_async_method(MyModule.get_w, remote_module2).wait()
 
             # ensure optimizer changed weights
-            self.assertNotEqual(old_w1, new_w1)
-            self.assertNotEqual(old_w2, new_w2)
+            self.assertNotEqual(old_w1, new_w1)  # type: ignore[attr-defined]
+            self.assertNotEqual(old_w2, new_w2)  # type: ignore[attr-defined]
             # ensure local equals remote
-            self.assertEqual(new_w1, module1.get_w())
-            self.assertEqual(new_w2, module2.get_w())
+            self.assertEqual(new_w1, module1.get_w())  # type: ignore[attr-defined]
+            self.assertEqual(new_w2, module2.get_w())  # type: ignore[attr-defined]
 
     @dist_init()
     def test_dist_optim(self):

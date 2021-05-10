@@ -95,7 +95,7 @@ class TestReduceOps(serial.SerializedTestCase):
             "ReduceMean", X, keepdims, num_axes, np.mean, gc, dc)
 
     @given(n=st.integers(1, 3), m=st.integers(1, 3), k=st.integers(1, 3),
-           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_reduce_l1(self, n, m, k, keepdims, num_axes, gc, dc):
         X = np.arange(n * m * k, dtype=np.float32) - 0.5

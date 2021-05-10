@@ -29,7 +29,7 @@ class DropoutTest(hu.HypothesisTestCase):
         # No sense in checking gradients for test phase
 
         def reference_dropout_test(x):
-            return x, np.ones(x.shape, dtype=np.bool)
+            return x, np.ones(x.shape, dtype=np.bool)  # type: ignore[attr-defined]
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_test,
             # The 'mask' output may be uninitialized
@@ -51,7 +51,7 @@ class DropoutTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
 
         def reference_dropout_ratio0(x):
-            return (x,) if is_test else (x, np.ones(x.shape, dtype=np.bool))
+            return (x,) if is_test else (x, np.ones(x.shape, dtype=np.bool))  # type: ignore[attr-defined]
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_ratio0, outputs_to_check=[0])
 

@@ -31,13 +31,13 @@ class TestCastOp(hu.HypothesisTestCase):
         # This is actually 0
         self.assertGradientChecks(gc, op, [data], 0, [0])
 
-    @given(data=hu.tensor(dtype=np.int32), **hu.gcs_cpu_only)
+    @given(data=hu.tensor(dtype=np.int32), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_cast_int_to_string(self, data, gc, dc):
         op = core.CreateOperator(
             'Cast', 'data', 'data_cast', to=core.DataType.STRING)
 
         def ref(data):
-            ret = data.astype(dtype=np.str)
+            ret = data.astype(dtype=np.str)  # type: ignore[attr-defined]
             # the string blob will be fetched as object, we feed and re-fetch
             # to mimic this.
             with hu.temp_workspace('tmp_ref_int_to_string'):

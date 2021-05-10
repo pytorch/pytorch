@@ -21,7 +21,7 @@ class DNNLowPGatherOpTest(hu.HypothesisTestCase):
         is_empty=st.booleans(),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_gather(self, dim1, dim2, is_empty, in_quantized, out_quantized, gc, dc):
         if is_empty:

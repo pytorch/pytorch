@@ -69,14 +69,14 @@ class Caffe2Frontend(object):
         'Transpose': {'axes': 'perm'},
     }
 
-    _special_operators = {}
+    _special_operators = {}  # type: ignore[var-annotated]
 
     # Dummy name generator
     _dummy_name = C.DummyName()
 
     @classmethod
     def dummy_name(cls):
-        return cls._dummy_name.new_dummy_name()
+        return cls._dummy_name.new_dummy_name()  # type: ignore[attr-defined]
 
     @classmethod
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
@@ -104,7 +104,7 @@ class Caffe2Frontend(object):
             raise ValueError('Could not find data field in arg: {}'.format(arg))
 
         if name in cls._blocklist_caffe2_args:
-            assert value in cls._blocklist_caffe2_args[arg.name]
+            assert value in cls._blocklist_caffe2_args[arg.name]  # type: ignore[operator]
             return None
 
         return helper.make_attribute(name, value)
@@ -123,7 +123,7 @@ class Caffe2Frontend(object):
         node_def.input.extend(op_def.input)
         node_def.output.extend(op_def.output)
 
-        attrs = filter(None, [cls.caffe2_arg_to_onnx_attr(op_def, arg)
+        attrs = filter(None, [cls.caffe2_arg_to_onnx_attr(op_def, arg)  # type: ignore[var-annotated]
                               for arg in op_def.arg])
         node_def.attribute.extend(attrs)
 
@@ -131,8 +131,8 @@ class Caffe2Frontend(object):
 
     @classmethod
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
-        if C.support_onnx_export(op_def.type):
-            node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
+        if C.support_onnx_export(op_def.type):  # type: ignore[attr-defined]
+            node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)  # type: ignore[attr-defined]
             nodes = []
             for s in node_strs:
                 node = NodeProto()
@@ -244,7 +244,7 @@ class Caffe2Frontend(object):
                 shape=value_info[name][1])
             for name in predict_net.external_input)
 
-        cls._dummy_name.reset(cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net))
+        cls._dummy_name.reset(cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net))  # type: ignore[attr-defined]
 
         for op in predict_net.op:
             shapes = {}

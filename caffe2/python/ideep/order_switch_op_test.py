@@ -74,7 +74,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Z1 - Z0)))
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 
 if __name__ == "__main__":

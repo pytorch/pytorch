@@ -29,7 +29,7 @@ def initialize_params_from_file(
 def initialize_master_xpu_model_params(model, weights_file, opts, reset_epoch):
     log.info("Initializing model params from file: {}".format(weights_file))
     with open(weights_file, 'r') as fopen:
-        blobs = pickle.load(fopen)
+        blobs = pickle.load(fopen)  # type: ignore[arg-type]
     if 'blobs' in blobs:
         blobs = blobs['blobs']
 
@@ -161,7 +161,7 @@ def save_model_params_blob(model, params_file, epoch, opts, best_metric):
     log.info('to weights file {}'.format(params_file))
     try:
         with open(params_file, 'w') as fwrite:
-            pickle.dump(dict(blobs=save_blobs), fwrite, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(dict(blobs=save_blobs), fwrite, pickle.HIGHEST_PROTOCOL)  # type: ignore[arg-type]
     except IOError as e:
         log.error('I/O error({0}): {1}'.format(e.errno, e.strerror))
 

@@ -19,7 +19,7 @@ def id_list_batch(draw):
     inputs = []
     sample_size = draw(st.integers(5, 10))
     for _ in range(batch_size):
-        values = draw(hnp.arrays(values_dtype, sample_size, st.integers(0, 1)))
+        values = draw(hnp.arrays(values_dtype, sample_size, st.integers(0, 1)))  # type: ignore[misc]
         inputs += [values]
     return [np.array(inputs)]
 
@@ -55,7 +55,7 @@ class TestDenseVectorToIdList(hu.HypothesisTestCase):
         np.testing.assert_array_equal(sparse_lengths, expected_lengths)
         np.testing.assert_array_equal(sparse_values, expected_values)
 
-    @given(inputs=id_list_batch(), **hu.gcs_cpu_only)
+    @given(inputs=id_list_batch(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_dense_vector_to_id_list_op(self, inputs, gc, dc):
         op = core.CreateOperator(
             "DenseVectorToIdList",

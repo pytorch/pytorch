@@ -17,10 +17,10 @@ class TestLengthsTopKOps(serial.SerializedTestCase):
            **hu.gcs_cpu_only)
     def test_lengths_top_k_op(self, N, K, gc, dc):
         lens = np.random.randint(low=1, high=2 * K + 1, size=N).astype(np.int32)
-        X = []
+        X = []  # type: ignore[var-annotated]
         for i in lens:
             X.extend(x / 100.0 for x in range(0, 6 * i, 6))
-        X = np.array(X, dtype=np.float32)
+        X = np.array(X, dtype=np.float32)  # type: ignore[assignment]
         op = core.CreateOperator("LengthsTopK", ["X", "Y"], ["values", "indices"], k=K)
 
         def lengths_top_k(X, lens):
@@ -45,7 +45,7 @@ class TestLengthsTopKOps(serial.SerializedTestCase):
 
     @given(N=st.integers(min_value=0, max_value=10),
            K=st.integers(min_value=1, max_value=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_lengths_top_k_empty_op(self, N, K, gc, dc):
         lens = np.zeros((N, ), dtype=np.int32)
         X = np.array([], dtype=np.float32)

@@ -41,7 +41,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None)
     def test_groupwise_dnnlowp_conv_acc16_int(
@@ -118,7 +118,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         b = np.round(np.random.randn(output_channels)).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("Conv", ""),
@@ -194,7 +194,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         prepack_weight=st.booleans(),
         nbits_in_non_outlier=st.sampled_from((0, 1, 6, 8)),
         share_col_buffer=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_groupwise_dnnlowp_conv_acc16_outlier(
         self,
@@ -251,7 +251,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         b = np.round(np.random.randn(output_channels)).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("Conv", ""),

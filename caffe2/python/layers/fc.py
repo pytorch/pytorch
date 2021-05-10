@@ -108,8 +108,8 @@ class FC(SamplingTrainableMixin, ModelLayer):
         if axis == 1:
             output_shape = (output_dims, )
         else:
-            output_shape = list(input_record.field_types()[0].shape)[0: axis - 1]
-            output_shape = tuple(output_shape + [output_dims])
+            output_shape = list(input_record.field_types()[0].shape)[0: axis - 1]  # type: ignore[assignment]
+            output_shape = tuple(output_shape + [output_dims])  # type: ignore[assignment]
 
         self.output_schema = schema.Scalar(
             (np.float32, output_shape),

@@ -18,7 +18,7 @@ class TestSparseGradient(hu.HypothesisTestCase):
            N=st.integers(min_value=5, max_value=20),
            K=st.integers(min_value=5, max_value=15),
            sparsity=st.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_sparse_gradient(self, M, N, K, sparsity, gc, dc):
         X = np.random.randn(M, K).astype(np.float32)

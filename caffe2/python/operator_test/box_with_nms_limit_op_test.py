@@ -53,9 +53,9 @@ def gen_multiple_boxes(centers, scores, count, num_classes):
     ret_scores = None
     for cc, ss in zip(centers, scores):
         box = gen_boxes(count, cc)
-        ret_box = np.vstack((ret_box, box)) if ret_box is not None else box
+        ret_box = np.vstack((ret_box, box)) if ret_box is not None else box  # type: ignore[arg-type]
         cur_sc = np.ones((count, 1), dtype=np.float32) * ss
-        ret_scores = np.vstack((ret_scores, cur_sc)) \
+        ret_scores = np.vstack((ret_scores, cur_sc)) \  # type: ignore[arg-type]
             if ret_scores is not None else cur_sc
     ret_box = np.tile(ret_box, (1, num_classes))
     ret_scores = np.tile(ret_scores, (1, num_classes))
@@ -65,7 +65,7 @@ def gen_multiple_boxes(centers, scores, count, num_classes):
 
 
 class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
-    @given(**HU_CONFIG)
+    @given(**HU_CONFIG)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_simple(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
@@ -82,7 +82,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
-    @given(**HU_CONFIG)
+    @given(**HU_CONFIG)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_score_thresh(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
@@ -97,11 +97,11 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         op = get_op(2, 3, {"score_thresh": 0.8, "nms": 0.9})
 
         def ref(*args, **kwargs):
-            return (gt_scores.flatten(), gt_boxes, gt_classes)
+            return (gt_scores.flatten(), gt_boxes, gt_classes)  # type: ignore[attr-defined]
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
-    @given(det_per_im=st.integers(1, 3), **HU_CONFIG)
+    @given(det_per_im=st.integers(1, 3), **HU_CONFIG)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_detections_per_im(self, det_per_im, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
@@ -119,7 +119,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         )
 
         def ref(*args, **kwargs):
-            return (gt_scores.flatten(), gt_boxes, gt_classes)
+            return (gt_scores.flatten(), gt_boxes, gt_classes)  # type: ignore[attr-defined]
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
@@ -129,7 +129,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         cls_agnostic_bbox_reg=st.booleans(),
         input_boxes_include_bg_cls=st.booleans(),
         output_classes_include_bg_cls=st.booleans(),
-        **HU_CONFIG
+        **HU_CONFIG  # type: ignore[arg-type]
     )
     @settings(deadline=1000)
     def test_multiclass(
@@ -185,7 +185,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
-    @given(det_per_im=st.integers(1, 3), **HU_CONFIG)
+    @given(det_per_im=st.integers(1, 3), **HU_CONFIG)  # type: ignore[arg-type]
     def test_detections_per_im_same_thresh(self, det_per_im, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.7, 0.7]
@@ -205,7 +205,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         def verify(inputs, outputs):
             # check scores
             np.testing.assert_allclose(
-                outputs[0], gt_scores.flatten(), atol=1e-4, rtol=1e-4,
+                outputs[0], gt_scores.flatten(), atol=1e-4, rtol=1e-4,  # type: ignore[attr-defined]
             )
             # check classes
             np.testing.assert_allclose(
@@ -215,7 +215,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
 
         self.assertValidationChecks(gc, op, [scores, boxes], verify, as_kwargs=False)
 
-    @given(num_classes=st.integers(2, 10), **HU_CONFIG)
+    @given(num_classes=st.integers(2, 10), **HU_CONFIG)  # type: ignore[arg-type]
     def test_detections_per_im_same_thresh_multiclass(self, num_classes, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.6, 0.7, 0.7]

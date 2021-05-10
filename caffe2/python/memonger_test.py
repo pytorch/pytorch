@@ -21,7 +21,7 @@ def has_blob(proto, needle):
 
 
 def count_blobs(proto):
-    blobs = set()
+    blobs = set()  # type: ignore[var-annotated]
     for op in proto.op:
         blobs = blobs.union(set(op.input)).union(set(op.output))
     return len(blobs)
@@ -128,7 +128,7 @@ class MemongerTest(hu.HypothesisTestCase):
         fc = []
         for i in range(2):
             z = brew.fc(
-                m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)
+                m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)  # type: ignore[str-format]
             fc.append(z)
         r = []
         # Trick is here to have same input appear twice in a same Sum
@@ -254,7 +254,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Create set of blobs on CPU side and GPU side and check they don't
         # overlap
-        device_blobs = {caffe2_pb2.CPU: set(), workspace.GpuDeviceType: set()}
+        device_blobs = {caffe2_pb2.CPU: set(), workspace.GpuDeviceType: set()}  # type: ignore[var-annotated]
         for op in optim_proto.op:
             if op.type not in ['CopyCPUToGPU', "CopyGPUToCPU"]:
                 dev = op.device_option.device_type

@@ -169,7 +169,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         blocksize=st.sampled_from([8, 16, 17, 26, 32, 64, 85, 96, 128, 148, 163]),
         normalize_by_lengths=st.booleans(),
         empty_indices=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_sparse_lengths_weightedsum_8BitsRowwiseOp_cpu(
         self, batchsize, blocksize, normalize_by_lengths, empty_indices, gc, dc
@@ -236,7 +236,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         blocksize=st.sampled_from([8, 16, 17, 26, 32, 64, 85, 96, 128, 148, 163]),
         normalize_by_lengths=st.booleans(),
         empty_indices=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_sparse_lengths_sum_8BitsRowwiseOp_cpu(
         self, batchsize, blocksize, normalize_by_lengths, empty_indices, gc, dc
@@ -294,7 +294,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         batchsize=st.integers(1, 20),
         blocksize=st.sampled_from([8, 16, 17, 26, 32, 64, 85, 96, 128, 148, 163]),
         normalize_by_lengths=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_sparse_lengths_sum_8BitsRowwiseOp_cpu_invalid_index(

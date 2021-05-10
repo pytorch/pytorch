@@ -19,7 +19,7 @@ class TestKeySplitOps(hu.HypothesisTestCase):
             dtype=np.int64,
             elements=st.integers(min_value=0, max_value=100)
         ),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_key_split_op(self, X, gc, dc):
         categorical_limit = max(X) + 1
@@ -35,7 +35,7 @@ class TestKeySplitOps(hu.HypothesisTestCase):
         output_vecs = [
             workspace.blobs[output_blobs[i]] for i in range(categorical_limit)
         ]
-        expected_output_vecs = [[] for _ in range(categorical_limit)]
+        expected_output_vecs = [[] for _ in range(categorical_limit)]  # type: ignore[var-annotated]
         for i, x in enumerate(X):
             expected_output_vecs[x].append(i)
         for i in range(categorical_limit):

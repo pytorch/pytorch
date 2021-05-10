@@ -52,7 +52,7 @@ def caffe2_to_onnx(caffe2_net,
         c2_init_net_proto.ParseFromString(caffe2_init_net.read())
         c2_init_net_proto.name = '{}_init'.format(caffe2_net_name)
     else:
-        c2_init_net_proto = None
+        c2_init_net_proto = None  # type: ignore[assignment]
 
     if value_info:
         value_info = json.loads(value_info)

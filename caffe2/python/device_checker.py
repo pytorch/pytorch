@@ -70,7 +70,7 @@ class DeviceChecker(object):
                 # else:
                 #     print ('Passed device pair (0, %d), %s %s' %
                 #            (i, outputs_to_check[j], y.shape))
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
         return success
 
     def CheckNet(self, net, inputs=None, blobs_to_check=None, ignore=None):
@@ -116,5 +116,5 @@ class DeviceChecker(object):
                 #     print ('Passed device pair (%d, %d), %s %s: %s' %
                 #            (i, j, blobs_to_check[j], y.shape,
                 #             str(y.flatten())))
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
         return success

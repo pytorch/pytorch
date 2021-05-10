@@ -630,7 +630,7 @@ def Benchmark(model_gen, arg):
             "{0}_init_batch_{1}.pbtxt".format(arg.model, arg.batch_size), "w"
         ) as fid:
             fid.write(str(model.param_init_net.Proto()))
-        with open("{0}.pbtxt".format(arg.model, arg.batch_size), "w") as fid:
+        with open("{0}.pbtxt".format(arg.model, arg.batch_size), "w") as fid:  # type: ignore[str-format]
             fid.write(str(model.net.Proto()))
 
     workspace.RunNetOnce(model.param_init_net)

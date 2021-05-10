@@ -30,7 +30,7 @@ class TestInt8GenQuantParamsMinMaxOperator(hu.HypothesisTestCase):
         m=st.integers(10, 10),
         preserve_sparsity=st.booleans(),
         rnd_seed=st.integers(1, 5),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_int8_gen_quant_params_min_max_op(
         self, n, m, preserve_sparsity, rnd_seed, gc, dc

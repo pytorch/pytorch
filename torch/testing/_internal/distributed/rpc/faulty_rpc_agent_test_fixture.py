@@ -21,7 +21,7 @@ default_messages_to_delay = {
 
 class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)  # type: ignore[call-arg]
         self.messages_to_fail = retryable_message_types
         self.messages_to_delay = default_messages_to_delay
 

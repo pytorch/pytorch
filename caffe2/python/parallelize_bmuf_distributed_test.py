@@ -235,7 +235,7 @@ class DistributedTest(unittest.TestCase):
     def _test_bmuf_distributed(self, cpu_device=False, nesterov=False):
         processes = []
         filestore_dir = tempfile.mkdtemp()
-        results = Manager().dict()
+        results = Manager().dict()  # type: ignore[var-annotated]
         for idx in range(0, 2):
             process = Process(
                 target=bmuf_process,

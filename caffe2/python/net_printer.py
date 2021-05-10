@@ -21,13 +21,13 @@ class Visitor(object):
     @classmethod
     def register(cls, Type):
         if not(hasattr(cls, 'visitors')):
-            cls.visitors = {}
+            cls.visitors = {}  # type: ignore[attr-defined]
         else:
-            assert Type not in cls.visitors, \
+            assert Type not in cls.visitors, \  # type: ignore[attr-defined]
                 '{} already registered!'.format(Type)
 
         def _register(func):
-            cls.visitors[Type] = func
+            cls.visitors[Type] = func  # type: ignore[attr-defined]
             return func
 
         return _register
@@ -37,11 +37,11 @@ class Visitor(object):
             return
 
         Type = type(obj)
-        if Type not in self.__class__.visitors:
+        if Type not in self.__class__.visitors:  # type: ignore[attr-defined]
             raise TypeError('%s: unsupported object type: %s' % (
                 self.__class__.__name__, Type))
 
-        func = self.__class__.visitors[Type]
+        func = self.__class__.visitors[Type]  # type: ignore[attr-defined]
         return func(self, obj, *args, **kwargs)
 
 
@@ -49,7 +49,7 @@ class Analyzer(Visitor):
     PREFIXES_TO_IGNORE = {'distributed_ctx_init'}
 
     def __init__(self):
-        self.workspaces = defaultdict(lambda: defaultdict(lambda: 0))
+        self.workspaces = defaultdict(lambda: defaultdict(lambda: 0))  # type: ignore[var-annotated]
         self.workspace_ctx = []
 
     @property
@@ -100,7 +100,7 @@ def analyze_step(analyzer, step):
         if proto.report_net:
             with analyzer.set_workspace(do_copy=True):
                 analyzer(step.get_net(proto.report_net))
-        all_new_blobs = set()
+        all_new_blobs = set()  # type: ignore[var-annotated]
         substeps = step.Substeps() + [step.get_net(n) for n in proto.network]
         for substep in substeps:
             with analyzer.set_workspace(
@@ -127,7 +127,7 @@ def analyze_task(analyzer, task):
     proto_len = len(plan.Proto().SerializeToString())
     assert proto_len < 2 ** 26, (
         'Due to a protobuf limitation, serialized tasks must be smaller '
-        'than 64Mb, but this task has {} bytes.' % proto_len)
+        'than 64Mb, but this task has {} bytes.' % proto_len)  # type: ignore[str-format]
 
     is_private = task.workspace_type() != WorkspaceType.GLOBAL
     with analyzer.set_workspace(do_copy=is_private):
@@ -285,7 +285,7 @@ def print_op(text, op):
     if text.c2_net_name:
         text.add(call(
             text.c2_net_name + '.' + op.type,
-            [list(op.input), list(op.output)] + args))
+            [list(op.input), list(op.output)] + args))  # type: ignore[operator]
     else:
         text.add(call(
             op.type,

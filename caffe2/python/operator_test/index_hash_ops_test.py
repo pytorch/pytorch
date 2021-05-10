@@ -18,7 +18,7 @@ class TestIndexHashOps(serial.SerializedTestCase):
         ]).flatmap(lambda dtype: hu.tensor(min_dim=1, max_dim=1, dtype=dtype)),
         seed=st.integers(min_value=0, max_value=10),
         modulo=st.integers(min_value=100000, max_value=200000),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_index_hash_ops(self, indices, seed, modulo, gc, dc):
@@ -30,7 +30,7 @@ class TestIndexHashOps(serial.SerializedTestCase):
                 hashed = dtype.type(0xDEADBEEF * seed)
                 indices_bytes = np.array([index], dtype).view(np.int8)
                 for b in indices_bytes:
-                    hashed = dtype.type(hashed * 65537 + b)
+                    hashed = dtype.type(hashed * 65537 + b)  # type: ignore[operator]
                 hashed = (modulo + hashed % modulo) % modulo
                 hashed_indices.append(hashed)
             return [hashed_indices]

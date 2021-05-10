@@ -148,7 +148,7 @@ class HybridModel(nn.Module):
         if process_group_for_ddp is not None:
             self.non_ddp_params, self.ddp_params = (
                 tuple(self.fc1.parameters()),
-                tuple(self.fc2.parameters()),
+                tuple(self.fc2.parameters()),  # type: ignore[assignment]
             )
             gLogger.info("Use DDP for the second local net.")
             self.fc2 = DistributedDataParallel(
@@ -200,9 +200,9 @@ class Trainer:
         )
         if ddp_mode == DdpMode.OUTSIDE:
             gLogger.info("Wrapping the whole hybrid module into DDP.")
-            self.ddp_params += self.non_ddp_params
+            self.ddp_params += self.non_ddp_params  # type: ignore[assignment]
             self.non_ddp_params = ()
-            self.hybrid_module = DistributedDataParallel(
+            self.hybrid_module = DistributedDataParallel(  # type: ignore[assignment]
                 self.hybrid_module,
                 check_reduction=True,
                 process_group=self.trainer_group,
@@ -250,7 +250,7 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
+        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():  # type: ignore[operator]
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
@@ -262,8 +262,8 @@ class Trainer:
                         f"Grads dict has {len(grads_dict)} entries: {grads_dict}"
                     )
         return (
-            tuple(grads_dict[param] for param in self.ddp_params),
-            tuple(grads_dict[param] for param in self.non_ddp_params),
+            tuple(grads_dict[param] for param in self.ddp_params),  # type: ignore[var-annotated]
+            tuple(grads_dict[param] for param in self.non_ddp_params),  # type: ignore[index]
         )
 
 
@@ -271,7 +271,7 @@ def get_training_examples():
     n = 16
     training_examples = FeatureSet(
         dense_features=torch.zeros((n, D_DENSE)),
-        sparse_features=torch.zeros(n, dtype=torch.long),
+        sparse_features=torch.zeros(n, dtype=torch.long),  # type: ignore[arg-type]
         values=torch.zeros(n),
     )
     idx = 0
@@ -294,7 +294,7 @@ def get_training_examples():
             dense_features=training_examples.dense_features[
                 start : start + examples_per_trainer, :
             ],
-            sparse_features=training_examples.sparse_features[
+            sparse_features=training_examples.sparse_features[  # type: ignore[arg-type]
                 start : start + examples_per_trainer
             ],
             values=training_examples.values[start : start + examples_per_trainer],
@@ -329,9 +329,9 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         gLogger.info("The remote worker is running.")
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
@@ -351,9 +351,9 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         )
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         gLogger.info(f"Waiting for shutdown signal on trainer #{rank}...")
@@ -368,9 +368,9 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         gLogger.info("Running the master process...")
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         remote_em_rref = rpc.remote(
@@ -436,7 +436,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                 # cancel each other out, since some trainers contribute 0 grad.
                 if not simulate_uneven_inputs:
                     for grad in ddp_grads:
-                        self.assertEqual(
+                        self.assertEqual(  # type: ignore[attr-defined]
                             grad,
                             torch.zeros_like(grad),
                             msg=f"The grad for any ddp parameter should be zeros, because "
@@ -444,7 +444,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                             f"gradient {grad}",
                         )
                 for grad in non_ddp_grads:
-                    self.assertNotEqual(
+                    self.assertNotEqual(  # type: ignore[attr-defined]
                         grad,
                         torch.zeros_like(grad),
                         msg="The grad for any non-ddp parameter shouldn't be zeros",
@@ -462,14 +462,14 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         rpc.rpc_sync(self.remote_worker_name(), set_shutdown_signal, args=())
 
     def _do_test(self, ddp_mode, simulate_uneven_inputs=False):
-        if self.rank == MASTER_RANK:
+        if self.rank == MASTER_RANK:  # type: ignore[attr-defined]
             self._master_process(ddp_mode, simulate_uneven_inputs)
-        elif self.rank == REMOTE_WORKER_RANK:
+        elif self.rank == REMOTE_WORKER_RANK:  # type: ignore[attr-defined]
             self._remote_worker_process(ddp_mode)
-        elif self.rank in TRAINER_RANKS:
-            self._trainer_process(self.rank)
+        elif self.rank in TRAINER_RANKS:  # type: ignore[attr-defined]
+            self._trainer_process(self.rank)  # type: ignore[attr-defined]
         else:
-            raise RuntimeError(f"Unknow process rank: {self.rank}")
+            raise RuntimeError(f"Unknow process rank: {self.rank}")  # type: ignore[attr-defined]
 
     @requires_gloo()
     @dist_init
@@ -509,17 +509,17 @@ class CommonDdpComparisonTest(RpcAgentTestFixture):
 
 class DdpComparisonTest(CommonDdpComparisonTest):
     def _run_test_ddp_comparision(self, simulate_uneven_inputs=False):
-        gLogger.info(f"Running trainer rank: {self.rank}")
+        gLogger.info(f"Running trainer rank: {self.rank}")  # type: ignore[attr-defined]
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
-        torch.manual_seed(self.rank)
+        torch.manual_seed(self.rank)  # type: ignore[attr-defined]
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
         net = nn.Linear(2, 3)
         ddp_net = DistributedDataParallel(net)
@@ -527,22 +527,22 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         # Odd ranks join early if simulate_uneven_inputs.
         num_inputs = 1
         if simulate_uneven_inputs:
-            if self.rank % 2 == 0:
+            if self.rank % 2 == 0:  # type: ignore[attr-defined]
                 num_inputs += 2
         inputs_list = [torch.rand((3, 2)) for _ in range(num_inputs)]
 
         if simulate_uneven_inputs:
-            gLogger.info(f"Rank {self.rank} training with {len(inputs_list)} inputs.")
+            gLogger.info(f"Rank {self.rank} training with {len(inputs_list)} inputs.")  # type: ignore[attr-defined]
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
-        with ddp_net.join(simulate_uneven_inputs):
+        with ddp_net.join(simulate_uneven_inputs):  # type: ignore[operator]
             for i, inputs in enumerate(inputs_list):
                 with dist_autograd.context() as context_id:
                     loss = ddp_net(inputs).norm()
                     dist_autograd.backward(context_id, [loss])
                     grads_dict = dist_autograd.get_gradients(context_id)
-                gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+                gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")  # type: ignore[attr-defined]
 
                 # Use local autograd. The gradients will be in each variable's '.grad'.
                 ddp_net.zero_grad()
@@ -551,11 +551,11 @@ class DdpComparisonTest(CommonDdpComparisonTest):
 
                 # The gradients should be the same
                 for param in net.parameters():
-                    self.assertTrue(
+                    self.assertTrue(  # type: ignore[attr-defined]
                         param in grads_dict,
                         msg=f"Param {param} is not in dist_auto grad dict {grads_dict} for iteration {i}",
                     )
-                    self.assertEqual(
+                    self.assertEqual(  # type: ignore[attr-defined]
                         grads_dict[param],
                         param.grad,
                         msg=f"The grads for param {param} are different under local "
@@ -581,12 +581,12 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
-        torch.manual_seed(self.rank)
+        torch.manual_seed(self.rank)  # type: ignore[attr-defined]
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         model = nn.EmbeddingBag(10, 3, sparse=True)
@@ -604,8 +604,8 @@ class DdpComparisonTest(CommonDdpComparisonTest):
             loss = ddp_model(input, offsets).sum()
             dist_autograd.backward(context_id, [loss])
             grads_dict = dist_autograd.get_gradients(context_id)
-            self.assertEqual(1, len(grads_dict))
-            self.assertEqual(model.weight.grad, grads_dict[model.weight])
+            self.assertEqual(1, len(grads_dict))  # type: ignore[attr-defined]
+            self.assertEqual(model.weight.grad, grads_dict[model.weight])  # type: ignore[attr-defined]
 
     @requires_gloo()
     @dist_init
@@ -614,19 +614,19 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
-        torch.manual_seed(self.rank)
+        torch.manual_seed(self.rank)  # type: ignore[attr-defined]
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         # Use two different remote device input string, w/ and w/o the default
         # device string "cpu", respectively.
         for remote_device in ["worker0/cpu", "worker0"]:
             remote_layer1 = RemoteModule(
-                remote_device=remote_device, module_cls=nn.Linear, args=(10, 5, False)
+                remote_device=remote_device, module_cls=nn.Linear, args=(10, 5, False)  # type: ignore[arg-type]
             )
             layer1 = nn.Linear(10, 5, False)
             # Start with the same parameters for remote and local
@@ -645,8 +645,8 @@ class DdpComparisonTest(CommonDdpComparisonTest):
                 dist_autograd.backward(context_id, [loss])
                 grads_dict = dist_autograd.get_gradients(context_id)
                 dist.barrier()
-                self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
-                self.assertEqual(
+                self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])  # type: ignore[attr-defined]
+                self.assertEqual(  # type: ignore[attr-defined]
                     layer1.weight.grad,
                     rpc.rpc_sync(
                         "worker0",
@@ -666,38 +666,38 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
-        torch.manual_seed(self.rank)
+        torch.manual_seed(self.rank)  # type: ignore[attr-defined]
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         remote_layer1 = RemoteModule(
-            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 7, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 7, False)  # type: ignore[arg-type]
         )
         layer1 = nn.Linear(10, 7, False)
         # Start with the same parameters for remote and local
         layer1.weight = remote_layer1.module_rref.to_here().weight
 
-        layer2 = nn.Linear(7, 5).cuda(self.rank)
-        ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
+        layer2 = nn.Linear(7, 5).cuda(self.rank)  # type: ignore[attr-defined]
+        ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])  # type: ignore[attr-defined]
 
         remote_layer3 = RemoteModule(
-            remote_device="worker0/cpu", module_cls=nn.Linear, args=(5, 3, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(5, 3, False)  # type: ignore[arg-type]
         )
         layer3 = nn.Linear(5, 3, False)
         # Start with the same parameters for remote and local
         layer3.weight = remote_layer3.module_rref.to_here().weight
 
-        layer4 = nn.Linear(3, 1).cuda(self.rank)
-        ddp_layer4 = DistributedDataParallel(layer4, device_ids=[self.rank])
+        layer4 = nn.Linear(3, 1).cuda(self.rank)  # type: ignore[attr-defined]
+        ddp_layer4 = DistributedDataParallel(layer4, device_ids=[self.rank])  # type: ignore[attr-defined]
 
         # Run local case.
         inputs = torch.rand((10, 10))
         loss = ddp_layer4(
-            layer3(ddp_layer2(layer1(inputs).cuda(self.rank)).cpu()).cuda(self.rank)
+            layer3(ddp_layer2(layer1(inputs).cuda(self.rank)).cpu()).cuda(self.rank)  # type: ignore[attr-defined]
         ).sum()
         loss.backward()
 
@@ -705,13 +705,13 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
         with dist_autograd.context() as context_id:
             loss = ddp_layer4(
                 remote_layer3(
-                    ddp_layer2(remote_layer1(inputs).cuda(self.rank)).cpu()
-                ).cuda(self.rank)
+                    ddp_layer2(remote_layer1(inputs).cuda(self.rank)).cpu()  # type: ignore[attr-defined]
+                ).cuda(self.rank)  # type: ignore[attr-defined]
             ).sum()
             dist_autograd.backward(context_id, [loss])
             grads_dict = dist_autograd.get_gradients(context_id)
             dist.barrier()
-            self.assertEqual(
+            self.assertEqual(  # type: ignore[attr-defined]
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
@@ -719,8 +719,8 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
                     args=(remote_layer1.module_rref, context_id),
                 ),
             )
-            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
-            self.assertEqual(
+            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])  # type: ignore[attr-defined]
+            self.assertEqual(  # type: ignore[attr-defined]
                 layer3.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
@@ -728,4 +728,4 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
                     args=(remote_layer3.module_rref, context_id),
                 ),
             )
-            self.assertEqual(layer4.weight.grad, grads_dict[layer4.weight])
+            self.assertEqual(layer4.weight.grad, grads_dict[layer4.weight])  # type: ignore[attr-defined]

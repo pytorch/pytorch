@@ -21,7 +21,7 @@ class TestContext(test_util.TestCase):
     def use_my_context(self):
         try:
             for _ in range(100):
-                with MyContext() as a:
+                with MyContext() as a:  # type: ignore[attr-defined]
                     for _ in range(100):
                         self.assertTrue(MyContext.current() == a)
         except Exception as e:
@@ -29,7 +29,7 @@ class TestContext(test_util.TestCase):
 
     def testMultiThreaded(self):
         threads = []
-        self._exceptions = []
+        self._exceptions = []  # type: ignore[var-annotated]
         for _ in range(8):
             thread = Thread(target=self.use_my_context)
             thread.start()
@@ -56,12 +56,12 @@ class TestContext(test_util.TestCase):
         self.assertIsInstance(DefaultMyContext.current(), DefaultMyContext)
 
     def testNestedContexts(self):
-        with MyContext() as ctx1:
-            with DefaultMyContext() as ctx2:
+        with MyContext() as ctx1:  # type: ignore[attr-defined]
+            with DefaultMyContext() as ctx2:  # type: ignore[attr-defined]
                 self.assertEqual(DefaultMyContext.current(), ctx2)
                 self.assertEqual(MyContext.current(), ctx1)
 
     def testChildClasses(self):
-        with ChildMyContext() as ctx:
+        with ChildMyContext() as ctx:  # type: ignore[attr-defined]
             self.assertEqual(ChildMyContext.current(), ctx)
             self.assertEqual(MyContext.current(), ctx)

@@ -162,7 +162,7 @@ class OnnxifiTransformTest(TestCase):
             for _ in range(repeat):
                 workspace.RunNet(pred_net.name)
             end = time.time()
-            c2_time = end - start
+            c2_time = end - start  # type: ignore[assignment]
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
         workspace.ResetWorkspace()
@@ -173,7 +173,7 @@ class OnnxifiTransformTest(TestCase):
 
         # Cut the graph
         start = time.time()
-        pred_net_cut = onnxifi_caffe2_net(pred_net,
+        pred_net_cut = onnxifi_caffe2_net(pred_net,  # type: ignore[call-arg]
                                           {input_name: input_blob_dims},
                                           infer_shapes=True)
         del init_net, pred_net

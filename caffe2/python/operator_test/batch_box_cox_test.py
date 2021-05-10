@@ -55,13 +55,13 @@ def _inputs(draw):
 class TestBatchBoxCox(serial.SerializedTestCase):
     @given(
         inputs=_inputs(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_batch_box_cox(self, inputs, gc, dc):
         self.batch_box_cox(inputs, gc, dc)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lambda1_is_all_zero(self, gc, dc):
         inputs = (1, 1, [[2]], [0], [0])
@@ -73,7 +73,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
         inputs = (2, 3, [[1, 2, 3], [4, 5, 6]], [0, 0, 0], [0, 0, 0])
         self.batch_box_cox(inputs, gc, dc)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lambda1_is_partially_zero(self, gc, dc):
         inputs = (1, 5, [[1, 2, 3, 4, 5]],
@@ -89,7 +89,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
                   [0, -.5, 0, .5, 0, 1, 0], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
         self.batch_box_cox(inputs, gc, dc)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_bound_base_away_from_zero(self, gc, dc):
         inputs = (2, 3, [[1e-5, 1e-6, 1e-7], [1e-7, -1e-6, 1e-5]],

@@ -17,9 +17,9 @@ class TestSelfBinningHistogramBase(object):
         # Check that sizes match and counts add up.
         values = workspace.FetchBlob("histogram_values")
         counts = workspace.FetchBlob("histogram_counts")
-        self.assertTrue(np.size(values) == num_bins)
-        self.assertTrue(np.size(counts) == num_bins)
-        self.assertTrue(np.sum(counts) == sum([np.size(array) for array in arrays]))
+        self.assertTrue(np.size(values) == num_bins)  # type: ignore[attr-defined]
+        self.assertTrue(np.size(counts) == num_bins)  # type: ignore[attr-defined]
+        self.assertTrue(np.sum(counts) == sum([np.size(array) for array in arrays]))  # type: ignore[attr-defined]
 
         # Check counts
         if expected_counts is None:
@@ -33,27 +33,27 @@ class TestSelfBinningHistogramBase(object):
                         if values[pos] > input_val:
                             found = True
                             break
-                    self.assertTrue(found, f"input value must fit inside values array: "
+                    self.assertTrue(found, f"input value must fit inside values array: "  # type: ignore[attr-defined]
                                            f"input={input_val}, last_value={values[-1]}")
                     if self.bin_spacing == "linear":
-                        self.assertTrue(pos > 0,
+                        self.assertTrue(pos > 0,  # type: ignore[attr-defined]
                                         f"input should not be smaller than the first bin value: "
                                         f"input={input_val}, 1st bin value={values[pos]}")
                     if pos == 0:
-                        self.assertEqual(self.bin_spacing, "logarithmic")
+                        self.assertEqual(self.bin_spacing, "logarithmic")  # type: ignore[attr-defined]
                         expected_counts[pos] += 1
                     else:
                         expected_counts[pos - 1] += 1
-        self.assertTrue(np.array_equal(expected_counts, counts), f"expected:{expected_counts}\ncounts:{counts}")
+        self.assertTrue(np.array_equal(expected_counts, counts), f"expected:{expected_counts}\ncounts:{counts}")  # type: ignore[attr-defined]
         # Check values
         if expected_values is not None:
-            self.assertTrue(np.allclose(expected_values, values, rtol=1e-02, atol=1e-05),
+            self.assertTrue(np.allclose(expected_values, values, rtol=1e-02, atol=1e-05),  # type: ignore[attr-defined]
                             f"expected:{expected_values}\nvalues:{values}")
         # Ideally, the output values are sorted in a non-decreasing order.
         for idx in range(len(values) - 1):
-            self.assertTrue(values[idx] <= values[idx + 1])
+            self.assertTrue(values[idx] <= values[idx + 1])  # type: ignore[attr-defined]
         if self.abs:
-            self.assertTrue(values[0] >= 0)
+            self.assertTrue(values[0] >= 0)  # type: ignore[attr-defined]
 
 
     def _run_single_op_net(self, arrays, num_bins, logspacing_start=None):
@@ -81,7 +81,7 @@ class TestSelfBinningHistogramBase(object):
             )
         workspace.RunNetOnce(net)
 
-    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)
+    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_histogram_device_consistency(self, rows, cols, gc, dc):
         X = np.random.rand(rows, cols)
@@ -92,7 +92,7 @@ class TestSelfBinningHistogramBase(object):
             num_bins=1000,
             bin_spacing=self.bin_spacing,
         )
-        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertDeviceChecks(dc, op, [X], [0])  # type: ignore[attr-defined]
 
     def test_histogram_bin_to_fewer(self):
         X = np.array([-2.0, -2.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0], dtype=self.dtype)
@@ -147,7 +147,7 @@ class TestSelfBinningHistogramBase(object):
     def test_histogram_min_max_equal(self):
         """This test uses exact value match, so is only relevant for float type."""
         X = np.array([0., 0., 0., 0., 0.], dtype='f')
-        logspacing_start = np.float(1e-24)
+        logspacing_start = np.float(1e-24)  # type: ignore[attr-defined]
         self._run_single_op_net([X], 3, logspacing_start)
         if self.bin_spacing == "linear":
             self._check_histogram(
@@ -157,7 +157,7 @@ class TestSelfBinningHistogramBase(object):
                 expected_counts=[5, 0, 0, 0]
             )
         else:
-            self.assertEqual(self.bin_spacing, "logarithmic")
+            self.assertEqual(self.bin_spacing, "logarithmic")  # type: ignore[attr-defined]
             self._check_histogram(
                 [X],
                 4,
@@ -238,7 +238,7 @@ class TestSelfBinningHistogramBase(object):
 
 
     def test_histogram_insufficient_bins(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegex(  # type: ignore[attr-defined]
             RuntimeError, "Number of bins must be greater than or equal to 1."
         ):
             self._run_single_op_net([np.random.rand(111)], 0)

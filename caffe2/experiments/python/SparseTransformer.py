@@ -175,7 +175,7 @@ def net2list(net_root):
 def netbuilder(model):
     print("Welcome to model checker")
     proto = model.net.Proto()
-    net_name2id = {}
+    net_name2id = {}  # type: ignore[var-annotated]
     net_id2node = {}
     net_root = NetDefNode("net_root", "root", None)
 

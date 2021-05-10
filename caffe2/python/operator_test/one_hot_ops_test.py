@@ -40,8 +40,8 @@ class TestOneHotOps(serial.SerializedTestCase):
             val = np.unique(x[:, i])
             vals.extend(val)
             lens.append(len(val))
-        lens = np.array(lens, dtype=np.int32)
-        vals = np.array(vals, dtype=np.int32)
+        lens = np.array(lens, dtype=np.int32)  # type: ignore[assignment]
+        vals = np.array(vals, dtype=np.int32)  # type: ignore[assignment]
 
         def ref(x, lens, vals):
             output_dim = vals.size
@@ -62,7 +62,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             min_dim=2, max_dim=2, dtype=np.float32,
             elements=st.integers(min_value=-5, max_value=5)),
         seed=st.integers(min_value=0, max_value=1000),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
         np.random.seed(seed)
@@ -80,7 +80,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             boundaries += cur_boundary.tolist()
 
         lens = np.array(lens, dtype=np.int32)
-        boundaries = np.array(boundaries, dtype=np.float32)
+        boundaries = np.array(boundaries, dtype=np.float32)  # type: ignore[assignment]
 
         def ref(x, lens, boundaries):
             output_dim = lens.size + boundaries.size
@@ -127,7 +127,7 @@ class TestOneHotOps(serial.SerializedTestCase):
 
         size = np.array(max(hot_indices) + end_padding + 1, dtype=np.int64)
         if size == 0:
-            size = 1
+            size = 1  # type: ignore[assignment]
         op = core.CreateOperator('OneHot', ['hot_indices', 'size'], ['output'])
         self.assertReferenceChecks(
             gc,
@@ -168,7 +168,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             min_dim=2, max_dim=2, dtype=np.float32,
             elements=st.integers(min_value=-5, max_value=5)),
         seed=st.integers(min_value=0, max_value=1000),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_batch_bucket_one_hot_shape_inference(self, x, seed, gc, dc):
         np.random.seed(seed)
         d = x.shape[1]
@@ -185,7 +185,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             boundaries += cur_boundary.tolist()
 
         lens = np.array(lens, dtype=np.int32)
-        boundaries = np.array(boundaries, dtype=np.float32)
+        boundaries = np.array(boundaries, dtype=np.float32)  # type: ignore[assignment]
 
         workspace.FeedBlob('lens', lens)
         workspace.FeedBlob('boundaries', boundaries)
@@ -198,7 +198,7 @@ class TestOneHotOps(serial.SerializedTestCase):
 
         self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
         self.assertEqual(
-            shapes[result], [x.shape[0], lens.shape[0] + boundaries.shape[0]])
+            shapes[result], [x.shape[0], lens.shape[0] + boundaries.shape[0]])  # type: ignore[attr-defined]
         self.assertEqual(types[result], core.DataType.FLOAT)
 
 

@@ -32,7 +32,7 @@ def half_floats_to_bytes(floats):
     for i, value in enumerate(floats):
         assert isinstance(value, np.float16), (value, floats)
         byte_matrix[i] = np.frombuffer(
-            memoryview(np.array([value])).tobytes(), dtype=np.uint8
+            memoryview(np.array([value])).tobytes(), dtype=np.uint8  # type: ignore[arg-type]
         )
     return byte_matrix
 

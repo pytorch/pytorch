@@ -37,7 +37,7 @@ class TestWhere(serial.SerializedTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_where(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
@@ -49,7 +49,7 @@ class TestWhere(serial.SerializedTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_where_dim2(self, N, gc, dc, engine):
         C = np.random.rand(N, N).astype(bool)
@@ -76,7 +76,7 @@ class TestRowWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_rowwhere(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
         X = np.random.rand(N).astype(np.float32)
@@ -93,7 +93,7 @@ class TestRowWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_rowwhere_dim2(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
         X = np.random.rand(N, N).astype(np.float32)
@@ -113,7 +113,7 @@ class TestIsMemberOf(serial.SerializedTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_is_member_of(self, N, gc, dc, engine):
         X = np.random.randint(10, size=N).astype(np.int64)
@@ -126,7 +126,7 @@ class TestIsMemberOf(serial.SerializedTestCase):
             engine=engine,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
-        values = set(values)
+        values = set(values)  # type: ignore[assignment]
 
         def test(x):
             return [np.vectorize(lambda x: x in values)(x)]

@@ -106,7 +106,7 @@ class ModelTrainerLog():
 
         self.logstr(",".join(str(v) for v in viewvalues(logdict)))
 
-        for logger in self.external_loggers:
+        for logger in self.external_loggers:  # type: ignore[union-attr]
             try:
                 logger.log(logdict)
             except Exception as e:

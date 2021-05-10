@@ -15,11 +15,11 @@ import numpy as np
 class TestFlexibleTopK(serial.SerializedTestCase):
     def flexible_top_k_ref(self, X, k):
         X_flat = X.reshape((-1, X.shape[-1]))
-        indices_ref = np.ndarray(shape=sum(k), dtype=np.int32)
-        values_ref = np.ndarray(shape=sum(k), dtype=np.float32)
+        indices_ref = np.ndarray(shape=sum(k), dtype=np.int32)  # type: ignore[arg-type]
+        values_ref = np.ndarray(shape=sum(k), dtype=np.float32)  # type: ignore[arg-type]
         offset = 0
         for i in range(X_flat.shape[0]):
-            od = OrderedDict()
+            od = OrderedDict()  # type: ignore[var-annotated]
             for j in range(X_flat.shape[1]):
                 val = X_flat[i, j]
                 if val not in od:
@@ -39,7 +39,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
 
         return (values_ref, indices_ref)
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_flexible_top_k(self, X, gc, dc):
         X = X.astype(dtype=np.float32)
@@ -56,7 +56,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [X, k], bind_ref)
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_flexible_top_k_grad(self, X, gc, dc):
         X = X.astype(np.float32)

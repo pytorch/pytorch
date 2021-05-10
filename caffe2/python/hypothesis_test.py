@@ -20,7 +20,7 @@ if workspace.has_gpu_support:
     #       result, deadlines are not enforced on CUDA runs.
     _hypothesis_settings = settings
 
-    def settings(**kwargs):
+    def settings(**kwargs):  # type: ignore[no-redef]
         if 'deadline' in kwargs:
             kwargs['deadline'] = None
             kwargs.setdefault('max_examples', 50)
@@ -61,7 +61,7 @@ def _tensor_and_indices(min_dim=1, max_dim=4, dtype=np.float32,
 _NUMPY_TYPE_TO_ENUM = {
     np.float32: core.DataType.FLOAT,
     np.int32: core.DataType.INT32,
-    np.bool: core.DataType.BOOL,
+    np.bool: core.DataType.BOOL,  # type: ignore[attr-defined]
     np.uint8: core.DataType.UINT8,
     np.int8: core.DataType.INT8,
     np.uint16: core.DataType.UINT16,
@@ -143,7 +143,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
 
-    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_row_mul(self, inputs, gc, dc):
         op = core.CreateOperator("RowMul", ["X1", "X2"], ["Y"])
@@ -161,7 +161,7 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X1, X2], i, [0])
         self.assertReferenceChecks(gc, op, [X1, X2], ref)
 
-    @given(inputs=hu.tensors(n=2), **hu.gcs_cpu_only)
+    @given(inputs=hu.tensors(n=2), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_max(self, inputs, gc, dc):
         op = core.CreateOperator("Max", ["X1", "X2"], ["Y"])
@@ -441,10 +441,10 @@ class TestOperators(hu.HypothesisTestCase):
 
         # Reference
         def depth_concat(*inputs):
-            inputs = list(inputs)
+            inputs = list(inputs)  # type: ignore[assignment]
             if add_axis:
                 for i in range(len(inputs)):
-                    inputs[i] = np.expand_dims(inputs[i], axis)
+                    inputs[i] = np.expand_dims(inputs[i], axis)  # type: ignore[index]
             input_dims = np.array([np.shape(x)[axis] for x in inputs])
             return [np.concatenate(inputs, axis=axis), input_dims]
 
@@ -471,7 +471,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         # Reference
         def depth_concat_with_order(*inputs):
-            inputs = list(inputs)
+            inputs = list(inputs)  # type: ignore[assignment]
             axis = order[1]
             input_dims = np.array([np.shape(x)[axis] for x in inputs])
             return [np.concatenate(inputs, axis=axis), input_dims]
@@ -483,7 +483,7 @@ class TestOperators(hu.HypothesisTestCase):
                            min_value=1.0,
                            max_value=10.0)
                        ),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_last_n_windows(self, X, gc, dc):
         workspace.FeedBlob('input', X)
@@ -507,7 +507,7 @@ class TestOperators(hu.HypothesisTestCase):
         import numpy.testing as npt
         npt.assert_almost_equal(output, new_output, decimal=5)
 
-    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, np.bool]))
+    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, np.bool]))  # type: ignore[attr-defined]
     @settings(deadline=1000)
     def test_print(self, dtype):
         data = np.random.permutation(6).astype(dtype)
@@ -603,7 +603,7 @@ class TestOperators(hu.HypothesisTestCase):
            lambda1=hu.floats(min_value=0.001, max_value=0.1),
            lambda2=hu.floats(min_value=0.001, max_value=0.1),
            engine=st.sampled_from([None, "SIMD"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_ftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
                       engine, gc, dc):
@@ -672,7 +672,7 @@ class TestOperators(hu.HypothesisTestCase):
            lambda1=hu.floats(min_value=0.001, max_value=0.1),
            lambda2=hu.floats(min_value=0.001, max_value=0.1),
            engine=st.sampled_from([None, "SIMD"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_gftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
                        engine, gc, dc):
@@ -700,7 +700,7 @@ class TestOperators(hu.HypothesisTestCase):
            lambda1=hu.floats(min_value=0.001, max_value=0.1),
            lambda2=hu.floats(min_value=0.001, max_value=0.1),
            engine=st.sampled_from([None, "SIMD"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_sparse_ftrl_sgd(self, inputs, alpha, beta, lambda1, lambda2,
                              engine, gc, dc):
@@ -744,7 +744,7 @@ class TestOperators(hu.HypothesisTestCase):
            lambda1=hu.floats(min_value=0.001, max_value=0.1),
            lambda2=hu.floats(min_value=0.001, max_value=0.1),
            engine=st.sampled_from([None, "SIMD"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_ftrl_sgd_send_alpha_by_input(self, inputs, in_place, alpha, beta,
                                           lambda1, lambda2, engine, gc, dc):
@@ -773,7 +773,7 @@ class TestOperators(hu.HypothesisTestCase):
            lambda1=hu.floats(min_value=0.001, max_value=0.1),
            lambda2=hu.floats(min_value=0.001, max_value=0.1),
            engine=st.sampled_from([None, "SIMD"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_sparse_ftrl_sgd_send_alpha_by_input(self, inputs, alpha, beta,
                                                  lambda1, lambda2, engine, gc,
@@ -813,7 +813,7 @@ class TestOperators(hu.HypothesisTestCase):
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs_no_hip)
+           **hu.gcs_no_hip)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
@@ -909,7 +909,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
                             min_size=0,
                             max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lengths_to_segment_ids(self, lengths, gc, dc):
         op = core.CreateOperator(
@@ -932,7 +932,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
                             min_size=0,
                             max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lengths_range_fill(self, lengths, gc, dc):
         op = core.CreateOperator(
@@ -952,7 +952,7 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_segment_ids_to_ranges(self, gc, dc):
         lengths = [4, 6, 3, 2, 0, 4]
@@ -986,7 +986,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
                             min_size=0,
                             max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lengths_to_ranges(self, lengths, gc, dc):
         op = core.CreateOperator(
@@ -1011,7 +1011,7 @@ class TestOperators(hu.HypothesisTestCase):
             st.integers(min_value=0, max_value=10), min_size=0, max_size=10
         ),
         include_last_offset=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None)
     def test_lengths_to_offsets(self, lengths, include_last_offset, gc, dc):
@@ -1085,7 +1085,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
                             min_size=0,
                             max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_segment_ids_to_lengths(self, lengths, gc, dc):
         op = core.CreateOperator(
@@ -1134,7 +1134,7 @@ class TestOperators(hu.HypothesisTestCase):
                             min_size=0,
                             max_size=10),
            power=st.sampled_from([0.5, 1.0, 1.5, 2.0]),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_lengths_to_weights(self, lengths, power, gc, dc):
         op = core.CreateOperator(
@@ -1243,7 +1243,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(input_tensor=hu.arrays(
         dims=[10], elements=hu.floats(min_value=1,
                                       max_value=10000)),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_log(self, input_tensor, gc, dc):
         op = core.CreateOperator(
@@ -1309,7 +1309,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         xs = [np.random.randn(num_elements, 5).astype(np.float32)
               for _ in range(num_blobs)]
-        q = queue.Queue()
+        q = queue.Queue()  # type: ignore[var-annotated]
         for i in range(num_elements):
             q.put([x[i] for x in xs])
 
@@ -1523,7 +1523,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(
         data=hu.tensor(),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_squeeze_expand_dims(self, data, gc, dc):
         dims = [0, 0]
@@ -1559,7 +1559,7 @@ class TestOperators(hu.HypothesisTestCase):
             output_to_grad='expanded',
             grad_reference=squeeze_ref)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_tt_layer(self, gc, dc):
         seed = 1234
@@ -1604,7 +1604,7 @@ class TestOperators(hu.HypothesisTestCase):
         # tt_ranks, and seed. Changing these will cause the test to fail.
         self.assertAlmostEqual(np.linalg.norm(golden - Y), 0, delta=1e-10)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_tt_sls_layer(self, gc, dc):
         seed = 1234
         np.random.seed(seed)
@@ -1644,7 +1644,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertAlmostEqual(np.linalg.norm(golden - Y), 0, delta=0)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_tt_sls_gradientop(self, gc, dc):
 
         op = core.CreateOperator(
@@ -1688,7 +1688,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertEqual(list(dCore2.shape), list(c2.shape))
 
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_tt_sls_gradientop1(self, gc, dc):
 
         op = core.CreateOperator(
@@ -1731,7 +1731,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertEqual(list(dCore1.shape), list(c1.shape))
         self.assertEqual(list(dCore2.shape), list(c2.shape))
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_tt_sls(self, gc, dc):
         factor_voc = [10, 10, 10]
@@ -1754,7 +1754,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [c0, c1, c2, index, lengths], 0, [0])
 
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_tt_sls_repro(self, gc, dc):
         factor_voc = [125, 160, 200]
         factor_width = [4, 4, 4]
@@ -1789,7 +1789,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertAlmostEqual(np.linalg.norm(golden - Y), 0, delta=0)
 
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_tt_sls_gradientop2(self, gc, dc):
 
         op = core.CreateOperator(
@@ -1909,7 +1909,7 @@ class TestOperators(hu.HypothesisTestCase):
            a=st.integers(),
            b=st.integers(),
            is_empty=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=None, max_examples=50)
     def test_slice(self, input, slice_dim, a, b, is_empty, gc, dc):
         slice_dim = slice_dim % len(input.shape)
@@ -1938,13 +1938,13 @@ class TestOperators(hu.HypothesisTestCase):
                                    slice_ref)
         self.assertGradientChecks(gc, op, [input, start_vec, end_vec], 0, [0])
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
+    @given(data=hu.tensor(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_shape(self, data, gc, dc):
         op = core.CreateOperator("Shape", ["data"], ["shape"])
         self.assertReferenceChecks(gc, op, [data], lambda x: (x.shape, ))
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
+    @given(data=hu.tensor(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_shape_with_axes(self, data, gc, dc):
         def shape_ref(x, y):
@@ -1953,7 +1953,7 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
         self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
 
-    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)
+    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_has_elements(self, x, y, gc, dc):
         op = core.CreateOperator("HasElements", ["x", "y"], ["has_elements"])
@@ -2127,7 +2127,7 @@ class TestOperators(hu.HypothesisTestCase):
         # Casting from a float type outside the range of the integral
         # type is UB.
         ftypes = [np.float32, np.float64]
-        if src in ftypes and dst not in ftypes and dst is not np.bool:
+        if src in ftypes and dst not in ftypes and dst is not np.bool:  # type: ignore[attr-defined]
             info = np.iinfo(dst)
             a = np.clip(a, info.min, info.max)
 
@@ -2136,7 +2136,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         to = _NUMPY_TYPE_TO_ENUM[dst]
         if use_name:
-            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()
+            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()  # type: ignore[assignment]
         op = core.CreateOperator('Cast', ["X"], ["Y"], to=to)
         self.assertDeviceChecks(dc, op, [a], [0])
         out, = self.assertReferenceChecks(gc, op, [a], ref)
@@ -2182,7 +2182,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [a], [0])
         self.assertReferenceChecks(gc, op, [a], ref)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).  # type: ignore[attr-defined]
            flatmap(lambda dtype: hu.tensor(
                min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
            has_input=st.booleans(),
@@ -2195,8 +2195,8 @@ class TestOperators(hu.HypothesisTestCase):
                            gc, dc):
         dtype = data.dtype.type
         # in opt mode, np.bool is converted into np.bool_
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        if data.dtype == np.dtype(np.bool):  # type: ignore[attr-defined]
+            dtype = np.bool  # type: ignore[attr-defined]
 
         value = data.item(0)
         gt_shape = data.shape
@@ -2229,15 +2229,15 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).  # type: ignore[attr-defined]
         flatmap(lambda dtype: hu.tensor(
             min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
         **hu.gcs)
     @settings(deadline=1000)
     def test_constant_fill_from_tensor(self, data, gc, dc):
         dtype = data.dtype.type
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        if data.dtype == np.dtype(np.bool):  # type: ignore[attr-defined]
+            dtype = np.bool  # type: ignore[attr-defined]
 
         value = np.array([data.item(0)], dtype=dtype)
         inputs = [data, value]
@@ -2430,8 +2430,8 @@ class TestOperators(hu.HypothesisTestCase):
     def test_string_serde(self, s):
         s = s.encode('ascii', 'ignore')
         self.ws.create_blob("a").feed(s)
-        serialized = self.ws.blobs["a"].serialize("a")
-        self.ws.create_blob("b").deserialize(serialized)
+        serialized = self.ws.blobs["a"].serialize("a")  # type: ignore[attr-defined]
+        self.ws.create_blob("b").deserialize(serialized)  # type: ignore[attr-defined]
         self.assertEqual(s, self.ws.blobs[("a")].fetch())
         self.assertEqual(s, self.ws.blobs[("b")].fetch())
 
@@ -2528,7 +2528,7 @@ class TestOperators(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=hu.floats(min_value=1e-4, max_value=1e-2),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_instance_norm(self, size, input_channels, batch_size, order,
                            epsilon, gc, dc):
@@ -2619,7 +2619,7 @@ class TestOperators(hu.HypothesisTestCase):
         if X.dtype == np.float32:
             self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
 
-    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_dot_product(self, inputs, gc, dc):
         X, Y = inputs
@@ -2637,7 +2637,7 @@ class TestOperators(hu.HypothesisTestCase):
            M=st.integers(min_value=2, max_value=10),
            K=st.integers(min_value=2, max_value=10),
            pad_value=hu.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_dot_product_with_padding(self, N, M, K, pad_value, gc, dc):
         X = np.random.rand(N, M).astype(np.float32) - 0.5
@@ -2662,7 +2662,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(N=st.integers(min_value=2, max_value=10),
            M=st.integers(min_value=2, max_value=10),
            pad_value=hu.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_dot_product_with_rep_padding(self, N, M, pad_value, gc, dc):
         K = 2 * M
@@ -2687,7 +2687,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(N=st.integers(min_value=2, max_value=10),
-           M=st.integers(min_value=2, max_value=10), **hu.gcs_cpu_only)
+           M=st.integers(min_value=2, max_value=10), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_ensure_dense(self, N, M, gc, dc):
         # in place
@@ -2704,7 +2704,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(N=st.integers(min_value=10, max_value=100),
            M=st.integers(min_value=2, max_value=10),
            num_buckets=st.integers(min_value=1, max_value=5),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_accumulate_histogram_op(self, N, M, num_buckets, gc, dc):
         X = np.random.rand(N, M).astype(np.float32)

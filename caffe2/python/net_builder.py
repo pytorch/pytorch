@@ -38,7 +38,7 @@ class NetBuilder(context.Managed):
             (not _stop_blob_required and not _stop_blob), \
             'Stop blobs are not used with control operators'
         self.name = _fullname or '/'.join(
-            n for n in (parent.name if parent else None, name) if n
+            n for n in (parent.name if parent else None, name) if n  # type: ignore[has-type]
         )
         self._frozen = False
         self._current_net = None
@@ -46,7 +46,7 @@ class NetBuilder(context.Managed):
         if parent:
             # make sure parent has an up to date lexical scope computed
             parent._update_lexical_scope()
-        self._init_lexical_scope = set(parent._lexical_scope) if parent else set()
+        self._init_lexical_scope = set(parent._lexical_scope) if parent else set()  # type: ignore[has-type]
         if initial_scope:
             self._init_lexical_scope |= set([str(b) for b in initial_scope])
         self._lexical_scope = set(self._init_lexical_scope)
@@ -137,7 +137,7 @@ class NetBuilder(context.Managed):
         return self._children
 
     def __exit__(self, etype, *args):
-        super(NetBuilder, self).__exit__(etype, *args)
+        super(NetBuilder, self).__exit__(etype, *args)  # type: ignore[misc]
 
         if self._use_control_ops and len(self._children) > 0:
             _children = self._children
@@ -242,8 +242,8 @@ class Operations(object):
         """
         from caffe2.python import task
         group = NetBuilder.current()
-        with task.Cluster():
-            with task.Node('local'):
+        with task.Cluster():  # type: ignore[attr-defined]
+            with task.Node('local'):  # type: ignore[attr-defined]
                 tg = task.TaskGroup()
                 group.add(tg)
                 return tg

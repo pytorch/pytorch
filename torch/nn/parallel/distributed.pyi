@@ -15,7 +15,7 @@ class DistributedDataParallel(Module):
     bucket_bytes_cap: float = ...
 
     # TODO type process_group once `distributed` module is stubbed
-    def __init__(self, module: Module, device_ids: Optional[_devices_t] = ...,
+    def __init__(self, module: Module, device_ids: Optional[_devices_t] = ...,  # type: ignore[here]
                  output_device: Optional[_device_t] = ..., dim: int = ...,
                  broadcast_buffers: bool = ..., process_group: Optional[Any] = ..., bucket_cap_mb: float = ...,
                  find_unused_parameters: bool = ..., check_reduction: bool = ...) -> None: ...

@@ -68,7 +68,7 @@ class SumElements(Benchmark):
             ["y"]
         )
 
-        for n in itertools.imap(pow, itertools.cycle([10]), range(10)):
+        for n in itertools.imap(pow, itertools.cycle([10]), range(10)):  # type: ignore[attr-defined]
             X = np.random.rand(n).astype(np.float32)
             logger.info('Running benchmark for n = {}'.format(n))
             ret = runOpBenchmark(gpu_do, op, inputs=[X])
@@ -83,7 +83,7 @@ class SumSqrElements(Benchmark):
             ["y"]
         )
 
-        for n in itertools.imap(pow, itertools.cycle([10]), range(10)):
+        for n in itertools.imap(pow, itertools.cycle([10]), range(10)):  # type: ignore[attr-defined]
             X = np.random.rand(n).astype(np.float32)
             logger.info('Running benchmark for n = {}'.format(n))
             ret = runOpBenchmark(gpu_do, op, inputs=[X])
@@ -98,8 +98,8 @@ class SoftMaxWithLoss(Benchmark):
             ["probs", "avgloss"],
         )
 
-        for n in itertools.imap(pow, itertools.cycle([10]), range(8)):
-            for D in itertools.imap(pow, itertools.cycle([10]), range(3)):
+        for n in itertools.imap(pow, itertools.cycle([10]), range(8)):  # type: ignore[attr-defined]
+            for D in itertools.imap(pow, itertools.cycle([10]), range(3)):  # type: ignore[attr-defined]
                 X = np.random.rand(n, D).astype(np.float32)
                 label = (np.random.rand(n) * D).astype(np.int32)
                 logger.info('Running benchmark for n = {}, D= {}'.format(n, D))

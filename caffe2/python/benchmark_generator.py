@@ -16,7 +16,7 @@ from caffe2.python import core, workspace, brew, utils
 
 
 def parse_kwarg(kwarg_str):
-    key, value = map(string.strip, kwarg_str.split("=", 1))
+    key, value = map(string.strip, kwarg_str.split("=", 1))  # type: ignore[attr-defined]
     try:
         value = int(value)
     except ValueError:

@@ -18,15 +18,15 @@ class BrewTest(unittest.TestCase):
         def myhelper(model, val=-1):
             return val
 
-        if not brew.has_helper(myhelper):
-            brew.Register(myhelper)
+        if not brew.has_helper(myhelper):  # type: ignore[attr-defined]
+            brew.Register(myhelper)  # type: ignore[attr-defined]
         self.myhelper = myhelper
 
         def myhelper2(model, val=-1):
             return val
 
-        if not brew.has_helper(myhelper2):
-            brew.Register(myhelper2)
+        if not brew.has_helper(myhelper2):  # type: ignore[attr-defined]
+            brew.Register(myhelper2)  # type: ignore[attr-defined]
         self.myhelper2 = myhelper2
         self.model = ModelHelper(name="test_model")
 
@@ -98,12 +98,12 @@ class BrewTest(unittest.TestCase):
         myhelper2 = self.myhelper2
         n = 15
         with brew.arg_scope([myhelper], val=n):
-            res = brew.myhelper(self.model)
+            res = brew.myhelper(self.model)  # type: ignore[attr-defined]
         self.assertEqual(n, res)
 
         with brew.arg_scope([myhelper, myhelper2], val=n):
-            res1 = brew.myhelper(self.model)
-            res2 = brew.myhelper2(self.model)
+            res1 = brew.myhelper(self.model)  # type: ignore[attr-defined]
+            res2 = brew.myhelper2(self.model)  # type: ignore[attr-defined]
         self.assertEqual([n, n], [res1, res2])
 
     def test_arg_scope_single(self):
@@ -138,28 +138,28 @@ class BrewTest(unittest.TestCase):
         with brew.arg_scope([myhelper], val=-3), \
                 brew.arg_scope([myhelper], val=-2):
             with brew.arg_scope([myhelper], val=n):
-                res = brew.myhelper(self.model)
+                res = brew.myhelper(self.model)  # type: ignore[attr-defined]
                 self.assertEqual(n, res)
-            res = brew.myhelper(self.model)
+            res = brew.myhelper(self.model)  # type: ignore[attr-defined]
             self.assertEqual(res, -2)
 
-        res = brew.myhelper(self.model, val=15)
+        res = brew.myhelper(self.model, val=15)  # type: ignore[attr-defined]
         self.model.Validate()
         self.assertEqual(res, 15)
 
     def test_double_register(self):
         myhelper = self.myhelper
         with self.assertRaises(AttributeError):
-            brew.Register(myhelper)
+            brew.Register(myhelper)  # type: ignore[attr-defined]
 
     def test_has_helper(self):
-        self.assertTrue(brew.has_helper(brew.conv))
-        self.assertTrue(brew.has_helper("conv"))
+        self.assertTrue(brew.has_helper(brew.conv))  # type: ignore[attr-defined]
+        self.assertTrue(brew.has_helper("conv"))  # type: ignore[attr-defined]
 
         def myhelper3():
             pass
 
-        self.assertFalse(brew.has_helper(myhelper3))
+        self.assertFalse(brew.has_helper(myhelper3))  # type: ignore[attr-defined]
 
     def test_model_helper(self):
         X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5

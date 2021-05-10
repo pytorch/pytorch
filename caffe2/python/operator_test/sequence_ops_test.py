@@ -252,7 +252,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            indices=st.lists(st.integers(min_value=0, max_value=9),
                             min_size=0,
                             max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_remove_data_blocks(self, data, indices, gc, dc):
         indices = np.array(indices)
@@ -277,7 +277,7 @@ class TestSequenceOps(serial.SerializedTestCase):
     @given(elements=st.lists(st.integers(min_value=0, max_value=9),
                              min_size=0,
                              max_size=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_find_duplicate_elements(self, elements, gc, dc):
         mapping = {

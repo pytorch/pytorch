@@ -31,12 +31,12 @@ import caffe2.python._import_c_extension as C
 class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
         g = C.DummyName()
-        n1 = g.new_dummy_name()
-        n2 = g.new_dummy_name()
+        n1 = g.new_dummy_name()  # type: ignore[attr-defined]
+        n2 = g.new_dummy_name()  # type: ignore[attr-defined]
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
     def test_check_arguments(self):
-        b2 = C.Caffe2Backend()
+        b2 = C.Caffe2Backend()  # type: ignore[attr-defined]
 
         node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"])
         b2.convert_node(node_def.SerializeToString())
@@ -458,7 +458,7 @@ class TestCaffe2Basic(TestCase):
             transB=1,
             broadcast=1)
 
-        backend = C.Caffe2Backend()
+        backend = C.Caffe2Backend()  # type: ignore[attr-defined]
 
         # without broadcast and without shape info, gemm will be
         # converted to matmul + add
@@ -661,7 +661,7 @@ class TestCaffe2Basic(TestCase):
                 dims=[1, 2, 3],
                 vals=vals.flatten().tolist(),
             )
-            b = C.Caffe2Backend()
+            b = C.Caffe2Backend()  # type: ignore[attr-defined]
             op = caffe2_pb2.OperatorDef()
             op.ParseFromString(b._build_tensor_filling_op(tensor.SerializeToString(), ''))
             self.assertEqual(len(op.input), 0)

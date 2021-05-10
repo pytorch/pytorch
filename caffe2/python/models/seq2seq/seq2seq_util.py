@@ -25,8 +25,8 @@ UNK = '<UNK>'
 
 
 def gen_vocab(corpus, unk_threshold):
-    vocab = collections.defaultdict(lambda: len(vocab))
-    freqs = collections.defaultdict(lambda: 0)
+    vocab = collections.defaultdict(lambda: len(vocab))  # type: ignore[var-annotated]
+    freqs = collections.defaultdict(lambda: 0)  # type: ignore[var-annotated]
     # Adding padding tokens to the vocabulary to maintain consistency with IDs
     vocab[PAD]
     vocab[GO]
@@ -95,7 +95,7 @@ def rnn_unidirectional_layer(
         None if dropout_keep_prob is None else (1.0 - dropout_keep_prob)
     )
     if dropout_ratio is not None:
-        cell = rnn_cell.DropoutCell(
+        cell = rnn_cell.DropoutCell(  # type: ignore[assignment]
             internal_cell=cell,
             dropout_ratio=dropout_ratio,
             name=(scope + '/' if scope else '') + 'dropout',
@@ -361,7 +361,7 @@ class LSTMWithAttentionDecoder(object):
                 name=self.scope('decoder'),
                 residual_output_layers=residual_output_layers,
             )
-            self.cell = rnn_cell.AttentionCell(
+            self.cell = rnn_cell.AttentionCell(  # type: ignore[assignment]
                 encoder_output_dim=encoder_output_dim,
                 encoder_outputs=encoder_outputs,
                 encoder_lengths=encoder_lengths,
@@ -391,7 +391,7 @@ class LSTMWithAttentionDecoder(object):
     def get_attention_weights(self):
         assert self.use_attention
         # [batch_size, encoder_length, 1]
-        return self.cell.get_attention_weights()
+        return self.cell.get_attention_weights()  # type: ignore[attr-defined]
 
     def apply(
         self,
@@ -552,7 +552,7 @@ def build_embedding_decoder(
                 'embedded_decoder_inputs',
             )
 
-    decoder_cells = []
+    decoder_cells = []  # type: ignore[var-annotated]
     decoder_units_per_layer = []
     for i, layer_config in enumerate(decoder_layer_configs):
         num_units = layer_config['num_units']
@@ -574,7 +574,7 @@ def build_embedding_decoder(
         dropout_keep_prob = layer_config.get('dropout_keep_prob', None)
         if dropout_keep_prob is not None:
             dropout_ratio = 1.0 - layer_config.dropout_keep_prob
-            cell = rnn_cell.DropoutCell(
+            cell = rnn_cell.DropoutCell(  # type: ignore[assignment]
                 internal_cell=cell,
                 dropout_ratio=dropout_ratio,
                 forward_only=forward_only,

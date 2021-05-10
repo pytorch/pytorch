@@ -141,7 +141,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
                 workspace.blobs[output_t_prev] = result_t
                 res_all[t_cur] = result_t
 
-            workspace.SwitchWorkspace(global_ws_name)
+            workspace.SwitchWorkspace(global_ws_name)  # type: ignore[call-overload]
 
             shape = list(input.shape)
             shape[0] = 1

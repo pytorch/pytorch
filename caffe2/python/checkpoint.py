@@ -101,8 +101,8 @@ class Job(context.Managed):
         return self
 
     def __exit__(self, *args):
-        self.epoch_group.__exit__()
-        super(Job, self).__exit__(*args)
+        self.epoch_group.__exit__()  # type: ignore[union-attr]
+        super(Job, self).__exit__(*args)  # type: ignore[misc]
 
     def add_stop_condition(self, output):
         if isinstance(output, core.BlobReference):
@@ -342,7 +342,7 @@ class CheckpointManager(object):
         Args:
             action_name: A string of the name of checkpoint operation.
         """
-        all_stats = {}
+        all_stats = {}  # type: ignore[var-annotated]
         self.collect_checkpoint_stats(all_stats)
         if self._metadata_handler:
             self._metadata_handler.report(action_name, all_stats)
@@ -452,9 +452,9 @@ class MultiNodeCheckpointManager(object):
 
     def _task_group(self, func, *args, **kw):
         assert self._node_managers is not None, 'init must be called first.'
-        with TaskGroup(WorkspaceType.GLOBAL) as task_group:
+        with TaskGroup(WorkspaceType.GLOBAL) as task_group:  # type: ignore[attr-defined]
             for node, manager in self._node_managers:
-                with Node(node):
+                with Node(node):  # type: ignore[attr-defined]
                     func(manager, *args, **kw)
             return task_group
 
@@ -474,7 +474,7 @@ class MultiNodeCheckpointManager(object):
             return TaskGroup(WorkspaceType.GLOBAL)
         self._node_managers = []
         for node in nodes:
-            with Node(node):
+            with Node(node):  # type: ignore[attr-defined]
                 manager = CheckpointManager(
                     db_prefix=self._db_prefix,
                     node_name=str(node),
@@ -508,7 +508,7 @@ class MultiNodeCheckpointManager(object):
         else:
             self._node_managers = []
             for node in nodes:
-                with Node(node):
+                with Node(node):  # type: ignore[attr-defined]
                     manager = CheckpointManager(
                         db_prefix=self._db_prefix,
                         node_name=str(node),
@@ -542,7 +542,7 @@ class MultiNodeCheckpointManager(object):
             checkpoint_db_name: A string. The checkpoint path of the given
                 node and the given epoch.
         """
-        for node, manager in self._node_managers:
+        for node, manager in self._node_managers:  # type: ignore[union-attr]
             if str(node) == node_name:
                 return db_name(epoch, manager._node_name, manager._db_prefix)
 
@@ -555,8 +555,8 @@ class MultiNodeCheckpointManager(object):
         Args:
             action_name: A string of the name of checkpoint operation.
         """
-        all_stats = {}
-        for _, manager in self._node_managers:
+        all_stats = {}  # type: ignore[var-annotated]
+        for _, manager in self._node_managers:  # type: ignore[union-attr]
             manager.collect_checkpoint_stats(all_stats)
         logger.debug("checkpoint stats: {}".format(all_stats))
         if self._metadata_handler:

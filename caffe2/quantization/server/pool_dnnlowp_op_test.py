@@ -24,7 +24,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_max_pool(
         self,
@@ -111,7 +111,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
         batch_size=st.integers(2, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_average_pool(
         self,

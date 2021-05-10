@@ -27,7 +27,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         batch_size=st.sampled_from([0, 32, 64, 128, 256]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_fully_connected_acc16_int(
         self,
@@ -72,7 +72,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         b = np.round(np.random.randn(output_channels)).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("FC", ""),
@@ -122,7 +122,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_fully_connected_acc16_outlier(
         self,
@@ -167,7 +167,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         # No input quantization error in bias
         b = np.round(np.random.randn(output_channels)).astype(np.float32)
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("FC", ""),

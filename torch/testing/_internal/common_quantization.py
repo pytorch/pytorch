@@ -129,7 +129,7 @@ class AverageMeter(object):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        self.avg = self.sum / self.count  # type: ignore[assignment]
 
     def __str__(self):
         fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
@@ -187,7 +187,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # type: ignore[name-defined]
     ddp_cleanup()
 
 
@@ -254,8 +254,8 @@ def skipIfNoFBGEMM(fn):
     reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
     if isinstance(fn, type):
         if 'fbgemm' not in torch.backends.quantized.supported_engines:
-            fn.__unittest_skip__ = True
-            fn.__unittest_skip_why__ = reason
+            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
+            fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
         return fn
 
     @functools.wraps(fn)
@@ -282,7 +282,7 @@ def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
     """
     tt = np.zeros((t.shape[0] + 1,), dtype=offset_type)
     tt[1:] = t
-    tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))
+    tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))  # type: ignore[assignment]
     if use_begin_offset:
         return tt[:-1]
     return tt[1:]
@@ -525,7 +525,7 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(outputs[True], outputs[False])
 
             # non debug graph should produce quantized op
-            FileCheck().check(quantized_op) \
+            FileCheck().check(quantized_op) \  # type: ignore[attr-defined]
                        .run(models[False].graph)
 
         return models[False]
@@ -541,7 +541,7 @@ class QuantizationTestCase(TestCase):
             expected_node, expected_node_occurrence, expected_node_list:
                see docs for checkGraphModeFxOp
         """
-        nodes_in_graph = dict()
+        nodes_in_graph = dict()  # type: ignore[var-annotated]
         node_list = []
         modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
@@ -633,7 +633,7 @@ class QuantizationTestCase(TestCase):
                 node: Node, gm: GraphModule
             ) -> Union[Callable, str]:
                 if node.op == 'call_module':
-                    mod = getattr(gm, node.target)
+                    mod = getattr(gm, node.target)  # type: ignore[arg-type]
                     return type(mod)
                 else:
                     assert node.op in ('call_function', 'call_method')
@@ -842,8 +842,8 @@ class QuantizationTestCase(TestCase):
         embedding_unpack = torch.ops.quantized.embedding_bag_unpack
         # Check unpacked weight values explicitly
         for key in emb_dict:
-            if isinstance(emb_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+            if isinstance(emb_dict[key], torch._C.ScriptObject):  # type: ignore[attr-defined]
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)  # type: ignore[attr-defined]
                 emb_weight = embedding_unpack(emb_dict[key])
                 loaded_weight = embedding_unpack(loaded_dict[key])
                 self.assertEqual(emb_weight, loaded_weight)
@@ -853,7 +853,7 @@ class QuantizationTestCase(TestCase):
             loaded_qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
                                            include_last_offset=True, mode='sum', dtype=dtype)
         else:
-            loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim, dtype=dtype)
+            loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim, dtype=dtype)  # type: ignore[assignment]
         self.check_eager_serialization(qemb, loaded_qemb, inputs)
 
         loaded_qemb.load_state_dict(loaded_dict)
@@ -869,13 +869,13 @@ class QuantizationTestCase(TestCase):
             float_embedding = torch.nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
                                                     include_last_offset=True, scale_grad_by_freq=False, mode='sum')
         else:
-            float_embedding = torch.nn.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+            float_embedding = torch.nn.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)  # type: ignore[assignment]
 
         if set_qconfig:
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,  # type: ignore[assignment]
                                                      weight=float_qparams_observer)
 
         prepare_dynamic(float_embedding)
@@ -931,7 +931,7 @@ class RNNDynamicModel(torch.nn.Module):
         if mod_type == 'GRU':
             self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
         if mod_type == 'LSTM':
-            self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+            self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.mod(x)
@@ -944,11 +944,11 @@ class RNNCellDynamicModel(torch.nn.Module):
         if mod_type == 'GRUCell':
             self.mod = torch.nn.GRUCell(2, 2).to(dtype=torch.float)
         if mod_type == 'LSTMCell':
-            self.mod = torch.nn.LSTMCell(2, 2).to(dtype=torch.float)
+            self.mod = torch.nn.LSTMCell(2, 2).to(dtype=torch.float)  # type: ignore[assignment]
         if mod_type == 'RNNReLU':
-            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='relu').to(dtype=torch.float)
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='relu').to(dtype=torch.float)  # type: ignore[assignment]
         if mod_type == 'RNNTanh':
-            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='tanh').to(dtype=torch.float)
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='tanh').to(dtype=torch.float)  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.mod(x)
@@ -1171,12 +1171,12 @@ class AnnotatedNestedModel(torch.nn.Module):
         self.sub1 = LinearReluModel()
         self.sub2 = TwoLayerLinearModel()
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
-        self.fc3.qconfig = default_qconfig
-        self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
+        self.fc3.qconfig = default_qconfig  # type: ignore[assignment]
+        self.sub2.fc1 = QuantWrapper(self.sub2.fc1)  # type: ignore[assignment]
         if qengine == 'fbgemm':
-            self.sub2.fc1.qconfig = default_per_channel_qconfig
+            self.sub2.fc1.qconfig = default_per_channel_qconfig  # type: ignore[assignment]
         else:
-            self.sub2.fc1.qconfig = default_qconfig
+            self.sub2.fc1.qconfig = default_qconfig  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.sub1(x)
@@ -1190,8 +1190,8 @@ class AnnotatedSubNestedModel(torch.nn.Module):
         self.sub1 = LinearReluModel()
         self.sub2 = QuantWrapper(TwoLayerLinearModel())
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
-        self.fc3.qconfig = default_qconfig
-        self.sub2.qconfig = default_qconfig
+        self.fc3.qconfig = default_qconfig  # type: ignore[assignment]
+        self.sub2.qconfig = default_qconfig  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.sub1(x)
@@ -1205,8 +1205,8 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
         self.sub1 = LinearReluModel()
         self.sub2 = TwoLayerLinearModel()
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
-        self.fc3.qconfig = default_qconfig
-        self.sub2.qconfig = default_qconfig
+        self.fc3.qconfig = default_qconfig  # type: ignore[assignment]
+        self.sub2.qconfig = default_qconfig  # type: ignore[assignment]
 
         custom_options = {
             'dtype': torch.quint8,
@@ -1214,10 +1214,10 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
         }
         custom_qconfig = QConfig(activation=default_observer.with_args(**custom_options),
                                  weight=default_weight_observer)
-        self.sub2.fc1.qconfig = custom_qconfig
+        self.sub2.fc1.qconfig = custom_qconfig  # type: ignore[assignment]
 
-        self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc2 = QuantWrapper(self.sub2.fc2)
+        self.sub2.fc1 = QuantWrapper(self.sub2.fc1)  # type: ignore[assignment]
+        self.sub2.fc2 = QuantWrapper(self.sub2.fc2)  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.sub1(x)
@@ -1230,9 +1230,9 @@ class QuantSubModel(torch.nn.Module):
         super().__init__()
         self.sub1 = LinearReluModel()
         self.sub2 = QuantWrapper(TwoLayerLinearModel())
-        self.sub2.qconfig = default_qconfig
+        self.sub2.qconfig = default_qconfig  # type: ignore[assignment]
         self.fc3 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc3.qconfig = default_qconfig
+        self.fc3.qconfig = default_qconfig  # type: ignore[assignment]
 
     def forward(self, x):
         x = self.sub1(x)
@@ -1288,13 +1288,13 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
         # don't quantize this fc
-        self.fc.qconfig = None
+        self.fc.qconfig = None  # type: ignore[assignment]
 
     def forward(self, x):
         return self.fc(self.sub(x))
 
     def fuse_modules(self):
-        self.sub.module.fuse_modules()
+        self.sub.module.fuse_modules()  # type: ignore[operator]
 
 class QuantStubModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
@@ -1353,7 +1353,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
 class SubModelForFusion(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)  # type: ignore[arg-type]
         self.bn = nn.BatchNorm2d(2).to(dtype=torch.float)
 
     def forward(self, x):
@@ -1365,7 +1365,7 @@ class SubModelForFusion(nn.Module):
 class SubModelWithoutFusion(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)  # type: ignore[arg-type]
         self.relu = nn.ReLU(inplace=False).to(dtype=torch.float)
 
     def forward(self, x):
@@ -1374,7 +1374,7 @@ class SubModelWithoutFusion(nn.Module):
 class ModelForFusion(nn.Module):
     def __init__(self, qconfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
+        self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)  # type: ignore[arg-type]
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
         self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
@@ -1383,7 +1383,7 @@ class ModelForFusion(nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
-        self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
+        self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)  # type: ignore[arg-type]
         self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
@@ -1391,8 +1391,8 @@ class ModelForFusion(nn.Module):
         self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
         self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
-        self.sub2.qconfig = None
-        self.fc.qconfig = None
+        self.sub2.qconfig = None  # type: ignore[assignment]
+        self.fc.qconfig = None  # type: ignore[assignment]
 
     def forward(self, x):
         x = x.squeeze(2)
@@ -1629,7 +1629,7 @@ class EmbeddingWithLinear(torch.nn.Module):
         super().__init__()
         self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
         self.fc = torch.nn.Linear(5, 5)
-        self.emb.qconfig = float_qparams_weight_only_qconfig
+        self.emb.qconfig = float_qparams_weight_only_qconfig  # type: ignore[assignment]
         self.qconfig = default_qconfig
 
     def forward(self, indices, linear_in):

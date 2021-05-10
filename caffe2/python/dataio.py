@@ -596,7 +596,7 @@ class CompositeReaderBuilder(ReaderBuilder):
         return self._schema
 
     def setup(self, **kwargs):
-        data_finished_blobs = {}
+        data_finished_blobs = {}  # type: ignore[var-annotated]
         # limiter is stateful; it can only be used once. Since
         # CompositeReader stops when one of the reader stops,
         # this is fine.

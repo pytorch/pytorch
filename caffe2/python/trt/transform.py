@@ -41,7 +41,7 @@ def convert_onnx_model_to_trt_op(onnx_model,
     Convert the whole ONNX model to a TensorRT C2 op
     """
     check_gpu_()
-    trt_str = C.onnx_to_trt_op(onnx_model.SerializeToString(),
+    trt_str = C.onnx_to_trt_op(onnx_model.SerializeToString(),  # type: ignore[attr-defined]
                                _get_output_shapes(onnx_model.graph.output),
                                max_batch_size,
                                max_workspace_size,
@@ -96,7 +96,7 @@ def transform_caffe2_net(
 
     for k,v in input_shapes.items():
         shape_hints[k] = v
-    pred_net_str = C.transform_trt(pred_net.SerializeToString(),
+    pred_net_str = C.transform_trt(pred_net.SerializeToString(),  # type: ignore[attr-defined]
                                    shape_hints,
                                    max_batch_size,
                                    max_workspace_size,

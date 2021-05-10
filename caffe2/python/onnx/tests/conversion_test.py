@@ -36,7 +36,7 @@ class TestConversion(TestCase):
         exc_info: {}
         '''.format(result.output,
                    result.exception,
-                   traceback.format_exception(*result.exc_info))))
+                   traceback.format_exception(*result.exc_info))))  # type: ignore[misc]
         return result
 
     def test_caffe2_to_onnx(self):

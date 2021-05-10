@@ -17,7 +17,7 @@ import shutil
 
 from caffe2.python import core, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
-from gloo.python import IoError
+from gloo.python import IoError  # type: ignore[import]
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:redis_store_handler_ops")
@@ -42,7 +42,7 @@ class TestCase(hu.HypothesisTestCase):
 
     def run_test_locally(self, fn, device_option=None, **kwargs):
         # Queue for assertion errors on subprocesses
-        queue = Queue()
+        queue = Queue()  # type: ignore[var-annotated]
 
         # Capture any exception thrown by the subprocess
         def run_fn(*args, **kwargs):
@@ -87,8 +87,8 @@ class TestCase(hu.HypothesisTestCase):
         self.assertIsNotNone(comm_rank)
         comm_size = os.getenv('COMM_SIZE')
         self.assertIsNotNone(comm_size)
-        kwargs['comm_rank'] = int(comm_rank)
-        kwargs['comm_size'] = int(comm_size)
+        kwargs['comm_rank'] = int(comm_rank)  # type: ignore[arg-type]
+        kwargs['comm_size'] = int(comm_size)  # type: ignore[arg-type]
         with core.DeviceScope(device_option):
             fn(**kwargs)
             workspace.ResetWorkspace()

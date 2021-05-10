@@ -10,6 +10,6 @@
 # This has to be done for all python targets, so listing them here
 from caffe2.proto import caffe2_pb2, metanet_pb2, torch_pb2
 try:
-    from caffe2.caffe2.fb.session.proto import session_pb2
+    from caffe2.caffe2.fb.session.proto import session_pb2  # type: ignore[import]
 except ImportError:
     pass

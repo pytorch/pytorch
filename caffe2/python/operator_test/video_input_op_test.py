@@ -31,37 +31,37 @@ class VideoInputOpTest(unittest.TestCase):
         env = lmdb.open(output_file, map_size=LMDB_MAP_SIZE)
         total_size = 0
 
-        file_name = []
-        start_frame = []
-        label = []
+        file_name = []  # type: ignore[var-annotated]
+        start_frame = []  # type: ignore[var-annotated]
+        label = []  # type: ignore[var-annotated]
         index = 0
 
         with env.begin(write=True) as txn:
             with open(list_file, "r") as data:
                 for line in data:
                     p = line.split()
-                    file_name = p[0]
-                    start_frame = int(p[1])
-                    label = int(p[2])
+                    file_name = p[0]  # type: ignore[assignment]
+                    start_frame = int(p[1])  # type: ignore[assignment]
+                    label = int(p[2])  # type: ignore[assignment]
 
                     if not use_list:
-                        with open(file_name, mode="rb") as file:
+                        with open(file_name, mode="rb") as file:  # type: ignore[call-overload]
                             video_data = file.read()
                     else:
                         video_data = file_name
 
                     tensor_protos = caffe2_pb2.TensorProtos()
                     video_tensor = tensor_protos.protos.add()
-                    video_tensor.data_type = 4  # string data
+                    video_tensor.data_type = 4  # string data  # type: ignore[assignment]
                     video_tensor.string_data.append(video_data)
 
                     label_tensor = tensor_protos.protos.add()
-                    label_tensor.data_type = 2
-                    label_tensor.int32_data.append(label)
+                    label_tensor.data_type = 2  # type: ignore[assignment]
+                    label_tensor.int32_data.append(label)  # type: ignore[arg-type]
 
                     start_frame_tensor = tensor_protos.protos.add()
-                    start_frame_tensor.data_type = 2
-                    start_frame_tensor.int32_data.append(start_frame)
+                    start_frame_tensor.data_type = 2  # type: ignore[assignment]
+                    start_frame_tensor.int32_data.append(start_frame)  # type: ignore[arg-type]
 
                     txn.put(
                         "{}".format(index).encode("ascii"),

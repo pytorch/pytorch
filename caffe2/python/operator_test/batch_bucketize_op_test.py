@@ -45,7 +45,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
             elements=hu.floats(min_value=0, max_value=5),
             min_value=5),
         seed=st.integers(min_value=2, max_value=1000),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_batch_bucketize(self, x, seed, gc, dc):
         op = core.CreateOperator('BatchBucketize',
                                  ["FEATURE", "INDICES", "BOUNDARIES", "LENGTHS"],
@@ -67,7 +67,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
             boundaries += cur_boundary.tolist()
 
         lens = np.array(lens, dtype=np.int32)
-        boundaries = np.array(boundaries, dtype=np.float32)
+        boundaries = np.array(boundaries, dtype=np.float32)  # type: ignore[assignment]
         indices = np.array(indices, dtype=np.int32)
 
         def ref(x, indices, boundaries, lens):

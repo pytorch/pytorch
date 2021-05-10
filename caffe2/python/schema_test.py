@@ -94,12 +94,12 @@ class TestDB(unittest.TestCase):
         s = schema.Tuple(np.int32, str, np.float32)
         s2 = schema.Struct(
             ('field_0', schema.Scalar(dtype=np.int32)),
-            ('field_1', schema.Scalar(dtype=np.str)),
+            ('field_1', schema.Scalar(dtype=np.str)),  # type: ignore[attr-defined]
             ('field_2', schema.Scalar(dtype=np.float32))
         )
         self.assertEquals(s, s2)
         self.assertEquals(s[0], schema.Scalar(dtype=np.int32))
-        self.assertEquals(s[1], schema.Scalar(dtype=np.str))
+        self.assertEquals(s[1], schema.Scalar(dtype=np.str))  # type: ignore[attr-defined]
         self.assertEquals(s[2], schema.Scalar(dtype=np.float32))
         self.assertEquals(
             s[2, 0],
@@ -187,19 +187,19 @@ class TestDB(unittest.TestCase):
             ('a', schema.Scalar(np.float32)), (
                 'b', schema.Scalar(
                     np.int32,
-                    metadata=schema.Metadata(categorical_limit=5)
+                    metadata=schema.Metadata(categorical_limit=5)  # type: ignore[call-arg]
                 )
             ), (
                 'c', schema.List(
                     schema.Scalar(
                         np.int32,
-                        metadata=schema.Metadata(categorical_limit=6)
+                        metadata=schema.Metadata(categorical_limit=6)  # type: ignore[call-arg]
                     )
                 )
             )
         )
         # attach metadata to lengths field
-        s.c.lengths.set_metadata(schema.Metadata(categorical_limit=7))
+        s.c.lengths.set_metadata(schema.Metadata(categorical_limit=7))  # type: ignore[call-arg]
 
         self.assertEqual(None, s.a.metadata)
         self.assertEqual(5, s.b.metadata.categorical_limit)

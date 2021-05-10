@@ -50,7 +50,7 @@ class PairwiseSimilarity(ModelLayer):
             )
             self.indices_to_gather = indices_to_gather
         else:
-            self.indices_to_gather = None
+            self.indices_to_gather = None  # type: ignore[assignment]
 
         self.x_embeddings = x_embeddings
         self.y_embeddings = y_embeddings

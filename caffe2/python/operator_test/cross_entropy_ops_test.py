@@ -119,7 +119,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
 
     @given(
         log_D_trick=st.just(False),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_cross_entropy_and_unjoied_cross_entropy_relation(
         self, log_D_trick, gc, dc
@@ -249,7 +249,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(2, 10),
            b=st.integers(1, 5),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_soft_label_cross_entropy(self, n, b, gc, dc):
         # Initialize X and add 1e-2 for numerical stability
         X = np.random.rand(b, n).astype(np.float32)
@@ -264,7 +264,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
 
         # Reference implementation of cross entropy with soft labels
         def soft_label_xentr_ref(X, label):
-            xent = [np.sum((-label[j][i] * np.log(max(X[j][i], 1e-20))
+            xent = [np.sum((-label[j][i] * np.log(max(X[j][i], 1e-20))  # type: ignore[call-overload]
                             for i in range(len(X[0])))) for j in range(b)]
             return (xent,)
 

@@ -28,7 +28,7 @@ class TestStringOps(serial.SerializedTestCase):
         # an invalid utf-8 string. The goal here is just to avoid python
         # complaining about the unicode -> str conversion.
         strings = np.array(
-            [a.encode('utf-8') for a in strings], dtype=np.object
+            [a.encode('utf-8') for a in strings], dtype=np.object  # type: ignore[attr-defined]
         )
 
         def string_prefix_ref(strings):
@@ -52,7 +52,7 @@ class TestStringOps(serial.SerializedTestCase):
     def test_string_suffix(self, strings):
         length = 3
         strings = np.array(
-            [a.encode('utf-8') for a in strings], dtype=np.object
+            [a.encode('utf-8') for a in strings], dtype=np.object  # type: ignore[attr-defined]
         )
 
         def string_suffix_ref(strings):
@@ -76,7 +76,7 @@ class TestStringOps(serial.SerializedTestCase):
     def test_string_starts_with(self, strings):
         prefix = 'a'
         strings = np.array(
-            [str(a) for a in strings], dtype=np.object
+            [str(a) for a in strings], dtype=np.object  # type: ignore[attr-defined]
         )
 
         def string_starts_with_ref(strings):
@@ -100,7 +100,7 @@ class TestStringOps(serial.SerializedTestCase):
     def test_string_ends_with(self, strings):
         suffix = 'a'
         strings = np.array(
-            [str(a) for a in strings], dtype=np.object
+            [str(a) for a in strings], dtype=np.object  # type: ignore[attr-defined]
         )
 
         def string_ends_with_ref(strings):
@@ -127,7 +127,7 @@ class TestStringOps(serial.SerializedTestCase):
             text = strings[0]
 
         strings = np.array(
-            [str(a) for a in strings], dtype=np.object
+            [str(a) for a in strings], dtype=np.object  # type: ignore[attr-defined]
         )
 
         def string_equals_ref(strings):

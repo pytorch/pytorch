@@ -98,7 +98,7 @@ def GetPydotGraph(
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     pydot_nodes = {}
-    pydot_node_counts = defaultdict(int)
+    pydot_node_counts = defaultdict(int)  # type: ignore[var-annotated]
     for op_id, op in enumerate(operators):
         op_node = op_node_producer(op, op_id)
         graph.add_node(op_node)
@@ -151,7 +151,7 @@ def GetPydotGraphMinimal(
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     # blob_parents maps each blob name to its generating op.
-    blob_parents = {}
+    blob_parents = {}  # type: ignore[var-annotated]
     # op_ancestry records the ancestors of each op.
     op_ancestry = defaultdict(set)
     for op_id, op in enumerate(operators):
@@ -265,8 +265,8 @@ def GetPlanGraph(plan_def, name=None, rankdir='TB'):
 def GetGraphInJson(operators_or_net, output_filepath):
     operators, _ = _rectify_operator_and_name(operators_or_net, None)
     blob_strid_to_node_id = {}
-    node_name_counts = defaultdict(int)
-    nodes = []
+    node_name_counts = defaultdict(int)  # type: ignore[var-annotated]
+    nodes = []  # type: ignore[var-annotated]
     edges = []
     for op_id, op in enumerate(operators):
         op_label = op.name + '/' + op.type if op.name else op.type
@@ -381,14 +381,14 @@ def main():
         )
     for key, operators in viewitems(graphs):
         if args.minimal:
-            graph = GetPydotGraphMinimal(
+            graph = GetPydotGraphMinimal(  # type: ignore[call-arg]
                 operators,
                 name=key,
                 rankdir=args.rankdir,
                 node_producer=GetOpNodeProducer(args.append_output, **OP_STYLE),
                 minimal_dependency=args.minimal_dependency)
         else:
-            graph = GetPydotGraph(
+            graph = GetPydotGraph(  # type: ignore[call-arg]
                 operators,
                 name=key,
                 rankdir=args.rankdir,

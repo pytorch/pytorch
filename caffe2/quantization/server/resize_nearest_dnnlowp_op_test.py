@@ -19,7 +19,7 @@ class DNNLowPResizeNearestOpTest(hu.HypothesisTestCase):
         C=st.integers(1, 32),
         scale_w=st.floats(0.25, 4.0) | st.just(2.0),
         scale_h=st.floats(0.25, 4.0) | st.just(2.0),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None, max_examples=50)
     def test_resize_nearest(self, N, H, W, C, scale_w, scale_h, gc, dc):

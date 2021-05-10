@@ -180,12 +180,12 @@ def matrix_to_tt(W, inp_sizes, out_sizes, tt_ranks):
     idx = 0
     for i in range(len(inp_sizes)):
         shape = (tt_ranks[i], inp_sizes[i], out_sizes[i], tt_ranks[i + 1])
-        current_core = cores[idx:idx + np.prod(shape)].reshape(shape)
+        current_core = cores[idx:idx + np.prod(shape)].reshape(shape)  # type: ignore[misc]
         current_core = current_core.transpose((1, 3, 0, 2))
-        new_cores[new_cores.shape[0] - idx - np.prod(shape):
+        new_cores[new_cores.shape[0] - idx - np.prod(shape):  # type: ignore[misc]
                   new_cores.shape[0] - idx] \
                   = current_core.flatten()
-        idx += np.prod(shape)
+        idx += np.prod(shape)  # type: ignore[assignment]
 
     return new_cores
 

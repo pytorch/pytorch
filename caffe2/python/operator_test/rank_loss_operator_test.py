@@ -17,7 +17,7 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
            label=hu.arrays(dims=[2, 1],
                            elements=st.integers(min_value=0, max_value=1),
                            dtype=np.float32),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_pair_wise_loss_predictions(self, X, label, gc, dc):
         workspace.FeedBlob('X', X)
         workspace.FeedBlob('label', label)
@@ -54,7 +54,7 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
                            dtype=np.float32),
            dY=hu.arrays(dims=[1],
                         elements=hu.floats(min_value=1, max_value=10)),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_pair_wise_loss_gradient(self, X, label, dY, gc, dc):
         workspace.FeedBlob('X', X)
         workspace.FeedBlob('dY', dY)

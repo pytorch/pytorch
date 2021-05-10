@@ -22,7 +22,7 @@ class RpcAgentTestFixture(ABC):
     @property
     def file_init_method(self):
         return torch.testing._internal.dist_utils.INIT_METHOD_TEMPLATE.format(
-            file_name=self.file_name
+            file_name=self.file_name  # type: ignore[attr-defined]
         )
 
     @property

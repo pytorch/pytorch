@@ -21,7 +21,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         in_place=st.sampled_from([(False, False), (True, False), (False, True)]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_int(
@@ -99,7 +99,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
 
         check_quantized_results_close(outputs)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_broadcast(self, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
@@ -139,7 +139,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
 
         check_quantized_results_close(outputs)
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_broadcast_axis(self, gc, dc):
         for bdim, axis in [

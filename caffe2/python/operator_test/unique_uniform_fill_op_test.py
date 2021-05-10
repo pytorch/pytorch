@@ -27,7 +27,7 @@ class TestUniqueUniformFillOp(hu.HypothesisTestCase):
             ]
         ),
         s=st.integers(10, 500),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_unique_uniform_int_fill(self, r, avoid, dtypes, s, gc, dc):
         net = core.Net("net")

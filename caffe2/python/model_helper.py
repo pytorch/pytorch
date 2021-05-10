@@ -414,7 +414,7 @@ class ModelHelper(object):
             """You cannot pass reader to model_helper.TensorProtosDBInput.
                Use model.net.TensorProtosDBInput instead to create the op."""
 
-        return db_input(
+        return db_input(  # type: ignore[call-arg]
             self, blob_out, batch_size, db, db_type, **kwargs)
 
     def GetDevices(self):
@@ -431,7 +431,7 @@ class ModelHelper(object):
             raise AttributeError(
                 'Method ' + op_type + ' is not a registered operator.' +
                 ' Did you mean: [' +
-                ','.join(workspace.C.nearby_opnames(op_type)) + ']'
+                ','.join(workspace.C.nearby_opnames(op_type)) + ']'  # type: ignore[attr-defined]
             )
         if op_type not in _known_working_ops:
             if not self.allow_not_known_ops:

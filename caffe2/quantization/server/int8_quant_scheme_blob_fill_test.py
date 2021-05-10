@@ -22,7 +22,7 @@ from caffe2.quantization.server import dnnlowp_pybind11
 
 class TestInt8QuantSchemeBlobFillOperator(hu.HypothesisTestCase):
     @given(
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_int8_quant_scheme_blob_fill_op(
         self, gc, dc

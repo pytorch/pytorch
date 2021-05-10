@@ -36,7 +36,7 @@ class ReluTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            inplace=st.booleans(),
-           **mu.gcs_cpu_ideep)
+           **mu.gcs_cpu_ideep)  # type: ignore[arg-type]
     @settings(max_examples=10, deadline=None)
     def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc):
         relu_fp32 = core.CreateOperator(
@@ -123,7 +123,7 @@ class ReluTest(hu.HypothesisTestCase):
             print("MSE", MSE)
             self.assertTrue(False)
 
-        workspace.SwitchWorkspace(old_ws_name)
+        workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 if __name__ == "__main__":
     unittest.main()

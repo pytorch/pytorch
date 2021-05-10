@@ -209,7 +209,7 @@ class AnyExpTrainer(object):
 
     def checkpoint(self, epoch):
         self.model_path = checkpoint.save_model_params(
-            True, self.train_model, self.gen_checkpoint_path(True, epoch + 1),
+            True, self.train_model, self.gen_checkpoint_path(True, epoch + 1),  # type: ignore[attr-defined]
             epoch + 1, self.opts, float('-inf'))
 
     def gen_checkpoint_path(self, is_checkpoint, epoch):
@@ -273,11 +273,11 @@ class AnyExpTrainer(object):
 
     @abstractmethod
     def run_testing_net(self):
-        if self.test_model is None:
+        if self.test_model is None:  # type: ignore[attr-defined]
             return
         timeout = 2000.0
         with timeout_guard.CompleteInTimeOrDie(timeout):
-            workspace.RunNet(self.test_model.net.Proto().name)
+            workspace.RunNet(self.test_model.net.Proto().name)  # type: ignore[attr-defined]
 
     # @abstractmethod
     def planning_output(self):
@@ -286,9 +286,9 @@ class AnyExpTrainer(object):
         self.init_logs()
 
     def prep_data_parallel_models(self):
-        self.prep_a_data_parallel_model(self.train_model,
+        self.prep_a_data_parallel_model(self.train_model,  # type: ignore[attr-defined]
                                         self.train_dataset, True)
-        self.prep_a_data_parallel_model(self.test_model,
+        self.prep_a_data_parallel_model(self.test_model,  # type: ignore[attr-defined]
                                         self.test_dataset, False)
 
     def prep_a_data_parallel_model(self, model, dataset, is_train):
@@ -359,7 +359,7 @@ class AnyExpTrainer(object):
                 ))
                 start_epoch, prev_checkpointed_lr, _best_metric = \
                     checkpoint.initialize_params_from_file(
-                        model=self.train_model,
+                        model=self.train_model,  # type: ignore[attr-defined]
                         weights_file=previous_checkpoint,
                         num_xpus=num_xpus,
                         opts=opts,
@@ -370,7 +370,7 @@ class AnyExpTrainer(object):
             log.info("Load pretrained model: {}".format(pretrained_model))
             start_epoch, prev_checkpointed_lr, best_metric = \
                 checkpoint.initialize_params_from_file(
-                    model=self.train_model,
+                    model=self.train_model,  # type: ignore[attr-defined]
                     weights_file=pretrained_model,
                     num_xpus=num_xpus,
                     opts=opts,
@@ -378,7 +378,7 @@ class AnyExpTrainer(object):
                     reset_epoch=opts['model_param']['reset_epoch'],
                 )
 
-        data_parallel_model.FinalizeAfterCheckpoint(self.train_model)
+        data_parallel_model.FinalizeAfterCheckpoint(self.train_model)  # type: ignore[attr-defined]
 
     def buildModelAndTrain(self, opts):
         log.info('in buildModelAndTrain, trainer_input: {}'.format(str(opts)))
@@ -424,7 +424,7 @@ class AnyExpTrainer(object):
 
                 self.fun_per_iter_b4RunNet(epoch, epoch_iter)
 
-                if self.train_model is not None:
+                if self.train_model is not None:  # type: ignore[attr-defined]
                     self.run_training_net()
 
                 self.fun_per_iter_aftRunNetB4Test(epoch, epoch_iter)
@@ -484,7 +484,7 @@ class AnyExpTrainer(object):
 
             self.fun_per_epoch_aftRunNet(epoch)
 
-        self.fun_conclude_operator()
+        self.fun_conclude_operator()  # type: ignore[call-arg]
 
         self.createMetricsPlotsModelsOutputs()
 

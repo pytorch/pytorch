@@ -26,7 +26,7 @@ class NetModifier(metaclass=abc.ABCMeta):
 
     def __call__(self, net, init_net=None, grad_map=None, blob_to_device=None,
                  modify_output_record=False):
-        self.modify_net(
+        self.modify_net(  # type: ignore[call-arg]
             net,
             init_net=init_net,
             grad_map=grad_map,

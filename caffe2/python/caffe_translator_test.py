@@ -10,7 +10,7 @@ import sys
 
 CAFFE_FOUND = False
 try:
-    from caffe.proto import caffe_pb2
+    from caffe.proto import caffe_pb2  # type: ignore[import]
     from caffe2.python import caffe_translator
     CAFFE_FOUND = True
 except Exception as e:

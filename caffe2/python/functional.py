@@ -16,14 +16,14 @@ def namedtupledict(typename, field_names, *args, **kwargs):
     field_names_map = {n: i for i, n in enumerate(field_names)}
     # Some output names are invalid python identifier, e.g. "0"
     kwargs.setdefault('rename', True)
-    data = namedtuple(typename, field_names, *args, **kwargs)
+    data = namedtuple(typename, field_names, *args, **kwargs)  # type: ignore[misc]
 
     def getitem(self, key):
         if isinstance(key, string_types):
             key = field_names_map[key]
         return super(type(self), self).__getitem__(key)
 
-    data.__getitem__ = getitem
+    data.__getitem__ = getitem  # type: ignore[assignment]
     return data
 
 
@@ -46,7 +46,7 @@ class _Functional(object):
             # of schema
             num_input = len(input_names)
             if num_input > schema.max_input or num_input < \
-               schema.min_input or not schema.num_inputs_allowed(num_input):
+               schema.min_input or not schema.num_inputs_allowed(num_input):  # type: ignore[attr-defined]
                 raise ValueError(
                     "Functional C2: Number of inputs not in \
                 range: {} - {} or not allowed."
@@ -57,8 +57,8 @@ class _Functional(object):
                 num_output = args['num_output']
                 if num_output > schema.max_output or \
                    num_output < schema.min_output or \
-                   not schema.num_outputs_allowed(num_output) or \
-                   not schema.num_inputs_outputs_allowed(num_input,
+                   not schema.num_outputs_allowed(num_output) or \  # type: ignore[attr-defined]
+                   not schema.num_inputs_outputs_allowed(num_input,  # type: ignore[attr-defined]
                                                          num_output):
                     raise ValueError(
                         "Functional C2: Number of output \
@@ -69,7 +69,7 @@ class _Functional(object):
                     output_prefix, num_output, schema.max_output
                 )
                 args.pop('num_output')
-            calculated = schema.CalculateOutput(num_input)
+            calculated = schema.CalculateOutput(num_input)  # type: ignore[attr-defined]
             if not output_names and calculated != -1:
                 output_names = get_name_list(
                     output_prefix, calculated, schema.max_output
@@ -80,7 +80,7 @@ class _Functional(object):
                 # For an op with max_output == inf
                 # and no Output defined in schema
                 # user should pass output_size explicitly
-                if schema.inf == max_output:
+                if schema.inf == max_output:  # type: ignore[attr-defined]
                     raise ValueError(
                         "For operators with max_output == inf,\
                         user should pass num_output explicitly."

@@ -33,10 +33,10 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         indices = np.random.randint(
             low=0, high=len(input_data), size=[num_indices], dtype=np.int64
         )
@@ -131,10 +131,10 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         #  Use int32 here because int64 is covered by test_sparse_lengths_sum
         indices = np.random.randint(
             low=0, high=len(input_data), size=[num_indices], dtype=np.int32
@@ -211,10 +211,10 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         #  Use int32 here because int64 is covered by test_sparse_lengths_sum
         index_type = np.int64 if indices_64bit else np.int32
         indices = np.random.randint(
@@ -337,10 +337,10 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         #  Use int32 here because int64 is covered by test_sparse_lengths_sum
         indices = np.random.randint(
             low=0, high=len(input_data), size=[num_indices], dtype=np.int32

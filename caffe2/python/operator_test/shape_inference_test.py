@@ -474,7 +474,7 @@ class TestShapeInference(test_util.TestCase):
         model = model_helper.ModelHelper(name="test_model")
 
         types = [
-            ('bool', np.bool, caffe2_pb2.TensorProto.BOOL),
+            ('bool', np.bool, caffe2_pb2.TensorProto.BOOL),  # type: ignore[attr-defined]
             #('byte', None, caffe2_pb2.TensorProto.BYTE),
             ('int8', np.int8, caffe2_pb2.TensorProto.INT8),
             ('uint8', np.uint8, caffe2_pb2.TensorProto.UINT8),
@@ -636,9 +636,9 @@ class TestShapeInference(test_util.TestCase):
                 elif arr.dtype == np.dtype('float64'):
                     correct_types[b] = caffe2_pb2.TensorProto.DOUBLE
                 else:
-                    correct_types[b] = "unknown {}".format(arr.dtype)
+                    correct_types[b] = "unknown {}".format(arr.dtype)  # type: ignore[assignment]
             else:
-                correct_types[b] = str(type(arr))
+                correct_types[b] = str(type(arr))  # type: ignore[assignment]
 
         if expected_uninferred_blobs is None:
             expected_uninferred_blobs = []

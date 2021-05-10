@@ -122,7 +122,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_bbox_transform(
         self,
@@ -181,7 +181,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         batch_splits_dtype=st.sampled_from([torch.float32, torch.int32]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_box_with_nms_limits(
         self,

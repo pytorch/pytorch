@@ -72,17 +72,17 @@ class TestSpeedFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             start = time.time()
             workspace.RunNet(sub_scale_sum_net)
             end = time.time()
-            sub_scale_sum_time += end - start
+            sub_scale_sum_time += end - start  # type: ignore[assignment]
 
             start = time.time()
             workspace.RunNet(enc_net)
             end = time.time()
-            enc_time += end - start
+            enc_time += end - start  # type: ignore[assignment]
 
             start = time.time()
             workspace.RunNet(dec_net)
             end = time.time()
-            dec_time += end - start
+            dec_time += end - start  # type: ignore[assignment]
 
         print("Sub+Scale+Sum time: {} ms".format(sub_scale_sum_time / times * 1000))
         print(

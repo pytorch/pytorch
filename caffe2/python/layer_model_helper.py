@@ -125,7 +125,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         assert isinstance(
             blob, (str, core.BlobReference)
         ), "expect type str or BlobReference, but got {}".format(type(blob))
-        dtype = dtype or (np.float, (1, ))
+        dtype = dtype or (np.float, (1, ))  # type: ignore[attr-defined]
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
         self.ad_hoc_plot_blobs.append(blob)
 
@@ -149,9 +149,9 @@ class LayerModelHelper(model_helper.ModelHelper):
                 op_name = 'GivenTensorIntFill'
             elif array.dtype == np.int64:
                 op_name = 'GivenTensorInt64Fill'
-            elif array.dtype == np.str:
+            elif array.dtype == np.str:  # type: ignore[attr-defined]
                 op_name = 'GivenTensorStringFill'
-            elif array.dtype == np.bool:
+            elif array.dtype == np.bool:  # type: ignore[attr-defined]
                 op_name = 'GivenTensorBoolFill'
             else:
                 op_name = 'GivenTensorFill'
@@ -282,7 +282,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             )
         elif isinstance(optim, Optimizer):
             assert isinstance(ref_optim, Optimizer), (
-                "Optim for {} is an instance of Optimizer. However, the optimizer "
+                "Optim for {} is an instance of Optimizer. However, the optimizer "  # type: ignore[str-format]
                 "for the parameters shared with {} is {} which is not an instance "
                 "of Optimizer. Please check the optimizer specified for other "
                 " parameters in the shared group to ensure consistency.".format(

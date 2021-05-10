@@ -14,7 +14,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPTanhOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
+    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_tanh(self, size, is_empty, gc, dc):
         if is_empty:

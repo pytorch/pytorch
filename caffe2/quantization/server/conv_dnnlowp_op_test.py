@@ -37,7 +37,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_conv_int(
@@ -79,7 +79,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         )
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("Conv", ""),
@@ -207,7 +207,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         share_col_buffer=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_conv_relu_int(
@@ -242,7 +242,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         )
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("Conv", ""),
@@ -342,7 +342,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         )
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [("Conv", ""), ("Conv", "DNNLOWP_16"), ("Int8Conv", "DNNLOWP")]
 
@@ -451,7 +451,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         batch_size=st.integers(0, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         prepack_weight=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=None, max_examples=50)
     def test_dnnlowp_conv3d_int(
@@ -499,7 +499,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         batch_size=st.integers(0, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         prepack_weight=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_conv1d_int(
         self,

@@ -19,7 +19,7 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
         max_time=st.sampled_from([2, 10, 30, 50]),
         num_classes=st.sampled_from([2, 10, 26, 40]),
         merge_repeated=st.sampled_from([True, False]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_ctc_greedy_decoder(
@@ -45,14 +45,14 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
                 for t in range(len_i):
                     max_id = np.argmax(inputs[t, i, :])
                     if max_id == 0:
-                        prev_id = max_id
+                        prev_id = max_id  # type: ignore[assignment]
                         continue
                     if max_id == prev_id and merge:
-                        prev_id = max_id
+                        prev_id = max_id  # type: ignore[assignment]
                         continue
                     t_dec += 1
                     val = np.append(val, max_id)
-                    prev_id = max_id
+                    prev_id = max_id  # type: ignore[assignment]
                 output_len = np.append(output_len, t_dec)
 
             return [output_len, val]
@@ -89,7 +89,7 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
         batch=st.sampled_from([2, 4, 128, 256]),
         max_time=st.sampled_from([2, 10, 30, 50]),
         num_classes=st.sampled_from([2, 10, 26, 40]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_ctc_greedy_decoder_no_merge_arg(
@@ -116,14 +116,14 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
                 for t in range(len_i):
                     max_id = np.argmax(inputs[t, i, :])
                     if max_id == 0:
-                        prev_id = max_id
+                        prev_id = max_id  # type: ignore[assignment]
                         continue
                     if max_id == prev_id and merge:
-                        prev_id = max_id
+                        prev_id = max_id  # type: ignore[assignment]
                         continue
                     t_dec += 1
                     val = np.append(val, max_id)
-                    prev_id = max_id
+                    prev_id = max_id  # type: ignore[assignment]
                 output_len = np.append(output_len, t_dec)
 
             return [output_len, val]

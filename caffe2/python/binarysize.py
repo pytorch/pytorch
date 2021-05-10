@@ -62,21 +62,21 @@ def GetSymbolTrie(target, nm_command, max_depth):
         sys.exit(1)
     # Splits the output to size and function name.
     data = []
-    for line in out.split('\n'):
+    for line in out.split('\n'):  # type: ignore[arg-type]
         if line:
-            content = line.split(' ')
+            content = line.split(' ')  # type: ignore[arg-type]
             if len(content) < 4:
                 # This is a line not representing symbol sizes. skip.
                 continue
-            data.append([int(content[1]), ' '.join(content[3:])])
+            data.append([int(content[1]), ' '.join(content[3:])])  # type: ignore[arg-type]
     symbol_trie = Trie('')
     for size, name in data:
         curr = symbol_trie
-        for c in name:
+        for c in name:  # type: ignore[attr-defined]
             if c not in curr.dictionary:
                 curr.dictionary[c] = Trie(curr.name + c)
             curr = curr.dictionary[c]
-            curr.size += size
+            curr.size += size  # type: ignore[operator]
             if len(curr.name) > max_depth:
                 break
     symbol_trie.size = sum(t.size for t in symbol_trie.dictionary.values())

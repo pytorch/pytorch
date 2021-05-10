@@ -32,7 +32,7 @@ def _remote_method(method, rref, *args, **kwargs):
     a helper function to run method on the owner of rref and fetch back the
     result using RPC
     """
-    args = [method, rref] + list(args)
+    args = [method, rref] + list(args)  # type: ignore[assignment]
     return rpc_sync(rref.owner(), _call_method, args=args, kwargs=kwargs)
 
 
@@ -84,7 +84,7 @@ class DummyEnv:
         state = torch.randn(self.state_dim)
         reward = torch.rand(1).item() * self.reward_threshold
         done = self.iter >= self.num_iters
-        info = {}
+        info = {}  # type: ignore[var-annotated]
         return state, reward, done, info
 
 
@@ -125,9 +125,9 @@ class Observer:
 class Agent:
     def __init__(self, world_size):
         self.ob_rrefs = []
-        self.agent_rref = RRef(self)
-        self.rewards = {}
-        self.saved_log_probs = {}
+        self.agent_rref = RRef(self)  # type: ignore[var-annotated]
+        self.rewards = {}  # type: ignore[var-annotated]
+        self.saved_log_probs = {}  # type: ignore[var-annotated]
         self.policy = Policy()
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
         self.eps = np.finfo(np.float32).eps.item()
@@ -197,24 +197,24 @@ class Agent:
 
         # use the minimum observer reward to calculate the running reward
         min_reward = min([sum(self.rewards[ob_id]) for ob_id in self.rewards])
-        self.running_reward = 0.05 * min_reward + (1 - 0.05) * self.running_reward
+        self.running_reward = 0.05 * min_reward + (1 - 0.05) * self.running_reward  # type: ignore[assignment]
 
         # clear saved probs and rewards
         for ob_id in self.rewards:
             self.rewards[ob_id] = []
             self.saved_log_probs[ob_id] = []
 
-        policy_loss, returns = [], []
+        policy_loss, returns = [], []  # type: ignore[var-annotated]
         for r in rewards[::-1]:
             R = r + GAMMA * R
             returns.insert(0, R)
-        returns = torch.tensor(returns)
-        returns = (returns - returns.mean()) / (returns.std() + self.eps)
+        returns = torch.tensor(returns)  # type: ignore[assignment]
+        returns = (returns - returns.mean()) / (returns.std() + self.eps)  # type: ignore[attr-defined]
         for log_prob, R in zip(probs, returns):
             policy_loss.append(-log_prob * R)
         self.optimizer.zero_grad()
-        policy_loss = torch.cat(policy_loss).sum()
-        policy_loss.backward()
+        policy_loss = torch.cat(policy_loss).sum()  # type: ignore[assignment]
+        policy_loss.backward()  # type: ignore[attr-defined]
         self.optimizer.step()
         return min_reward
 
@@ -232,12 +232,12 @@ def run_agent(agent, n_steps):
 class ReinforcementLearningRpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     def test_rl_rpc(self):
-        if self.rank == 0:
+        if self.rank == 0:  # type: ignore[attr-defined]
             # Rank 0 is the agent.
             rpc.init_rpc(
-                name=worker_name(self.rank),
+                name=worker_name(self.rank),  # type: ignore[attr-defined]
                 backend=self.rpc_backend,
-                rank=self.rank,
+                rank=self.rank,  # type: ignore[attr-defined]
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
@@ -246,13 +246,13 @@ class ReinforcementLearningRpcTest(RpcAgentTestFixture):
 
             # Ensure training was run. We don't really care about whether the task was learned,
             # since the purpose of the test is to check the API calls.
-            self.assertGreater(agent.running_reward, 0.0)
+            self.assertGreater(agent.running_reward, 0.0)  # type: ignore[attr-defined]
         else:
             # Other ranks are observers that passively wait for instructions from the agent.
             rpc.init_rpc(
-                name=worker_name(self.rank),
+                name=worker_name(self.rank),  # type: ignore[attr-defined]
                 backend=self.rpc_backend,
-                rank=self.rank,
+                rank=self.rank,  # type: ignore[attr-defined]
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )

@@ -183,7 +183,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
            rpn_post_nms_topN=st.integers(min_value=1000, max_value=4000),
            roi_canonical_scale=st.integers(min_value=100, max_value=300),
            roi_canonical_level=st.integers(min_value=1, max_value=8),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_collect_and_dist(
         self,
@@ -244,7 +244,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
         rpn_post_nms_topN=st.integers(min_value=1000, max_value=4000),
         roi_canonical_scale=st.integers(min_value=100, max_value=300),
         roi_canonical_level=st.integers(min_value=1, max_value=8),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_collect_and_dist_separately(
         self,

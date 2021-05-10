@@ -237,7 +237,7 @@ class TensorRTTransformTest(TestCase):
             for _ in range(repeat):
                 workspace.RunNet(pred_net.name)
             end = time.time()
-            c2_time = end - start
+            c2_time = end - start  # type: ignore[assignment]
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
         workspace.ResetWorkspace()

@@ -26,7 +26,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         fuse_relu=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_spatial_bn_int(
         self,
@@ -60,7 +60,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
             X = utils.NHWC2NCHW(X)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("SpatialBN", ""),

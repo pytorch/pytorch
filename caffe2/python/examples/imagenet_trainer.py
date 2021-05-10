@@ -104,7 +104,7 @@ def AddNullInput(model, reader, batch_size, img_size, dtype):
 
 
 def SaveModel(args, train_model, epoch, use_ideep):
-    prefix = "[]_{}".format(train_model._device_prefix, train_model._devices[0])
+    prefix = "[]_{}".format(train_model._device_prefix, train_model._devices[0])  # type: ignore[str-format]
     predictor_export_meta = pred_exp.PredictorExportMeta(
         predict_net=train_model.net.Proto(),
         parameters=data_parallel_model.GetCheckpointParams(train_model),
@@ -226,8 +226,8 @@ def RunEpoch(
                     "{}_{}".format(test_model._device_prefix, g) + '/accuracy_top5'
                 ))
                 ntests += 1
-        test_accuracy /= ntests
-        test_accuracy_top5 /= ntests
+        test_accuracy /= ntests  # type: ignore[assignment]
+        test_accuracy_top5 /= ntests  # type: ignore[assignment]
     else:
         test_accuracy = (-1)
         test_accuracy_top5 = (-1)
@@ -304,7 +304,7 @@ def Train(args):
         }
     else:
         train_arg_scope = {
-            'order': 'NCHW',
+            'order': 'NCHW',  # type: ignore[dict-item]
             'use_cudnn': True,
             'cudnn_exhaustive_search': True,
             'ws_nbytes_limit': (args.cudnn_workspace_limit_mb * 1024 * 1024),
@@ -369,7 +369,7 @@ def Train(args):
             exit_nets=None)
 
     else:
-        rendezvous = None
+        rendezvous = None  # type: ignore[assignment]
 
     # Model building functions
     def create_resnext_model_ops(model, loss_scale):
@@ -533,7 +533,7 @@ def Train(args):
             }
         else:
             test_arg_scope = {
-                'order': "NCHW",
+                'order': "NCHW",  # type: ignore[dict-item]
                 'use_cudnn': True,
                 'cudnn_exhaustive_search': True,
             }

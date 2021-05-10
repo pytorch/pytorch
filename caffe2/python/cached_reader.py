@@ -113,7 +113,7 @@ class CachedReader(DBFileReader):
 
         init_net = core.Net('init')
         self._init_field_blobs_as_empty(init_net)
-        with Cluster(), core.NameScope(self.name), TaskGroup() as copy_tg:
+        with Cluster(), core.NameScope(self.name), TaskGroup() as copy_tg:  # type: ignore[attr-defined]
             pipe(self.original_reader, self.ds.writer(), num_threads=16)
             copy_step = copy_tg.to_task().get_step()
         save_net = core.Net('save')

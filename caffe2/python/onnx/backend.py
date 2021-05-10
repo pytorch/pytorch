@@ -136,7 +136,7 @@ class Caffe2Backend(Backend):
     # This dictionary will record operators which are KNOWN to be
     # broken, so we give a good error message rather than do something
     # bogus and then fail.
-    _broken_operators = {
+    _broken_operators = {  # type: ignore[var-annotated]
         # 'BrokenOp': version_it_was_broken_in
     }
 
@@ -198,7 +198,7 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def dummy_name(cls):
-        return cls._dummy_name.new_dummy_name()
+        return cls._dummy_name.new_dummy_name()  # type: ignore[attr-defined]
 
     # NB: By default, you will use the LATEST definition of the operator,
     # so this interface MAY make BC-breaking changes.  Specify an
@@ -230,7 +230,7 @@ class Caffe2Backend(Backend):
                         shape=value.shape).SerializeToString())
 
             ops = []
-            cbackend = C.Caffe2Backend(cls._dummy_name)
+            cbackend = C.Caffe2Backend(cls._dummy_name)  # type: ignore[attr-defined]
             ops_str = cbackend.convert_node(node.SerializeToString(), value_infos, opset_version)
             for s in ops_str[0] + ops_str[1]:
                 op = caffe2_pb2.OperatorDef()
@@ -435,10 +435,10 @@ class Caffe2Backend(Backend):
                     reform, make_cell, lambda x: x)
 
         elif n.op_type == 'GRU':
-            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):
+            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):  # type: ignore[misc]
                 # caffe2 has a different order from onnx. We need to rearrange
                 #  z r h  -> r z h
-                reforms = ((W_, 'i2h_w',    True,  [(0,-1)]),
+                reforms = ((W_, 'i2h_w',    True,  [(0,-1)]),  # type: ignore[var-annotated]
                            (R_, 'gate_t_w', False, [(0,-1)]),
                            (Bi, 'i2h_b',    True,  []),
                            (Br, 'gate_t_b', False, []))
@@ -456,10 +456,10 @@ class Caffe2Backend(Backend):
                     reform, make_cell, lambda x: x)
 
         elif n.op_type == 'LSTM':
-            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):
+            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):  # type: ignore[misc]
                 # caffe2 has a different order from onnx. We need to rearrange
                 #   i o f c -> i f o c
-                reforms = ((W_, 'i2h_w',     True, [(0, -1)]),
+                reforms = ((W_, 'i2h_w',     True, [(0, -1)]),  # type: ignore[var-annotated]
                            (R_, 'gates_t_w', True, [(0, -1)]),
                            (Bi, 'i2h_b'    , True, []),
                            (Br, 'gates_t_b', True, []))
@@ -517,8 +517,8 @@ class Caffe2Backend(Backend):
         outputs = {output for node in init_model.graph.node for output in node.output}
         has_initializers = all(x in initializers or x in outputs for x in (W, R, B))
 
-        pred_ops = []
-        init_ops = []
+        pred_ops = []  # type: ignore[var-annotated]
+        init_ops = []  # type: ignore[var-annotated]
         (init_ops if has_initializers else pred_ops).extend(init_net.Proto().op)
         pred_ops.extend(pred_mh.Proto().op)
 
@@ -735,7 +735,7 @@ class Caffe2Backend(Backend):
     @classmethod
     # TODO: This method needs a refactor for clarity
     def _onnx_node_to_caffe2_op(cls, init_model, pred_model, node_def, opset_version):
-        cbackend = C.Caffe2Backend(cls._dummy_name)
+        cbackend = C.Caffe2Backend(cls._dummy_name)  # type: ignore[attr-defined]
         if cbackend.support_onnx_import(node_def.op_type):
 
             # extract value infos from pred model (value infos of
@@ -771,7 +771,7 @@ class Caffe2Backend(Backend):
         if isinstance(ops, Caffe2Ops):
             return ops
         if not isinstance(ops, collections.abc.Iterable):
-            ops = [ops]
+            ops = [ops]  # type: ignore[list-item]
         return Caffe2Ops(ops, [], [])
 
     _broadcast_operators = {
@@ -837,7 +837,7 @@ class Caffe2Backend(Backend):
         if graph is None:
             return set()
 
-        names = set()
+        names = set()  # type: ignore[var-annotated]
         names.update(value_info.name for value_info in graph.input)
         names.update(value_info.name for value_info in graph.output)
         for node in graph.node:
@@ -887,7 +887,7 @@ class Caffe2Backend(Backend):
         if include_initializers:
             init_net.op.extend(cls._create_tensor_filling_op(tp) for tp in onnx_model.graph.initializer)
 
-        cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
+        cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))  # type: ignore[attr-defined]
 
         errors = []
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):

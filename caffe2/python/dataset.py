@@ -210,7 +210,7 @@ class Dataset(object):
             fields = from_column_list(fields)
         self.schema = fields
         self.fields = fields.field_names()
-        self.field_types = fields.field_types()
+        self.field_types = fields.field_types()  # type: ignore[assignment]
         self.name = name or 'dataset'
         self.field_blobs = fields.field_blobs() if fields.has_blobs() else None
 

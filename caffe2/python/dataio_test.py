@@ -100,7 +100,7 @@ class TestCompositeReader(TestCase):
         )
         dst_ds = make_destination_dataset(ws, dst_ds_schema)
 
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             reader = CompositeReader(names,
                                      [src_ds.reader() for src_ds in src_dses])
             pipe(reader, dst_ds.writer(), num_runtime_threads=3)
@@ -133,7 +133,7 @@ class TestCompositeReader(TestCase):
         )
         dst_ds = make_destination_dataset(ws, dst_ds_schema)
 
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             reader_builder = CompositeReaderBuilder(
                 names, src_ds_builders)
             reader_builder.setup(ws=ws)
@@ -180,24 +180,24 @@ class TestReaderWithLimit(TestCase):
             return rec
 
         # Read full data set from original reader
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             pipe(src_ds.reader(), num_runtime_threads=8, processor=proc)
         session.run(tg)
-        self.assertEqual(totals[0].fetch(), 100)
-        self.assertEqual(totals[1].fetch(), 100)
-        self.assertEqual(totals[2].fetch(), 8)
+        self.assertEqual(totals[0].fetch(), 100)  # type: ignore[attr-defined]
+        self.assertEqual(totals[1].fetch(), 100)  # type: ignore[attr-defined]
+        self.assertEqual(totals[2].fetch(), 8)  # type: ignore[attr-defined]
 
         # Read with a count-limited reader
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             q1 = pipe(src_ds.reader(), num_runtime_threads=2)
             q2 = pipe(
                 ReaderWithLimit(q1.reader(), num_iter=25),
                 num_runtime_threads=3)
             pipe(q2, processor=proc, num_runtime_threads=6)
         session.run(tg)
-        self.assertEqual(totals[0].fetch(), 25)
-        self.assertEqual(totals[1].fetch(), 25)
-        self.assertEqual(totals[2].fetch(), 6)
+        self.assertEqual(totals[0].fetch(), 25)  # type: ignore[attr-defined]
+        self.assertEqual(totals[1].fetch(), 25)  # type: ignore[attr-defined]
+        self.assertEqual(totals[2].fetch(), 6)  # type: ignore[attr-defined]
 
     def _test_limit_reader_init_shared(self, size):
         ws = workspace.C.Workspace()
@@ -221,7 +221,7 @@ class TestReaderWithLimit(TestCase):
         # Read without limiter
         # WorkspaceType.GLOBAL is required because we are fetching
         # reader.data_finished() after the TaskGroup finishes.
-        with TaskGroup(workspace_type=WorkspaceType.GLOBAL) as tg:
+        with TaskGroup(workspace_type=WorkspaceType.GLOBAL) as tg:  # type: ignore[attr-defined]
             if read_delay > 0:
                 reader = reader_class(ReaderWithDelay(src_ds.reader(),
                                                       read_delay),
@@ -311,7 +311,7 @@ class TestReaderWithLimit(TestCase):
         expected_read_len = int(round(num_threads * duration / sleep_duration))
         # Because the time limit check happens before the delay + read op,
         # subtract a little bit of time to ensure we don't get in an extra read
-        duration = duration - 0.25 * sleep_duration
+        duration = duration - 0.25 * sleep_duration  # type: ignore[assignment]
 
         # NOTE: `expected_read_len_threshold` was added because this test case
         # has significant execution variation under stress. Under stress, we may
@@ -373,7 +373,7 @@ class TestDBFileReader(TestCase):
     def _read_all_data(ws, reader, session):
         dst_ds = make_destination_dataset(ws, reader.schema().clone_schema())
 
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             pipe(reader, dst_ds.writer(), num_runtime_threads=8)
         session.run(tg)
 

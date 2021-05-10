@@ -44,13 +44,13 @@ def visualize_summary(filename):
     chart_name = os.path.splitext(os.path.basename(filename))[0]
     chart = nvd3.lineChart(
         name=chart_name + '_summary_chart',
-        height=args.chart_height,
+        height=args.chart_height,  # type: ignore[attr-defined]
         y_axis_format='.03g'
     )
-    if args.sample < 0:
-        step = max(data.shape[0] / -args.sample, 1)
+    if args.sample < 0:  # type: ignore[attr-defined]
+        step = max(data.shape[0] / -args.sample, 1)  # type: ignore[attr-defined]
     else:
-        step = args.sample
+        step = args.sample  # type: ignore[attr-defined]
     xdata = np.arange(0, data.shape[0], step)
     # data should have 4 dimensions.
     chart.add_serie(x=xdata, y=data[xdata, 0], name='min')
@@ -71,13 +71,13 @@ def visualize_print_log(filename):
     chart_name = os.path.splitext(os.path.basename(filename))[0]
     chart = nvd3.lineChart(
         name=chart_name + '_log_chart',
-        height=args.chart_height,
+        height=args.chart_height,  # type: ignore[attr-defined]
         y_axis_format='.03g'
     )
-    if args.sample < 0:
-        step = max(data.shape[0] / -args.sample, 1)
+    if args.sample < 0:  # type: ignore[attr-defined]
+        step = max(data.shape[0] / -args.sample, 1)  # type: ignore[attr-defined]
     else:
-        step = args.sample
+        step = args.sample  # type: ignore[attr-defined]
     xdata = np.arange(0, data.shape[0], step)
     # if there is only one curve, we also show the running min and max
     if data.shape[1] == 1:
@@ -96,7 +96,7 @@ def visualize_print_log(filename):
         )
         chart.add_serie(x=xdata, y=data[xdata, 0], name=chart_name)
     else:
-        for i in range(0, min(data.shape[1], args.max_curves)):
+        for i in range(0, min(data.shape[1], args.max_curves)):  # type: ignore[attr-defined]
             # data should have 4 dimensions.
             chart.add_serie(
                 x=xdata,
@@ -108,7 +108,7 @@ def visualize_print_log(filename):
 
 
 def visualize_file(filename):
-    fullname = os.path.join(args.root, filename)
+    fullname = os.path.join(args.root, filename)  # type: ignore[attr-defined]
     if filename.endswith('summary'):
         return visualize_summary(fullname)
     elif filename.endswith('log'):
@@ -122,12 +122,12 @@ def visualize_file(filename):
 
 @app.route('/')
 def index():
-    files = glob.glob(os.path.join(args.root, "*.*"))
+    files = glob.glob(os.path.join(args.root, "*.*"))  # type: ignore[attr-defined]
     files.sort()
     names = [os.path.basename(f) for f in files]
     return flask.render_template(
         'index.html',
-        root=args.root,
+        root=args.root,  # type: ignore[attr-defined]
         names=names,
         debug_messages=names
     )

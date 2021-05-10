@@ -104,7 +104,7 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
                     stream.synchronize()
 
                     amax = np.argmax(h_output)
-                    pred = self.labels[amax]
+                    pred = self.labels[amax]  # type: ignore[call-overload]
                     if "_".join(pred.split()) not in\
                             os.path.splitext(os.path.basename(test_case))[0]:
                         err_count = err_count + 1

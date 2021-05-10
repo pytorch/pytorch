@@ -23,8 +23,8 @@ import tempfile
 
 
 def build_pipeline(node_id):
-    with Node('trainer_%d' % node_id):
-        with Job.current().init_group, Task():
+    with Node('trainer_%d' % node_id):  # type: ignore[attr-defined]
+        with Job.current().init_group, Task():  # type: ignore[union-attr]
             data_arr = Struct(('val', np.array(list(range(10)))))
             data = ConstRecord(ops, data_arr)
             ds = Dataset(data, name='dataset:%d' % node_id)
@@ -54,9 +54,9 @@ class UploadToLocalFile(UploadTaskGroupBuilder):
         self.dest_dir = dest_dir
 
     def build(self, epoch, checkpoint_manager):
-        with TaskGroup(WorkspaceType.GLOBAL) as upload_task_group:
+        with TaskGroup(WorkspaceType.GLOBAL) as upload_task_group:  # type: ignore[attr-defined]
             for node, manager in checkpoint_manager._node_managers:
-                with Node(str(node)), Task():
+                with Node(str(node)), Task():  # type: ignore[attr-defined]
                     src_path = db_name(epoch, manager._node_name, manager._db_prefix)
                     dest_path = os.path.join(self.dest_dir, str(node))
                     ops.Python((local_copy_op,
@@ -66,7 +66,7 @@ class UploadToLocalFile(UploadTaskGroupBuilder):
 
 class TestCheckpoint(TestCase):
     def run_with(self, builder):
-        with Cluster():
+        with Cluster():  # type: ignore[attr-defined]
             with Job() as job:
                 outputs = build_pipeline(node_id=0)
             output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
@@ -130,7 +130,7 @@ class TestCheckpoint(TestCase):
             # First, check if the checkpoint name generation mechanism is
             # correct.
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Cluster():
+            with Cluster():  # type: ignore[attr-defined]
                 with Job() as job:
                     for node_id in range(num_nodes):
                         build_pipeline(node_id)
@@ -153,7 +153,7 @@ class TestCheckpoint(TestCase):
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
                 checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-                with Cluster():
+                with Cluster():  # type: ignore[attr-defined]
                     with Job() as job:
                         build_pipeline(node_id)
                     job.compile(LocalSession)
@@ -171,7 +171,7 @@ class TestCheckpoint(TestCase):
             model_blob_names = ['trainer_1/task_2/GivenTensorInt64Fill:0',
                                 'trainer_2/task_2/GivenTensorInt64Fill:0']
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Cluster():
+            with Cluster():  # type: ignore[attr-defined]
                 with Job() as job:
                     for node_id in range(num_nodes):
                         build_pipeline(node_id)
@@ -189,7 +189,7 @@ class TestCheckpoint(TestCase):
                             session=session))
                     # Check that all the model blobs are loaded.
                     for blob_name in model_blob_names:
-                        self.assertTrue(ws.has_blob(blob_name))
+                        self.assertTrue(ws.has_blob(blob_name))  # type: ignore[attr-defined]
                         self.assertEquals(
                             ws.fetch_blob(blob_name),
                             np.array([EXPECTED_TOTALS[epoch - 1]]))
@@ -218,7 +218,7 @@ class TestCheckpoint(TestCase):
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
                 checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-                with Cluster():
+                with Cluster():  # type: ignore[attr-defined]
                     with Job() as job:
                         build_pipeline(node_id)
                     job.compile(LocalSession)
@@ -252,7 +252,7 @@ class TestCheckpoint(TestCase):
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Cluster():
+            with Cluster():  # type: ignore[attr-defined]
                 with Job() as job:
                     build_pipeline(node_id)
                 job.compile(LocalSession)
@@ -282,7 +282,7 @@ class TestCheckpoint(TestCase):
         # All blob values are initialized as 1.0, after download_net executed
         # we expect to see download result is the same as training result.
         with Job() as job:
-            with Node("trainer:0"):
+            with Node("trainer:0"):  # type: ignore[attr-defined]
                 with job.init_group:
                     Task(step=model.param_init_net)
                 with job.epoch_group:

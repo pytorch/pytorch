@@ -506,8 +506,8 @@ class SimpleElasticAgent(ElasticAgent):
         if master_addr is None:
             master_addr = _get_fq_hostname()
 
-        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
-        store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
+        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
+        store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 
     @staticmethod
     def _get_master_addr_port(store: Store) -> Tuple[str, int]:
@@ -528,13 +528,13 @@ class SimpleElasticAgent(ElasticAgent):
         spec = worker_group.spec
 
         store, group_rank, group_world_size = spec.rdzv_handler.next_rendezvous()
-        self._store = store
+        self._store = store  # type: ignore[assignment]
 
         workers = self._assign_worker_ranks(store, group_rank, group_world_size, spec)
         worker_group.workers = workers
-        worker_group.store = store
-        worker_group.group_rank = group_rank
-        worker_group.group_world_size = group_world_size
+        worker_group.store = store  # type: ignore[assignment]
+        worker_group.group_rank = group_rank  # type: ignore[assignment]
+        worker_group.group_world_size = group_world_size  # type: ignore[assignment]
 
         if group_rank == 0:
             self._set_master_addr_port(store, spec.master_addr, spec.master_port)
@@ -750,8 +750,8 @@ class SimpleElasticAgent(ElasticAgent):
             global_rank = worker.global_rank
             worker_id = str(worker.id)
         else:
-            global_rank = None
-            worker_id = None
+            global_rank = None  # type: ignore[assignment]
+            worker_id = None  # type: ignore[assignment]
         md_str = json.dumps(md)
         metadata = {
             "run_id": spec.rdzv_handler.get_run_id(),
@@ -768,7 +768,7 @@ class SimpleElasticAgent(ElasticAgent):
             "agent_restarts": spec.max_restarts - self._remaining_restarts,
         }
         return Event(
-            f"torchelastic.worker.status.{state}", source=source, metadata=metadata
+            f"torchelastic.worker.status.{state}", source=source, metadata=metadata  # type: ignore[arg-type]
         )
 
     def _record_metrics(self, group_results: RunResult):
@@ -883,8 +883,8 @@ class SimpleElasticAgent(ElasticAgent):
         try:
             store_util.barrier(
                 self._store,
-                self._worker_group.group_rank,
-                self._worker_group.group_world_size,
+                self._worker_group.group_rank,  # type: ignore[arg-type]
+                self._worker_group.group_world_size,  # type: ignore[arg-type]
                 key_prefix=_TERMINAL_STATE_SYNC_ID,
                 barrier_timeout=self._exit_barrier_timeout,
             )

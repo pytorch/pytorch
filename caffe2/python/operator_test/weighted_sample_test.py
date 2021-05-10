@@ -34,8 +34,8 @@ class TestWeightedSample(hu.HypothesisTestCase):
                 weights[i, rand_tmp] = 1.0
                 values[i, rand_tmp] = rand_val
 
-        rand_indices = np.array(rand_indices, dtype=np.float32)
-        rand_values = np.array(rand_values, dtype=np.float32)
+        rand_indices = np.array(rand_indices, dtype=np.float32)  # type: ignore[assignment]
+        rand_values = np.array(rand_values, dtype=np.float32)  # type: ignore[assignment]
         workspace.FeedBlob("weights", weights.astype(np.float32))
         workspace.FeedBlob("values", values.astype(np.float32))
 

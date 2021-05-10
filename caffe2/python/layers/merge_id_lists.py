@@ -42,7 +42,7 @@ class MergeIdLists(ModelLayer):
                 schema.Scalar(
                     np.int64,
                     blob=model.net.NextBlob(name),
-                    metadata=schema.Metadata(categorical_limit=merge_dim)
+                    metadata=schema.Metadata(categorical_limit=merge_dim)  # type: ignore[call-arg]
                 )))
 
     def add_ops(self, net):

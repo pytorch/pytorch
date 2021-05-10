@@ -150,7 +150,7 @@ def elements_of_type(dtype=np.float32, filter_=None):
         elems = st.integers(min_value=0, max_value=2 ** 31 - 1)
     elif dtype is np.int64:
         elems = st.integers(min_value=0, max_value=2 ** 63 - 1)
-    elif dtype is np.bool:
+    elif dtype is np.bool:  # type: ignore[attr-defined]
         elems = st.booleans()
     else:
         raise ValueError("Unexpected dtype without elements provided")
@@ -251,7 +251,7 @@ def segmented_tensor(
 def lengths_tensor(min_segments=None, max_segments=None, *args, **kwargs):
     gen = functools.partial(
         lengths, min_segments=min_segments, max_segments=max_segments)
-    return segmented_tensor(*args, segment_generator=gen, **kwargs)
+    return segmented_tensor(*args, segment_generator=gen, **kwargs)  # type: ignore[misc]
 
 
 def sparse_segmented_tensor(min_dim=1, max_dim=4, dtype=np.float32,
@@ -336,7 +336,7 @@ def temp_workspace(name=b"temp_ws"):
     workspace.SwitchWorkspace(name, True)
     yield
     workspace.ResetWorkspace()
-    workspace.SwitchWorkspace(old_ws_name)
+    workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
 
 
 def runOpBenchmark(
@@ -552,9 +552,9 @@ class HypothesisTestCase(test_util.TestCase):
             elif output.dtype == np.dtype('int64'):
                 correct_type = caffe2_pb2.TensorProto.INT64
             else:
-                correct_type = "unknown {}".format(np.dtype)
+                correct_type = "unknown {}".format(np.dtype)  # type: ignore[assignment]
         else:
-            correct_type = str(type(output))
+            correct_type = str(type(output))  # type: ignore[assignment]
         try:
             np.testing.assert_array_equal(
                 np.array(shapes[name]).astype(np.int32),

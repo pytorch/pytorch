@@ -98,16 +98,16 @@ def get_ignored_functions() -> Set[Callable]:
         torch.from_numpy,
         torch.get_device,
         torch.tensor,
-        torch.default_generator,
-        torch.has_cuda,
-        torch.has_cudnn,
-        torch.has_lapack,
+        torch.default_generator,  # type: ignore[arg-type]
+        torch.has_cuda,  # type: ignore[arg-type]
+        torch.has_cudnn,  # type: ignore[arg-type]
+        torch.has_lapack,  # type: ignore[arg-type]
         torch.device,
         torch.dtype,
         torch.finfo,
-        torch.has_mkl,
-        torch.has_mkldnn,
-        torch.has_openmp,
+        torch.has_mkl,  # type: ignore[arg-type]
+        torch.has_mkldnn,  # type: ignore[arg-type]
+        torch.has_openmp,  # type: ignore[arg-type]
         torch.iinfo,
         torch.memory_format,
         torch.qscheme,
@@ -170,10 +170,10 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.upsample,
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
-        torch.nn.functional.has_torch_function,
-        torch.nn.functional.has_torch_function_unary,
-        torch.nn.functional.has_torch_function_variadic,
-        torch.nn.functional.handle_torch_function,
+        torch.nn.functional.has_torch_function,  # type: ignore[attr-defined]
+        torch.nn.functional.has_torch_function_unary,  # type: ignore[attr-defined]
+        torch.nn.functional.has_torch_function_variadic,  # type: ignore[attr-defined]
+        torch.nn.functional.handle_torch_function,  # type: ignore[attr-defined]
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
@@ -193,9 +193,9 @@ def get_ignored_functions() -> Set[Callable]:
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
-        torch.vitals_enabled,
-        torch.set_vital,
-        Tensor.__delitem__,
+        torch.vitals_enabled,  # type: ignore[attr-defined]
+        torch.set_vital,  # type: ignore[attr-defined]
+        Tensor.__delitem__,  # type: ignore[attr-defined]
         Tensor.__dir__,
         Tensor.__getattribute__,
         Tensor.__init__,
@@ -206,7 +206,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__torch_function__,
         Tensor.__new__,
         Tensor.__class__,
-        Tensor.__subclasshook__,
+        Tensor.__subclasshook__,  # type: ignore[attr-defined]
         Tensor.as_subclass,
         Tensor.reinforce,
         Tensor.new,
@@ -929,39 +929,39 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__repr__: lambda self: -1,
         Tensor.__setitem__: lambda self, k, v: -1,
         Tensor.__setstate__: lambda self, d: -1,
-        Tensor.T.__get__: lambda self: -1,
-        Tensor._backward_hooks.__get__: lambda self: -1,
-        Tensor._base.__get__: lambda self: -1,
-        Tensor._cdata.__get__: lambda self: -1,
-        Tensor.grad.__get__: lambda self: -1,
-        Tensor._grad.__get__: lambda self: -1,
+        Tensor.T.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor._backward_hooks.__get__: lambda self: -1,  # type: ignore[union-attr]
+        Tensor._base.__get__: lambda self: -1,  # type: ignore[union-attr]
+        Tensor._cdata.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.grad.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor._grad.__get__: lambda self: -1,  # type: ignore[union-attr]
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
-        Tensor._version.__get__: lambda self: -1,
-        Tensor.data.__get__: lambda self: -1,
+        Tensor._version.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.data.__get__: lambda self: -1,  # type: ignore[attr-defined]
         Tensor.device.__get__: lambda self: -1,
-        Tensor.dtype.__get__: lambda self: -1,
-        Tensor.is_cuda.__get__: lambda self: -1,
-        Tensor.is_xpu.__get__: lambda self: -1,
-        Tensor.is_leaf.__get__: lambda self: -1,
-        Tensor.is_meta.__get__: lambda self: -1,
-        Tensor.is_mlc.__get__: lambda self: -1,
-        Tensor.is_mkldnn.__get__: lambda self: -1,
-        Tensor.is_quantized.__get__: lambda self: -1,
-        Tensor.is_sparse.__get__: lambda self: -1,
-        Tensor.is_sparse_csr.__get__: lambda self: -1,
-        Tensor.is_vulkan.__get__: lambda self: -1,
-        Tensor.layout.__get__: lambda self: -1,
-        Tensor.name.__get__: lambda self: -1,
-        Tensor.names.__get__: lambda self: -1,
-        Tensor.ndim.__get__: lambda self: -1,
-        Tensor.output_nr.__get__: lambda self: -1,
-        Tensor.requires_grad.__get__: lambda self: -1,
-        Tensor.shape.__get__: lambda self: -1,
-        Tensor.volatile.__get__: lambda self: -1,
-        Tensor.real.__get__: lambda self: -1,
-        Tensor.imag.__get__: lambda self: -1,
-        Tensor.__cuda_array_interface__.__get__: lambda self: -1,
+        Tensor.dtype.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_cuda.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_xpu.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_leaf.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_meta.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_mlc.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_mkldnn.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_quantized.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_sparse.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_sparse_csr.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.is_vulkan.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.layout.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.name.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.names.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.ndim.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.output_nr.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.requires_grad.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.shape.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.volatile.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.real.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.imag.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.__cuda_array_interface__.__get__: lambda self: -1,  # type: ignore[attr-defined]
         Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
         Tensor._coalesced_: lambda self: -1,
         Tensor._dimI: lambda self: -1,
@@ -990,7 +990,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
-        Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,  # type: ignore[attr-defined]
         Tensor.data_ptr: lambda self: -1,
         Tensor.dense_dim: lambda self: -1,
         Tensor.dim: lambda self: -1,

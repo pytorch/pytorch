@@ -215,7 +215,7 @@ def generate_convnd_inputs(
     if depthwise_convolution and groupwise_quantization:
         # For depthwise convolution, it's not enough to set input channel 0
         # to all X_min to avoid overflow from vpmaddubsw
-        X_range /= 2
+        X_range /= 2  # type: ignore[assignment]
     X = np.round(
         np.random.rand(*((batch_size,) + tuple(sizes) + (input_channels,))) * X_range
         + X_min
@@ -391,7 +391,7 @@ def run_conv_or_fc(
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
     else:
         # FC
-        Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
+        Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])  # type: ignore[no-redef]
 
     # We run DNNLOWP ops multiple times to test their first runs that
     # do caching so exercises different code paths from the subsequent
@@ -416,7 +416,7 @@ def run_conv_or_fc(
         if order:
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
         else:
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine))
+            outputs.append(Output(Y=Y, op_type=op_type, engine=engine))  # type: ignore[call-arg]
 
     # workspace.CreateNet + workspace.RunNet reuses the same operator
     if engine != "":
@@ -437,4 +437,4 @@ def run_conv_or_fc(
             if order:
                 outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
             else:
-                outputs.append(Output(Y=Y, op_type=op_type, engine=engine))
+                outputs.append(Output(Y=Y, op_type=op_type, engine=engine))  # type: ignore[call-arg]

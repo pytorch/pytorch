@@ -119,7 +119,7 @@ def gen_do_gradient(op, g_output):
             new_op_outputs.append(outer_grad_input_name)
             g_input.append(outer_grad_input_name)
         else:
-            g_input.append(None)
+            g_input.append(None)  # type: ignore[arg-type]
 
     new_op_inputs = []
     overwritten_names = set()
@@ -173,7 +173,7 @@ def dedupe_g_output(op, g_output):
     # deduplication
     grad_ops = []
     deduped_g_output = []
-    init_grad_map = {}
+    init_grad_map = {}  # type: ignore[var-annotated]
     for output_name, grad_name in zip(op.output, g_output):
         if not grad_name:
             deduped_g_output.append(grad_name)
@@ -297,7 +297,7 @@ def _prepare_gradient_while_ops(
     del gradient_while_def.control_input[:]
     del gradient_while_def.input[:]
     gradient_while_def.input.extend(
-        [str(cond_blob).encode('utf-8')] + list(input_names))
+        [str(cond_blob).encode('utf-8')] + list(input_names))  # type: ignore[arg-type]
     del gradient_while_def.output[:]
     gradient_while_def.output.extend(output_names)
     gradient_while_def.is_gradient_op = True

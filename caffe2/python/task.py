@@ -103,8 +103,8 @@ class WorkspaceType(object):
 def get_setup_nets(key, steps_or_nets, target):
     init_net = core.Net(key + '/init')
     exit_net = core.Net(key + '/exit')
-    init_nets = []
-    exit_nets = []
+    init_nets = []  # type: ignore[var-annotated]
+    exit_nets = []  # type: ignore[var-annotated]
     objs = []
     for step_or_net in steps_or_nets:
         if hasattr(step_or_net, 'get_all_attributes'):
@@ -387,7 +387,7 @@ class TaskOutput(object):
     def fetch(self):
         assert self._fetch_func is not None, (
             'Cannot fetch value for this output.')
-        fetched_vals = [self._fetch_func(v) for v in self._values]
+        fetched_vals = [self._fetch_func(v) for v in self._values]  # type: ignore[union-attr]
         if self._is_scalar:
             return fetched_vals[0]
         elif self._schema:
@@ -473,7 +473,7 @@ class Task(context.Managed):
     # Setup will run once for each instance of the task.
     TASK_INSTANCE_SETUP = 'task_instance_setup'
     REPORT_STEP = 'report_step'
-    _global_names_used = set()
+    _global_names_used = set()  # type: ignore[var-annotated]
 
     @staticmethod
     def _get_next_name(node, group, name):
@@ -549,14 +549,14 @@ class Task(context.Managed):
         return self
 
     def __exit__(self, type, value, traceback):
-        super(Task, self).__exit__(type, value, traceback)
+        super(Task, self).__exit__(type, value, traceback)  # type: ignore[misc]
 
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
             self.set_step(self._net_builder)
         if self.group is not None:
             self.group._tasks_to_add.append(self)
-        self._net_builder = None
+        self._net_builder = None  # type: ignore[assignment]
 
     def workspace_type(self):
         return self._workspace_type

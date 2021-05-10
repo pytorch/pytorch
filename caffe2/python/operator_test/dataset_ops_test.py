@@ -265,7 +265,7 @@ class TestDatasetOps(TestCase):
         zipped = zip(expected_fields, schema.field_names(), schema.field_types())
         for (ref_name, ref_type), name, dtype in zipped:
             self.assertEquals(ref_name, name)
-            self.assertEquals(np.dtype(ref_type), dtype)
+            self.assertEquals(np.dtype(ref_type), dtype)  # type: ignore[call-overload]
         """
         2. The contents of our dataset.
 

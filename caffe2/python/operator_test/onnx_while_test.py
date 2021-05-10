@@ -19,7 +19,7 @@ class TestONNXWhile(serial.SerializedTestCase):
         save_scopes=st.booleans(),
         disable_scopes=st.booleans(),
         seed=st.integers(0, 65535),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_onnx_while_fibb(
             self, condition, max_trip_count, save_scopes, disable_scopes, seed, gc, dc):
@@ -68,7 +68,7 @@ class TestONNXWhile(serial.SerializedTestCase):
             disable_scopes=disable_scopes,
         )
 
-        condition_arr = np.array(condition).astype(np.bool)
+        condition_arr = np.array(condition).astype(np.bool)  # type: ignore[attr-defined]
         max_trip_count_arr = np.array(max_trip_count).astype(np.int64)
         first_init = np.array([1]).astype(np.float32)
         second_init = np.array([1]).astype(np.float32)

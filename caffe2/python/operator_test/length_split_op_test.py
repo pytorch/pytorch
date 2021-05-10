@@ -27,7 +27,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
                     output.append(val - 1)
         return [np.array(output).astype(np.int32)]
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_length_split_edge(self, gc, dc):
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
@@ -52,7 +52,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_], [0])
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_length_split_arg(self, gc, dc):
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
@@ -75,7 +75,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [input_lengths], [0])
 
-    @given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_length_split_override_arg(self, gc, dc):
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
@@ -101,7 +101,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_used], [0])
 
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_length_split_even_divide(self, m, n_split, gc, dc):
         # multiples of n_split
@@ -127,7 +127,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_], [0])
 
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_length_split_random(self, m, n_split, gc, dc):
         input_lengths = np.random.randint(100, size=m).astype(np.int32)

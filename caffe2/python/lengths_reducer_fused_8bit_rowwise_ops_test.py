@@ -59,10 +59,10 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         indices = np.random.randint(
             low=0, high=len(input_data), size=[num_indices], dtype=np.int32
         )
@@ -147,10 +147,10 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
             # the number of indices per sample
             lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split  # type: ignore[list-item]
             )
             # readjust num_indices when lengths_split doesn't divide num_indices
-            num_indices = num_indices // lengths_split * lengths_split
+            num_indices = num_indices // lengths_split * lengths_split  # type: ignore[assignment]
         indices = np.random.randint(
             low=0, high=len(input_data), size=[num_indices], dtype=np.int32
         )

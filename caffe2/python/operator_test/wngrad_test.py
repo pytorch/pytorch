@@ -85,7 +85,7 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_wngrad_dense_base(self, inputs, seq_b, lr, epsilon, gc, dc):
         param, grad = inputs
@@ -112,7 +112,7 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_wngrad_dense_output_effective_lr(self, inputs, seq_b,
                                               lr, epsilon, gc, dc):
@@ -141,7 +141,7 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_wngrad_dense_output_effective_lr_and_update(
             self, inputs, seq_b, lr, epsilon, gc, dc):
@@ -173,7 +173,7 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_sparse_wngrad(self, inputs, seq_b, lr, epsilon, gc, dc):
         return wngrad_sparse_test_helper(self, inputs, seq_b, lr, epsilon,
             None, gc, dc)
@@ -185,7 +185,7 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_sparse_wngrad_empty(self, inputs, seq_b, lr, epsilon, gc, dc):
         param = inputs[0]

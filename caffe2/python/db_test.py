@@ -23,8 +23,8 @@ class TestDB(unittest.TestCase):
         ]
 
     def testSimple(self):
-        db = workspace.C.create_db(
-            "minidb", self.file_name, workspace.C.Mode.write)
+        db = workspace.C.create_db(  # type: ignore[attr-defined]
+            "minidb", self.file_name, workspace.C.Mode.write)  # type: ignore[attr-defined]
 
         for key, value in self.data:
             transaction = db.new_transaction()
@@ -33,8 +33,8 @@ class TestDB(unittest.TestCase):
 
         del db  # should close DB
 
-        db = workspace.C.create_db(
-            "minidb", self.file_name, workspace.C.Mode.read)
+        db = workspace.C.create_db(  # type: ignore[attr-defined]
+            "minidb", self.file_name, workspace.C.Mode.read)  # type: ignore[attr-defined]
         cursor = db.new_cursor()
         data = []
         while cursor.valid():

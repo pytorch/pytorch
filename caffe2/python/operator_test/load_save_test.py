@@ -45,7 +45,7 @@ class TestLoadSaveBase(test_util.TestCase):
     def load_save(self, src_device_type, src_gpu_id,
                   dst_device_type, dst_gpu_id):
         workspace.ResetWorkspace()
-        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
+        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,  # type: ignore[attr-defined]
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
@@ -130,7 +130,7 @@ class TestLoadSaveBase(test_util.TestCase):
     def saveFile(
         self, tmp_folder: Path, db_name: str, db_type: str, start_blob_id: int
     ) -> Tuple[str, List[np.ndarray]]:
-        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
+        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,  # type: ignore[attr-defined]
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
@@ -156,7 +156,7 @@ class TestLoadSave(TestLoadSaveBase):
         self.load_save()
 
     def testRepeatedArgs(self):
-        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
+        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,  # type: ignore[attr-defined]
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
@@ -666,7 +666,7 @@ class TestLoadSave(TestLoadSaveBase):
                 options=[
                     BlobSerializationOptions(
                         blob_name_regex="float1",
-                        float_format=BlobSerializationOptions.FLOAT_BFLOAT16,
+                        float_format=BlobSerializationOptions.FLOAT_BFLOAT16,  # type: ignore[arg-type]
                     ),
                 ],
             ),

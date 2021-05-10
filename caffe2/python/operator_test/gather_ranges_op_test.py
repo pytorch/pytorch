@@ -165,7 +165,7 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
 
 
 class TestGatherRanges(serial.SerializedTestCase):
-    @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
+    @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_gather_ranges(self, boarders_and_data, gc, dc):
         boarders, data = boarders_and_data
@@ -186,7 +186,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             reference=gather_ranges,
         )
 
-    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=1000)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
         data, ranges, lengths, _ = tensor_splits
@@ -203,7 +203,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             reference=gather_ranges_to_dense,
         )
 
-    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_gather_ranges_with_key_split(self, tensor_splits, gc, dc):
         data, ranges, lengths, key = tensor_splits
 
@@ -232,7 +232,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             self.assertEqual(shapes["lengths_output"], [3])
             self.assertEqual(types["lengths_output"], core.DataType.INT32)
 
-    @given(tensor_splits=_bad_tensor_splits(), **hu.gcs_cpu_only)
+    @given(tensor_splits=_bad_tensor_splits(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_empty_range_check(self, tensor_splits, gc, dc):
         data, ranges, lengths, key = tensor_splits

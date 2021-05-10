@@ -44,8 +44,8 @@ def _convert_to_ssa(shapes, track_blob_names, ops):
     I.e. blobs will be renamed so that each blob is produced only once.
     """
     ir = core.IR(ops)
-    seen = set()
-    versioned = {}
+    seen = set()  # type: ignore[var-annotated]
+    versioned = {}  # type: ignore[var-annotated]
     shapes2 = {}
     track_blob_names2 = {}
 
@@ -98,8 +98,8 @@ def _remap_keys(m, f):
 
 
 def _rename_all(shapes, track_blob_names, ops, f):
-    seen = set()
-    renamed = {}
+    seen = set()  # type: ignore[var-annotated]
+    renamed = {}  # type: ignore[var-annotated]
 
     def g(name):
         """ Collision-free version of f.
@@ -288,7 +288,7 @@ def _operators_to_graph_def(
         _add_gradient_scope(shapes, track_blob_names, ops)
     _fill_missing_operator_names(ops)
     g = GraphDef()
-    producing_ops = {}
+    producing_ops = {}  # type: ignore[var-annotated]
     blobs = set()
     for op in ops:
         g.node.extend([_operator_to_node(shapes, op)])

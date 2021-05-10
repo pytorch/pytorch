@@ -112,7 +112,7 @@ class HelperWrapper(object):
             cur_scope = get_current_scope()
             new_kwargs.update(cur_scope.get(helper_name, {}))
             new_kwargs.update(kwargs)
-            return func(*args, **new_kwargs)
+            return func(*args, **new_kwargs)  # type: ignore[operator]
 
         scope_wrapper.__name__ = helper_name
         return scope_wrapper
@@ -136,4 +136,4 @@ class HelperWrapper(object):
 
 
 # pyre-fixme[6]: incompatible parameter type: expected ModuleType, got HelperWrapper
-sys.modules[__name__] = HelperWrapper(sys.modules[__name__])
+sys.modules[__name__] = HelperWrapper(sys.modules[__name__])  # type: ignore[assignment]

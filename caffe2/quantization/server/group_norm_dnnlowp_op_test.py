@@ -26,7 +26,7 @@ class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_dnnlowp_group_norm(
         self,
@@ -51,7 +51,7 @@ class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
         beta = np.random.randn(C).astype(np.float32) - 0.5
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-        outputs = []
+        outputs = []  # type: ignore[var-annotated]
 
         op_engine_list = [
             ("GroupNorm", ""),

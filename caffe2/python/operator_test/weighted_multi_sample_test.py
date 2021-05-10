@@ -17,14 +17,14 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
     @given(
         num_samples=st.integers(min_value=0, max_value=128),
         data_len=st.integers(min_value=0, max_value=10000),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     def test_weighted_multi_sample(self, num_samples, data_len, gc, dc):
         weights = np.zeros((data_len))
-        expected_indices = []
+        expected_indices = []  # type: ignore[var-annotated]
         if data_len > 0:
             weights[-1] = 1.5
-            expected_indices = np.repeat(data_len - 1, num_samples)
+            expected_indices = np.repeat(data_len - 1, num_samples)  # type: ignore[assignment]
 
         workspace.FeedBlob("weights", weights.astype(np.float32))
 

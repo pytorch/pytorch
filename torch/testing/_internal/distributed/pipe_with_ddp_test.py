@@ -84,14 +84,14 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False):
         dist.init_process_group(
             backend="nccl",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),  # type: ignore[attr-defined]
             world_size=self.world_size,
-            rank=self.rank,
+            rank=self.rank,  # type: ignore[attr-defined]
         )
 
         # Use 4 GPUs, two replicas of a pipe across GPU 0 and 1 and another
         # pipe between GPU 2 and 3. Both replicas are replicated via DDP.
-        fc1 = nn.Linear(16, 8, bias=False).cuda(2 * self.rank)
+        fc1 = nn.Linear(16, 8, bias=False).cuda(2 * self.rank)  # type: ignore[attr-defined]
 
         class MyModule(nn.Module):
             def __init__(self, device):
@@ -105,30 +105,30 @@ class PipeWithDDPTest(RpcAgentTestFixture):
                 else:
                     return self.fc3(self.fc2(inp))
 
-        layer2 = MyModule(2 * self.rank + 1)
+        layer2 = MyModule(2 * self.rank + 1)  # type: ignore[attr-defined]
         model = nn.Sequential(
             fc1,
             layer2
         )
-        model = Pipe(model, chunks=2, checkpoint=checkpoint)
-        model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)
-        out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()
+        model = Pipe(model, chunks=2, checkpoint=checkpoint)  # type: ignore[assignment]
+        model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)  # type: ignore[assignment]
+        out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()  # type: ignore[attr-defined]
         out.sum().backward()
 
         # Run forward again for find_unused_parameters to trigger any potential errors.
         if find_unused_parameters:
-            model(torch.rand(16, 16).cuda(2 * self.rank))
+            model(torch.rand(16, 16).cuda(2 * self.rank))  # type: ignore[attr-defined]
 
         # Check grads
         output = [torch.empty_like(fc1.weight.grad), torch.empty_like(fc1.weight.grad)]
         dist.all_gather(output, fc1.weight.grad)
-        self.assertEqual(output[0], output[1])
+        self.assertEqual(output[0], output[1])  # type: ignore[attr-defined]
 
         output = [torch.empty_like(layer2.fc2.weight.grad), torch.empty_like(layer2.fc2.weight.grad)]
         dist.all_gather(output, layer2.fc2.weight.grad)
-        self.assertEqual(output[0], output[1])
+        self.assertEqual(output[0], output[1])  # type: ignore[attr-defined]
 
         if not find_unused_parameters:
             output = [torch.empty_like(layer2.fc3.weight.grad), torch.empty_like(layer2.fc3.weight.grad)]
             dist.all_gather(output, layer2.fc3.weight.grad)
-            self.assertEqual(output[0], output[1])
+            self.assertEqual(output[0], output[1])  # type: ignore[attr-defined]

@@ -116,8 +116,8 @@ class TestResize(hu.HypothesisTestCase):
         def ref(dY, X):
             dX = np.zeros_like(X)
 
-            for i in range(output_height):
-                for j in range(output_width):
+            for i in range(output_height):  # type: ignore[call-overload]
+                for j in range(output_width):  # type: ignore[call-overload]
                     input_i = np.minimum(i / height_scale, height - 1).astype(np.int32)
                     input_j = np.minimum(j / width_scale, width - 1).astype(np.int32)
                     if order == "NCHW":
@@ -233,8 +233,8 @@ class TestResize(hu.HypothesisTestCase):
         def ref(dY, X, scales):
             dX = np.zeros_like(X)
 
-            for i in range(output_height):
-                for j in range(output_width):
+            for i in range(output_height):  # type: ignore[call-overload]
+                for j in range(output_width):  # type: ignore[call-overload]
                     input_i = np.minimum(i / scales[0], height - 1).astype(np.int32)
                     input_j = np.minimum(j / scales[1], width - 1).astype(np.int32)
 

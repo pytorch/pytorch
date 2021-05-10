@@ -32,13 +32,13 @@ class _QueueReader(Reader):
 class _QueueWriter(Writer):
     def __init__(self, blobs_queue, schema):
         self.blobs_queue = blobs_queue
-        self.schema = schema
+        self.schema = schema  # type: ignore[assignment]
 
     def write(self, writer_net, fields):
         if isinstance(fields, Field):
             fields = fields.field_blobs()
         writer_net.CheckDatasetConsistency(
-            fields, [], fields=self.schema.field_names())
+            fields, [], fields=self.schema.field_names())  # type: ignore[attr-defined]
         status = writer_net.NextName()
         writer_net.SafeEnqueueBlobs(
             [self.blobs_queue] + fields, fields + [status])

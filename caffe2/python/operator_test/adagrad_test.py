@@ -57,7 +57,7 @@ class TestAdagrad(serial.SerializedTestCase):
             min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
         ),
         weight_decay=st.sampled_from([0.0, 0.1]),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_adagrad_output_effective_lr(
@@ -96,7 +96,7 @@ class TestAdagrad(serial.SerializedTestCase):
         epsilon=st.floats(
             min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
         ),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=1000)
     def test_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc):

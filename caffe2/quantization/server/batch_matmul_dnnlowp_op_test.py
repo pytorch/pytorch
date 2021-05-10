@@ -26,7 +26,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         n=st.integers(4, 32),
         k=st.integers(4, 32),
         batch_size=st.integers(0, 4),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=10000)
     def test_dnnlowp_batch_matmul_int(self, m, n, k, batch_size, gc, dc):
@@ -122,7 +122,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         A_quantized=st.booleans(),
         B_quantized=st.booleans(),
         out_quantized=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs_cpu_only  # type: ignore[arg-type]
     )
     @settings(deadline=2000)
     def test_dnnlowp_batch_matmul_int_constant_B(
@@ -184,7 +184,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
 
         for trans_a, trans_b in product([0, 1], [0, 1]):
             Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
-            outputs = []
+            outputs = []  # type: ignore[var-annotated]
 
             op_engine_list = [
                 ("BatchMatMul", ""),

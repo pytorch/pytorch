@@ -261,8 +261,8 @@ class TestFillerOperator(serial.SerializedTestCase):
             expected_max = min + range
 
             self.assertEqual(blob_out.dtype.name, expected_type)
-            self.assertAlmostEqual(np.mean(blob_out, dtype=np.float32), expected_mean, delta=0.1)
-            self.assertAlmostEqual(np.var(blob_out, dtype=np.float32), expected_var, delta=0.1)
+            self.assertAlmostEqual(np.mean(blob_out, dtype=np.float32), expected_mean, delta=0.1)  # type: ignore[call-overload]
+            self.assertAlmostEqual(np.var(blob_out, dtype=np.float32), expected_var, delta=0.1)  # type: ignore[call-overload]
             self.assertGreaterEqual(np.min(blob_out), expected_min)
             self.assertLessEqual(np.max(blob_out), expected_max)
 

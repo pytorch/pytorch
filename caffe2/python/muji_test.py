@@ -24,7 +24,7 @@ class TestMuji(test_util.TestCase):
         workspace.RunNetOnce(net)
         target_value = sum(gpu_ids) + len(gpu_ids)
         all_blobs = workspace.Blobs()
-        all_blobs.sort()
+        all_blobs.sort()  # type: ignore[attr-defined]
         for blob in all_blobs:
             print('{} {}'.format(blob, workspace.FetchBlob(blob)))
 

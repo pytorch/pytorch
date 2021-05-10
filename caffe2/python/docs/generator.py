@@ -45,7 +45,7 @@ class OpDocGenerator(DocGenerator):
         # map: op_name -> operator
         self.operators = {}
         # map: op_name -> [engine, engine]
-        self.engines = {}
+        self.engines = {}  # type: ignore[var-annotated]
 
         def filePriority(x):
             if x == "caffe2/caffe2/operators":
@@ -59,7 +59,7 @@ class OpDocGenerator(DocGenerator):
         for name in core._GetRegisteredOperators():
             schema = OpSchema.get(name)
             if schema:
-                priority = filePriority(os.path.dirname(schema.file))
+                priority = filePriority(os.path.dirname(schema.file))  # type: ignore[attr-defined]
                 operator = self.getOperatorDoc(name, schema, priority)
                 self.operators[name] = operator
 
@@ -102,8 +102,8 @@ class OperatorEngine(object):
 
     def getDeviceImpl(self):
         deviceImplList = []
-        for device, impl in [('CPU', OpSchema.get_cpu_impl(self.op_name)),
-                             ('CUDA', OpSchema.get_cuda_impl(self.op_name))]:
+        for device, impl in [('CPU', OpSchema.get_cpu_impl(self.op_name)),  # type: ignore[attr-defined]
+                             ('CUDA', OpSchema.get_cuda_impl(self.op_name))]:  # type: ignore[attr-defined]
             if not impl:
                 continue
             deviceImplList.append((device, impl))
@@ -192,9 +192,9 @@ class OperatorDoc(object):
         formatter.addHeader("Devices", 3)
         devices = [
             self.getInfo(formatter,
-                         'CPU', OpSchema.get_cpu_impl(self.name)),
+                         'CPU', OpSchema.get_cpu_impl(self.name)),  # type: ignore[attr-defined]
             self.getInfo(formatter,
-                         'GPU', OpSchema.get_cuda_impl(self.name)),
+                         'GPU', OpSchema.get_cuda_impl(self.name)),  # type: ignore[attr-defined]
         ]
         formatter.addList([i for i in devices if i])
 

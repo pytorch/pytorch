@@ -91,7 +91,7 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
         param, mom1, mom2, grad = inputs
         mom2 = np.abs(mom2)

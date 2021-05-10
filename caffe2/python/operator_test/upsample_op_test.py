@@ -83,13 +83,13 @@ class TestUpSample(serial.SerializedTestCase):
                         if output_width > 1
                         else float(0))
 
-                for i in range(output_height):
+                for i in range(output_height):  # type: ignore[call-overload]
                     h1r = rheight * i
                     h1 = int(h1r)
                     h1p = 1 if h1 < height - 1 else 0
                     h1lambda = h1r - h1
                     h0lambda = float(1) - h1lambda
-                    for j in range(output_width):
+                    for j in range(output_width):  # type: ignore[call-overload]
                         w1r = rwidth * j
                         w1 = int(w1r)
                         w1p = 1 if w1 < width - 1 else 0
@@ -166,13 +166,13 @@ class TestUpSample(serial.SerializedTestCase):
                         if output_width > 1
                         else float(0))
 
-                for i in range(output_height):
+                for i in range(output_height):  # type: ignore[call-overload]
                     h1r = rheight * i
                     h1 = int(h1r)
                     h1p = 1 if h1 < height - 1 else 0
                     h1lambda = h1r - h1
                     h0lambda = float(1) - h1lambda
-                    for j in range(output_width):
+                    for j in range(output_width):  # type: ignore[call-overload]
                         w1r = rwidth * j
                         w1 = int(w1r)
                         w1p = 1 if w1 < width - 1 else 0

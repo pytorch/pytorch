@@ -129,7 +129,7 @@ class NetGradientChecker(object):
         def GetLoss(new_value):
             workspace.blobs[input_to_check] = new_value
             workspace.RunNetOnce(full_net)
-            return sum([
+            return sum([  # type: ignore[union-attr]
                 workspace.blobs[output]
                 for output in outputs_with_grad
             ]).sum()
@@ -339,7 +339,7 @@ class GradientChecker:
             # cleaned up. Note that there is no need to delete a workspace -
             # when empty it takes a very limited amount of memory.
             workspace.ResetWorkspace()
-            workspace.SwitchWorkspace(old_ws_name)
+            workspace.SwitchWorkspace(old_ws_name)  # type: ignore[call-overload]
         return ret, grad, grad_estimate
 
     def _assertInferTensorChecks(self, op, grad_ops):
@@ -377,9 +377,9 @@ class GradientChecker:
                 elif blob.dtype == np.dtype('int64'):
                     correct_type = caffe2_pb2.TensorProto.INT64
                 else:
-                    correct_type = "unknown {}".format(np.dtype)
+                    correct_type = "unknown {}".format(np.dtype)  # type: ignore[assignment]
             else:
-                correct_type = str(type(blob))
+                correct_type = str(type(blob))  # type: ignore[assignment]
             inferred_type = inferred_types[output]
             if correct_type != inferred_type:
                 raise Exception(

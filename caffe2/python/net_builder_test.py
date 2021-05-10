@@ -99,7 +99,7 @@ class TestNetBuilder(unittest.TestCase):
             (p, 2),
             (q, 3),
         ]
-        for b, expected in expected:
+        for b, expected in expected:  # type: ignore[assignment]
             actual = ws.blobs[str(b)].fetch()
             self.assertEquals(actual, expected)
 
@@ -209,7 +209,7 @@ class TestNetBuilder(unittest.TestCase):
     def test_multi_instance(self):
         NUM_INSTANCES = 10
         NUM_ITERS = 15
-        with TaskGroup() as tg:
+        with TaskGroup() as tg:  # type: ignore[attr-defined]
             with Task(num_instances=NUM_INSTANCES):
                 with ops.task_init():
                     counter1 = ops.CreateCounter([], ['global_counter'])

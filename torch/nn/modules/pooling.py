@@ -315,8 +315,8 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
-        return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
-                              self.padding, output_size)
+        return F.max_unpool1d(input, indices, self.kernel_size, self.stride,  # type: ignore[arg-type]
+                              self.padding, output_size)  # type: ignore[arg-type]
 
 
 class MaxUnpool2d(_MaxUnpoolNd):
@@ -392,8 +392,8 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
-        return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
-                              self.padding, output_size)
+        return F.max_unpool2d(input, indices, self.kernel_size, self.stride,  # type: ignore[arg-type]
+                              self.padding, output_size)  # type: ignore[arg-type]
 
 
 class MaxUnpool3d(_MaxUnpoolNd):
@@ -458,8 +458,8 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
-        return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
-                              self.padding, output_size)
+        return F.max_unpool3d(input, indices, self.kernel_size, self.stride,  # type: ignore[arg-type]
+                              self.padding, output_size)  # type: ignore[arg-type]
 
 
 class _AvgPoolNd(Module):
@@ -752,15 +752,15 @@ class FractionalMaxPool2d(Module):
         self.kernel_size = _pair(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
-        self.output_size = _pair(output_size) if output_size is not None else None
-        self.output_ratio = _pair(output_ratio) if output_ratio is not None else None
+        self.output_size = _pair(output_size) if output_size is not None else None  # type: ignore[assignment]
+        self.output_ratio = _pair(output_ratio) if output_ratio is not None else None  # type: ignore[assignment]
         if output_size is None and output_ratio is None:
             raise ValueError("FractionalMaxPool2d requires specifying either "
                              "an output size, or a pooling ratio")
         if output_size is not None and output_ratio is not None:
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
-            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1):
+            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1):  # type: ignore[index]
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
@@ -815,15 +815,15 @@ class FractionalMaxPool3d(Module):
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
-        self.output_size = _triple(output_size) if output_size is not None else None
-        self.output_ratio = _triple(output_ratio) if output_ratio is not None else None
+        self.output_size = _triple(output_size) if output_size is not None else None  # type: ignore[assignment]
+        self.output_ratio = _triple(output_ratio) if output_ratio is not None else None  # type: ignore[assignment]
         if output_size is None and output_ratio is None:
             raise ValueError("FractionalMaxPool3d requires specifying either "
                              "an output size, or a pooling ratio")
         if output_size is not None and output_ratio is not None:
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
-            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):
+            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):  # type: ignore[index]
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 

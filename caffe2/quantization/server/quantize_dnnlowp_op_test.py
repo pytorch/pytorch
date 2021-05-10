@@ -16,7 +16,7 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
     @given(size=st.integers(1024, 2048),
            is_empty=st.booleans(),
            absorb=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(max_examples=10, deadline=None)
     def test_dnnlowp_quantize(self, size, is_empty, absorb, gc, dc):
         if is_empty:

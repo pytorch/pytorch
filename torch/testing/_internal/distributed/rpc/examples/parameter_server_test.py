@@ -32,7 +32,7 @@ class BatchUpdateParameterServer(object):
     def __init__(self, batch_update_size):
         self.model = nn.Linear(in_features, out_features)
         self.lock = threading.Lock()
-        self.future_model = torch.futures.Future()
+        self.future_model = torch.futures.Future()  # type: ignore[var-annotated]
         self.batch_update_size = batch_update_size
         self.curr_update_size = 0
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
@@ -101,7 +101,7 @@ def run_trainer(ps_rref):
 def run_ps(trainers):
     timed_log("Start training")
     start = perf_counter()
-    ps_rref = rpc.RRef(BatchUpdateParameterServer(len(trainers)))
+    ps_rref = rpc.RRef(BatchUpdateParameterServer(len(trainers)))  # type: ignore[var-annotated]
     futs = []
     for trainer in trainers:
         futs.append(
@@ -118,19 +118,19 @@ class ParameterServerTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     def test_batch_updating_parameter_server(self):
 
-        if self.rank != 0:
+        if self.rank != 0:  # type: ignore[attr-defined]
             rpc.init_rpc(
-                name=worker_name(self.rank),
+                name=worker_name(self.rank),  # type: ignore[attr-defined]
                 backend=self.rpc_backend,
-                rank=self.rank,
+                rank=self.rank,  # type: ignore[attr-defined]
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
         else:
             rpc.init_rpc(
-                name=worker_name(self.rank),
+                name=worker_name(self.rank),  # type: ignore[attr-defined]
                 backend=self.rpc_backend,
-                rank=self.rank,
+                rank=self.rank,  # type: ignore[attr-defined]
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )

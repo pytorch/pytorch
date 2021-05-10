@@ -19,7 +19,7 @@ def parse_lines(lines):
 
     # Preprocess the macros
     curr_macro = ""
-    macros = {}
+    macros = {}  # type: ignore[var-annotated]
 
     index = 0
     while index < len(lines):
@@ -60,7 +60,7 @@ def parse_lines(lines):
     curr_op = ""
     # dict of the form
     #  opName : { attributes: [], ... }
-    ops = {}
+    ops = {}  # type: ignore[var-annotated]
     # To preserve parsing order for dependencies (for things like init_from)
     op_list = []
 

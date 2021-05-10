@@ -25,7 +25,7 @@ def get_input_tensors():
 
 
 class TestCopyRowsToTensor(hu.HypothesisTestCase):
-    @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)
+    @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_copy_rows_to_tensor(self, input_tensor, gc, dc):
         dtype = np.random.choice([np.float16, np.float32, np.int32, np.int64], 1)[0]
         input_tensor = np.array(input_tensor).astype(dtype)
@@ -51,7 +51,7 @@ class TestCopyRowsToTensor(hu.HypothesisTestCase):
             reference=ref,
         )
 
-    @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)
+    @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_copy_rows_to_tensor_invalid_input(self, input_tensor, gc, dc):
         input_tensor = np.array(input_tensor).astype(np.float32)

@@ -168,7 +168,7 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None, max
     candidate = st.lists(st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims)
     if max_numel is not None:
         candidate = candidate.filter(lambda x: reduce(int.__mul__, x, 1) <= max_numel)
-    return draw(candidate.map(tuple))
+    return draw(candidate.map(tuple))  # type: ignore[arg-type]
 
 
 """Strategy for generating test cases for tensors.
@@ -312,7 +312,7 @@ def tensor_conv(
     output_channels = output_channels_per_group * groups
 
     if isinstance(spatial_dim, Iterable):
-        spatial_dim = draw(st.sampled_from(spatial_dim))
+        spatial_dim = draw(st.sampled_from(spatial_dim))  # type: ignore[call-overload]
 
     feature_map_shape = []
     for i in range(spatial_dim):
@@ -352,10 +352,10 @@ def tensor_conv(
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
 hypothesis_version = hypothesis.version.__version_info__
-current_settings = settings._profiles[settings._current_profile].__dict__
+current_settings = settings._profiles[settings._current_profile].__dict__  # type: ignore[attr-defined]
 current_settings['deadline'] = None
 if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
-    current_settings['timeout'] = hypothesis.unlimited
+    current_settings['timeout'] = hypothesis.unlimited  # type: ignore[attr-defined]
 def assert_deadline_disabled():
     if hypothesis_version < (3, 27, 0):
         import warnings

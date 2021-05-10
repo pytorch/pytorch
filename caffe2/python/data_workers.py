@@ -176,7 +176,7 @@ class BatchFeeder(State):
 
     def start(self):
         self._inputs = 0
-        self._prev_seconds = time.time()
+        self._prev_seconds = time.time()  # type: ignore[assignment]
 
     def stop(self):
         try:
@@ -406,7 +406,7 @@ class BatchFeeder(State):
             self._metrics.log_metrics()
             self._metrics.reset_metrics()
             self._inputs = 0
-            self._prev_seconds = current_seconds
+            self._prev_seconds = current_seconds  # type: ignore[assignment]
 
 
 class GlobalCoordinator(GlobalWorkerCoordinator):

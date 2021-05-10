@@ -20,7 +20,7 @@ class MKLFillTest(hu.HypothesisTestCase):
                ["XavierFill", "ConstantFill", "GaussianFill", "MSRAFill"]
            ),
            seed=st.integers(5, 10),
-           **mu.gcs_cpu_mkl)
+           **mu.gcs_cpu_mkl)  # type: ignore[arg-type]
     def test_mkl_fill(self, n, c, h, w, filler, seed, gc, dc):
         op = core.CreateOperator(
             filler,

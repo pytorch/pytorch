@@ -360,7 +360,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         op = core.CreateOperator(
             "SumReduceLike", ["X", "Y"], "out", broadcast=1, axis=0)
 
-        def ref_op(X, Y):
+        def ref_op(X, Y):  # type: ignore[no-redef]
             res = np.sum(X, axis=3)
             res = np.sum(res, axis=2)
             return [res]
@@ -378,7 +378,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         op = core.CreateOperator(
             "SumReduceLike", ["X", "Y"], "out", broadcast=1, axis=1)
 
-        def ref_op(X, Y):
+        def ref_op(X, Y):  # type: ignore[no-redef]
             res = np.sum(X, axis=0)
             res = np.sum(res, axis=2)
             return [res]
@@ -396,7 +396,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         op = core.CreateOperator(
             "SumReduceLike", ["X", "Y"], "out", broadcast=1)
 
-        def ref_op(X, Y):
+        def ref_op(X, Y):  # type: ignore[no-redef]
             res = np.sum(X, axis=0)
             res = np.sum(res, axis=2)
             return [res.reshape(Y.shape)]

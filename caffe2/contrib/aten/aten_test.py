@@ -25,7 +25,7 @@ class TestATen(hu.HypothesisTestCase):
             return [X + Y]
         self.assertReferenceChecks(gc, op, inputs, ref)
 
-    @given(inputs=hu.tensors(n=2, dtype=np.float16), **hu.gcs_gpu_only)
+    @given(inputs=hu.tensors(n=2, dtype=np.float16), **hu.gcs_gpu_only)  # type: ignore[arg-type]
     def test_add_half(self, inputs, gc, dc):
         op = core.CreateOperator(
             "ATen",

@@ -31,7 +31,7 @@ if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
     gpu_device_checker = device_checker.DeviceChecker(
         0.01, [_gpu_dev_option]
     )
-    device_checker = device_checker.DeviceChecker(
+    device_checker = device_checker.DeviceChecker(  # type: ignore[assignment]
         0.01, [_gpu_dev_option, cpu_device_option]
     )
     gpu_gradient_checkers = [
@@ -54,7 +54,7 @@ else:
     gpu_device_checker = device_checker.DeviceChecker(
         0.01, []
     )
-    device_checker = device_checker.DeviceChecker(0.01, [cpu_device_option])
+    device_checker = device_checker.DeviceChecker(0.01, [cpu_device_option])  # type: ignore[assignment]
 
     gradient_checkers = [
         gradient_checker.GradientChecker(
@@ -82,7 +82,7 @@ class TestLRN(test_util.TestCase):
                                      )
             X = np.random.rand(2, input_size, input_size,
                                depth).astype(np.float32)
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -94,7 +94,7 @@ class TestFlatten(test_util.TestCase):
     def testFlatten(self):
         op = core.CreateOperator("Flatten", ["X"], ["Y"])
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        res = device_checker.CheckSimple(op, [X], [0])
+        res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
         self.assertTrue(res)
         for checker in gradient_checkers:
             res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -127,7 +127,7 @@ class TestConcat(test_util.TestCase):
                 np.random.rand(2, input_size, input_size, d4).astype(np.float32)
             ]
             for i in range(4):
-                res = device_checker.CheckSimple(op, Xs, [0])
+                res = device_checker.CheckSimple(op, Xs, [0])  # type: ignore[attr-defined]
                 self.assertTrue(res)
                 for checker in gradient_checkers:
                     res, grad, grad_estimated = checker.CheckSimple(op, Xs, i,
@@ -151,7 +151,7 @@ class TestConcat(test_util.TestCase):
                 np.random.rand(2, d4, input_size, input_size).astype(np.float32)
             ]
             for i in range(4):
-                res = device_checker.CheckSimple(op, Xs, [0])
+                res = device_checker.CheckSimple(op, Xs, [0])  # type: ignore[attr-defined]
                 self.assertTrue(res)
                 for checker in gradient_checkers:
                     res, grad, grad_estimated = checker.CheckSimple(op, Xs, i,
@@ -180,7 +180,7 @@ class TestRelu(test_util.TestCase):
             # go away from the origin point to avoid kink problems
             X += 0.01 * np.sign(X)
             X[X == 0] = 0.01
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -201,7 +201,7 @@ class TestTanh(test_util.TestCase):
         for input_size in self.test_configs:
             op = core.CreateOperator("Tanh", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -225,7 +225,7 @@ class TestAbs(test_util.TestCase):
             # go away from the origin point to avoid kink problems
             X += 0.01 * np.sign(X)
             X[X == 0] = 0.01
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -245,7 +245,7 @@ class TestExp(test_util.TestCase):
         for input_size in self.test_configs:
             op = core.CreateOperator("Exp", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -265,7 +265,7 @@ class TestCos(test_util.TestCase):
         for input_size in self.test_configs:
             op = core.CreateOperator("Cos", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -285,7 +285,7 @@ class TestSin(test_util.TestCase):
         for input_size in self.test_configs:
             op = core.CreateOperator("Sin", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -305,7 +305,7 @@ class TestSigmoid(test_util.TestCase):
         for input_size in self.test_configs:
             op = core.CreateOperator("Sigmoid", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
@@ -326,7 +326,7 @@ class TestSum(test_util.TestCase):
                                      ["Y" if not in_place else "X1"])
             X1 = np.random.rand(*input_size).astype(np.float32) - 0.5
             X2 = np.random.rand(*input_size).astype(np.float32) - 0.5
-            res = device_checker.CheckSimple(op, [X1, X2], [0])
+            res = device_checker.CheckSimple(op, [X1, X2], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(
@@ -356,7 +356,7 @@ class TestMakeTwoClass(test_util.TestCase):
             # step a little to avoid gradient problems
             X[X < 0.01] += 0.01
             X[X > 0.99] -= 0.01
-            res = device_checker.CheckSimple(op, [X], [0])
+            res = device_checker.CheckSimple(op, [X], [0])  # type: ignore[attr-defined]
             self.assertTrue(res)
             for checker in gradient_checkers:
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])

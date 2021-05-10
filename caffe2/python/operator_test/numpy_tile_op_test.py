@@ -17,7 +17,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 class TestNumpyTile(serial.SerializedTestCase):
     @given(ndim=st.integers(min_value=1, max_value=4),
            seed=st.integers(min_value=0, max_value=65536),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_numpy_tile(self, ndim, seed, gc, dc):
         np.random.seed(seed)
@@ -40,7 +40,7 @@ class TestNumpyTile(serial.SerializedTestCase):
 
     @given(ndim=st.integers(min_value=1, max_value=4),
            seed=st.integers(min_value=0, max_value=65536),
-           **hu.gcs_cpu_only)
+           **hu.gcs_cpu_only)  # type: ignore[arg-type]
     @settings(deadline=10000)
     def test_numpy_tile_zero_dim(self, ndim, seed, gc, dc):
         np.random.seed(seed)

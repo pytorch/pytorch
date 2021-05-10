@@ -16,7 +16,7 @@ from past.builtins import basestring
 _LEARNING_RATE_INJECTION = "lr_injection"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
-_optimizer_instance_count = defaultdict(int)
+_optimizer_instance_count = defaultdict(int)  # type: ignore[var-annotated]
 
 FP16_ENGINES = ["SIMD_Q_FP16", "SIMD_Q_STOC_FP16", "SIMD_Q_STOC_MKL_FP16"]
 

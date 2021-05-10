@@ -164,7 +164,7 @@ def add_while_op(
     loop_outputs = [core.BlobReference(name=b, net=None) for b in output_blob_names]
 
     while_inputs = [cond_blob] + loop_inputs
-    while_outputs = [] + loop_outputs
+    while_outputs = [] + loop_outputs  # type: ignore[operator]
 
     do_loop_body_net = core.Net('do_loop_body_net')
 

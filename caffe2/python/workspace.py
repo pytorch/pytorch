@@ -42,7 +42,7 @@ BenchmarkNetOnce = C.benchmark_net_once
 GetStats = C.get_stats
 CreateOfflineTensor = C.create_offline_tensor
 
-operator_tracebacks = defaultdict(dict)
+operator_tracebacks = defaultdict(dict)  # type: ignore[var-annotated]
 
 is_asan = C.is_asan
 has_fbgemm = C.has_fbgemm
@@ -59,7 +59,7 @@ if has_cuda_support:
     GetCuDNNVersion = C.get_cudnn_version
 
     def GetGpuPeerAccessPattern():
-        return np.asarray(C.get_cuda_peer_access_pattern())
+        return np.asarray(C.get_cuda_peer_access_pattern())  # type: ignore[attr-defined]
 
     GetDeviceProperties = C.get_device_properties
     GetGPUMemoryInfo = C.get_gpu_memory_info
@@ -78,7 +78,7 @@ if has_hip_support:
     GetHIPVersion = C.get_hip_version
 
     def GetGpuPeerAccessPattern():
-        return np.asarray(C.get_hip_peer_access_pattern())
+        return np.asarray(C.get_hip_peer_access_pattern())  # type: ignore[attr-defined]
     GetDeviceProperties = C.get_device_properties
     GetGPUMemoryInfo = C.get_gpu_memory_info
 
@@ -88,10 +88,10 @@ if not has_gpu_support:
     GpuDeviceType = caffe2_pb2.CUDA
     # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = lambda: 0 # noqa
-    GetDeviceProperties = lambda x: None # noqa
+    GetDeviceProperties = lambda x: None # noqa  # type: ignore[assignment]
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
     # pyre-fixme[9]: incompatible type assignment
-    GetGPUMemoryInfo = lambda: None # noqa
+    GetGPUMemoryInfo = lambda: None # noqa  # type: ignore[misc]
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
@@ -100,7 +100,7 @@ GetBlobSizeBytes = C.get_blob_size_bytes
 
 
 def FillRandomNetworkInputs(net, input_dims, input_types):
-    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)
+    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)  # type: ignore[attr-defined]
 
 
 def _GetFreeFlaskPort():
@@ -173,11 +173,11 @@ def StringifyProto(obj):
 def ResetWorkspace(root_folder=None):
     if root_folder is None:
         # Reset the workspace, but keep the current root folder setting.
-        return C.reset_workspace(C.root_folder())
+        return C.reset_workspace(C.root_folder())  # type: ignore[attr-defined]
     else:
         if not os.path.exists(root_folder):
             os.makedirs(root_folder)
-        return C.reset_workspace(root_folder)
+        return C.reset_workspace(root_folder)  # type: ignore[attr-defined]
 
 
 def CreateNet(net, overwrite=False, input_blobs=None):
@@ -187,27 +187,27 @@ def CreateNet(net, overwrite=False, input_blobs=None):
     for input_blob in input_blobs:
         C.create_blob(input_blob)
     return CallWithExceptionIntercept(
-        C.create_net,
-        C.Workspace.current._last_failed_op_net_position,
+        C.create_net,  # type: ignore[attr-defined]
+        C.Workspace.current._last_failed_op_net_position,  # type: ignore[attr-defined]
         GetNetName(net),
         StringifyProto(net), overwrite,
     )
 
 
 def Predictor(init_net, predict_net):
-    return C.Predictor(StringifyProto(init_net), StringifyProto(predict_net))
+    return C.Predictor(StringifyProto(init_net), StringifyProto(predict_net))  # type: ignore[attr-defined]
 
 
 def GetOperatorCost(operator, blobs):
-    return C.get_operator_cost(StringifyProto(operator), blobs)
+    return C.get_operator_cost(StringifyProto(operator), blobs)  # type: ignore[attr-defined]
 
 
 def RunOperatorOnce(operator):
-    return C.run_operator_once(StringifyProto(operator))
+    return C.run_operator_once(StringifyProto(operator))  # type: ignore[attr-defined]
 
 
 def RunOperatorMultiple(operator, num_runs):
-    return C.run_operator_multiple(StringifyProto(operator), num_runs)
+    return C.run_operator_multiple(StringifyProto(operator), num_runs)  # type: ignore[attr-defined]
 
 
 def RunOperatorsOnce(operators):
@@ -219,7 +219,7 @@ def RunOperatorsOnce(operators):
 
 
 def ClearGlobalNetObserver():
-    return C.clear_global_net_observer()
+    return C.clear_global_net_observer()  # type: ignore[attr-defined]
 
 
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
@@ -242,8 +242,8 @@ def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
 
 def RunNetOnce(net):
     return CallWithExceptionIntercept(
-        C.run_net_once,
-        C.Workspace.current._last_failed_op_net_position,
+        C.run_net_once,  # type: ignore[attr-defined]
+        C.Workspace.current._last_failed_op_net_position,  # type: ignore[attr-defined]
         GetNetName(net),
         StringifyProto(net),
     )
@@ -260,8 +260,8 @@ def RunNet(name, num_iter=1, allow_fail=False):
       True or an exception.
     """
     return CallWithExceptionIntercept(
-        C.run_net,
-        C.Workspace.current._last_failed_op_net_position,
+        C.run_net,  # type: ignore[attr-defined]
+        C.Workspace.current._last_failed_op_net_position,  # type: ignore[attr-defined]
         GetNetName(name),
         StringifyNetName(name), num_iter, allow_fail,
     )
@@ -272,7 +272,7 @@ def RunPlan(plan_or_step):
     import caffe2.python.core as core
     if isinstance(plan_or_step, core.ExecutionStep):
         plan_or_step = core.Plan(plan_or_step)
-    return C.run_plan(StringifyProto(plan_or_step))
+    return C.run_plan(StringifyProto(plan_or_step))  # type: ignore[attr-defined]
 
 
 def RunPlanInBackground(plan_or_step):
@@ -280,7 +280,7 @@ def RunPlanInBackground(plan_or_step):
     import caffe2.python.core as core
     if isinstance(plan_or_step, core.ExecutionStep):
         plan_or_step = core.Plan(plan_or_step)
-    return C.run_plan_in_background(StringifyProto(plan_or_step))
+    return C.run_plan_in_background(StringifyProto(plan_or_step))  # type: ignore[attr-defined]
 
 
 def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False,
@@ -302,13 +302,13 @@ def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False,
         net_protos = [StringifyProto(n.Proto()) for n in nets]
     if blob_dimensions is None:
         assert blob_types is None
-        blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)
+        blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)  # type: ignore[attr-defined]
     elif blob_types is None:
-        blobdesc_prototxt = C.infer_shapes_and_types_from_map(
+        blobdesc_prototxt = C.infer_shapes_and_types_from_map(  # type: ignore[attr-defined]
             net_protos, blob_dimensions
         )
     else:
-        blobdesc_prototxt = C.infer_shapes_and_types_from_map(
+        blobdesc_prototxt = C.infer_shapes_and_types_from_map(  # type: ignore[attr-defined]
             net_protos, blob_dimensions, blob_types
         )
     blobdesc_proto = caffe2_pb2.TensorShapes()
@@ -383,7 +383,7 @@ def FetchBlob(name):
     Returns:
       Fetched blob (numpy array or string) if successful
     """
-    result = C.fetch_blob(StringifyBlobName(name))
+    result = C.fetch_blob(StringifyBlobName(name))  # type: ignore[attr-defined]
     if isinstance(result, tuple):
         raise TypeError(
             "Use FetchInt8Blob to fetch Int8 Blob {}".format(
@@ -414,7 +414,7 @@ def FetchInt8Blob(name):
       scale: float, fake quantization scale
       zero_point: int, fake quantization offset
     """
-    result = C.fetch_blob(StringifyBlobName(name))
+    result = C.fetch_blob(StringifyBlobName(name))  # type: ignore[attr-defined]
     assert isinstance(result, tuple), \
         'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
             StringifyBlobName(name))
@@ -429,7 +429,7 @@ def FetchInt8BlobRealVal(name):
     Returns:
       real value representation of int8 numpy array
     """
-    result = C.fetch_blob(StringifyBlobName(name))
+    result = C.fetch_blob(StringifyBlobName(name))  # type: ignore[attr-defined]
     assert isinstance(result, tuple), \
         'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
             StringifyBlobName(name))
@@ -456,7 +456,7 @@ def _Workspace_fetch_int8_blob(ws, name):
     return Int8Tensor(*result)
 
 
-C.Workspace.fetch_int8_blob = _Workspace_fetch_int8_blob
+C.Workspace.fetch_int8_blob = _Workspace_fetch_int8_blob  # type: ignore[assignment]
 
 
 def ApplyTransform(transform_key, net):
@@ -470,7 +470,7 @@ def ApplyTransform(transform_key, net):
       Transformed NetDef protobuf object.
     """
     transformed_net = caffe2_pb2.NetDef()
-    transformed_str = C.apply_transform(
+    transformed_str = C.apply_transform(  # type: ignore[attr-defined]
         str(transform_key).encode('utf-8'),
         net.SerializeToString(),
     )
@@ -509,7 +509,7 @@ def ApplyTransformIfFaster(transform_key, net, init_net, **kwargs):
         if 'improvement_threshold' in kwargs else 1.01
 
     transformed_net = caffe2_pb2.NetDef()
-    transformed_str = C.apply_transform_if_faster(
+    transformed_str = C.apply_transform_if_faster(  # type: ignore[attr-defined]
         str(transform_key).encode('utf-8'),
         net.SerializeToString(),
         init_net.SerializeToString(),
@@ -582,7 +582,7 @@ def WorkspaceGuard(workspace_name):
     current = CurrentWorkspace()
     SwitchWorkspace(workspace_name, True)
     yield
-    SwitchWorkspace(current)
+    SwitchWorkspace(current)  # type: ignore[call-overload]
 
 
 def StartImmediate(i_know=False):
@@ -704,7 +704,7 @@ def _Workspace_feed_blob(ws, name, arr, device_option=None):
         arr = utils.Caffe2TensorToNumpyArray(arr)
     if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
         # Plain NumPy strings are weird, let's use objects instead
-        arr = arr.astype(np.object)
+        arr = arr.astype(np.object)  # type: ignore[attr-defined]
 
     if device_option is None:
         device_option = scope.CurrentDeviceScope()
@@ -730,10 +730,10 @@ def _Workspace_remove_blob(ws, blob):
 
 
 Workspace = C.Workspace
-Workspace.create_net = _Workspace_create_net_with_exception_intercept
-Workspace.run = _Workspace_run
-Workspace.feed_blob = _Workspace_feed_blob
-Workspace.remove_blob = _Workspace_remove_blob
+Workspace.create_net = _Workspace_create_net_with_exception_intercept  # type: ignore[assignment]
+Workspace.run = _Workspace_run  # type: ignore[assignment]
+Workspace.feed_blob = _Workspace_feed_blob  # type: ignore[assignment]
+Workspace.remove_blob = _Workspace_remove_blob  # type: ignore[assignment]
 
 # C.Blob methods.
 
@@ -745,7 +745,7 @@ def _Blob_feed(blob, arg, device_option=None):
         if isinstance(arg, torch.Tensor):
             assert device_option is None, \
                 "device_option doesn't make sense with PyTorch tensors"
-            handle = torch._C._tensor_impl_raw_handle(arg)
+            handle = torch._C._tensor_impl_raw_handle(arg)  # type: ignore[attr-defined]
             blob._wrap_tensor_impl(handle)
             return True  # _feed() returns True for some reason
     if device_option is not None:
@@ -753,7 +753,7 @@ def _Blob_feed(blob, arg, device_option=None):
     return blob._feed(arg, device_option)
 
 
-C.Blob.feed = _Blob_feed
+C.Blob.feed = _Blob_feed  # type: ignore[assignment]
 
 
 def _Tensor_to_torch(tensor):
@@ -766,9 +766,9 @@ def _Tensor_to_torch(tensor):
     # avoiding circular dependency
     import torch
     handle = tensor._tensor_impl_raw_handle()
-    return torch._C._wrap_tensor_impl(handle)
+    return torch._C._wrap_tensor_impl(handle)  # type: ignore[attr-defined]
 
-C.TensorCPU.to_torch = _Tensor_to_torch
+C.TensorCPU.to_torch = _Tensor_to_torch  # type: ignore[assignment]
 
 
 def _Blob_to_torch(blob):
@@ -776,4 +776,4 @@ def _Blob_to_torch(blob):
         raise RuntimeError("Blob has to be a tensor")
     return blob.as_tensor().to_torch()
 
-C.Blob.to_torch = _Blob_to_torch
+C.Blob.to_torch = _Blob_to_torch  # type: ignore[assignment]

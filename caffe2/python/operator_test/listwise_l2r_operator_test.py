@@ -46,7 +46,7 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
 
         if use_ndcg_as_loss:
             dcg = sum(g[i] * d[i] for i in range(n))
-            loss = (idcg - dcg) / session_weight
+            loss = (idcg - dcg) / session_weight  # type: ignore[assignment]
         for i in range(n):
             for j in range(n):
                 if i == j:

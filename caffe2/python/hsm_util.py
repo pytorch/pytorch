@@ -65,6 +65,6 @@ def create_hierarchy(tree_proto):
 
     node = tree_proto.root_node
     hierarchy_proto = hsm_pb2.HierarchyProto()
-    path = []
+    path = []  # type: ignore[var-annotated]
     max_index = recursive_path_builder(node, path, hierarchy_proto, max_index)
     return hierarchy_proto

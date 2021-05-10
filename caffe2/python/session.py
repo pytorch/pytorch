@@ -73,7 +73,7 @@ class Session(object):
         will only be able to share blobs defined on a common parent Workspace.
     """
 
-    _compiled_cache = {}
+    _compiled_cache = {}  # type: ignore[var-annotated]
 
     def __init__(self):
         self._open = True
@@ -188,7 +188,7 @@ class LocalSession(Session):
 
     @classmethod
     def _compile_task_group(cls, task_group, setup_net_list=None):
-        with Cluster():
+        with Cluster():  # type: ignore[attr-defined]
             task = task_group.to_task()
         plan = core.Plan('task_group_plan')
         plan.AddStep(task.get_step())

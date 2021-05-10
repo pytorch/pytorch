@@ -64,7 +64,7 @@ class TestPooling(hu.HypothesisTestCase):
     @unittest.skipIf(not os.getenv('CAFFE2_DEBUG'),
                      "This is a test that reproduces a cudnn error. If you "
                      "want to run it, set env variable CAFFE2_DEBUG=1.")
-    @given(**hu.gcs_cuda_only)
+    @given(**hu.gcs_cuda_only)  # type: ignore[arg-type]
     def test_pooling_big_batch(self, gc, dc):
         op = core.CreateOperator(
             "AveragePool",
@@ -195,7 +195,7 @@ class TestPooling(hu.HypothesisTestCase):
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
            batch_size=st.integers(0, 3),
-           **hu.gcs_gpu_only)
+           **hu.gcs_gpu_only)  # type: ignore[arg-type]
     def test_pooling_with_index(self, stride, pad, kernel, size,
                                 input_channels, batch_size, gc, dc):
         assume(pad < kernel)

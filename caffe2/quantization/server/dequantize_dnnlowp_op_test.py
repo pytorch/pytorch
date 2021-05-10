@@ -15,7 +15,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPDequantizeOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
+    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)  # type: ignore[arg-type]
     def test_dnnlowp_dequantize(self, size, is_empty, gc, dc):
         if is_empty:
             size = 0

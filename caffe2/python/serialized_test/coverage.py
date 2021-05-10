@@ -73,7 +73,7 @@ def gen_coverage_sets(source_dir):
     for op_name in core._GetRegisteredOperators():
         s = OpSchema.get(op_name)
 
-        if s is not None and s.private:
+        if s is not None and s.private:  # type: ignore[attr-defined]
             continue
         if s:
             if op_name not in covered_ops:
