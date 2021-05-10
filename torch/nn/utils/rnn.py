@@ -321,7 +321,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0.0):
-    # type: (Sequence[Tensor], bool, float) -> Tensor
+    # type: (List[Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
