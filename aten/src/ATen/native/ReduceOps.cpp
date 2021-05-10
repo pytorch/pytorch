@@ -1401,6 +1401,13 @@ std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
       self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
+std::tuple<Tensor&, Tensor&> var_mean_out(
+    Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    int64_t correction, bool keepdim) {
+  return std_var_mean_out(
+      "var_mean", result1, result2, self, dim, correction, keepdim, false);
+}
+
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, c10::optional<IntArrayRef> dim,
     c10::optional<int64_t> correction, bool keepdim) {
