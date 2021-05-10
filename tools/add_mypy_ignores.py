@@ -20,10 +20,10 @@ with open(args.log, "r") as f:
             if content_line[-1] == "\n":
                 # remove trailing newline
                 content_line = content_line[:-1]
-            
+
             if index + 1 == lineno:
                 if "type: ignore" not in content_line:
                     content_line = content_line + f"  # type: ignore[{error_code}]"
             output.append(content_line)
-        
+
         open(filename, "w").write("\n".join(output) + "\n")
