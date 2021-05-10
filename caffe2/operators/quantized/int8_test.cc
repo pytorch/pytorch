@@ -20,7 +20,6 @@ namespace caffe2 {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ReLU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 224, 224, 3});
   auto X = dq(*XQ);
   auto xop = CreateOperatorDef("Relu", "", {"X"}, {"Y"});
@@ -46,7 +45,6 @@ TEST(Int8, ReLU) {
 // xplat/caffe2:caffe2_testAndroid
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DISABLED_LeakyReLU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 224, 224, 3});
   auto X = dq(*XQ);
   const float alpha = 0.1;
@@ -82,7 +80,6 @@ TEST(Int8, Softmax) {
       {"XQ"},
       {"YQ"},
       {MakeArgument<int>("Y_zero_point", 0),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<float>("Y_scale", 1.0 / 256)});
   Workspace ws;
   int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
@@ -109,7 +106,6 @@ TEST(Int8, Sigmoid) {
       {"XQ"},
       {"YQ"},
       {MakeArgument<int>("Y_zero_point", 0),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<float>("Y_scale", 1.0 / 256)});
   Workspace ws;
   int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
@@ -127,7 +123,6 @@ TEST(Int8, Sigmoid) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, MaxPool) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
   auto xop = CreateOperatorDef(
@@ -158,7 +153,6 @@ TEST(Int8, MaxPool) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, AveragePool) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
   auto xop = CreateOperatorDef(
@@ -189,7 +183,6 @@ TEST(Int8, AveragePool) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ResizeNearest) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
   auto xop = CreateOperatorDef(
@@ -223,7 +216,6 @@ TEST(Int8, ResizeNearest) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ChannelShuffle) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({2, 25, 25, 32});
   auto X = dq(*XQ);
   auto xop = CreateOperatorDef(
@@ -263,10 +255,8 @@ TEST(Int8, ChannelShuffle) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Concat) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ0 = q({2, 25, 25, 16});
   auto X0 = dq(*XQ0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ1 = q({2, 25, 25, 24});
   auto X1 = dq(*XQ1);
   auto xop = CreateOperatorDef(
@@ -305,9 +295,7 @@ TEST(Int8, Concat) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Add) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ0 = q({1, 10, 10, 20});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ1 = q({1, 10, 10, 20});
   auto X0 = dq(*XQ0);
   auto X1 = dq(*XQ1);
@@ -335,9 +323,7 @@ TEST(Int8, Add) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, SumRelu) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ0 = q({1, 10, 10, 20});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ1 = q({1, 10, 10, 20});
   auto X0 = dq(*XQ0);
   auto X1 = dq(*XQ1);
@@ -395,17 +381,13 @@ void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Conv) {
   auto XQ = q({2, 2, 4, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
   setq(
       XQ.get(),
       std::vector<float>{1, 1, 1, 1, 2, 2, 2, 2, 1, 2, 3, 4, 1, 2, 3, 4});
   auto WQ = q({3, 2, 2, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
   setq(
       WQ.get(),
@@ -444,7 +426,6 @@ TEST(Int8, Conv) {
       {MakeArgument<int>("kernel", 2),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("stride", 2),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -471,20 +452,14 @@ TEST(Int8, Conv) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Grouped1x1Conv) {
   auto XQ = q({1, 3, 2, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6, 7, 8, 2,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     3, 8, 1, 7, 4, 2, 1, 3, 8, 5, 3, 1});
 
   // G = 2
   auto WQ = q({4, 1, 1, 2});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
   setq(WQ.get(), {1, 2, 3, 4, -1, -2, -3, -4});
   auto BQ = biasq({4}, XQ->scale * WQ->scale);
@@ -508,7 +483,6 @@ TEST(Int8, Grouped1x1Conv) {
       {MakeArgument<int>("kernel", 1),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("group", 2),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -544,21 +518,15 @@ TEST(Int8, Grouped1x1Conv) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Conv2) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 3, 6, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
   setq(
       XQ.get(),
       std::vector<float>{
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           3, 2, 1, -1, -2, -3, 4, 3, 2, -2, -3, -4, 5, 4, 3, -3, -4, -5});
   auto WQ = q({1, 2, 2, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
   setq(WQ.get(), {1, 2, 3, 4});
   auto BQ = biasq({1}, XQ->scale * WQ->scale);
@@ -584,7 +552,6 @@ TEST(Int8, Conv2) {
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("stride_w", 3),
        MakeArgument<int>("stride_h", 1),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -609,20 +576,14 @@ TEST(Int8, Conv2) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv) {
   auto XQ = q({1, 3, 2, 2});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
   // setq(XQ.get(), std::vector<float>{1, 2, 7, 8, 3, 4, 9, 10, 5, 6, 11, 12});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6, 7, 8, 2});
 
   auto WQ = q({2, 2, 2, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(WQ.get(), {1, 2, 3, 4, -9, 10, -11, 12});
   auto BQ = biasq({2}, XQ->scale * WQ->scale);
   biassetq(BQ.get(), {1, 2});
@@ -645,7 +606,6 @@ TEST(Int8, DepthwiseConv) {
       {MakeArgument<int>("kernel", 2),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("group", 2),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -675,27 +635,17 @@ TEST(Int8, DepthwiseConv) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv3x3) {
   auto XQ = q({1, 3, 3, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     7, 8, 2, 3, 4, 5, 2, 4, 4,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     9, 8, 7, 6, 5, 4, 3, 2, 1});
 
   auto WQ = q({3, 3, 3, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(WQ.get(), std::vector<float>{1, -4, 3, 2, -9, 3, -8, 2, 6,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     7, 8, -2, -3, 4, -5, -2, 4, 4,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     -9, 8, -7, 6, -5, 4, 3, -2, 1});
   auto BQ = biasq({3}, XQ->scale * WQ->scale);
   biassetq(BQ.get(), {1, 2, 3});
@@ -718,7 +668,6 @@ TEST(Int8, DepthwiseConv3x3) {
       {MakeArgument<int>("kernel", 3),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("group", 3),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -747,30 +696,18 @@ TEST(Int8, DepthwiseConv3x3) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv5x5) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 5, 5, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     7, 8, 2, 3, 4, 5, 2, 4, 4,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     9, 8, 7, 6, 5, 4, 3});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto WQ = q({1, 5, 5, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(WQ.get(), std::vector<float>{1, -4, 3, 2, -9, 3, -8, 2, 6,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     7, 8, -2, -3, 4, -5, -2, 4, 4,
-                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     -9, 8, -7, 6, -5, 4, 3});
   auto BQ = biasq({1}, XQ->scale * WQ->scale);
   biassetq(BQ.get(), {1});
@@ -782,7 +719,6 @@ TEST(Int8, DepthwiseConv5x5) {
       "",
       {"XT", "WT", "B"},
       {"YT"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<int>("kernel", 5),
        MakeArgument<string>("order", "NCHW"),
        MakeArgument<int>("group", 1)});
@@ -791,11 +727,9 @@ TEST(Int8, DepthwiseConv5x5) {
       "",
       {"XQ", "WQ", "BQ"},
       {"YQ"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<int>("kernel", 5),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("group", 1),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -824,21 +758,15 @@ TEST(Int8, DepthwiseConv5x5) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ConvTranspose) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 3, 6, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
   setq(
       XQ.get(),
       std::vector<float>{
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           3, 2, 1, -1, -2, -3, 4, 3, 2, -2, -3, -4, 5, 4, 3, -3, -4, -5});
   auto WQ = q({1, 2, 2, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
   setq(WQ.get(), {1, 2, 3, 4});
   auto BQ = biasq({1}, XQ->scale * WQ->scale);
@@ -864,7 +792,6 @@ TEST(Int8, ConvTranspose) {
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("stride_w", 1),
        MakeArgument<int>("stride_h", 2),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -884,30 +811,19 @@ TEST(Int8, ConvTranspose) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, FC) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({2, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setq(XQ.get(), {1, 2, 3, 4, 5, 6, 7, 8,  -9, -10,
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   1, 2, 3, 4, 5, 6, 7, -8, 9,  -10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto WQ = q({3, 10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->scale = 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   WQ->zero_point = 127;
   setq(
       WQ.get(),
       {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, // u = 0
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, // u = 1
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, // u = 1
       });
   auto BQ = biasq({3}, XQ->scale * WQ->scale);
@@ -921,7 +837,6 @@ TEST(Int8, FC) {
       "",
       {"XQ", "WQ", "BQ"},
       {"YQ"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<int>("Y_zero_point", 127),
        MakeArgument<float>("Y_scale", 1.0)});
   Workspace ws;
@@ -948,7 +863,6 @@ TEST(Int8, FC) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, GivenTensorFill) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<int64_t> shape = {1, 25, 25, 16};
   auto XQ = q(shape);
   auto X = dq(*XQ);
@@ -984,9 +898,7 @@ TEST(Int8, GivenTensorFill) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, GivenIntTensorFill) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<int64_t> shape = {32};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = biasq(shape, 1. / 255 * 1. / 255);
   auto X = biasdq(*XQ);
   vector<float> v(
@@ -1021,7 +933,6 @@ TEST(Int8, GivenIntTensorFill) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, QuantDeQuant) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<int64_t> shape = {1, 25, 25, 16};
   auto XQ = q(shape);
   auto X = dq(*XQ);
@@ -1043,14 +954,12 @@ TEST(Int8, QuantDeQuant) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Reshape) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto xop = CreateOperatorDef(
       "Int8Reshape",
       "",
       {"XQ"},
       {"YQ", "old_shape"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument("shape", vector<int64_t>{0, -1, 2000}),
        MakeArgument<float>("Y_scale", XQ->scale),
        MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
@@ -1065,7 +974,6 @@ TEST(Int8, Reshape) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Flatten) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto xop = CreateOperatorDef(
       "Int8Flatten",
@@ -1086,11 +994,9 @@ TEST(Int8, Flatten) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Slice) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
   vector<int> starts = {0, 3, 0, 0};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<int> ends = {-1, 5, -1, -1};
   auto xop = CreateOperatorDef(
       "Slice",
@@ -1124,7 +1030,6 @@ TEST(Int8, Slice) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DISABLED_Transpose) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto XQ = q({1, 50, 25, 16});
   auto xop = CreateOperatorDef(
       "Int8Transpose",

@@ -317,16 +317,6 @@ namespace impl {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void set_pyobj(const Variable& self, PyObject* pyobj) {
-    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
-    self.unsafeGetTensorImpl()->set_pyobj(pyobj);
-  }
-
-  PyObject* pyobj(const Variable& self) {
-    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-    return self.unsafeGetTensorImpl()->pyobj();
-  }
-
   AutogradMeta* get_autograd_meta(const Variable& self) {
     // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
