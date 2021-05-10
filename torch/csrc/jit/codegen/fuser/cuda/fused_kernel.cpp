@@ -46,34 +46,21 @@ void codegenOutputQuery(
   // based on the NVRTC version
   major = prop->major;
   minor = prop->minor;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nvrtc_major <= 7 && prop->major > 5) { // 7 supports 2-5.x
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 5;
     minor = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 6;
     minor = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 7;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 7;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
   } else if (
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       nvrtc_major == 11 && nvrtc_minor == 0 &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       prop->major >= 8) { // 11.0 supports 3.5-8.0
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 8;
     minor = 0;
   }

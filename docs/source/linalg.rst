@@ -22,6 +22,7 @@ Matrix Properties
 
     norm
     vector_norm
+    matrix_norm
     det
     slogdet
     cond
