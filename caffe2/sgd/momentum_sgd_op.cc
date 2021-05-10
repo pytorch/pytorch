@@ -84,7 +84,6 @@ REGISTER_CPU_OPERATOR(
     SparseMomentumSGDUpdateOp<float, CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseMomentumSGDUpdate)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(3)
     .AllowInplace({{0, 0}})

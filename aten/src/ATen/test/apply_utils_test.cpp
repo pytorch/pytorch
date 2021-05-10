@@ -109,7 +109,6 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
 // apply utils test 2-dim small contiguous
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, Contiguous2D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
   test(CPU(kDouble), {2, 1}, -1, -1);
 }
@@ -117,7 +116,6 @@ TEST(ApplyUtilsTest, Contiguous2D) {
 // apply utils test 2-dim small
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, Small2D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
   test(CPU(kDouble), {2, 1});
 }
@@ -125,16 +123,13 @@ TEST(ApplyUtilsTest, Small2D) {
 // apply utils test 2-dim
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, _2D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test(CPU(kDouble), {20, 10});
 }
 
 // apply utils test 3-dim
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, _3D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
   test(CPU(kDouble), {3, 4, 2});
 }
@@ -142,17 +137,13 @@ TEST(ApplyUtilsTest, _3D) {
 // apply utils test 3-dim medium
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, Medium3D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test(CPU(kDouble), {3, 40, 2});
 }
 
 // apply utils test 10-dim
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ApplyUtilsTest, _10D) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

@@ -17,8 +17,6 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-namespace {
-
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
@@ -49,12 +47,11 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
   return bytecode_values;
 }
 
-} // namespace
-
-/********************** Bytecode Version **********************/
+/********************** Bytecode **********************/
 
 // Forward declare
-int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues);
+int64_t _get_model_bytecode_version(
+    const std::vector<IValue>& bytecode_ivalues);
 
 int64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
@@ -77,7 +74,8 @@ int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   return _get_model_bytecode_version(bytecode_values);
 }
 
-int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues) {
+int64_t _get_model_bytecode_version(
+    const std::vector<IValue>& bytecode_ivalues) {
   if (!bytecode_ivalues.empty() && bytecode_ivalues[0].isInt()) {
     int64_t model_version = bytecode_ivalues[0].toInt();
     return model_version;
@@ -130,7 +128,8 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
  **/
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues) {
-  if (_get_model_bytecode_version(bytecode_ivalues) < 6) {
+  constexpr uint64_t min_version_with_schema = 6;
+  if (_get_model_bytecode_version(bytecode_ivalues) < min_version_with_schema) {
     TORCH_WARN(
         "Only models with bytecode version 6 and above contain operator schema information. Please re-export your model to generate it");
   }
