@@ -30,6 +30,7 @@ void CompareDivMod(int32_t v, int32_t divisor) {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FixedDivisorTest, FixedDivisorInt32Test) {
   constexpr int32_t kMax = std::numeric_limits<int32_t>::max();
 

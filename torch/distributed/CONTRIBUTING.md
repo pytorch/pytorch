@@ -74,7 +74,9 @@ All the unit tests can be found under the [test/distributed](../../test/distribu
 
 ```
 # Run the c10d unit test.
-python test/distributed/test_c10d.py
+python test/distributed/test_c10d_common.py
+python test/distributed/test_c10d_gloo.py
+python test/distributed/test_c10d_nccl.py
 
 # Run distributed tests, including tests for Distributed Data Parallel
 python test/run_test.py --verbose -i distributed/test_distributed_fork
@@ -82,10 +84,15 @@ python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
 # Run the RPC test suite for the TensorPipeAgent.
 python test/distributed/rpc/test_tensorpipe_agent.py
+python test/distributed/rpc/cuda/test_tensorpipe_agent.py
 
 # Run the RPC test suite for the ProcessGroupAgent.
 python test/distributed/rpc/test_process_group_agent.py
+python test/distributed/rpc/cuda/test_process_group_agent.py
 
 # Run a specific test method.
 pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py
 ```
+
+Note that the RPC framework is by default only tested with filesystem [initialization](https://pytorch.org/docs/stable/distributed.html#initialization). To run tests with TCP initialization, set the
+environment variable `RPC_INIT_WITH_TCP=1` before running your test command.

@@ -114,7 +114,8 @@ class _ObserverBase(ObserverBase):
     eps: torch.Tensor
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False, quant_min=None, quant_max=None):
+                 reduce_range=False, quant_min=None, quant_max=None, factory_kwargs=None) -> None:
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         if reduce_range:
@@ -123,7 +124,7 @@ class _ObserverBase(ObserverBase):
                     reduce_range will be deprecated in a future release of PyTorch."
             )
         self.reduce_range = reduce_range
-        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps]))
+        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps], **factory_kwargs))
         assert self.qscheme in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
@@ -367,21 +368,23 @@ class MinMaxObserver(_ObserverBase):
     max_val: torch.Tensor
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False, quant_min=None, quant_max=None):
+                 reduce_range=False, quant_min=None, quant_max=None, factory_kwargs=None) -> None:
+
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
         # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
-
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
                                              reduce_range=reduce_range,
                                              quant_min=quant_min,
-                                             quant_max=quant_max)
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+                                             quant_max=quant_max,
+                                             factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
+        self.register_buffer('min_val', torch.tensor(float('inf'), **factory_kwargs))
+        self.register_buffer('max_val', torch.tensor(float('-inf'), **factory_kwargs))
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -456,13 +459,14 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     """
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, **kwargs) -> None:
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
                                                           qscheme=qscheme,
                                                           reduce_range=reduce_range,
                                                           quant_min=quant_min,
-                                                          quant_max=quant_max)
+                                                          quant_max=quant_max,
+                                                          **kwargs)
 
     def forward(self, x_orig):
         if x_orig.numel() == 0:
@@ -514,15 +518,17 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, factory_kwargs=None) -> None:
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range,
                                                        quant_min=quant_min,
-                                                       quant_max=quant_max)
+                                                       quant_max=quant_max,
+                                                       factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
-        self.register_buffer('min_vals', torch.tensor([]))
-        self.register_buffer('max_vals', torch.tensor([]))
+        self.register_buffer('min_vals', torch.tensor([], **factory_kwargs))
+        self.register_buffer('max_vals', torch.tensor([], **factory_kwargs))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -637,10 +643,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, **kwargs) -> None:
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
-            reduce_range=reduce_range, quant_min=quant_min, quant_max=quant_max)
+            reduce_range=reduce_range, quant_min=quant_min, quant_max=quant_max, **kwargs)
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
@@ -697,21 +703,97 @@ class HistogramObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
-    def __init__(self, bins=2048, upsample_rate=128, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self,
+        bins: int = 2048,
+        upsample_rate: int = 128,
+        dtype: torch.dtype = torch.quint8,
+        qscheme=torch.per_tensor_affine,
+        reduce_range=False,
+        factory_kwargs=None,
+    ) -> None:
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
                                                 qscheme=qscheme,
-                                                reduce_range=reduce_range)
+                                                reduce_range=reduce_range,
+                                                factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
-        self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+        self.register_buffer('histogram', torch.zeros(self.bins, **factory_kwargs))
+        self.register_buffer('min_val', torch.tensor(float('inf'), **factory_kwargs))
+        self.register_buffer('max_val', torch.tensor(float('-inf'), **factory_kwargs))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
-    @torch.jit.ignore
-    def _non_linear_param_search(self):
+    def _get_norm(
+        self,
+        delta_begin: torch.Tensor,
+        delta_end: torch.Tensor,
+        density: torch.Tensor
+    ) -> torch.Tensor:
+        r"""
+        Compute the norm of the values uniformaly distributed between
+        delta_begin and delta_end.
+        Currently only L2 norm is supported.
+
+        norm = density * (integral_{begin, end} x^2)
+             = density * (end^3 - begin^3) / 3
+        """
+        norm = (
+            delta_end * delta_end * delta_end
+            - delta_begin * delta_begin * delta_begin
+        ) / 3
+        return density * norm
+
+    def _compute_quantization_error(
+        self, next_start_bin: int, next_end_bin: int
+    ):
+        r"""
+        Compute the quantization error if we use start_bin to end_bin as the
+        min and max to do the quantization.
+        """
+        bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
+
+        dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
+        if dst_bin_width == 0.0:
+            return 0.0
+
+        src_bin = torch.arange(self.bins)
+        # distances from the beginning of first dst_bin to the beginning and
+        # end of src_bin
+        src_bin_begin = (src_bin - next_start_bin) * bin_width
+        src_bin_end = src_bin_begin + bin_width
+
+        # which dst_bins the beginning and end of src_bin belong to?
+        dst_bin_of_begin = torch.clamp(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
+        dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
+
+        dst_bin_of_end = torch.clamp(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
+        dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
+
+        density = self.histogram / bin_width
+
+        norm = torch.zeros(self.bins)
+
+        delta_begin = src_bin_begin - dst_bin_of_begin_center
+        delta_end = dst_bin_width / 2
+        norm += self._get_norm(delta_begin, torch.ones(self.bins) * delta_end, density)
+
+        norm += (dst_bin_of_end - dst_bin_of_begin - 1) * self._get_norm(
+            torch.tensor(-dst_bin_width / 2), torch.tensor(dst_bin_width / 2), density
+        )
+
+        dst_bin_of_end_center = (
+            dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+        )
+
+        delta_begin = -dst_bin_width / 2
+        delta_end = src_bin_end - dst_bin_of_end_center
+        norm += self._get_norm(torch.tensor(delta_begin), delta_end, density)
+
+        return norm.sum().item()
+
+    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -719,74 +801,11 @@ class HistogramObserver(_ObserverBase):
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
         caffe2/quantization/server/norm_minimization.cc
         """
-        def _get_norm(delta_begin, delta_end, density, norm_type):
-            r"""
-            Compute the norm of the values uniformaly distributed between
-            delta_begin and delta_end.
-
-            norm = density * (integral_{begin, end} x^2)
-                 = density * (end^3 - begin^3) / 3
-            """
-            assert norm_type == "L2", "Only L2 norms are currently supported"
-            norm = 0.0
-            if norm_type == "L2":
-                norm = (
-                    delta_end * delta_end * delta_end
-                    - delta_begin * delta_begin * delta_begin
-                ) / 3
-            return density * norm
-
-        def _compute_quantization_error(next_start_bin, next_end_bin, norm_type):
-            r"""
-            Compute the quantization error if we use start_bin to end_bin as the
-            min and max to do the quantization.
-            """
-            bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
-
-            dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
-            if dst_bin_width == 0.0:
-                return 0.0
-
-            src_bin = torch.arange(self.bins)
-            # distances from the beginning of first dst_bin to the beginning and
-            # end of src_bin
-            src_bin_begin = (src_bin - next_start_bin) * bin_width
-            src_bin_end = src_bin_begin + bin_width
-
-            # which dst_bins the beginning and end of src_bin belong to?
-            dst_bin_of_begin = torch.clamp(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
-            dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
-
-            dst_bin_of_end = torch.clamp(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
-            dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
-
-            density = self.histogram / bin_width
-
-            norm = torch.zeros(self.bins)
-
-            delta_begin = src_bin_begin - dst_bin_of_begin_center
-            delta_end = dst_bin_width / 2
-            norm += _get_norm(delta_begin, delta_end, density, norm_type)
-
-            norm += (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
-                -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
-            )
-
-            dst_bin_of_end_center = (
-                dst_bin_of_end * dst_bin_width + dst_bin_width / 2
-            )
-
-            delta_begin = -dst_bin_width / 2
-            delta_end = src_bin_end - dst_bin_of_end_center
-            norm += _get_norm(delta_begin, delta_end, density, norm_type)
-
-            return norm.sum()
-
         assert self.histogram.size()[0] == self.bins, "bins mistmatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
-        total = sum(self.histogram)
+        total = torch.sum(self.histogram).item()
         cSum = torch.cumsum(self.histogram, dim=0)
 
         stepsize = 1e-5  # granularity
@@ -825,7 +844,7 @@ class HistogramObserver(_ObserverBase):
                 continue
 
             # calculate the quantization error using next_start_bin and next_end_bin
-            norm = _compute_quantization_error(next_start_bin, next_end_bin, "L2")
+            norm = self._compute_quantization_error(next_start_bin, next_end_bin)
 
             if norm > norm_min:
                 break
@@ -837,11 +856,12 @@ class HistogramObserver(_ObserverBase):
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
 
-    @torch.jit.ignore
-    def _adjust_min_max(self,
-                        combined_min: torch.Tensor,
-                        combined_max: torch.Tensor,
-                        upsample_rate: int) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
+    def _adjust_min_max(
+        self,
+        combined_min: torch.Tensor,
+        combined_max: torch.Tensor,
+        upsample_rate: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
         # We ensure that:
         # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
         # This allows us to have a common grid of resolution s, where we can align
@@ -849,7 +869,8 @@ class HistogramObserver(_ObserverBase):
         # start_idx maps min_val to the histogram bin index.
 
         hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
-        downsample_rate = int(torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).item())
+        downsample_rate = int(torch.ceil(
+            (combined_max - combined_min) / (self.bins * hist_bin_width)).item())
         e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
         # Relax only the max, not the min, so that for one sided distributions, min stays at zero
         combined_max = combined_max + e
@@ -857,7 +878,6 @@ class HistogramObserver(_ObserverBase):
         start_idx = int(torch.round((self.min_val - combined_min) / hist_bin_width).item())
         return combined_min, combined_max, downsample_rate, start_idx
 
-    @torch.jit.ignore
     def _combine_histograms(self,
                             orig_hist: torch.Tensor,
                             new_hist: torch.Tensor,
@@ -915,7 +935,8 @@ class HistogramObserver(_ObserverBase):
             assert combined_min.numel() == 1 and combined_max.numel() == 1, (
                 "histogram min/max values must be scalar."
             )
-            combined_histogram = torch.histc(x, self.bins, min=int(combined_min), max=int(combined_max))
+            combined_histogram = torch.histc(
+                x, self.bins, min=int(combined_min), max=int(combined_max))
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
@@ -998,7 +1019,7 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None):
+    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None) -> None:
         super(PlaceholderObserver, self).__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
@@ -1058,7 +1079,7 @@ class NoopObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name=""):
+    def __init__(self, dtype=torch.float16, custom_op_name="") -> None:
         super(NoopObserver, self).__init__(dtype=dtype)
         self.dtype = dtype
         self.custom_op = custom_op_name

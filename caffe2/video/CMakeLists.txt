@@ -34,7 +34,7 @@ if(USE_OPENCV AND OpenCV_FOUND AND USE_FFMPEG AND FFMPEG_FOUND)
   # ---[ GPU test files
   file(GLOB tmp *_gpu_test.cc)
   set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
-  
+
   # ---[ HIP test files
   file(GLOB tmp hip/*_test.cc)
   set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})

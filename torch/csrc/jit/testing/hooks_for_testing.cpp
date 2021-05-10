@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
+
 #include <torch/csrc/jit/api/module.h>
 
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(Module module) {
   if (emit_module_callback) {
@@ -11,6 +13,7 @@ void didFinishEmitModule(Module module) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static FunctionHook emit_function_callback;
 void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {

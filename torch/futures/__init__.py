@@ -1,4 +1,4 @@
-from typing import cast, Callable, Generic, List, Type, TypeVar
+from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
 from torch._six import PY37
@@ -25,6 +25,24 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     .. warning:: GPU support is a beta feature, subject to changes.
     """
 
+    def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
+        r"""
+        Create an empty unset ``Future``. If the future is intended to hold
+        values containing CUDA tensors, (a superset of) their CUDA devices must
+        be specified at construction. (This is only supported if
+        ``torch.cuda.is_available()`` returns ``True``). This is needed to
+        ensure proper CUDA stream synchronization. The child futures, returned
+        by the ``then`` method, will inherit these devices.
+
+        Args:
+            devices(``List[Union[int, str, torch.device]]``, optional): the set
+                of devices on which tensors contained in this future's value are
+                allowed to reside and on which callbacks are allowed to operate.
+        """
+        if devices is None:
+            devices = []
+        super().__init__([torch.device(d) for d in devices])
+
     def done(self) -> bool:
         r"""
         Return ``True`` if this ``Future`` is done. A ``Future`` is done if it
@@ -38,41 +56,26 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().done()
 
-    def wait(self, non_blocking: bool = False) -> T:
+    def wait(self) -> T:
         r"""
         Block until the value of this ``Future`` is ready.
 
         If the value contains tensors that reside on GPUs, then an additional
         synchronization is performed with the kernels (executing on the device)
-        which may be asynchronously populating those tensors. Such sync can be:
-
-        - *Blocking* (the default), in which case the calling thread is held up
-          until those asynchronous kernels effectively terminate running on the
-          device. In such a mode, when ``wait()`` returns it is safe to
-          immediately use the result on any stream without further
-          synchronization. On the other hand, a blocking wait delays the moment
-          at which new operations can be sent to the GPU, possibly degrading
-          performance.
-        - *Non-blocking*, in which case ``wait()`` inserts the necessary
-          instructions in the current streams to ensure that further operations
-          enqueued on those streams will be properly scheduled after the async
-          kernels. Once that is done, ``wait()`` will return, even if
-          those kernels are still running. This mode allows for better
-          pipelining and performance, and should be safe as long as one doesn't
-          change streams between the call to ``wait()`` and the time at
-          which the result is used (but it requires explicit manual
-          synchronization when switching streams).
-
-        Args:
-            non_blocking (bool): whether the sync with the GPU kernels should be
-                                 non-blocking.
+        which may be asynchronously populating those tensors. Such sync is
+        non-blocking, which means that ``wait()`` will insert the necessary
+        instructions in the current streams to ensure that further operations
+        enqueued on those streams will be properly scheduled after the async
+        kernels but, once that is done, ``wait()`` will return, even if those
+        kernels are still running. No further synchronization is required when
+        accessing and using the values, as long as one doesn't change streams.
 
         Returns:
             The value held by this ``Future``. If the function (callback or RPC)
             creating the value has thrown an error, this ``wait`` method will
             also throw an error.
         """
-        return super().wait(non_blocking)
+        return super().wait()
 
     def value(self) -> T:
         r"""
@@ -104,18 +107,26 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         be guaranteed (to enforce a certain order consider chaining:
         ``fut.then(cb1).then(cb2)``). The callback must take one argument, which
         is the reference to this ``Future``. The callback function can use the
-        :meth:`value` method to get the value.
+        :meth:`value` method to get the value. Note that if this ``Future`` is
+        already completed, the given callback will be run immediately inline.
 
         If the ``Future``'s value contains tensors that reside on GPUs, the
         callback might be invoked while the async kernels that are populating
         those tensors haven't yet finished executing on the device. However, the
         callback will be invoked with some dedicated streams set as current
         (fetched from a global pool) which will be synchronized with those
-        kernels so that any new operation enqueued on those streams will be
-        scheduled on the device after the kernels complete. In other words, as
-        long as the callback doesn't switch streams, it can safely manipulate
-        the result without any additional synchronization. This is similar to
-        the non-blocking mode of :meth:`wait`.
+        kernels. Hence any operation performed by the callback on these tensors
+        will be scheduled on the device after the kernels complete. In other
+        words, as long as the callback doesn't switch streams, it can safely
+        manipulate the result without any additional synchronization. This is
+        similar to the non-blocking behavior of :meth:`wait`.
+
+        Similarly, if the callback returns a value that contains tensors that
+        reside on a GPU, it can do so even if the kernels that are producing
+        these tensors are still running on the device, as long as the callback
+        didn't change streams during its execution. If one wants to change
+        streams, one must be careful to re-synchronize them with the original
+        streams, that is, those that were current when the callback was invoked.
 
         Args:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
@@ -125,6 +136,15 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             A new ``Future`` object that holds the return value of the
             ``callback`` and will be marked as completed when the given
             ``callback`` finishes.
+
+        .. note:: Note that if the callback function throws, either
+            through the original future being completed with an exception and
+            calling ``fut.wait()``, or through other code in the callback, the
+            future returned by ``then`` will be marked appropriately with the
+            encountered error. However, if this callback later completes
+            additional futures, those futures are not marked as completed with
+            an error and the user is responsible for handling completion/waiting
+            on those futures independently.
 
         Example::
             >>> import torch
@@ -155,28 +175,44 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         the same ``Future``, but the order in which they will be executed cannot
         be guaranteed. The callback must take one argument, which is the
         reference to this ``Future``. The callback function can use the
-        :meth:`value` method to get the value.
+        :meth:`value` method to get the value. Note that if this ``Future`` is
+        already completed, the given callback will be run inline.
 
-        We recommend that you use the :meth:`then` method as it provides a way to synchronize
-        after your callback has completed. ``add_done_callback`` can be cheaper if your
-        callback does not return anything. But both :meth:`then` and ``add_done_callback``
-        use the same callback registration API under the hood.
+        We recommend that you use the :meth:`then` method as it provides a way
+        to synchronize after your callback has completed. ``add_done_callback``
+        can be cheaper if your callback does not return anything. But both
+        :meth:`then` and ``add_done_callback`` use the same callback
+        registration API under the hood.
+
+        With respect to GPU tensors, this method behaves in the same way as
+        :meth:`then`.
 
         Args:
-            callback(``None``): a ``Callable`` that takes in no arguments
+            callback(``Future``): a ``Callable`` that takes in one argument,
+            which is the reference to this ``Future``.
+
+        .. note:: Note that if the callback function throws, either
+            through the original future being completed with an exception and
+            calling ``fut.wait()``, or through other code in the callback,
+            error handling must be carefully taken care of. For example, if
+            this callback later completes additional futures, those futures are
+            not marked as completed with an error and the user is responsible
+            for handling completion/waiting on those futures independently.
 
         Example::
             >>> import torch
             >>>
-            >>> def callback():
+            >>> def callback(fut):
             >>>     print(f"This will run after the future has finished.")
+            >>>     print(fut.wait())
             >>>
             >>> fut = torch.futures.Future()
             >>> fut.add_done_callback(callback)
             >>> fut.set_result(5)
             >>>
             >>> # Outputs are:
-            >>> # This will run after the future has finished.
+            >>> This will run after the future has finished.
+            >>> 5
         """
         super().add_done_callback(callback)
 
@@ -221,6 +257,35 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         super().set_result(result)
 
+    def set_exception(self, result: T) -> None:
+        r"""
+        Set an exception for this ``Future``, which will mark this ``Future`` as
+        completed with an error and trigger all attached callbacks. Note that
+        when calling wait()/value() on this ``Future``, the exception set here
+        will be raised inline.
+
+        Args:
+            result (BaseException): the exception for this ``Future``.
+
+        Example::
+            >>> import torch
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> fut.set_exception(ValueError("foo"))
+            >>> fut.wait()
+            >>>
+            >>> # Output:
+            >>> # This will run after the future has finished.
+            >>> ValueError: foo
+        """
+        assert isinstance(result, Exception), f"{result} is of type {type(result)}, not an Exception."
+
+        def raise_error(fut_result):
+            raise fut_result
+
+        super()._set_unwrap_func(raise_error)
+        self.set_result(result)  # type: ignore[arg-type]
+
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:
     r"""
@@ -256,22 +321,19 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
     return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
 
 
-def wait_all(futures: List[Future], non_blocking: bool = False) -> List:
+def wait_all(futures: List[Future]) -> List:
     r"""
     Waits for all provided futures to be complete, and returns
-    the list of completed values.
+    the list of completed values. If any of the futures encounters an error,
+    the method will exit early and report the error not waiting for other
+    futures to complete.
 
     Args:
         futures (list): a list of :class:`~torch.futures.Future` object.
-        non_blocking (bool): whether the sync with the GPU kernels should be
-                             non-blocking.
 
     Returns:
         A list of the completed :class:`~torch.futures.Future` results. This
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [
-        fut.wait(non_blocking)
-        for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()
-    ]
+    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]

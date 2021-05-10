@@ -16,6 +16,8 @@ from torch._C._distributed_rpc import _get_current_rpc_agent
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
+_pickler = pickle.Pickler
+_unpickler = pickle.Unpickler
 
 
 class RPCExecMode(Enum):
@@ -87,7 +89,7 @@ class _InternalRPCPickler:
         tensor table
         """
         f = io.BytesIO()
-        p = pickle.Pickler(f)
+        p = _pickler(f)
         p.dispatch_table = self._dispatch_table
 
         # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
@@ -142,7 +144,8 @@ class _InternalRPCPickler:
         _thread_local_tensor_tables.recv_tables = tensor_table
 
         try:
-            ret = pickle.loads(binary_data)
+            unpickler = _unpickler(io.BytesIO(binary_data))
+            ret = unpickler.load()
         except AttributeError as e:
             # Occurs when function is not found on module/class during
             # unpickling.

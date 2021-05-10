@@ -18,8 +18,20 @@ inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, I
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack) {
+inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
+    // Note that we're dropping the DispatchKeySet argument.
+    // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, stack);
+}
+
+inline bool KernelFunction::isValidUnboxed() const {
+    return unboxed_kernel_func_ != nullptr;
+}
+
+template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
+inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
+    // See Note [Plumbing Keys Through The Dispatcher 2] for details.
+    func(opHandle, ks, stack);
 }
 
 inline bool KernelFunction::isValid() const {
@@ -30,29 +42,29 @@ inline bool KernelFunction::isFallthrough() const {
     return boxed_kernel_func_ == &fallthrough_kernel;
 }
 
-inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
+inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         boxed_kernel_func_ != nullptr,
         "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction."
     );
-    (*boxed_kernel_func_)(functor_.get(), opHandle, stack);
+    (*boxed_kernel_func_)(functor_.get(), opHandle, dispatchKeySet, stack);
 }
 
 template<class Return, class... Args>
-inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKernel* functor, Args&&... args) {
-    using ActualSignature = Return (OperatorKernel*, Args...);
+inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKernel* functor, DispatchKeySet dispatchKeySet, Args&&... args) {
+    using ActualSignature = Return (OperatorKernel*, DispatchKeySet, Args...);
     ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func);
-    return (*func)(functor, std::forward<Args>(args)...);
+    return (*func)(functor, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
+C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
     if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
+        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), dispatchKeySet, std::forward<Args>(args)...);
     }
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -64,11 +76,21 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         boxed_kernel_func_,
         functor_.get(),
         opHandle,
+        dispatchKeySet,
         std::forward<Args>(args)...
     );
 }
 
 template<KernelFunction::BoxedKernelFunction* func>
+inline KernelFunction KernelFunction::makeFromBoxedFunction() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &make_boxed_function<func>,
+        nullptr  // no unboxed function pointer
+    );
+}
+
+template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
 inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     return KernelFunction(
         nullptr,  // no functor_ object
@@ -103,7 +125,10 @@ inline KernelFunction KernelFunction::makeNamedNotSupported() {
 
 template<bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
+#ifndef NDEBUG
+  // This assertion is costly for build time so it's debug-gated.
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
+#endif
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     return KernelFunction(

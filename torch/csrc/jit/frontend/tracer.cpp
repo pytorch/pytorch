@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -61,6 +62,7 @@ void badArgType(const T& v) {
       ". File a bug report.");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
@@ -334,7 +336,9 @@ static IValue addInput(
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
-    value->setDebugName(name);
+    if (!value->hasDebugName()) {
+      value->setDebugName(name);
+    }
     state->setValue(input_tensor, value);
     return input_tensor;
   } else if (auto tuple_type = type->cast<TupleType>()) {
@@ -427,7 +431,14 @@ static void gatherParametersAndBuffers(
     if (isCustomClass(s.value)) {
       tracer::setValueTrace(s.value, trace_get_attr);
     }
-    if (self_ty->getAttribute(s.name)->is_module()) {
+
+    auto attr_type = self_ty->getAttribute(s.name);
+    // Skipping Parameters and Buffers that are behind an `InterfaceType`
+    // because it is illegal for InterfaceType to expose any attribute.
+    // And these attributes should never be used/exposed outside of
+    // InterfaceType'd module anyway.
+    if (attr_type->is_module() &&
+        attr_type->kind() != TypeKind::InterfaceType) {
       gatherParametersAndBuffers(
           state, trace_get_attr, Module(s.value.toObject()), qualname);
     }
@@ -440,7 +451,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool strict,
     bool force_outplace,
-    Module* self) {
+    Module* self,
+    const std::vector<std::string>& argument_names) {
   try {
     // Start tracing, treating 'inputs' as inputs to the trace, which can be
     // varied on subsequent invocations of the trace.  Any other variables
@@ -459,9 +471,26 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
       gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 
-    for (IValue& input : inputs) {
-      input = addInput(state, input, input.type(), state->graph->addInput());
+    // When enough argument name hints are provided, use them as debug names
+    // for traced function/modules.
+    // Here argument_names is allowed to have more names than needed because
+    // some arguments may have valid default values, therefore they don't need
+    // example inputs.
+    if (argument_names.size() >= inputs.size()) {
+      for (size_t i = 0, e = inputs.size(); i < e; ++i) {
+        IValue& input = inputs[i];
+        input = addInput(
+            state,
+            input,
+            input.type(),
+            state->graph->addInput(argument_names[i]));
+      }
+    } else {
+      for (IValue& input : inputs) {
+        input = addInput(state, input, input.type(), state->graph->addInput());
+      }
     }
+
     auto graph = state->graph;
 
     getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
@@ -562,7 +591,11 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
-  if (value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else if (value) {
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
@@ -836,7 +869,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   Variable size_var;
   {
     // Make sure this scalar to tensor isn't traced!
-    at::AutoNonVariableTypeMode guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
@@ -881,6 +914,7 @@ void ensureUniqueIfOutOfPlaced(
 ////////////////////////////////////////////////////////////////////////////////
 // Argument stash
 ////////////////////////////////////////////////////////////////////////////////
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local ArgumentStash ArgumentStash::stash;
 
 void ArgumentStash::stashIntArrayRefElem(
@@ -931,6 +965,7 @@ void ArgumentStash::stashValue(
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
 void defaultRecordSourceLocation(Node* n) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -943,6 +978,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
     defaultPythonCallstack);
 std::vector<StackEntry> pythonCallstack() {
@@ -955,21 +991,26 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
 void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_PYTHON_DATAFLOW =
     " might cause the trace to be incorrect. We can't record the data flow of "
     "Python values, so this value will be treated as a constant in the future. "
     "This means that the trace might not generalize to other inputs!";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_CONSTRUCTOR =
     " results are registered as constants in the trace. You can safely ignore this "
     "warning if you use this function to create tensors out of constant variables "
     "that would be the same every time you call this function. In any other case, "
     "this might cause the trace to be incorrect.";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* STRICT_TRACER_MSG =
     " might cause the trace to be incorrect, this is only valid if the container "
     "structure does not change based on the module's inputs. Consider using a constant "

@@ -24,19 +24,24 @@ DECLARE_DISPATCH(reduce_fn, argmax_stub);
 DECLARE_DISPATCH(reduce_fn, argmin_stub);
 
 using reduce_std_var_function =
-  void (*)(TensorIterator&, bool unbiased, bool take_sqrt);
+    void (*)(TensorIterator&, int64_t correction, bool take_sqrt);
 DECLARE_DISPATCH(reduce_std_var_function, std_var_stub);
 
 using reduce_norm_fn =
-    void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);
+    void (*)(Tensor&, const Tensor&, const Scalar&, c10::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
-using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
+using reduce_fn_flag = void(*)(TensorIterator &, const Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
 DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
+
+// Used in cuda/Normalization.cu
+TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
+    Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
+    int64_t correction, bool keepdim);
 
 }} // namespace at::native

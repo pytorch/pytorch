@@ -54,7 +54,7 @@ bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
   const auto& X = Input(0);
   const auto& a = Input(1);
   const auto& b = Input(2);
-  
+
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
@@ -78,6 +78,8 @@ bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
       a.data<float>(),
       b.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -95,9 +97,9 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
   CAFFE_ENFORCE_EQ(a.dim(0), D, a.dim());
 
-  
-  
-  
+
+
+
   auto* g_X = Output(0, X.sizes(), at::dtype<float>());
   auto * g_a = Output(1, a.sizes(), at::dtype<float>());
   auto * g_b = Output(2, a.sizes(), at::dtype<float>());
@@ -118,6 +120,8 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
       g_X->template mutable_data<float>(),
       g_a_data,
       g_b_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

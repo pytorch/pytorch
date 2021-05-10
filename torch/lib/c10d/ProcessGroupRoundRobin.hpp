@@ -6,6 +6,8 @@
 
 namespace c10d {
 
+constexpr const char* ROUND_ROBIN_BACKEND_NAME = "round_robin";
+
 // ProcessGroupRoundRobin implements simple load balancing.
 //
 // It is constructed with multiple processes groups. Each call is dispatched to
@@ -24,6 +26,10 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
       std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups);
 
   ~ProcessGroupRoundRobin() override;
+
+  const std::string getBackendName() const override {
+      return std::string(ROUND_ROBIN_BACKEND_NAME);
+  }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -47,7 +53,7 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;

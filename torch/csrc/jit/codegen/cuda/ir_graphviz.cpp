@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -372,8 +373,8 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   const bool is_output = outputs_.find(tv) != outputs_.end();
 
   const char* style = is_input ? "style=filled, fillcolor=palegreen"
-                               : is_output ? "style=filled, fillcolor=lightblue"
-                                           : "style=filled, fillcolor=beige";
+      : is_output              ? "style=filled, fillcolor=lightblue"
+                               : "style=filled, fillcolor=beige";
 
   graph_def_ << "    " << getid(tv) << " [label=\"" << label.str()
              << "\", shape=Mrecord, color=brown, " << style << "];\n";

@@ -6,7 +6,7 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(input.size());
@@ -22,9 +22,9 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<4>(tensor_lists,
-                              PointwiseOpScalarFunctor<scalar_t, 
+                              PointwiseOpScalarFunctor<scalar_t,
                                                        /* depth */ 4,
-                                                       /* r_args_depth */ 3, 
+                                                       /* r_args_depth */ 3,
                                                        /* res_arg_index */ 3>(),
                               Op<opmath_t>(),
                               scalar.to<opmath_t>());
@@ -34,7 +34,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 }
 
 template<template<class> class Op>
-void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(input.vec());
     tensor_lists.emplace_back(tensors1.vec());
@@ -43,9 +43,9 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<3>(tensor_lists,
-                              PointwiseOpScalarFunctor<scalar_t, 
+                              PointwiseOpScalarFunctor<scalar_t,
                                                        /* depth */ 3,
-                                                       /* r_args_depth */ 3, 
+                                                       /* r_args_depth */ 3,
                                                        /* res_arg_index */ 0>(),
                               Op<opmath_t>(),
                               scalar.to<opmath_t>());
@@ -53,7 +53,7 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
 }
 
 template<template<class> class Op>
-void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {
+void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.reserve(3);
     tensor_lists.emplace_back(input.vec());
@@ -62,18 +62,18 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        multi_tensor_apply<3>(tensor_lists,
-                              scalars,
-                              PointwiseOpScalarListFunctor<scalar_t, 
-                                                           /* depth */ 3,
-                                                           /* r_args_depth */ 3, 
-                                                           /* res_arg_index */ 0>(),
-                              Op<opmath_t>());
+        multi_tensor_apply<3, opmath_t>(tensor_lists,
+                                        scalars,
+                                        PointwiseOpScalarListFunctor<scalar_t,
+                                                                     /* depth */ 3,
+                                                                     /* r_args_depth */ 3,
+                                                                     /* res_arg_index */ 0>(),
+                                        Op<opmath_t>());
     });
 }
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {
+std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.reserve(4);
     std::vector<at::Tensor> vec_res;
@@ -89,33 +89,33 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        multi_tensor_apply<4>(tensor_lists,
-                              scalars,
-                              PointwiseOpScalarListFunctor<scalar_t, 
-                                                           /* depth */ 4,
-                                                           /* r_args_depth */ 3, 
-                                                           /* res_arg_index */ 3>(),
-                              Op<opmath_t>());
+        multi_tensor_apply<4, opmath_t>(tensor_lists,
+                                        scalars,
+                                        PointwiseOpScalarListFunctor<scalar_t,
+                                                                     /* depth */ 4,
+                                                                     /* r_args_depth */ 3,
+                                                                     /* res_arg_index */ 3>(),
+                                        Op<opmath_t>());
     });
 
     return tensor_lists[3];
 }
 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                                                                         \
-std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalar)) {                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);                                                               \
 }                                                                                                                                     \
                                                                                                                                       \
-void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
+void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalar)) {                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -124,20 +124,20 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
 
 
 #define FOREACH_POINTWISE_OP_SCALARLIST(NAME, OP)                                                                                                        \
-std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {  \
+std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
                                                                                                                                                          \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalars)) {                                                                                       \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars)) {                                                                                     \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
                                                                                                                                                          \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);                                                                                 \
 }                                                                                                                                                        \
                                                                                                                                                          \
-void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {                \
+void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
                                                                                                                                                          \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalars)) {                                                                                       \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars)) {                                                                                     \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -152,7 +152,7 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
     check_foreach_api_restrictions(tensors1, tensors2);                                                    \
-    if (!can_use_fast_route(tensors1, tensors2)) {                                                         \
+    if (!can_use_fast_route({tensors1, tensors2})) {                                                       \
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
     }                                                                                                      \
                                                                                                            \

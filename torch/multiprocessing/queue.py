@@ -1,5 +1,4 @@
 import io
-import multiprocessing
 import multiprocessing.queues
 from multiprocessing.reduction import ForkingPickler
 import pickle

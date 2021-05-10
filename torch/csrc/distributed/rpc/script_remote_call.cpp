@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/script_remote_call.h>
 
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -75,7 +75,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   auto values = value.toTuple()->elements();
   return fromIValues(values);
 }

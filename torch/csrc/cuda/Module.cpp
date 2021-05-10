@@ -77,8 +77,34 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
   return THPUtils_packInt32(device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* arg1 = nullptr;
+  PyObject* arg2 = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &arg1, &arg2)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "can_device_peer_access",
+        1,
+        "(int device, int peer_device);");
+    return nullptr;
+  }
+  THPUtils_assert(THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
+  THPUtils_assert(THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
+  int64_t device = THPUtils_unpackLong(arg1);
+  int64_t peer_device = THPUtils_unpackLong(arg2);
+
+  torch::utils::cuda_lazy_init();
+  auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
 }
 
@@ -140,6 +166,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
     throw python_error();
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
@@ -486,6 +513,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
     // This reference is meant to be given away, so no need to incref here.
@@ -506,11 +534,13 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_init",        THCPModule_initExtension,    METH_NOARGS,  nullptr},
   {"_cuda_setDevice",   THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_canDeviceAccessPeer", THCPModule_canDeviceAccessPeer_wrap, METH_VARARGS, nullptr},
   {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",

@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -32,6 +33,7 @@ TEST(GraphExecutorTest, Basic_CUDA) {
   ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, runAsync_executor) {
   /*
   TODO: there are some problem with C++ parsing script program involving
@@ -44,7 +46,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
         r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
         return r1.wait() + r2.wait()
   demo = DemoModule()
-  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
+  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
@@ -62,6 +64,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
     at::launch(move(f));
   };
   std::vector<IValue> stack;
+  // NOLINTNEXTLINE(modernize-use-emplace)
   stack.push_back(module._ivalue());
   graphExecutor.runAsync(stack, launcher)->wait();
   ASSERT_TRUE(asyncCounter > 0);

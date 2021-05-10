@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -167,6 +168,7 @@ void LoopNestGenerator::initReduction(
   // Work through the iter domains that we need to initialize on, outside to
   // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     kir::ForLoop* new_fl;
 
     if (id->isThread()) {
@@ -477,6 +479,7 @@ void groupExpressions(
     TargetGroupMapT& computed_at_exprs,
     ExprScoreMapT& scores) {
   TensorView* target_tensor = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ScoreT score;
   findTargetTensor(expr, target_tensor, score);
   scores.emplace(expr, score);

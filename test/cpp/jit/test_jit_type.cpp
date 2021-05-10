@@ -8,6 +8,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
   auto opt_bool_tensor = OptionalType::create(bool_tensor);
@@ -18,7 +19,7 @@ TEST(JitTypeTest, UnifyTypes) {
   TORCH_INTERNAL_ASSERT(!tensor->isSubtypeOf(opt_bool_tensor));
   auto unified = unifyTypes(opt_bool_tensor, tensor);
   TORCH_INTERNAL_ASSERT(unified);
-  auto elem = (*unified)->expect<OptionalType>()->getElementType();
+  auto elem = (*unified)->expectRef<OptionalType>().getElementType();
   TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(TensorType::get()));
 
   auto opt_tuple_none_int = OptionalType::create(

@@ -120,6 +120,56 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
+    def test_view_dtype(self, device, dtype):
+        int_dtype = {
+            torch.half: torch.int16,
+            torch.bfloat16: torch.int16,
+            torch.float: torch.int,
+            torch.double: torch.long,
+            torch.complex64: torch.long,
+        }[dtype]
+        numpy_dtype = {
+            torch.half: np.int16,
+            torch.bfloat16: np.int16,
+            torch.float: np.int32,
+            torch.double: np.int64,
+            torch.complex64: np.int64,
+        }[dtype]
+
+        def generate_inputs():
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
+            yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
+            yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
+            yield make_tensor((), device, dtype, low=-5, high=5)
+
+        def run_test(fp_tensor):
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.int8))
+
+            int_tensor = fp_tensor.view(int_dtype)
+            self.assertEqual(int_tensor.dtype, int_dtype)
+            self.assertEqual(int_tensor.shape, fp_tensor.shape)
+            self.assertEqual(int_tensor.stride(), fp_tensor.stride())
+
+            self.assertEqual(fp_tensor, int_tensor.view(dtype), rtol=0, atol=0)
+            self.assertEqual(fp_tensor.cpu().numpy().view(numpy_dtype), int_tensor, rtol=0, atol=0)
+
+            fp_tensor.zero_()
+            self.assertEqual(fp_tensor, torch.zeros_like(fp_tensor), rtol=0, atol=0)
+
+        for fp_tensor in generate_inputs():
+            run_test(fp_tensor)
+
+        # Test that requires_grad is dropped, because view(dtype) does not support backward
+        if dtype is torch.double:
+            t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
+            self.assertFalse(t.view(torch.complex64).requires_grad)
+
+
+    @onlyOnCPUAndCUDA
     def test_view_as_complex(self, device):
         def fn(contiguous_input=True, dim0=0, dim1=1):
             t = torch.randn(3, 2, 2, device=device)
@@ -223,6 +273,36 @@ class TestViewOps(TestCase):
         a_split_dim1 = a.tensor_split(7, 1)
         for a_split_dim1_tensor in a_split_dim1:
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_hsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_hsplit = torch.hsplit(t, 2)
+        for t_hsplit_tensor in t_hsplit:
+            self.assertTrue(self.is_view_of(t, t_hsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_hsplit[1][2, 0, 2], t[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_vsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_vsplit = torch.vsplit(t, 2)
+        for t_vsplit_tensor in t_vsplit:
+            self.assertTrue(self.is_view_of(t, t_vsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_vsplit[1][0, 2, 2], t[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_dsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_dsplit = torch.dsplit(t, 2)
+        for t_dsplit_tensor in t_dsplit:
+            self.assertTrue(self.is_view_of(t, t_dsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
@@ -811,21 +891,21 @@ class TestOldViewOps(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))
-        self.assertEqual(x.narrow(0, 0, 2), torch.Tensor([[0, 1, 2], [3, 4, 5]]))
-        self.assertEqual(x.narrow(0, 1, 1), torch.Tensor([[3, 4, 5]]))
-        self.assertEqual(x.narrow(0, -1, 1), torch.Tensor([[6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -2, 2), torch.Tensor([[3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -3, 3), torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
-        self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, 0, 1), torch.tensor([[0, 1, 2]]))
+        self.assertEqual(x.narrow(0, 0, 2), torch.tensor([[0, 1, 2], [3, 4, 5]]))
+        self.assertEqual(x.narrow(0, 1, 1), torch.tensor([[3, 4, 5]]))
+        self.assertEqual(x.narrow(0, -1, 1), torch.tensor([[6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -2, 2), torch.tensor([[3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -3, 3), torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(-1, -1, 1), torch.tensor([[2], [5], [8]]))
+        self.assertEqual(x.narrow(-2, -1, 1), torch.tensor([[6, 7, 8]]))
 
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow_tensor(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.Tensor([[0, 1, 2]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
         with self.assertRaises(Exception):
             x.narrow(0, torch.tensor(0.), 1)
         with self.assertRaises(Exception):

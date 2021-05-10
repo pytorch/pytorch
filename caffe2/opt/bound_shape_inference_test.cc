@@ -46,7 +46,7 @@ void verifyShapeInfo(
   const auto& shape = shape_info.shape;
   ASSERT_EQ(shape.dims_size(), dims.size());
   for (int i = 0; i < dims.size(); ++i) {
-    EXPECT_EQ(shape.dims(i), dims[i]);
+    EXPECT_EQ(dims[i], shape.dims(i));
   }
   EXPECT_EQ(shape.data_type(), dtype);
   EXPECT_EQ(shape_info.is_quantized, quantized);
@@ -54,6 +54,7 @@ void verifyShapeInfo(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -93,6 +94,65 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       {spec.max_batch_size, 16});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "SparseLengthsSumSparseLookup",
+      "",
+      {"Indices", "Lengths", "Remapping", "Weights"},
+      {"IndicesOut", "LengthsOut", "WeightsOut"},
+      {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Remapping",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT},
+          {1000},
+          TensorProto_DataType_INT32));
+  BoundShapeSpec spec(20, 1000);
+  shape_map.emplace(
+      "Indices",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+          {spec.max_batch_size * spec.max_seq_size},
+          TensorProto_DataType_INT32));
+  shape_map.emplace(
+      "Weights",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+          {spec.max_batch_size * spec.max_seq_size},
+          TensorProto_DataType_FLOAT));
+  shape_map.emplace(
+      "Lengths",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH},
+          {spec.max_batch_size},
+          TensorProto_DataType_INT32));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "WeightsOut",
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
+      TensorProto_DataType_FLOAT);
+  verifyShapeInfo(
+      out_shape,
+      "IndicesOut",
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "LengthsOut",
+      {TensorBoundShape_DimType_BATCH},
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -138,6 +198,7 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       {spec.max_batch_size, 50});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -195,6 +256,7 @@ TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
       {spec.max_batch_size, 50});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -240,6 +302,7 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
       {spec.max_batch_size, 100});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, LengthsRangeFill) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -271,6 +334,7 @@ TEST(BoundShapeInference, LengthsRangeFill) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConstantFill) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -295,6 +359,7 @@ TEST(BoundShapeInference, ConstantFill) {
 }
 
 // https://github.com/pytorch/pytorch/issues/40861
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};
@@ -347,6 +412,7 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatMissingInput) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -380,6 +446,7 @@ TEST(BoundShapeInference, ConcatMissingInput) {
 }
 
 // See https://github.com/pytorch/pytorch/issues/35544
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BoundShapeInference,
     DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
@@ -439,6 +506,7 @@ TEST(
       true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -489,6 +557,7 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       {spec.max_batch_size, 101 - 60});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -536,6 +605,7 @@ TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
       {spec.max_batch_size, 50});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseOp) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -599,6 +669,7 @@ TEST(BoundShapeInference, ElementwiseOp) {
       {spec.max_batch_size, 40});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Bucketize) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -612,7 +683,7 @@ TEST(BoundShapeInference, Bucketize) {
   shape_map.emplace(
       "In",
       makeTensorInfo(
-          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
           {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -620,11 +691,12 @@ TEST(BoundShapeInference, Bucketize) {
   verifyShapeInfo(
       out_shape,
       "Out",
-      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 60},
       TensorProto_DataType_INT32);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Split) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -709,6 +781,7 @@ TEST(BoundShapeInference, Split) {
 }
 
 // https://github.com/pytorch/pytorch/issues/41471
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -786,6 +859,7 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, FC3D) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -816,6 +890,7 @@ TEST(BoundShapeInference, FC3D) {
       {spec.max_batch_size, 16});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Quantization) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -839,6 +914,7 @@ TEST(BoundShapeInference, Quantization) {
       TensorProto_DataType_UINT8);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Tile) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -877,6 +953,7 @@ TEST(BoundShapeInference, Tile) {
       {8, 16});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -924,4 +1001,86 @@ TEST(BoundShapeInference, Combo0) {
       "Gout",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 2});
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundShapeInference, Softmax) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Softmax",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<int>("axis", 1)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {1, 16});
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundShapeInference, LpNorm) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "LpNorm",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<int>("p", 1)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT},
+      {1});
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundShapeInference, Transpose) {
+  NetDef net;
+  std::vector<int> axes{1, 0};
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Transpose",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<std::vector<int>>("axes", axes)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {16, 1});
 }

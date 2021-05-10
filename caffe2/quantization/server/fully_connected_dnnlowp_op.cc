@@ -13,6 +13,7 @@
 #include "fbgemm_pack_op.h"
 #include "mmio.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_dnnlowp_enforce_default_operators,
     false,
@@ -20,7 +21,9 @@ C10_DEFINE_bool(
     "instead of using its own implementation that uses AVX2 instructions"
     "(currently only honored by FC)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_dump_tensors);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
@@ -454,6 +457,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
         int32_t sum = 0;
         for (int k = 0; k < K; ++k) {
           int x = Xdata[i * K + k];
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           int w = Wdata[j * K + k];
           sum += x * w;
 #ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
@@ -499,12 +503,15 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       size_t X_size = M * K;
       size_t W_size = N * K;
       size_t Y_size = M * N;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < X_size; i++) {
         X_q_data[i] = Xdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < W_size; i++) {
         W_q_data[i] = Wdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < Y_size; i++) {
         Y_q_data[i] = Y_int32_[i];
       }
@@ -681,6 +688,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       filter_zero_points_.resize(filter_qparams_.size());
       requantization_params_.resize(filter_qparams_.size());
       requantization_multipliers_.resize(filter_qparams_.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < filter_qparams_.size(); ++i) {
         filter_scales_[i] = filter_qparams_[i].scale;
         filter_zero_points_[i] = filter_qparams_[i].zero_point;
@@ -788,6 +796,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
     } else {
       const auto& bias = InputTensorCPU_(2);
       if (this->template InputIsType<int8::Int8TensorCPU>(2)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
         TensorQuantizationParams bias_qparams;
         bias_qparams.scale = this->template Input<int8::Int8TensorCPU>(2).scale;
         bias_qparams.zero_point =
@@ -838,6 +847,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
         b_quantized_->assign(b_quantized_data_, b_quantized_data_ + N);
         b_quantized_data_ = b_quantized_->data();
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       vector<int32_t>* column_offset_ptr;
       vector<int32_t> column_offset_temp;
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -889,6 +899,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       float in_scale = input_qparam_blob->qparam.scale;
       int in_zero_point = input_qparam_blob->qparam.zero_point;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       dnnlowp::TensorQuantizationParams out_qparams_overwrite;
       out_qparams_overwrite.scale = in_scale;
       out_qparams_overwrite.zero_point = in_zero_point;
@@ -898,6 +909,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       GetOutputQuantizationParams_();
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < filter_qparams_.size(); ++i) {
       float real_multiplier =
           in_qparams_[0].scale * filter_qparams_[i].scale / out_qparams_.scale;
@@ -931,48 +943,59 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 
 template class FullyConnectedDNNLowPOp<uint8_t>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ROWWISE_16,
     FullyConnectedDNNLowPOp<uint16_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP,
     FullyConnectedDNNLowPOp<uint8_t, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCRelu,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t, true>);
 
 using namespace std::placeholders;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8FCRelu)
     .NumInputs(3, 4)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));
 
 } // namespace caffe2

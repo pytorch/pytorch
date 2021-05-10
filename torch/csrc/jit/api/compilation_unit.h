@@ -46,6 +46,7 @@ struct Self {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
+  enum class FunctionType { Method, Hook, PreHook };
   // constructor that takes a set of functions to compile using the native
   // resolver
   explicit CompilationUnit(const std::string& source);
@@ -97,6 +98,15 @@ struct TORCH_API CompilationUnit {
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
       // see [name mangling]
+      bool shouldMangle = false);
+
+  void define_hooks(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const std::vector<Def>& hookDefs,
+      const std::vector<ResolverPtr>& hookResolvers,
+      const std::vector<Def>& preHookDefs,
+      const std::vector<ResolverPtr>& preHookResolvers,
+      const Self* self,
       bool shouldMangle = false);
 
   // same as above but parse the definitions from source
@@ -221,6 +231,24 @@ struct TORCH_API CompilationUnit {
           // Erase in our big lookup table
           dict_.erase(it);
         }
+        // Classes can have multiple pointers to the same hook,
+        // need to make sure to not delete it twice
+        std::unordered_set<Function*> hooks_to_delete;
+        for (const auto& hook : cls->getForwardHooks()) {
+          hooks_to_delete.insert(hook);
+        }
+        for (const auto& pre_hook : cls->getForwardPreHooks()) {
+          hooks_to_delete.insert(pre_hook);
+        }
+        for (const auto& hook : hooks_to_delete) {
+          // Tombstone the hook in the compilation unit.
+          auto it = dict_.find(hook->qualname());
+          if (it != dict_.end()) {
+            functions_[it->second] = nullptr;
+            // Erase in our big lookup table
+            dict_.erase(it);
+          }
+        }
       }
     }
     classes_.clear();
@@ -263,7 +291,8 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle = false) const;
+      bool shouldMangle = false,
+      FunctionType type = FunctionType::Method) const;
 
   // Define a property on \p self.
   struct PropertyPair;
