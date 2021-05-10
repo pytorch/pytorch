@@ -207,7 +207,6 @@ void QuantizeConvBias(
     CAFFE_ENFORCE_LE(
         std::abs(
             bias_qparams.scale - in_qparams.scale * filter_qparams[0].scale),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         1e-4);
     CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
     b_quantized.resize(bias.numel());
@@ -235,7 +234,6 @@ void QuantizeConvBias(
               bdata[i],
               0,
               in_qparams.scale * filter_qparams[g].scale,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               32,
               true /* signed */);
         } else {
@@ -295,7 +293,6 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
   }
   if (this->InputIsType<int8::Int8TensorCPU>(0) && quantize_channelwise_) {
     static int log_occurences = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (log_occurences < 32) {
       ++log_occurences;
       LOG(WARNING) << "Cannot do row-wise quantization for "
@@ -313,7 +310,6 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
       K, N, W_quantized.data(), Y->qparams, *Y->column_offsets);
 
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nbits_in_non_outlier_ < 8) {
       Y->W_outlier.reset(
           ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized));
@@ -413,7 +409,6 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3FastPath_() {
   // The number of input channels per group
   int C_per_group = filter.dim32(filter.dim() - 1);
   return this->debug_def().engine() != "DNNLOWP_ACC16" && group_ == M &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       C_per_group == 1 && group_ % 8 == 0 && this->kernel_.size() == 2 &&
       kernel_h() == 3 && kernel_w() == 3 && stride_h() == stride_w() &&
       (stride_h() == 1 || stride_h() == 2) && dilation_h() == 1 &&
@@ -428,7 +423,6 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   // The number of input channels per group
   int C_per_group = filter.dim32(filter.dim() - 1);
   bool ret = this->debug_def().engine() != "DNNLOWP_ACC16" && group_ == M &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       C_per_group == 1 && group_ % 8 == 0 && this->kernel_.size() == 3 &&
       this->kernel_[0] == 3 && this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
       (this->stride_[0] == 1 || this->stride_[0] == 2) &&
@@ -482,7 +476,6 @@ fbgemm::conv_param_t<3> ConvDNNLowPPackWeightOp::GetConv3DParam_() {
        this->pads_[2],
        this->pads_[3],
        this->pads_[4],
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        this->pads_[5]});
 }
 
@@ -540,7 +533,6 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
 
   if (this->InputIsType<int8::Int8TensorCPU>(FILTER) && quantize_groupwise_) {
     static int log_occurences = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (log_occurences < 32) {
       ++log_occurences;
       LOG(WARNING) << "Cannot do group-wise quantization for "
@@ -595,7 +587,6 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   // When nbits_in_non_outlier == 0, we fall back to acc32
   if (this->debug_def().engine() == "DNNLOWP_ACC16" &&
       !fallback_to_32_bit_accumulation) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nbits_in_non_outlier_ < 8) {
       int outlier_cnt = CountOutliers(
           group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized);

@@ -46,7 +46,6 @@ OpSchema::Cost CostInferenceForSparseLengths(
 // gradient of SparseLengthsWeightedSum
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(2);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

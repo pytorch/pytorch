@@ -84,26 +84,16 @@ static void codegenOutputQuery(
 
   CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
   CudaVersion max_dev_version(dev_version);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(5, 0);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(6, 0);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(7, 2);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(7, 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
     // 11.0 supports 3-8.0
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(8, 0);
   }
   if (dev_version > max_dev_version) {
@@ -1154,7 +1144,6 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (has_random_) {
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     // TODO: total hack. Switch to numel when it is available.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t total_elements_per_thread = (1LL << 28);
     {
       std::lock_guard<std::mutex> lock(gen.mutex());

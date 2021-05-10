@@ -707,9 +707,7 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
     ++nwords_first_line;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bool new_format = nwords_first_line == 6;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (!new_format && nwords_first_line != 5) {
     LOG(WARNING) << "min_max file " << min_max_file_name
                  << " has an invalid format";
@@ -749,10 +747,8 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));
         qparams = qfactory->ChooseQuantizationParams(min, max, is_weight);
       } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.scale = 0.1f;
         qparams.zero_point = -min / qparams.scale;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.precision = 8;
       }
 
@@ -804,12 +800,10 @@ RegisterQuantizationParamsWithHistogramNetObserver::
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nwords_first_line != nbins + 7) {
     ist.str(first_line);
     ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nwords_first_line == nbins + 6) {
       new_format = false;
     } else {
@@ -871,9 +865,7 @@ RegisterQuantizationParamsWithHistogramNetObserver::
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));
         qparams = qfactory->ChooseQuantizationParams(hist, is_weight);
       } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.scale = 0.1f;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.precision = 8;
         qparams.zero_point =
             (isinf(min / qparams.scale) || isnan(min / qparams.scale))

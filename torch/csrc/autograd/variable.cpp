@@ -317,16 +317,6 @@ namespace impl {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void set_pyobj(const Variable& self, PyObject* pyobj) {
-    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
-    self.unsafeGetTensorImpl()->set_pyobj(pyobj);
-  }
-
-  PyObject* pyobj(const Variable& self) {
-    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-    return self.unsafeGetTensorImpl()->pyobj();
-  }
-
   AutogradMeta* get_autograd_meta(const Variable& self) {
     // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
@@ -686,12 +676,7 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 
-      if (creation_meta == CreationMeta::NO_GRAD_MODE) {
-        // TODO: remove this before 1.9 once all code is properly updated
-        TORCH_WARN(msg);
-      } else {
-        TORCH_CHECK(false, msg);
-      }
+      TORCH_CHECK(false, msg);
     }
 
     // We warn only once per view
