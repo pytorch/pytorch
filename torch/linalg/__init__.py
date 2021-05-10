@@ -354,7 +354,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 .. note:: {sync_note}
 
-.. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (e.g. when all the
+.. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (for example, when all the
              eigenvalues are different). If it is not diagonalizable, the returned
              eigenvalues will be correct but :math:`A \neq V \operatorname{diag}(\Lambda)V^{-1}`.
 
