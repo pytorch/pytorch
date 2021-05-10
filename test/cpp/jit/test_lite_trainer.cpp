@@ -26,9 +26,7 @@ TEST(LiteTrainerTest, Params) {
       b = 1.0
       return self.foo * x + b
   )");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -106,34 +104,6 @@ TEST(MobileTest, NamedParameters) {
   }
 }
 
-TEST(MobileTest, SaveLoadData) {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
-  m.define(R"(
-    def add_it(self, x):
-      b = 4
-      return self.foo + x + b
-  )");
-  Module child("m2");
-  child.register_parameter("foo", 4 * torch::ones({}), false);
-  child.register_parameter("bar", 3 * torch::ones({}), false);
-  m.register_module("child1", child);
-  m.register_module("child2", child.clone());
-  auto full_params = m.named_parameters();
-
-  std::stringstream ss;
-  std::stringstream ss_data;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  mobile::_save_data(bc, ss_data);
-  auto mobile_params = mobile::_load_data(ss_data).named_parameters();
-  AT_ASSERT(full_params.size() == mobile_params.size());
-  for (const auto& e : full_params) {
-    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
-  }
-}
-
 TEST(MobileTest, SaveLoadParameters) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -198,9 +168,7 @@ TEST(LiteTrainerTest, SGD) {
       b = 1.0
       return self.foo * x + b
   )");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -252,7 +220,6 @@ TEST(LiteTrainerTest, SGD) {
 
 namespace {
 struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   explicit DummyDataset(size_t size = 100) : size_(size) {}
 
   int get(size_t index) override {
@@ -273,9 +240,7 @@ TEST(LiteTrainerTest, SequentialSampler) {
   const int kBatchSize = 10;
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          DummyDataset(25),
-          kBatchSize);
+          DummyDataset(25), kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {

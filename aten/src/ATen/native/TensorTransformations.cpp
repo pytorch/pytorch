@@ -110,7 +110,6 @@ void flip_cpu_kernel(TensorIterator& iter) {
   iter.for_each(loop, index_parallel_grain_size);
 }
 
-
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   if(dims.size() == 0) {
     return self.clone();
