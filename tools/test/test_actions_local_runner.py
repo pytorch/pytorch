@@ -95,7 +95,8 @@ if sys.version_info >= (3, 8):
             for line in self.expected:
                 self.assertIn(line, stdout)
 
-            self.assertIn("✓ mypy (skipped typestub generation)", stdout)
+            # TODO: See https://github.com/pytorch/pytorch/issues/57967
+            # self.assertIn("✓ mypy (skipped typestub generation)", stdout)
 
 
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):
