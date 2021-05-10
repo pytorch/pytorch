@@ -9,7 +9,6 @@ void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int j;
   // vectorized loop
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (j = 0; j < N / 32 * 32; j += 32) {
     // a : a0 a1 ... a31
     // b : b0 b1 ... b31
@@ -42,19 +41,15 @@ void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
 
     // Storing with 128-bit lanes are permuted so that everything is in order
     _mm256_storeu_si256(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (__m256i*)(dst + j * M + 0 * 32),
         _mm256_permute2f128_si256(y0, y1, 0x20));
     _mm256_storeu_si256(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (__m256i*)(dst + j * M + 1 * 32),
         _mm256_permute2f128_si256(y2, y3, 0x20));
     _mm256_storeu_si256(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (__m256i*)(dst + j * M + 2 * 32),
         _mm256_permute2f128_si256(y0, y1, 0x31));
     _mm256_storeu_si256(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (__m256i*)(dst + j * M + 3 * 32),
         _mm256_permute2f128_si256(y2, y3, 0x31));
   }

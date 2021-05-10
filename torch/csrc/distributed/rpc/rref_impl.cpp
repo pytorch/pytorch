@@ -246,7 +246,7 @@ OwnerRRef::OwnerRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     TypePtr type,
-    std::vector<c10::DeviceIndex> devices)
+    std::vector<c10::Device> devices)
     : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
 
 OwnerRRef::OwnerRRef(
@@ -254,15 +254,10 @@ OwnerRRef::OwnerRRef(
     const RRefId& rrefId,
     TypePtr type,
     c10::optional<IValue> value,
-    std::vector<c10::DeviceIndex> devices)
+    std::vector<c10::Device> devices)
     : RRef(ownerId, rrefId, type) {
-  if (devices.empty()) {
-    future_ =
-        FutureFactoryRegistry::getInstance().createFuture(c10::DeviceType::CPU);
-  } else {
-    future_ = FutureFactoryRegistry::getInstance().createFuture(
-        c10::DeviceType::CUDA, devices);
-  }
+  future_ = c10::make_intrusive<JitFuture>(
+      at::AnyClassType::get(), std::move(devices));
 
   if (value.has_value()) {
     future_->markCompleted(value.value());
@@ -288,7 +283,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 
@@ -314,7 +309,7 @@ void OwnerRRef::recordAllStreams(
 void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
-      event.block(ctx->getStream(event.device_index()));
+      event.block(ctx->getStream(event.device()));
     }
   }
 }

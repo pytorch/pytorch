@@ -183,7 +183,6 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             scalar_t floordiv;
             if (div != 0) {
               floordiv = std::floor(div);
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (div - floordiv > scalar_t(0.5)) {
                 floordiv += scalar_t(1.0);
               }
@@ -639,9 +638,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
             [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
               auto z = std::abs(a - b);
               return z < beta_val
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   ? static_cast<scalar_t>(0.5) * z * z / beta_val
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                   : z - static_cast<scalar_t>(0.5) * beta_val;
             },
             [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
@@ -662,9 +659,7 @@ void huber_kernel(TensorIterator& iter, double delta) {
       iter,
       [&delta_val](scalar_t a, scalar_t b) -> scalar_t {
         auto z = std::abs(a - b);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return z < delta_val ? static_cast<scalar_t>(0.5) * z * z :
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         delta_val * (z - static_cast<scalar_t>(0.5) * delta_val);
       },
       [&delta_val_vec, &point_five_vec](Vec a, Vec b) {
@@ -808,7 +803,7 @@ void fmod_kernel(TensorIterator& iter) {
   }
 }
 
-void logaddexp_kernel(TensorIterator& iter) {
+void logaddexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -832,7 +827,7 @@ void logaddexp_kernel(TensorIterator& iter) {
   });
 }
 
-void logaddexp2_kernel(TensorIterator& iter) {
+void logaddexp2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -847,7 +842,6 @@ void logaddexp2_kernel(TensorIterator& iter) {
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
           Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
           Vec256<scalar_t> one(1.0);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Vec256<scalar_t> two(2.0);
           Vec256<scalar_t> m = maximum(a, b);
           return Vec256<scalar_t>::blendv(
@@ -858,7 +852,7 @@ void logaddexp2_kernel(TensorIterator& iter) {
   });
 }
 
-void gcd_kernel(TensorIterator& iter) {
+void gcd_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
       cpu_kernel(
           iter,
@@ -868,7 +862,7 @@ void gcd_kernel(TensorIterator& iter) {
     });
 }
 
-void lcm_kernel(TensorIterator& iter) {
+void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
       cpu_kernel(
           iter,
@@ -879,7 +873,7 @@ void lcm_kernel(TensorIterator& iter) {
     });
 }
 
-void hypot_kernel(TensorIterator& iter) {
+void hypot_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -892,7 +886,7 @@ void hypot_kernel(TensorIterator& iter) {
   });
 }
 
-void igamma_kernel(TensorIterator& iter) {
+void igamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igamma_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -905,7 +899,7 @@ void igamma_kernel(TensorIterator& iter) {
   });
 }
 
-void igammac_kernel(TensorIterator& iter) {
+void igammac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igammac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -918,7 +912,7 @@ void igammac_kernel(TensorIterator& iter) {
   });
 }
 
-void nextafter_kernel(TensorIterator& iter) {
+void nextafter_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -961,6 +955,20 @@ void xlogy_kernel(TensorIterator& iter) {
         return 0;
       }
       return x * std::log(y);
+    });
+  });
+}
+
+void xlog1py_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlog1py_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log1p(y);
     });
   });
 }
@@ -1057,6 +1065,7 @@ REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
+REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 
 } // namespace native
 } // namespace at

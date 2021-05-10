@@ -214,7 +214,7 @@ Alias for :func:`torch.acosh`.
 """.format(**common_args))
 
 add_docstr(torch.add, r"""
-add(input, other, *, out=None)
+add(input, other, *, out=None) -> Tensor
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
 and returns a new resulting tensor.
@@ -227,7 +227,7 @@ a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    value (Number): the number to be added to each element of :attr:`input`
+    other (Number): the number to be added to each element of :attr:`input`
 
 Keyword arguments:
     {out}
@@ -240,7 +240,7 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, other, *, alpha=1, out=None)
+.. function:: add(input, other, *, alpha=1, out=None) -> Tensor
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -2029,13 +2029,16 @@ Keyword args:
 """.format(**common_args))
 
 add_docstr(torch.clamp, r"""
-clamp(input, min, max, *, out=None) -> Tensor
+clamp(input, min=None, max=None, *, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
-Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
+Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
+Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
 
 .. math::
-    y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
+    y_i = \min(\max(x_i, \text{min\_value}_i), \text{max\_value}_i)
+
+If :attr:`min` is ``None``, there is no lower bound.
+Or, if :attr:`max` is ``None`` there is no upper bound.
 """ + r"""
 
 .. note::
@@ -2044,8 +2047,8 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 
 Args:
     {input}
-    min (Number): lower-bound of the range to be clamped to
-    max (Number): upper-bound of the range to be clamped to
+    min (Number or Tensor, optional): lower-bound of the range to be clamped to
+    max (Number or Tensor, optional): upper-bound of the range to be clamped to
 
 Keyword args:
     {out}
@@ -2058,47 +2061,14 @@ Example::
     >>> torch.clamp(a, min=-0.5, max=0.5)
     tensor([-0.5000,  0.1734, -0.0478, -0.0922])
 
-.. function:: clamp(input, *, min, out=None) -> Tensor
+    >>> min = torch.linspace(-1, 1, steps=4)
+    >>> torch.clamp(a, min=min)
+    tensor([-1.0000,  0.1734,  0.3333,  1.0000])
 
-Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
-
-Args:
-    {input}
-
-Keyword args:
-    min (Number): minimal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([-0.0299, -2.3184,  2.1593, -0.8883])
-    >>> torch.clamp(a, min=0.5)
-    tensor([ 0.5000,  0.5000,  2.1593,  0.5000])
-
-.. function:: clamp(input, *, max, out=None) -> Tensor
-
-Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-Args:
-    {input}
-
-Keyword args:
-    max (Number): maximal value of each element in the output
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
-    >>> torch.clamp(a, max=0.5)
-    tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
 """.format(**common_args))
 
 add_docstr(torch.clip, r"""
-clip(input, min, max, *, out=None) -> Tensor
+clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
@@ -4706,8 +4676,8 @@ Similar to SciPy's `scipy.special.xlogy`.
 """ + r"""
 
 Args:
-    input (Number or Tensor)
-    other (Number or Tensor)
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
 
 .. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
@@ -5025,6 +4995,68 @@ Example::
 
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, False], [True, False]])
+""".format(**common_args))
+
+add_docstr(torch.lu_unpack, r"""
+lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
+
+Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
+such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
+
+Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
+
+.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
+          are possible without casting it to a floating type.
+
+Args:
+    LU_data (Tensor): the packed LU factorization data
+    LU_pivots (Tensor): the packed LU factorization pivots
+    unpack_data (bool): flag indicating if the data should be unpacked.
+                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
+                        Default: ``True``
+    unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
+                          If ``False``, then the returned ``P`` is  ``None``.
+                          Default: ``True``
+    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
+
+Examples::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots = A.lu()
+    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+    >>>
+    >>> # can recover A from factorization
+    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+
+    >>> # LU factorization of a rectangular matrix:
+    >>> A = torch.randn(2, 3, 2)
+    >>> A_LU, pivots = A.lu()
+    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+    >>> P
+    tensor([[[1., 0., 0.],
+             [0., 1., 0.],
+             [0., 0., 1.]],
+
+            [[0., 0., 1.],
+             [0., 1., 0.],
+             [1., 0., 0.]]])
+    >>> A_L
+    tensor([[[ 1.0000,  0.0000],
+             [ 0.4763,  1.0000],
+             [ 0.3683,  0.1135]],
+
+            [[ 1.0000,  0.0000],
+             [ 0.2957,  1.0000],
+             [-0.9668, -0.3335]]])
+    >>> A_U
+    tensor([[[ 2.1962,  1.0881],
+             [ 0.0000, -0.8681]],
+
+            [[-1.0947,  0.3736],
+             [ 0.0000,  0.5718]]])
+    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+    >>> torch.norm(A_ - A)
+    tensor(2.9802e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
@@ -6001,7 +6033,7 @@ Example::
 """.format(**single_dim_common))
 
 add_docstr(torch.mul, r"""
-mul(input, other, *, out=None)
+mul(input, other, *, out=None) -> Tensor
 
 Multiplies each element of the input :attr:`input` with the scalar
 :attr:`other` and returns a new resulting tensor.
@@ -6027,7 +6059,7 @@ Example::
     >>> torch.mul(a, 100)
     tensor([  20.1494,  -42.5491,  260.8663])
 
-.. function:: mul(input, other, *, out=None)
+.. function:: mul(input, other, *, out=None) -> Tensor
 
 Each element of the tensor :attr:`input` is multiplied by the corresponding
 element of the Tensor :attr:`other`. The resulting tensor is returned.
@@ -6036,8 +6068,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \text{input}_i \times \text{other}_i
-""" + r"""
+    \text{{out}}_i = \text{{input}}_i \times \text{{other}}_i
+""".format(**common_args) + r"""
 
 Args:
     input (Tensor): the first multiplicand tensor
@@ -6602,7 +6634,7 @@ Example::
 
 .. function:: normal(mean, std=1.0, *, out=None) -> Tensor
 
-Similar to the function above, but the standard-deviations are shared among
+Similar to the function above, but the standard deviations are shared among
 all drawn elements.
 
 Args:
@@ -6725,22 +6757,40 @@ Alias for :func:`torch.linalg.householder_product`.
 
 add_docstr(torch.ormqr,
            r"""
-ormqr(input, input2, input3, left=True, transpose=False) -> Tensor
+ormqr(input, tau, other, left=True, transpose=False, *, out=None) -> Tensor
 
-Multiplies `mat` (given by :attr:`input3`) by the orthogonal `Q` matrix of the QR factorization
-formed by :func:`torch.geqrf` that is represented by `(a, tau)` (given by (:attr:`input`, :attr:`input2`)).
+Computes the matrix-matrix multiplication of a product of Householder matrices with a general matrix.
 
-This directly calls the underlying LAPACK function `?ormqr`.
-See `LAPACK documentation for ormqr`_ for further details.
+Multiplies a :math:`m \times n` matrix `C` (given by :attr:`other`) with a matrix `Q`,
+where `Q` is represented using Householder reflectors `(input, tau)`.
+See `Representation of Orthogonal or Unitary Matrices`_ for further details.
+
+If :attr:`left` is `True` then `op(Q)` times `C` is computed, otherwise the result is `C` times `op(Q)`.
+When :attr:`left` is `True`, the implicit matrix `Q` has size :math:`m \times m`.
+It has size :math:`n \times n` otherwise.
+If :attr:`transpose` is `True` then `op` is the conjugate transpose operation, otherwise it's a no-op.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+.. seealso::
+
+        :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
+        from the QR decomposition.
 
 Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-    input3 (Tensor): the matrix to be multiplied.
+    input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
+                    and `mn` equals to `m` or `n` depending on the :attr:`left`.
+    tau (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
+    other (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    left (bool): controls the order of multiplication.
+    transpose (bool): controls whether the matrix `Q` is conjugate transposed or not.
 
-.. _LAPACK documentation for ormqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+Keyword args:
+    out (Tensor, optional): the output Tensor. Ignored if `None`. Default: `None`.
 
+.. _Representation of Orthogonal or Unitary Matrices:
+    https://www.netlib.org/lapack/lug/node128.html
 """)
 
 add_docstr(torch.permute,
@@ -8283,105 +8333,81 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.std, r"""
-std(input, unbiased=True) -> Tensor
+std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
 
-Returns the standard-deviation of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
-via the biased estimator. Otherwise, Bessel's correction will be used.
-
-Args:
-    {input}
-    unbiased (bool): whether to use the unbiased estimation or not
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[-0.8166, -1.3802, -0.3560]])
-    >>> torch.std(a)
-    tensor(0.5130)
-
-.. function:: std(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
-
-Returns the standard-deviation of each row of the :attr:`input` tensor in the
-dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
-reduce over all of them.
-
-{keepdim_details}
-
-If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
-via the biased estimator. Otherwise, Bessel's correction will be used.
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
 
 Args:
     {input}
     {dim}
-    unbiased (bool): whether to use the unbiased estimation or not
-    {keepdim}
 
 Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
     {out}
+
+
+.. function:: std(input, unbiased) -> Tensor
+   :noindex:
+
+Calculates the standard deviation of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
 
 Example::
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.2035,  1.2959,  1.8101, -0.4644],
-            [ 1.5027, -0.3270,  0.5905,  0.6538],
-            [-1.5745,  1.3330, -0.5596, -0.6548],
-            [ 0.1264, -0.5080,  1.6420,  0.1992]])
-    >>> torch.std(a, dim=1)
-    tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.std(a, unbiased=False)
+    tensor(0.4188)
 """.format(**multi_dim_common))
 
 add_docstr(torch.std_mean,
            r"""
-std_mean(input, unbiased=True) -> (Tensor, Tensor)
+std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
 
-Returns the standard-deviation and mean of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
-via the biased estimator. Otherwise, Bessel's correction will be used.
-
-Args:
-    {input}
-    unbiased (bool): whether to use the unbiased estimation or not
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[0.3364, 0.3591, 0.9462]])
-    >>> torch.std_mean(a)
-    (tensor(0.3457), tensor(0.5472))
-
-.. function:: std_mean(input, dim, unbiased=True, keepdim=False) -> (Tensor, Tensor)
-
-Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
-dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
-reduce over all of them.
-
-{keepdim_details}
-
-If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
-via the biased estimator. Otherwise, Bessel's correction will be used.
+If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
+the standard deviation. Otherwise, the sample deviation is calculated, without
+any correction.
 
 Args:
     {input}
     {dim}
-    unbiased (bool): whether to use the unbiased estimation or not
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
     {keepdim}
+    {out}
+
+Returns:
+    A tuple (std, mean) containing the standard deviation and mean.
+
+.. function:: std_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
+
+Calculates the standard deviation and mean of all elements in the :attr:`input`
+tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Returns:
+    A tuple (std, mean) containing the standard deviation and mean.
 
 Example::
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.5648, -0.5984, -1.2676, -1.4471],
-            [ 0.9267,  1.0612,  1.1050, -0.6014],
-            [ 0.0154,  1.9301,  0.0125, -1.0904],
-            [-1.9711, -0.7748, -1.3840,  0.5067]])
-    >>> torch.std_mean(a, 1)
-    (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.std_mean(a, unbiased=False)
+    (tensor(0.4188), tensor(-0.8509))
 """.format(**multi_dim_common))
 
 add_docstr(torch.sub, r"""
@@ -9535,104 +9561,80 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.var, r"""
-var(input, unbiased=True) -> Tensor
+var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
 
-Returns the variance of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``False``, then the variance will be calculated via the
-biased estimator. Otherwise, Bessel's correction will be used.
-
-Args:
-    {input}
-    unbiased (bool): whether to use the unbiased estimation or not
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[-0.3425, -1.2636, -0.4864]])
-    >>> torch.var(a)
-    tensor(0.2455)
-
-
-.. function:: var(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
-
-Returns the variance of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
-
-{keepdim_details}
-
-If :attr:`unbiased` is ``False``, then the variance will be calculated via the
-biased estimator. Otherwise, Bessel's correction will be used.
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample variance is calculated, without any correction.
 
 Args:
     {input}
     {dim}
-    unbiased (bool): whether to use the unbiased estimation or not
-    {keepdim}
 
 Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
     {out}
+
+.. function:: var(input, unbiased) -> Tensor
+   :noindex:
+
+Calculates the variance of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
 
 Example::
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3567,  1.7385, -1.3042,  0.7423],
-            [ 1.3436, -0.1015, -0.9834, -0.8438],
-            [ 0.6056,  0.1089, -0.3112, -1.4085],
-            [-0.7700,  0.6074, -0.1469,  0.7777]])
-    >>> torch.var(a, 1)
-    tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.var(a, unbiased=False)
+    tensor(0.1754)
 """.format(**multi_dim_common))
 
 add_docstr(torch.var_mean,
            r"""
-var_mean(input, unbiased=True) -> (Tensor, Tensor)
+var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
 
-Returns the variance and mean of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``False``, then the variance will be calculated via the
-biased estimator. Otherwise, Bessel's correction will be used.
-
-Args:
-    {input}
-    unbiased (bool): whether to use the unbiased estimation or not
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[0.0146, 0.4258, 0.2211]])
-    >>> torch.var_mean(a)
-    (tensor(0.0423), tensor(0.2205))
-
-.. function:: var_mean(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
-
-Returns the variance and mean of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
-
-{keepdim_details}
-
-If :attr:`unbiased` is ``False``, then the variance will be calculated via the
-biased estimator. Otherwise, Bessel's correction will be used.
+If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
+the variance. Otherwise, the sample variance is calculated, without any
+correction.
 
 Args:
     {input}
     {dim}
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
     {keepdim}
-    unbiased (bool): whether to use the unbiased estimation or not
+    {out}
+
+Returns:
+    A tuple (var, mean) containing the variance and mean.
+
+.. function:: var_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
+
+Calculates the variance and mean of all elements in the :attr:`input`
+tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Returns:
+    A tuple (var, mean) containing the variance and mean.
 
 Example::
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-1.5650,  2.0415, -0.1024, -0.5790],
-            [ 0.2325, -2.6145, -1.6428, -0.3537],
-            [-0.2159, -1.1069,  1.2882, -1.3265],
-            [-0.6706, -1.5893,  0.6827,  1.6727]])
-    >>> torch.var_mean(a, 1)
-    (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.var_mean(a, unbiased=False)
+    (tensor(0.1754), tensor(-0.8509))
 """.format(**multi_dim_common))
 
 add_docstr(torch.zeros,

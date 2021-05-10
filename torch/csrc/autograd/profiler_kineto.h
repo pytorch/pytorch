@@ -2,9 +2,9 @@
 
 #include <torch/csrc/autograd/profiler_legacy.h>
 
-// Kineto is currently available on Linux server-side
 #ifdef USE_KINETO
-#if !defined(__linux__) || defined(_WIN32) || defined(C10_MOBILE) || defined(__APPLE__) || defined(DISABLE_KINETO)
+// skip Kineto dependency on mobile
+#ifdef C10_MOBILE
 #undef USE_KINETO
 #endif
 #endif
@@ -45,8 +45,6 @@ struct KinetoObserverContext : public at::ObserverContext {
 };
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent();
-
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -144,12 +142,21 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& setAsync(bool is_async) {
+    is_async_ = is_async;
+    return *this;
+  }
+
   // Kineto fields
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
+  }
+
+  bool isAsync() const {
+    return is_async_;
   }
 
   uint64_t deviceIndex() const {
@@ -189,7 +196,7 @@ struct TORCH_API KinetoEvent {
   int64_t sequence_nr_ = -1;
   uint8_t scope_ = 0;
 
-  uint8_t activity_type_;
+  uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> dtypes_;
@@ -202,6 +209,7 @@ struct TORCH_API KinetoEvent {
   uint64_t correlation_id_ = 0;
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
+  bool is_async_{false};
 };
 
 // Consolidating events returned directly from Kineto
