@@ -649,9 +649,9 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                     dist.barrier(group_id)
-                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.05)
+                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
             else:
-                time.sleep(timeout.total_seconds())
+                pass
 
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         @unittest.skipIf(
@@ -6081,6 +6081,9 @@ class DistributedTest:
                 torch.nn.Parameter(torch.ones(1)),
             ])
 
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
         def test_ddp_build_param_to_name_mapping_requires_grad(self):
             class Net(nn.Module):
                 def __init__(self):
