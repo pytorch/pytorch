@@ -3439,7 +3439,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('erfc',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('expm1',
                          dtypes=floating_types(),
