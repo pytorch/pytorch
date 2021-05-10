@@ -1039,7 +1039,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::Sync* node) final {
-    indent() << "__syncthreads();\n";
+    indent() << "__barrier_sync(0);\n";
   }
 
  private:
