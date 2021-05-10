@@ -60,6 +60,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
 
   for (auto thread_id = 0; thread_id < config.num_calling_threads;
        ++thread_id) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
@@ -71,6 +72,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         std::unique_lock<std::mutex> lock(m);
         ++initialized;
         worker_main_cv.notify_one();
+        // NOLINTNEXTLINE(bugprone-infinite-loop)
         while (!start) {
           main_worker_cv.wait(lock);
         }
@@ -105,6 +107,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     if (!config.profiler_output_path.empty()) {
       LOG(INFO) << "Using Autograd profiler. Trace will be saved to "
                 << config.profiler_output_path;
+      // NOLINTNEXTLINE(modernize-make-unique)
       profiler_guard.reset(new torch::autograd::profiler::RecordProfile(
         config.profiler_output_path));
     }
@@ -124,6 +127,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   LOG(INFO) << "Finished benchmark";
 
   BenchmarkExecutionStats stats;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(
                             end_time - start_time)
                             .count() /
@@ -132,6 +136,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   // repsesatative of the real work done. Last attempted iteration on each
   // calling threads doesn't represent the real work (i.e. running the model)
   stats.latency_avg_ms =
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       total_time_ms * config.num_calling_threads / config.num_iters;
   stats.num_iters = config.num_iters;
 

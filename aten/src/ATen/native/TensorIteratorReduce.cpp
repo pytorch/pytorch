@@ -42,11 +42,13 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   buffer_shape.insert(buffer_shape.begin(), max_threads);
   auto buffer = at::empty(buffer_shape, dst.options());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<bool[]> written(new bool[max_threads]);
   std::fill(written.get(), written.get() + max_threads, false);
 
   at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     int thread_num = at::get_thread_num();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     written[thread_num] = true;
     auto slice = buffer[thread_num];
     slice.copy_(dst);

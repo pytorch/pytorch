@@ -184,6 +184,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
   if (!seq) throw python_error();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
   if (seq_size != n) {
     throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
@@ -256,7 +257,7 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoDispatchBelowInplaceOrView guard;  // TODO: remove
+    at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(

@@ -206,6 +206,7 @@ const auto& tscores = Input(0);
           cur_scores, utils::AsEArrXt(cur_keep), &cur_out_scores);
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int k = 0; k < cur_keep.size(); k++) {
         cur_out_classes[k] =
             static_cast<float>(j - !output_classes_include_bg_cls_);
@@ -250,8 +251,10 @@ const auto& tscores = Input(0);
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BoxWithNMSLimit)
     .NumInputs(2, 3)
     .NumOutputs(3, 6)
@@ -304,6 +307,7 @@ returned boxes.
         "keeps_size",
         "Optional number of filtered indices per class, size (num_classes)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 
 } // namespace

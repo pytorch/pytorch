@@ -23,8 +23,10 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
@@ -74,6 +76,7 @@ std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
 
 auto ConvParams::is_strided() const -> bool {
   bool is_strided = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int s : stride) {
     is_strided |= (s != 1);
   }
@@ -82,6 +85,7 @@ auto ConvParams::is_strided() const -> bool {
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int d : dilation) {
     is_dilated |= (d != 1);
   }
@@ -90,6 +94,7 @@ auto ConvParams::is_dilated() const -> bool {
 
 auto ConvParams::is_padded() const -> bool {
   bool is_padded = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : padding) {
     is_padded |= (p != 0);
   }
@@ -98,6 +103,7 @@ auto ConvParams::is_padded() const -> bool {
 
 auto ConvParams::is_output_padding_neg() const -> bool {
   bool is_non_neg = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : output_padding) {
     is_non_neg |= (p < 0);
   }
@@ -114,6 +120,7 @@ auto ConvParams::is_output_padding_big() const -> bool {
 
 auto ConvParams::is_padding_neg() const -> bool {
   bool is_non_neg = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : padding) {
     is_non_neg |= (p < 0);
   }
@@ -122,6 +129,7 @@ auto ConvParams::is_padding_neg() const -> bool {
 
 auto ConvParams::is_stride_nonpos() const -> bool {
   bool is_nonpos = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int s : stride) {
     is_nonpos |= (s <= 0);
   }
@@ -324,6 +332,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 
       // large nb_channels
       if (ch >= 1024) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (w >= 56) {
           return true;
         } else if (bs >= 32) {
@@ -333,6 +342,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 
       // batch_size specific
       if (bs >= 128) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (ch >= 512) {
           return true;
         } else if (ch >= 64) {
@@ -343,12 +353,14 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         }
       } else if (bs >= 64) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 14)) {
           return true;
         } else if ((ch >= 32) && (w >= 28)) {
           return true;
         }
       } else if (bs >= 32) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 14)) {
           return true;
         } else if ((ch >= 128) && (w >= 28)) {
@@ -360,12 +372,14 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
         if ((ch >= 1024) && (w >= 14)) {
           return true;
         }
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 28)) {
           return true;
         } else if ((ch >= 32) && (w >= 56)) {
           return true;
         }
       } else if (bs >= 8) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 28)) {
           return true;
         } else if ((ch >= 64) && (w >= 56)) {
@@ -380,6 +394,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 
     if (w >= 7) {
       if (bs >= 128) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (ch >= 1024) {
           return true;
         } else if ((ch >= 512) && (w >= 14)) {
@@ -388,24 +403,28 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         }
       } else if (bs >= 64) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 14)) {
           return true;
         } else if (w >= 28) {
           return true;
         }
       } else if (bs >= 32) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 1024) && (w >= 14)) {
           return true;
         } else if (w >= 28) {
           return true;
         }
       } else if (bs >= 16) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 28)) {
           return true;
         } else if (w >= 56) {
           return true;
         }
       } else if (bs >= 8) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 1024) && (w >= 28)) {
           return true;
         } else if (w >= 56) {
@@ -604,10 +623,13 @@ static Tensor convolution_same(
               k, "-dimensional weight", weight_sizes, ", but got ",
               input.dim(), "-dimensional input of size ",
               input.sizes(), " instead");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(stride.size() == dim || stride.size() == 1,
               "stride cannot broadcast to ", dim, " dimensions");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(dilation.size() == dim || dilation.size() == 1,
               "dilation cannot broadcast to ", dim, " dimensions");
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int64_t i = 0; i < stride.size(); ++i) {
     TORCH_CHECK(stride[i] == 1, "padding='same' is not supported for strided convolutions");
   }
@@ -666,6 +688,7 @@ Tensor _convolution_mode(
     return at::native::convolution_same(
         input, weight, bias, stride, dilation, groups);
   } else if (padding == "valid") {
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
     return at::native::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
@@ -752,6 +775,7 @@ at::Tensor convolution_overrideable(
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
@@ -1113,6 +1137,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   // TODO: hacky way of inferring the groups number for grouped Conv3D
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     params.groups = input.size(1) / weight.size(1);
   } else {
     params.groups = groups_;

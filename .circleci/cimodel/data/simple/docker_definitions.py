@@ -7,6 +7,7 @@ from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 # TODO: make this generated from a matrix rather than just a static list
 IMAGE_NAMES = [
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9",
+    "pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
     "pytorch-linux-bionic-py3.6-clang9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",
     "pytorch-linux-bionic-py3.8-gcc9",
@@ -14,7 +15,7 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
-    "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7",
+    "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     "pytorch-linux-xenial-py3-clang5-asan",
     "pytorch-linux-xenial-py3-clang7-onnx",

@@ -12,6 +12,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 // Can replace a simple scalar access with a local variable.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -57,6 +58,7 @@ TEST(Registerizer, RegisterizerSimple) {
 }
 
 // Won't do replacement of a loop access.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -104,6 +106,7 @@ TEST(Registerizer, RegisterizerLoop) {
 
 // Won't replace even if the load is a fixed scalar, since the store could
 // invalidate it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopFixedLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -151,6 +154,7 @@ TEST(Registerizer, RegisterizerLoopFixedLoad) {
 
 // We can registerize accesses that occur entirely within inner scopes, even if
 // they depend on the loop var.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopInternal) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -202,6 +206,7 @@ TEST(Registerizer, RegisterizerLoopInternal) {
 
 // An access can be overlapped by another read in the same Expr. In this case
 // B[z] and B[y] overlap and prevent registerization of both accesses.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -234,6 +239,7 @@ TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
   ASSERT_EQ(before.str(), after.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopInternalRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -306,6 +312,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -352,6 +359,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
   ASSERT_EQ(before.str(), after.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -399,6 +407,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
 }
 
 // Will registerize multiple accesses of different items of the same buffer.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -455,6 +464,7 @@ TEST(Registerizer, RegisterizerMultiVar) {
 }
 
 // Will registerize the valid accesses while skipping invalid replacements.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerVariableLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -511,6 +521,7 @@ TEST(Registerizer, RegisterizerVariableLoad) {
 }
 
 // Can registerize variable accesses so long as the variable does not change.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerSymbolicIndices) {
   KernelScope kernel_scope;
   VarHandle i("i", kInt);
@@ -558,6 +569,7 @@ TEST(Registerizer, RegisterizerSymbolicIndices) {
 }
 
 // Can registerize accesses dependent on multiple loop vars.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -615,6 +627,7 @@ TEST(Registerizer, RegisterizerMultiLoop) {
 }
 
 // Can registerize correctly if scalars already exist in the program.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -672,6 +685,7 @@ TEST(Registerizer, RegisterizerRepeated) {
 }
 
 // Can registerize the load of A.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNoLoads) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -713,6 +727,7 @@ TEST(Registerizer, RegisterizerNoLoads) {
 }
 
 // Can registerize the load of A but not the store of B.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNoRepeatedStores) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -762,6 +777,7 @@ TEST(Registerizer, RegisterizerNoRepeatedStores) {
 }
 
 // Won't registerize if there are multiple accesses which may overlap.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiVarOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -791,6 +807,7 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
   ASSERT_EQ(before.str(), after.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerAllocs) {
   KernelScope kernel_scope;
 
@@ -859,6 +876,7 @@ TEST(Registerizer, RegisterizerAllocs) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNoInitializer) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -899,6 +917,7 @@ TEST(Registerizer, RegisterizerNoInitializer) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -928,6 +947,7 @@ TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
   ASSERT_EQ(before.str(), after.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoadThenStore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -979,6 +999,7 @@ TEST(Registerizer, RegisterizerLoadThenStore) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerParallelized) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -1008,6 +1029,7 @@ TEST(Registerizer, RegisterizerParallelized) {
 
 // Should be able to registerize this since the scalar would exist before the
 // branch.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1058,6 +1080,7 @@ TEST(Registerizer, RegisterizerConditionAfter) {
 
 // Should be able to registerize this since the scalar exists in the same form
 // after the branch and there is no overlap.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1110,6 +1133,7 @@ TEST(Registerizer, RegisterizerConditionBefore) {
 }
 
 // Should be able to registerize this as the combination of the two above rules.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionInside) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1170,6 +1194,7 @@ TEST(Registerizer, RegisterizerConditionInside) {
 // An example where an access is cut by an overlapping access inside a
 // condition, and both sides are large enough to be registerized but cannot be
 // because there is no safe place to put the initializer or finalizer.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1179,6 +1204,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1229,6 +1255,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
 // from the loop. Registerization occurs but does not include any accesses in
 // the condition, and the first group must be finalized before the Cond, the
 // second initialized after it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1238,6 +1265,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(a, {x}, Load::make(b, {x + 1})),
        Store::make(c, {x}, Load::make(a, {x})),
@@ -1314,6 +1342,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
 // program, because we don't know if the branch would be taken and if it isn't
 // the accesses in it don't need to be valid (think size checks on the index).
 // In this case the accesses cannot be registerized.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1356,6 +1385,7 @@ TEST(Registerizer, RegisterizerConditionHidden) {
 // that that access is valid in the higher scope (or at least if its not it's
 // the user's fault). It "unhides" the conditional accesses, allowing
 // registerization to occur.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1417,6 +1447,7 @@ TEST(Registerizer, RegisterizerConditionUnhidden) {
 }
 
 // Can registerize a load that occurs in the condition of a Cond.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerCondCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1468,6 +1499,7 @@ TEST(Registerizer, RegisterizerCondCondition) {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerCondConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1517,6 +1549,7 @@ TEST(Registerizer, RegisterizerCondConditionUnhidden) {
 }
 
 // Conditional hiding also works for IfThenElse exprs.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1559,6 +1592,7 @@ TEST(Registerizer, RegisterizerIfThenElseHidden) {
 }
 
 // Conditional unhiding also works for IfThenElse exprs.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1614,6 +1648,7 @@ TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
 }
 
 // Nested IfThenElse exprs can't promote to higher level scopes.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseNested) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1658,6 +1693,7 @@ TEST(Registerizer, RegisterizerIfThenElseNested) {
 // branch, since it is not a Stmt and cannot hold variable definitions. We need
 // to check that we don't promote the initializer/finalizer to the enclosing
 // Block.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseInternal) {
   KernelScope kernel_scope;
   // Making these floats so they don't get simplified to a single access.
@@ -1737,6 +1773,7 @@ TEST(Registerizer, RegisterizerIfThenElseInternal) {
 }
 
 // Can registerize a load that occurs in the condition of an IfThenElse;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1783,6 +1820,7 @@ TEST(Registerizer, RegisterizerIfThenElseCondition) {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1823,6 +1861,7 @@ TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
 
 // Cannot promote accesses internal to IfThenElse branches even if the enclosing
 // scope if conditional.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerConditionBranchOnly) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1874,6 +1913,7 @@ TEST(Registerizer, RegisterizerConditionBranchOnly) {
 
 // We can registerize an IfThenElse that appears in the condition branch of a
 // Cond. This is a weird but valid thing to do.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerCondIfThenElse) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1924,6 +1964,7 @@ TEST(Registerizer, RegisterizerCondIfThenElse) {
 
 // Can registerize a conditional access in the RHS of a store unhidden by it's
 // LHS, and hoist it out of a loop.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1974,6 +2015,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoop) {
 }
 
 // Cannot registerize if the RHS overlaps the access creating visibility.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -2013,6 +2055,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
 
 // Simple case where an access is cut by an overlapping access later in the
 // program, we can registerize up until the overlap.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2070,6 +2113,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
 
 // We can registerize an access which overlaps a previous access, the
 // initializer must be inserted after the previous access.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2127,6 +2171,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 
 // The combination of the previous two tests, an access is cut by an overlapping
 // access in both directions.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialInside) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2197,6 +2242,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
 // An element could be registerized program wide but is cut by a conditional
 // access, we should break this into two scalars and write back to the buffer
 // before the condition.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2267,6 +2313,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 
 // Tests case where an access is cut by an internal conditional access which
 // itself is registerized.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2330,6 +2377,7 @@ TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
 
 // First statment in condition closes outer access, but can be registerized with
 // later statements.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2394,6 +2442,7 @@ TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
 }
 
 // An access cuts two open overlaps and creates four scalar variables.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2465,11 +2514,13 @@ TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
 
 // Nested blocks will automatically be flattened and do not provent
 // registerization of enclosed accesses.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedBlocks) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
        Block::make(
@@ -2518,6 +2569,7 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
 
 // The access can be registerized internally to a condition, but must ensure
 // that both initializer and finalizer are within the same condition.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2574,6 +2626,7 @@ TEST(Registerizer, RegisterizerNestedConditions) {
 
 // If an access exists outside the scope of the condition then we can lift
 // nested conditional usages into the same scalar.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2630,6 +2683,7 @@ TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2669,9 +2723,11 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2711,11 +2767,13 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
 // If an access is cut by another access internal to a condition block, it still
 // cuts the access.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2755,6 +2813,7 @@ TEST(Registerizer, RegisterizerNestedConditionsCut) {
   ASSERT_EQ(before.str(), after.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -2802,6 +2861,7 @@ TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
 
 // Three loops and four element regions, three of which should be registerized
 // at different levels of the IR.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -2902,6 +2962,7 @@ TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
 
 // Can replace a simple scalar access with a local variable even when that
 // variable is an outer loop var.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerNestedLoopSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -2957,6 +3018,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
 // Test the positive case of the hiddenAccess split, where an internal
 // conditional access can be hoisted up through a loop to match an existing
 // access in a higher scope and the two can be registerized.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerHiddenAccessYes) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -2973,6 +3035,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
                10,
                Block::make(
                    {Store::make(b, {x}, 0),
+                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                     Cond::make(
                         CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                         For::make(
@@ -3039,6 +3102,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
 // Test the negative case of the hiddenAccess split, where the hoisted access is
 // never unhidden at a higher scope and registerization occurs at the lower
 // scope.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerHiddenAccessNo) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3053,6 +3117,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
           10,
           Block::make(
               {Store::make(b, {x}, 0),
+               // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                Cond::make(
                    CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                    For::make(
@@ -3118,6 +3183,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
 // In this case the conditional access must be hoisted by two loops, there are
 // two accesses here one is unhidden and the other isnt. A[0] can be
 // registerized but B[0] cannot.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3200,6 +3266,7 @@ TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
 
 // Accesses are registerized inside two conditions, but the immeidate parent is
 // not a condition.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerTwoConditionalLoops) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -3272,6 +3339,7 @@ TEST(Registerizer, RegisterizerTwoConditionalLoops) {
 }
 
 // Accesses are registerized inside two conditions, cut in the middle.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -3354,6 +3422,7 @@ TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
 
 // references a Let var in a local scope which cannot be hoisted out of the
 // loop.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopLetVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3388,6 +3457,7 @@ TEST(Registerizer, RegisterizerLoopLetVar) {
 
 // references a Let var in an outer scope that does not prevent hoisting the
 // initializer.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerLoopLetVarOuter) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3436,6 +3506,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
 
 // Okay so the registerizer generally goes after index flattening, but just in
 // case. Test multi index registerization.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDim) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
@@ -3482,6 +3553,7 @@ TEST(Registerizer, RegisterizerMultiDim) {
 
 // Wont registerize if only some dims match, but will still registerize distinct
 // elements.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDimPartial) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
@@ -3530,6 +3602,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
 }
 
 // If they could overlap across all dimensions we cannot registerize.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDimOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
@@ -3565,6 +3638,7 @@ TEST(Registerizer, RegisterizerMultiDimOverlap) {
 }
 
 // But, if one dimension is known to be distinct they do not overlap.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
@@ -3611,6 +3685,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 }
 
 // A 3D reduction with different input dimensionality.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3683,6 +3758,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
 
 // A 3D reduction with the same smaller dimensionality using different loop
 // vars.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -3695,6 +3771,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
       x,
       0,
       10,
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       For::make(
           y,
           0,

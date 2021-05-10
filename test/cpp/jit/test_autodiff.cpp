@@ -31,7 +31,9 @@ using test_fn_type = std::function<variable_list(const variable_list&)>;
 struct ADTestSpec {
   ADTestSpec(
       const char* name,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       var_meta_list input_meta,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       test_fn_type test_fn,
       float clampMax = -1.0f)
       : name(name),
@@ -85,6 +87,7 @@ variable_list grad(
       fmap(inputs, get_edge));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutodiffTest, ADFormulas) {
   const auto cast = [](const Variable& v) {
     return static_cast<at::Tensor>(v);
@@ -176,6 +179,7 @@ TEST(AutodiffTest, ADFormulas) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutodiffTest, Differentiate) {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
@@ -231,6 +235,7 @@ TEST(AutodiffTest, Differentiate) {
       ->run(*grad_spec.df);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutodiffTest, DifferentiateWithRequiresGrad) {
   const auto graph_string = R"IR(
     graph(%0 : Tensor,

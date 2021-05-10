@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Wngrad, WngradOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Wngrad)
     .NumInputs(4)
     .NumOutputs(2, 4)
@@ -35,7 +37,9 @@ Optionally returns effective_lr and update as well.
 
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseWngrad, SparseWngradOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseWngrad)
     .NumInputs(5)
     .NumOutputs(2)
@@ -58,6 +62,8 @@ new_seq_b) as in the dense case.
     .Output(1, "output_seq_b", "Updated seq_b")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Wngrad);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseWngrad);
 } // namespace caffe2

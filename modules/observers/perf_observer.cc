@@ -6,6 +6,7 @@
 #endif
 
 #include <random>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <time.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
@@ -31,26 +32,31 @@ defined(TARGET_IPHONE_SIMULATOR)
 #endif
 
 #ifndef C10_MOBILE
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
     "One in N sampling rate for net delay");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleRate,
     0,
     "One in N sampling rate for net delay");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleCount,
     0,
     "control the following c logs");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_operatorNetSampleRatio,
     0,
     "One in N sampling rate for operator delay");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_skipIters,
     0,
@@ -156,6 +162,7 @@ double getCpuTimeMilliseconds() {
 
   return 0.0;
 #elif defined _APPLE
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct rusage ru;
   if (getrusage(RUSAGE_SELF, &ru)) {
     return 0.0;
@@ -170,14 +177,17 @@ double getCpuTimeMilliseconds() {
 #endif
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
     registerGlobalPerfNetObserverCreator,
     &registerGlobalPerfNetObserverCreator,
     "Caffe2 net global observer creator");
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PerfNetObserver::PerfNetObserver(NetBase* subject_)
     : NetObserver(subject_), numRuns_(0) {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 PerfNetObserver::~PerfNetObserver() {}
 
 void PerfNetObserver::Start() {
@@ -190,11 +200,13 @@ void PerfNetObserver::Start() {
   int operatorNetSampleRatio = ObserverConfig::getOpoeratorNetSampleRatio();
   int skipIters = ObserverConfig::getSkipIters();
   int sampleRate = visitCount > 0 ? netFollowupSampleRate : netInitSampleRate;
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   if (skipIters <= numRuns_ && sampleRate > 0 && rand() % sampleRate == 0) {
     visitCount++;
     if (visitCount == netFollowupSampleCount) {
       visitCount = 0;
     }
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     if (operatorNetSampleRatio > 0 && rand() % operatorNetSampleRatio == 0) {
       logType_ = PerfNetObserver::OPERATOR_DELAY;
     } else {
@@ -247,6 +259,7 @@ void PerfNetObserver::Stop() {
               ->getTensorShapes();
 
       if (op->has_debug_def()) {
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto arg : op->debug_def().arg()) {
           p.args.emplace_back(arg);
         }
@@ -290,6 +303,7 @@ PerfOperatorObserver::PerfOperatorObserver(
   CAFFE_ENFORCE(netObserver_, "Observers can't operate outside of the net");
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 PerfOperatorObserver::~PerfOperatorObserver() {}
 
 void PerfOperatorObserver::Start() {
