@@ -122,6 +122,15 @@ TensorView* getTVOutput(const Expr* expr) {
   return nullptr;
 }
 
+kir::TensorView* getTVOutput(const kir::Expr* expr) {
+  for (auto out : expr->outputs()) {
+    if (auto tv = dynamic_cast<kir::TensorView*>(out)) {
+      return tv;
+    }
+  }
+  return nullptr;
+}
+
 bool isScalarOp(const Expr* expr) {
   for (auto out : expr->outputs())
     if (!out->isScalar())

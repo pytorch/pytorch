@@ -206,22 +206,64 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
   kir::ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
+
   while (loops.size() > 0) {
     auto loop = loops.back();
     loops.pop_back();
-    auto id = loop->iter_domain();
-    if (id->isThread() || id->parallelType() == ParallelType::Vectorize) {
-      continue;
+
+    // If there's any expression that requires barrier
+    // synchronization, the else part can't be omitted
+    for (auto expr : loop->body().exprs()) {
+      if (expr->isA<kir::BroadcastOp>()) {
+        const ParallelTypeBitmap domains =
+            ir_utils::getParallelBroadcastDomains(
+                expr->outputs()[0]->as<kir::TensorView>()->fuserTv(),
+                thread_predicates_);
+        if (domains.any()) {
+          return false;
+        }
+      } else if (expr->isA<kir::ReductionOp>() || expr->isA<kir::WelfordOp>()) {
+        auto td = ir_utils::getTVOutput(expr)->domain();
+        if (td->hasBlockReduction() || td->hasGridReduction()) {
+          return false;
+        }
+      }
     }
-    const auto result = eval.evaluate(id->extent());
-    if (!(result.has_value() && result.value() == 1)) {
+    // If the number of visits of the loop body per thread is one, the
+    // unswitch predicate is sufficient.
+    // When the loop stop is the same as the extent of its IterDomain,
+    // the per-thread visit count is guaranteed to be one at most (see
+    // CudaKernelGenerator::visit(kir::ForLoop*) as well. Also, when a
+    // loop is vectorized (not misaligned), the count must be one at
+    // most. Even if not parallelized nor vectoirzed, it is also
+    // sufficient if the loop stop is in fact one.
+    bool visit_once = false;
+    auto id = loop->iter_domain();
+    if ((id->isThread() && (loop->stop() == id->extent())) ||
+        id->parallelType() == ParallelType::Vectorize) {
+      visit_once = true;
+    }
+    if (!visit_once) {
+      const auto result = eval.evaluate(loop->stop());
+      if (result.has_value() && result.value() == 1) {
+        visit_once = true;
+      }
+    }
+
+    // The visit count is not guaranteed to be one, so the else part
+    // must be created.
+    if (!visit_once) {
       return false;
     }
+
+    // The unswitch predicate is sufficient for this loop. Proceed to
+    // nested loops.
     for (auto nested_loop :
          ir_utils::filterByType<kir::ForLoop>(loop->body().exprs())) {
       loops.push_back(nested_loop);
     }
   }
+
   return true;
 }
 

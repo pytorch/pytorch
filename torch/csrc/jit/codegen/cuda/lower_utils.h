@@ -69,6 +69,7 @@ TORCH_CUDA_CU_API bool isTVOp(const Expr*);
 bool isTVOp(const kir::Expr* expr);
 
 TensorView* getTVOutput(const Expr*);
+kir::TensorView* getTVOutput(const kir::Expr*);
 
 bool isScalarOp(const Expr*);
 

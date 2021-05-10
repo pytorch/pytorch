@@ -14957,6 +14957,84 @@ TEST(NVFuserTest, FusionBNRepro_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionBNRepro2_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int batch = 2;
+  int c = 4;
+  int h = 17;
+  int w = 17;
+  int numDims = 4;
+
+  auto input = makeSymbolicTensor(numDims);
+  fusion.addInput(input);
+
+  Val* momentum_ptr = new Double(0.1);
+  Val* rev_momentum_ptr = new Double(1.0 - 0.1);
+  Val* eps_ptr = new Double(1e-5);
+
+  std::vector<int> reduction_axes;
+  std::vector<bool> broadcast_mask(numDims, false);
+  Val* num_features = new Double(1);
+  for (size_t axis = 0; axis < numDims; ++axis) {
+    if (axis != 1) {
+      reduction_axes.push_back(axis);
+      broadcast_mask[axis] = true;
+      num_features =
+          mul(num_features, input->domain()->domain()[axis]->extent());
+    }
+  }
+
+  // Algorithm
+  auto x_sum = sum(input, reduction_axes);
+  auto x_mean = div(x_sum, num_features);
+  auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
+  auto x_mean_bcast = div(x_sum_bcast, num_features);
+
+  auto x_mean_sub = sub(input, x_mean_bcast);
+  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
+  auto var_sum = sum(x_mean_sub_pow, reduction_axes);
+
+  auto var = div(var_sum, num_features);
+  auto var_eps = add(var, eps_ptr);
+  auto invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+  auto invstd_bcast = broadcast(invstd, broadcast_mask);
+  auto output = mul(x_mean_sub, invstd_bcast);
+  fusion.addOutput(output);
+
+  auto save_mean = x_mean;
+  fusion.addOutput(save_mean);
+  auto save_invstd = invstd;
+  fusion.addOutput(save_invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({batch, c, h, w}, options);
+
+  auto input1_ref = input1.clone();
+  at::Tensor r_m;
+  at::Tensor r_v;
+  at::Tensor weight;
+  at::Tensor bias;
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> aten_inputs = {input1};
+  auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto at_results = at::native_batch_norm(
+      input1_ref, r_m, r_v, weight, bias, true, 0.1, 1e-5);
+
+  auto at_output = std::get<0>(at_results);
+  auto at_mean = std::get<1>(at_results);
+  auto at_invstd = std::get<2>(at_results);
+
+  std::vector<at::Tensor> aten_outputs = {at_output, at_mean, at_invstd};
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
