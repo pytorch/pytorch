@@ -2349,7 +2349,7 @@ std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool up
   TORCH_WARN_ONCE(
     "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
     "PyTorch release.\n",
-    "The default behavior has changed grom using the upper triangular portion of the matrix by default ",
+    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
     "to using the lower triangular portion. This should only matter if the matrix is not symmetric, ",
     "which is not recommended.\n",
     "L, _ = torch.symeig(A, upper=upper)\n",
@@ -2368,7 +2368,7 @@ std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, b
   TORCH_WARN_ONCE(
     "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
     "PyTorch release.\n",
-    "The default behavior has changed grom using the upper triangular portion of the matrix by default ",
+    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
     "to using the lower triangular portion. This should only matter if the matrix is not symmetric, ",
     "which is not recommended.\n",
     "L, _ = torch.symeig(A, upper=upper)\n",
