@@ -96,6 +96,22 @@ inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, o
   return torch::linalg_vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
+}
+
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
   return torch::linalg_matrix_power(self, n);
 }
@@ -321,6 +337,23 @@ inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> 
 
 inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_norm
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
