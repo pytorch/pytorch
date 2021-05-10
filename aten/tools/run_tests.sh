@@ -40,6 +40,9 @@ fi
 if [[ -x ./cuda_half_test ]]; then
   ./cuda_half_test
 fi
+if [[ -x ./cuda_bfloat16_test ]]; then
+  ./cuda_bfloat16_test
+fi
 if [[ -x ./cuda_vectorized_test ]]; then
   ./cuda_vectorized_test
 fi

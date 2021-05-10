@@ -23,7 +23,7 @@ __device__ void test(){
   __half c = a - Half(b);
   assert(static_cast<Half>(c) == Half(1.0));
 
-  // asserting if the  functions used on
+  // asserting if the functions used on
   // half types give almost equivalent results when using
   //  functions on double.
   // The purpose of these asserts are to test the device side
