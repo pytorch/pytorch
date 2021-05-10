@@ -56,12 +56,10 @@ size_t getDefaultNumThreads() {
         }
         break;
 #endif
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 5:
         /* 4+1 big.LITTLE */
         numThreads = 4;
         break;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 6:
         /* 2+4 big.LITTLE */
         numThreads = 2;
@@ -71,7 +69,6 @@ size_t getDefaultNumThreads() {
         /* 4+4 big.LITTLE */
         numThreads = 4;
         break;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 10:
         /* 4+4+2 Min.Med.Max, running on Med cores */
         numThreads = 4;
