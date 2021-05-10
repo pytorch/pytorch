@@ -65,7 +65,7 @@ TORCH_API Module import_ir_module(
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
-    std::shared_ptr<torch::jit::StorageContext> storage_tracker,
+    std::shared_ptr<torch::jit::StorageContext> storage_context,
     c10::optional<at::Device> device,
     std::string ts_id /* torchscript identifier inside package */);
 

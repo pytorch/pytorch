@@ -86,7 +86,6 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   float* Ydata = Y->template mutable_data<float>();
 
   // Specialized implementation for fast 2x upsampling
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (width_scale_ == 2.0 && height_scale_ == 2.0) {
     resizeNearestNCHW2x(
         batch_size, num_channels, input_height, input_width, Xdata, Ydata);

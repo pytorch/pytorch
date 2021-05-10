@@ -30,6 +30,7 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
+_gate_torchscript_serialization = True
 
 class EmptyMatchError(Exception):
     """This is an exception that is thrown when a mock or extern is marked as
@@ -112,7 +113,6 @@ class PackageExporter:
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
-        self.gate_torchscript_serialization = True
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -517,7 +517,7 @@ node [shape=box];
             return ("storage", storage_type, obj_key, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
-            if self.gate_torchscript_serialization and isinstance(
+            if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
                 raise Exception(

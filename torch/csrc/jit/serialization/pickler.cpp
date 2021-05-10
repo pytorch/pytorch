@@ -240,7 +240,6 @@ void Pickler::pushInt(int64_t n) {
   } else {
     // Push 8 byte integer
     push<PickleOpCode>(PickleOpCode::LONG1);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     push<uint8_t>(8);
     push<int64_t>(n);
   }
@@ -296,10 +295,24 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  std::string root_key = (get_tensor_id_ == nullptr)
-      ? c10::to_string(tensor_data_.size())
-      : get_tensor_id_(tensor);
+  // if tensors_archive_table_ includes the tensor, root_key will be,
+  // for example: constants/0, such that it refers to the existing tensor
+  // archive/index.
+  const auto& found = tensors_archive_table_.find(tensor);
+  std::string root_key;
+  if (found != tensors_archive_table_.end()) {
+    std::string archive_name_slash = found->second.first + "/";
+    root_key = archive_name_slash + c10::to_string(found->second.second);
+  } else {
+    root_key = c10::to_string(tensor_data_.size());
+  }
+
+  // change will only be triggered on non-mobile logic
+  if (get_tensor_id_ != nullptr) {
+    root_key = get_tensor_id_(tensor);
+  }
   pushString(root_key);
+
   // location
   pushString(tensor.device().str());
   // size
