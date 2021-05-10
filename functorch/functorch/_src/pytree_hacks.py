@@ -28,11 +28,6 @@ def tree_flatten_hack(pytree):
 
     return result, _pytree.TreeSpec(typ, context, children_specs)
 
-# TODO: replace this with tree_map from core
-def tree_map(fn, pytree):
-    flat_args, spec = tree_flatten(pytree)
-    return tree_unflatten([fn(arg) for arg in flat_args], spec)
-
 def tree_map_(fn_, pytree):
     flat_args, _ = tree_flatten(pytree)
     [fn_(arg) for arg in flat_args]
