@@ -570,6 +570,7 @@ class DistributedDataParallel(Module):
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
+        modules_and_parameters = []
         modules_and_parameters = [
             [
                 (module, parameter)
