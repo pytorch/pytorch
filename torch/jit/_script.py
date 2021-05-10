@@ -892,8 +892,8 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
                     for examples in example_inputs:
                         obj(*examples)
                 else:
-                    warnings.warn("Error: The example inputs are not of the right format. Please format the inputs to be of "
-                                  "type `List[Tuple]` or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+                    warnings.warn("Error: Unable to infer types using. Please format the inputs to type `List[Tuple]`"
+                                  " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
         else:
             warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                           "to enable Profile-Directed Typing in TorchScript. Refer to "
