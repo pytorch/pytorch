@@ -222,9 +222,8 @@ Value* CloneValueFromListConstruct(
   TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
   c10::optional<at::ScalarType> scalar_type = c10::nullopt;
   if (elem->cast<IntType>()) {
-
     scalar_type = at::kLong;
-    if (!v->node()->inputs().empty()){
+    if (!v->node()->inputs().empty()) {
       auto lc_node = v->node();
       // ListConstruct Int[] output case, we need to transform to ONNX
       // Concat to ensure the output is a single tensor(dynamic) type in
