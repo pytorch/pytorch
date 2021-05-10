@@ -96,6 +96,26 @@ TORCH_META_FUNC(trunc) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(floor) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "floor is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(sign) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(),
+              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(ceil) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "ceil is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -116,6 +136,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh)
 CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not)
+CREATE_UNARY_TORCH_IMPL_FUNC(ceil)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma)
@@ -125,6 +146,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(erfinv)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp2)
 CREATE_UNARY_TORCH_IMPL_FUNC(expm1)
+CREATE_UNARY_TORCH_IMPL_FUNC(floor)
 CREATE_UNARY_TORCH_IMPL_FUNC(frac)
 CREATE_UNARY_TORCH_IMPL_FUNC(i0)
 CREATE_UNARY_TORCH_IMPL_FUNC(lgamma)
@@ -137,6 +159,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
 CREATE_UNARY_TORCH_IMPL_FUNC(round)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign)
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
@@ -423,16 +446,6 @@ Tensor conj(const Tensor& self) {
   return self.conj();
 }
 
-Tensor& ceil_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "ceil is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, ceil_stub);
-}
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
-Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
-
 // special_exp2, alias for exp2
 Tensor& special_exp2_out(const Tensor& self, Tensor& result) { return at::exp2_out(result, self); }
 Tensor special_exp2(const Tensor& self) { return self.exp2(); }
@@ -452,24 +465,6 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
-
-Tensor& floor_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "floor is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, floor_stub);
-}
-Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
-Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
-
-Tensor& sign_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(),
-              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  return unary_op_impl_out(result, self, sign_stub);
-}
-Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
-Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
 Tensor& sgn_out(const Tensor& self, Tensor& result) {
   if (self.is_complex()) {
