@@ -2502,6 +2502,31 @@ def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_remainder(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (), 1.5, False, False),
+            ((), 1.5, (), False, False),
+            ((S, S, S), (S, S, S), 1.5, False, True),
+            ((S,), (S, S, S), 1.5, False, True),
+            ((S, 1, S), (S, S), 1.5, False, True),
+            ((), 1.5, (), False, False),
+            ((), (S, S, S), 1.5, False, True)
+            )
+
+    def generator():
+        for case in cases:
+            shape, shape_other, add_other, requires_grad, broadcasts_input = case
+            if isinstance(shape_other, tuple):
+                arg = make_arg(shape_other, requires_grad=False) + add_other
+            else:
+                # shape_other is scalar
+                arg = shape_other
+            yield(SampleInput(make_arg(shape), args=(arg,),
+                broadcasts_input=broadcasts_input))
+
+    return list(generator())
+
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
 
@@ -4247,6 +4272,14 @@ op_db: List[OpInfo] = [
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+            ),),
+    OpInfo('remainder',
+            dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+            sample_inputs_func=sample_inputs_remainder,
+            skips=(
+                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
             ),),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -6125,14 +6158,7 @@ def method_tests():
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
-        ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('remainder', (S, S, S), (1.5,), '', (True,)),
-        ('remainder', (), (1.5,), 'scalar', (True,)),
-        ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-        ('remainder', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-        ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-        ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-        ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
+        ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'), 
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
@@ -6476,48 +6502,20 @@ def unpack_variables(args):
         return args
 
 
-EXCLUDE_FUNCTIONAL = {
-    'addmm',
-    'addmm_',
-    'reshape',
-    'where'  # argument order
-}
-EXCLUDE_GRADCHECK: Dict[str, Any] = {
-}
-EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
-}
-EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # `other` expand_as(self, other) is not used in autograd.
-    'test_expand_as',
-    'test_cdist',
-}
-
-
-def exclude_tensor_method(name, test_name):
-    # there are no tensor equivalents for these (inplace or out)
-    exclude_all_tensor_method_by_test_name = {
-        'test_slice',
-        'test_where',
-        'test_where_broadcast_all',
-        'test_where_scalar',
-        'test_where_scalar_broadcast_mask',
-        'test_where_scalar_broadcast_non_mask',
-        'test_var_mean_keepdim_dim_1d',
-        'test_var_mean_keepdim_dim',
-        'test_var_mean_dim_1d',
-        'test_var_mean_dim',
-        'test_var_mean',
-        'test_std_mean_keepdim_dim_1d',
-        'test_std_mean_keepdim_dim',
-        'test_std_mean_dim_1d',
-        'test_std_mean_dim',
-        'test_std_mean',
+    EXCLUDE_FUNCTIONAL = {
+        'addmm',
+        'addmm_',
+        'reshape',
+        'where'  # argument order
     }
-    # there are no out-of-place tensor equivalents for these
-    exclude_outplace_tensor_method = {
-        'index_fill',
-        'scatter',
-        'scatter_add',
+    EXCLUDE_GRADCHECK: Dict[str, Any] = {
+    }
+    EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
+    }
+    EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
+        # `other` expand_as(self, other) is not used in autograd.
+        'test_expand_as',
+        'test_cdist',
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
