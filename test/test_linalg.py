@@ -1499,24 +1499,29 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
-    # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
-    # their matrix norm results match
+    # This test compares torch.linalg.norm, torch.linalg.matrix_norm and numpy.linalg.norm to
+    # ensure that their matrix norm results match.
     @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim):
+            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             result = torch.linalg.norm(input, ord, dim, keepdim)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
 
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            self.assertEqual(result, result_numpy, msg=msg)
+            def check(op):
+                result = op(input, ord, dim, keepdim)
+                self.assertEqual(result, result_numpy, msg=msg)
+                result_out = torch.empty_like(result)
+                op(input, ord, dim, keepdim, out=result_out)
+                self.assertEqual(result, result_out, msg=msg)
 
-            result_out = torch.empty_like(result)
-            torch.linalg.norm(input, ord, dim, keepdim, out=result_out)
-            self.assertEqual(result, result_out, msg=msg)
+            check(torch.linalg.norm)
+            if ord is not None and dim is not None:
+                check(torch.linalg.matrix_norm)
 
         ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro']
         S = 10
@@ -1531,8 +1536,10 @@ class TestLinalg(TestCase):
             ((S, S, S, S), ord_matrix, (-3, 2)),
         ]
         L = 1_000
+
         if dtype == torch.double:
             test_cases.append(((L, L), ord_matrix, None))
+
         for keepdim in [True, False]:
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
@@ -1765,6 +1772,29 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 2e-5})
+    def test_matrix_norm(self, device, dtype):
+        # Test only inputs for which torch.linalg.matrix_norm diverges from torch.linalg.norm
+        A = make_tensor((2, 2, 2), device, dtype)
+
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a matrix.*'):
+            torch.linalg.matrix_norm(make_tensor((2,), device, dtype))
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a 2-tuple.*'):
+            torch.linalg.matrix_norm(A, dim=(0,))
+        with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
+            torch.linalg.matrix_norm(A, ord=0)
+        with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
+            torch.linalg.matrix_norm(A, ord=3.0)
+
+        # Test dim=None behavior
+        ref = torch.linalg.norm(A, dim=(-2, -1))
+        res = torch.linalg.matrix_norm(A)
+        self.assertEqual(ref, res)
+
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
@@ -1864,15 +1894,22 @@ class TestLinalg(TestCase):
         def run_test_case(input, ord, dim, keepdim, should_error):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             input_numpy = input.cpu().numpy()
+            ops = [torch.linalg.norm]
+
+            if ord is not None and dim is not None:
+                ops.append(torch.linalg.matrix_norm)
+
             if should_error:
                 with self.assertRaises(ValueError):
                     np.linalg.norm(input_numpy, ord, dim, keepdim)
-                with self.assertRaises(IndexError):
-                    torch.linalg.norm(input, ord, dim, keepdim)
+                for op in ops:
+                    with self.assertRaises(IndexError):
+                        op(input, ord, dim, keepdim)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
-                result = torch.linalg.norm(input, ord, dim, keepdim)
-                self.assertEqual(result, result_numpy, msg=msg)
+                for op in ops:
+                    result = op(input, ord, dim, keepdim)
+                    self.assertEqual(result, result_numpy, msg=msg)
 
         ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
         S = 10
@@ -1886,6 +1923,7 @@ class TestLinalg(TestCase):
             ((0, 0, S), [1, 2, inf, -1, -2, -inf], (0, 1)),
             ((0, 0, S), [1, 2, inf, -1, -2, -inf], (1, 0)),
         ]
+
         for keepdim in [True, False]:
             for input_size, error_ords, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
@@ -2793,7 +2831,7 @@ class TestLinalg(TestCase):
 
             out_u = torch.empty(0, dtype=dtype, device=device)
             if svd == torch.linalg.svd:
-                msg = "but got VT with dtype Int"
+                msg = "but got Vh with dtype Int"
             else:
                 msg = "but got V with dtype Int"
             with self.assertRaisesRegex(RuntimeError, msg):
@@ -2865,15 +2903,15 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_compute_uv(self, device, dtype):
         """
-        Test the default case, compute_uv=True. Here we have the very same behavior as
-        numpy
+        Test the default case. Here we have the very same behavior as
+        NumPy with compute_uv=True.
         """
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
         for full_matrices in (True, False):
             # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
-            actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
+            actual = torch.linalg.svd(t, full_matrices)
             # sign/phase of the singular vectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual[0]), abs(expected[0]))
             self.assertEqual(actual[1], expected[1])
@@ -2882,38 +2920,9 @@ class TestLinalg(TestCase):
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
                    torch.empty_like(actual[2]))
-            out2 = torch.linalg.svd(t, full_matrices, compute_uv=True, out=out)
+            out2 = torch.linalg.svd(t, full_matrices, out=out)
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_linalg_svd_no_compute_uv(self, device, dtype):
-        """
-        Test the compute_uv=False case. Here we have a different return type than
-        numpy: numpy returns S, we return (empty, S, empty)
-        """
-        t = torch.randn((10, 11), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-
-        def is_empty(x):
-            return x.numel() == 0 and x.dtype == t.dtype and x.device == t.device
-
-        for full_matrices in (True, False):
-            # check linalg.svd vs numpy
-            np_s = np.linalg.svd(np_t, full_matrices, compute_uv=False)
-            USV = torch.linalg.svd(t, full_matrices, compute_uv=False)
-            assert is_empty(USV.U)
-            self.assertEqual(USV.S, np_s)
-            assert is_empty(USV.V)
-            # check linalg.svd vs linalg.svd(out=...)
-            out = (torch.empty_like(USV.U), torch.empty_like(USV.S), torch.empty_like(USV.V))
-            USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out)
-            assert USV.U is out[0]
-            assert USV.S is out[1]
-            assert USV.V is out[2]
-            self.assertEqual(USV.S, np_s)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
