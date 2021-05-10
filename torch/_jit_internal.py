@@ -24,7 +24,7 @@ import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -32,9 +32,11 @@ else:
     from typing_extensions import Final
 
 try:
-    from _thread import LockType
+    import _thread
+    LockType: Type = _thread.LockType
 except ImportError:
-    from _dummy_thread import LockType
+    import _dummy_thread
+    LockType: Type = _dummy_thread.LockType
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
