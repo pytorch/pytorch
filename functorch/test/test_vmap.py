@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
+from common import parameterized, instantiate_parameterized_methods
 import types
 
 from functorch import vmap
@@ -25,6 +26,7 @@ class EnableVmapFallbackWarnings:
 
     def __exit__(self, *ignored):
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
+
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
@@ -1100,46 +1102,45 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op, in_dims=2), [getter([2, 5, B0, B1, 3], device)],
              in_dims=2, out_dims=2)
 
-    def test_unary_pointwise_ops(self):
-        cases = [
-            (torch.abs, TensorFactory.randn),
-            (torch.acos, TensorFactory.rand),
-            (torch.asin, TensorFactory.rand),
-            (torch.atan, TensorFactory.rand),
-            (torch.ceil, TensorFactory.randn),
-            (torch.cos, TensorFactory.rand),
-            (torch.cosh, TensorFactory.rand),
-            (torch.digamma, TensorFactory.rand),
-            (torch.exp, TensorFactory.randn),
-            (torch.expm1, TensorFactory.randn),
-            (torch.floor, TensorFactory.randn),
-            (torch.frac, TensorFactory.randn),
-            (torch.lgamma, TensorFactory.rand),
-            (torch.log, TensorFactory.randp1),
-            (torch.log10, TensorFactory.randp1),
-            (torch.log1p, TensorFactory.randp1),
-            (torch.log2, TensorFactory.randp1),
-            (torch.neg, TensorFactory.randn),
-            (torch.reciprocal, TensorFactory.randp1),
-            (torch.relu, TensorFactory.randn),
-            (torch.round, TensorFactory.randn),
-            (torch.rsqrt, TensorFactory.randp1),
-            (torch.sigmoid, TensorFactory.randn),
-            (torch.sign, TensorFactory.randn),
-            (torch.sin, TensorFactory.rand),
-            (torch.sinh, TensorFactory.rand),
-            (torch.sqrt, TensorFactory.rand),
-            (torch.tan, TensorFactory.rand),
-            (torch.tanh, TensorFactory.rand),
-            (torch.trunc, TensorFactory.randn),
-        ]
+    @parameterized("case", {
+        'abs': (torch.abs, TensorFactory.randn),
+        'acos': (torch.acos, TensorFactory.rand),
+        'asin': (torch.asin, TensorFactory.rand),
+        'atan': (torch.atan, TensorFactory.rand),
+        'ceil': (torch.ceil, TensorFactory.randn),
+        'cos': (torch.cos, TensorFactory.rand),
+        'cosh': (torch.cosh, TensorFactory.rand),
+        'digamma': (torch.digamma, TensorFactory.rand),
+        'exp': (torch.exp, TensorFactory.randn),
+        'expm1': (torch.expm1, TensorFactory.randn),
+        'floor': (torch.floor, TensorFactory.randn),
+        'frac': (torch.frac, TensorFactory.randn),
+        'lgamma': (torch.lgamma, TensorFactory.rand),
+        'log': (torch.log, TensorFactory.randp1),
+        'log10': (torch.log10, TensorFactory.randp1),
+        'log1p': (torch.log1p, TensorFactory.randp1),
+        'log2': (torch.log2, TensorFactory.randp1),
+        'neg': (torch.neg, TensorFactory.randn),
+        'reciprocol': (torch.reciprocal, TensorFactory.randp1),
+        'relu': (torch.relu, TensorFactory.randn),
+        'round': (torch.round, TensorFactory.randn),
+        'rsqrt': (torch.rsqrt, TensorFactory.randp1),
+        'sigmoid': (torch.sigmoid, TensorFactory.randn),
+        'sign': (torch.sign, TensorFactory.randn),
+        'sin': (torch.sin, TensorFactory.rand),
+        'sinh': (torch.sinh, TensorFactory.rand),
+        'sqrt': (torch.sqrt, TensorFactory.rand),
+        'tan': (torch.tan, TensorFactory.rand),
+        'tanh': (torch.tanh, TensorFactory.rand),
+        'trunc': (torch.trunc, TensorFactory.randn),
+    })
+    def test_unary_pointwise(self, case):
+        op, getter = case
+        self._test_unary(op, getter, 'cpu')
 
-        for op, getter in cases:
-            self._test_unary(op, getter, 'cpu')
-
-            # test in-place
-            method = getattr(Tensor, f'{op.__name__ + "_"}')
-            self._test_unary(method, getter, 'cpu', check_propagates_grad=False)
+        # test in-place
+        method = getattr(Tensor, f'{op.__name__ + "_"}')
+        self._test_unary(method, getter, 'cpu', check_propagates_grad=False)
 
     def test_clone(self):
         # Some basic tests
@@ -2371,6 +2372,18 @@ class TestVmapOperators(Namespace.TestVmapBase):
                                         'vmap: We do not yet support calling random operations'):
                 vmap(op)(*args)
 
+    @parameterized('op', {'abs': torch.abs, 'acos': torch.acos})
+    def test_parameterize(self, op):
+        pass
+
+    @parameterized('op2', {'cos': torch.cos, 'cosh': torch.cosh})
+    @parameterized('op1', {'sin': torch.sin, 'sinh': torch.sinh})
+    def test_parameterize_multiple(self, op1, op2):
+        pass
+
+instantiate_parameterized_methods(TestVmapOperators)
+
+
 def construct_v(output, batch_size):
     return torch.randn(batch_size, *output.shape,
                        dtype=output.dtype, device=output.device)
@@ -2535,6 +2548,10 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,))
         self._batched_grad_grad_test(torch.log1p, (x,))
+
+    @parameterized('param', {'foo': None, 'bar': None})
+    def test_param_device(self, device, param):
+        pass
 
     @allowVmapFallbackUsage
     def test_max(self, device):
@@ -2732,6 +2749,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
+instantiate_parameterized_methods(TestVmapBatchedGradient)
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
