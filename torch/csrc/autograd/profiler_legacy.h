@@ -91,7 +91,6 @@ inline int64_t getTime(bool allow_monotonic = false) {
     mode = CLOCK_MONOTONIC;
   }
   clock_gettime(mode, &t);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }
@@ -202,12 +201,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void setCpuUs(int64_t cpu_us) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     cpu_ns_ = cpu_us * 1000.0;
   }
 
   double cpuUs() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return cpu_ns_ / (1000.0);
   }
 

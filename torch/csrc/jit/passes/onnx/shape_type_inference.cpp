@@ -721,11 +721,9 @@ void ProcessSliceNode(Node* n, int opset_version) {
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
       auto valid = true;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version >= 10) {
         valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
             ConstantValueMap::HasValue(n->input(2)->debugName());
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (auto input_idx = 3; input_idx < 5; ++input_idx) {
           if (n->inputs().size() > input_idx) {
             valid = valid &&
@@ -750,7 +748,6 @@ void ProcessSliceNode(Node* n, int opset_version) {
       }
       std::vector<int64_t> step_vector;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
@@ -1001,7 +998,6 @@ void ComputeConstant(Node* n, int opset_version) {
             auto value =
                 input_node->t(attr::value).toType(at::ScalarType::Float);
             auto value_a = value.accessor<float, 1>();
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (value_a.size(0) == 1 && std::abs(value_a[0]) > 1e-6) {
               if (ConstantValueMap::HasShape(n->input()->debugName())) {
                 auto shape_size_0 =
