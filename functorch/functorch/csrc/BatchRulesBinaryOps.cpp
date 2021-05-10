@@ -119,11 +119,22 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::div, const Scalar&>));
   BINARY_POINTWISE(div);
   VMAP_SUPPORT("tanh_backward", BINARY_POINTWISE_BATCH_RULE(at::tanh_backward));
+  VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
+        binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
 
   // at::pow has three out-of-place overloads
   VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::pow>));
   VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>));
   VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
+
+  VMAP_SUPPORT("clamp_min.Tensor",
+      SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, static_cast<TensorTensorType>(&at::clamp_min)>));
+  VMAP_SUPPORT("clamp_min",
+      SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, static_cast<TensorScalarType>(&at::clamp_min), const Scalar&>));
+  VMAP_SUPPORT("clamp_max.Tensor",
+      SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, static_cast<TensorTensorType>(&at::clamp_max)>));
+  VMAP_SUPPORT("clamp_max",
+      SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, static_cast<TensorScalarType>(&at::clamp_max), const Scalar&>));
 
 
 #define COMPARISON_POINTWISE(op) \
