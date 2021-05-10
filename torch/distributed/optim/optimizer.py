@@ -96,7 +96,7 @@ class _LocalOptimizer(object):
             self.optim.step()
 
         if len(all_local_grads) > 0:
-            torch.cuda.current_stream(all_local_grads[0].device()).synchronize()
+            torch.cuda.current_stream(list(all_local_grads.items())[0][0].device).synchronize()
 
 
 def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
