@@ -117,7 +117,7 @@ def _unwrap_batched(
         # Some weird edge case requires us to spell out the following
         # see test_out_dims_edge_case
         if isinstance(out_dims, int):
-            flat_out_dims = [out_dims] 
+            flat_out_dims = [out_dims]
         elif isinstance(out_dims, tuple) and len(out_dims) == 1:
             flat_out_dims = out_dims
             out_dims = out_dims[0]
