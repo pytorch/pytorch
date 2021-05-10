@@ -17,7 +17,7 @@ void atan2_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-void hypot_kernel_cuda(TensorIterator& iter) {
+void hypot_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "hypot_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return ::hypot(a, b);
