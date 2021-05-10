@@ -213,6 +213,7 @@ absl_files = list(
     set(glob2.glob('third_party/abseil-cpp/absl/**/*_benchmark.cc')) -
     set(glob2.glob('third_party/abseil-cpp/absl/**/*_benchmarks.cc')) -
     set(glob2.glob('third_party/abseil-cpp/absl/**/spinlock_test_common.cc')) -
+    set(glob2.glob('third_party/abseil-cpp/absl/flags/**/*.cc')) -
     set(glob2.glob('third_party/abseil-cpp/absl/**/mutex_nonprod.cc')) -
     set(glob2.glob('third_party/abseil-cpp/absl/**/gaussian_distribution_gentables.cc')))
 
