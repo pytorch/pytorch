@@ -31,12 +31,13 @@ if sys.version_info[:2] > (3, 7):
 else:
     from typing_extensions import Final
 
+LockType: Type
 try:
     import _thread
-    LockType: Type = _thread.LockType
+    LockType = _thread.LockType
 except ImportError:
     import _dummy_thread
-    LockType: Type = _dummy_thread.LockType
+    LockType = _dummy_thread.LockType
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
