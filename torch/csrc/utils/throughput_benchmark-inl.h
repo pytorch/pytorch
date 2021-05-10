@@ -131,7 +131,6 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   float total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(
                             end_time - start_time)
                             .count() /
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1000.0 / 1000.0;
   // We use config.num_iters instead of num_attempted_iters as it is
   // repsesatative of the real work done. Last attempted iteration on each

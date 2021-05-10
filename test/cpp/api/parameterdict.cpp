@@ -80,16 +80,11 @@ TEST_F(ParameterDictTest, SimpleUpdate) {
   ParameterDict wrongDict;
   ParameterDict rightDict;
   dict->insert("A", torch::tensor({1.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict->insert("B", torch::tensor({2.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict->insert("C", torch::tensor({3.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   wrongDict->insert("A", torch::tensor({5.0}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   wrongDict->insert("D", torch::tensor({5.0}));
   ASSERT_THROWS_WITH(dict->update(*wrongDict), "Parameter 'D' is not defined");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   rightDict->insert("A", torch::tensor({5.0}));
   dict->update(*rightDict);
   ASSERT_EQ(dict->size(), 3);
@@ -100,9 +95,7 @@ TEST_F(ParameterDictTest, SimpleUpdate) {
 TEST_F(ParameterDictTest, Keys) {
   torch::OrderedDict<std::string, torch::Tensor> params = {
       {"a", torch::tensor({1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"b", torch::tensor({2.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"c", torch::tensor({1.0, 2.0})}};
   auto dict = torch::nn::ParameterDict(params);
   std::vector<std::string> keys = dict->keys();
@@ -147,11 +140,8 @@ TEST_F(ParameterDictTest, Get) {
 TEST_F(ParameterDictTest, PrettyPrintParameterDict) {
   torch::OrderedDict<std::string, torch::Tensor> params = {
       {"a", torch::tensor({1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"b", torch::tensor({2.0, 1.0})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"c", torch::tensor({{3.0}, {2.1}})},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {"d", torch::tensor({{3.0, 1.3}, {1.2, 2.1}})}};
   auto dict = torch::nn::ParameterDict(params);
   ASSERT_EQ(

@@ -135,9 +135,9 @@ TensorImpl::TensorImpl(
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude
-    // Autograd & InplaceOrView keys. Normally key_set only contains backend
+    // Autograd & ADInplaceOrView keys. Normally key_set only contains backend
     // keys but we do the substraction here to make sure.
-    key_set_ = key_set - c10::autograd_dispatch_keyset_with_InplaceOrView;
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
     // grad.
@@ -235,7 +235,6 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
   switch (sizes_and_strides_.size()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
@@ -273,7 +272,6 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.size_at_unchecked(0) < 2 ||
         sizes_and_strides_.stride_at_unchecked(0) == 1;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
   for (int64_t i = 0; i < dim(); i++) {

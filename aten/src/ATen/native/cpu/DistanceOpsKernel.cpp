@@ -155,10 +155,8 @@ struct Dist {
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -191,7 +189,6 @@ struct Dist {
       run_parallel_pdist<zdist_calc<Vec>>(result, self, p);
     } else if (p == 1.0) {
       run_parallel_pdist<odist_calc<Vec>>(result, self, p);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_parallel_pdist<tdist_calc<Vec>>(result, self, p);
     } else if (std::isinf(p)) {
@@ -215,7 +212,6 @@ struct Dist {
     int64_t size1 = r1 * m;
     int64_t size2 = r2 * m;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     parallel_for(0, combs * d, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
       scalar_t * res = res_start + start;
       const scalar_t * const res_end = res_start + end;
@@ -257,7 +253,6 @@ struct Dist {
       run_parallel_cdist<zdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (p == 1.0) {
       run_parallel_cdist<odist_calc<scalar_t>>(result, x1, x2, p);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_parallel_cdist<tdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (std::isinf(p)) {
@@ -306,7 +301,6 @@ struct Dist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
@@ -329,10 +323,8 @@ struct Dist {
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel_pdist<odist_calc<Vec>>(result, grad, self, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p < 2.0) {
       run_backward_parallel_pdist<lttdist_calc>(result, grad, self, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_backward_parallel_pdist<tdist_calc<Vec>>(result, grad, self, p, dist);
     } else if (std::isinf(p)) {
@@ -347,10 +339,8 @@ struct Dist {
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel_cdist<odist_calc<Vec>>(result, grad, x1, x2, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p < 2.0) {
       run_backward_parallel_cdist<lttdist_calc>(result, grad, x1, x2, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_backward_parallel_cdist<tdist_calc<Vec>>(result, grad, x1, x2, p, dist);
     } else if (std::isinf(p)) {
@@ -380,7 +370,6 @@ struct Dist {
     const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {
       const Vec pvec(p);
 

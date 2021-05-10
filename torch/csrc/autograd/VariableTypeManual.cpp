@@ -203,11 +203,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
   })();
   namedinference::propagate_names(result, self);
 
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
-    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
-  }
+  // Detach the forward grads by not setting anything on the result
 
   return result;
 }
@@ -245,11 +241,7 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    self._fw_grad(/* level */ 0).detach_();
-  }
+  autograd_meta->fw_grad_.reset();
 
   return self;
 }
@@ -280,13 +272,13 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }  // namespace
 }} // namespace autograd::VariableType
 
-namespace InplaceOrView {
+namespace ADInplaceOrView {
   #define CREATION_META_DEFINITION InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)
 
   Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
     {
-      at::AutoDispatchBelowInplaceOrView guard;
-      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+      at::AutoDispatchBelowADInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_ADInplaceOrView_keyset, self, src, non_blocking);
     }
     torch::autograd::increment_version(self);
     return self;
@@ -294,7 +286,7 @@ namespace InplaceOrView {
 
   Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
     auto out = ([&]() {
-      at::AutoDispatchBelowInplaceOrView guard;
+      at::AutoDispatchBelowADInplaceOrView guard;
       // Make an empty shallow copy, the as_view call below will fill in the proper fields
       return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
@@ -302,7 +294,8 @@ namespace InplaceOrView {
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
-                          /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
+                          /* is_fw_differentiable */ false, /* view_func */ func,
+                          /* creation_meta */ CreationMeta::DEFAULT,
                           /*allow_tensor_metadata_change=*/false);
 
     return result;
@@ -310,7 +303,7 @@ namespace InplaceOrView {
 
   Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
     auto tmp = ([&]() {
-      at::AutoDispatchBelowInplaceOrView guard;
+      at::AutoDispatchBelowADInplaceOrView guard;
       // Make an empty shallow copy, the as_view call below will fill in the proper fields
       return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
@@ -330,11 +323,11 @@ namespace InplaceOrView {
   }
 
   namespace {
-    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
-      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
-      m.impl("detach", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::detach)));
-      m.impl("_fw_primal", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::_fw_primal)));
+    TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::copy_)));
+      m.impl("detach", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::detach)));
+      m.impl("_fw_primal", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_fw_primal)));
     }
   } // namespace
-} // namespace InplaceOrView
+} // namespace ADInplaceOrView
 } // namespace torch
