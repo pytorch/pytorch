@@ -389,7 +389,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   dist_autograd_context_id_ = getDistAutogradContextId();
                   state_ = InterpreterState(stateImpl_);
                 }
-                void operator()() {
+                void operator()(c10::ivalue::Future& /* unused */) {
                   stateImpl_->taskLauncher_(InterpreterContinuation(
                       state_,
                       std::move(stack_),
@@ -811,7 +811,7 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::unordered_map<std::string, int>& Code::op_to_num_specified_args()
+const std::unordered_map<std::string, size_t>& Code::op_to_num_specified_args()
     const {
   return pImpl->op_to_num_specified_args();
 }
