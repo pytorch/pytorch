@@ -5,7 +5,6 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/AccumulateType.h>
 
-
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
