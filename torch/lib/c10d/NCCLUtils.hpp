@@ -112,6 +112,7 @@ class NCCLComm {
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
     comm->ncclId_ = commId;
+    comm->rank_ = rank;
     return comm;
   }
 
@@ -139,7 +140,8 @@ class NCCLComm {
   ncclComm_t getNcclComm() {
     std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
-      throw std::runtime_error("NCCL communicator was aborted.");
+      throw std::runtime_error(
+          "NCCL communicator was aborted on rank ", rank_, ".");
     }
     return ncclComm_;
   }
@@ -192,6 +194,8 @@ class NCCLComm {
   bool aborted_;
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
+  // Rank that this communicator corresponds to.
+  int rank_;
 };
 
 } // namespace c10d
