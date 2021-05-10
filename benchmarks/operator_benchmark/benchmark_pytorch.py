@@ -1,7 +1,7 @@
 import time
 import json
 import torch
-import cpp_extension  # noqa: F401
+from torch.utils import cpp_extension  # noqa: F401
 
 
 """PyTorch performance microbenchmarks.
