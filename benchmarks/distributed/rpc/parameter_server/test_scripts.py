@@ -3,7 +3,7 @@ from os.path import join
 from pathlib import Path
 
 script_dir = join(
-    Path(__file__).parent, "scripts"
+    Path(__file__).parent, "experiment_scripts"
 )
 encoding = 'utf-8'
 

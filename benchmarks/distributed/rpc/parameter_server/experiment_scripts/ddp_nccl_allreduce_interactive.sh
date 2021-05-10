@@ -1,7 +1,5 @@
 #!/bin/bash
 
-cd "$(dirname "$0")"
-
 srun --label \
     --job-name=ddp_nccl_allreduce_interactive \
     --partition=q2 \

@@ -16,7 +16,4 @@
 
 #SBATCH --time=1:00:00
 
-# move to directory
-cd $1
-
 srun --label ddp_nccl_allreduce.sh
