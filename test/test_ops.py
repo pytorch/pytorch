@@ -205,7 +205,7 @@ class TestGradients(TestCase):
         if op.supports_gradgrad:
             self.skipTest("Skipped! Operation does support gradgrad")
 
-        err_msg = r"the derivative for '.*' is not implemented\."
+        err_msg = r"derivative for .* is not implemented"
         with self.assertRaisesRegex(RuntimeError, err_msg):
             self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
@@ -730,24 +730,29 @@ class TestCommon(JitCommonTestCase):
     # 3. If the operator's inplace variant is supported, tests that the inplace operation
     #    produces the correct value when called on a conjugate view tensor and that the output
     #    has its conj bit set to true
-    # Note: This test also runs for functions that take tensorlists as input.
+    # This test only runs for C -> R and C -> C functions
+    # TODO: add tests for `R->C` functions
+    # Note: This test runs for functions that take both tensors and tensorlists as input.
     @ops(op_db, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
-        # This test only runs for C -> R and C -> C functions
-        # TODO: add tests for `R->C` functions
-        _requires_grad = (op.supports_autograd and op.supports_complex_autograd)
-
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         inplace_variant = op.inplace_variant
 
         # helper function to physically conjugate the tensor
-        def conjugate_physical(tensor):
-            tensor_requires_grad = tensor.requires_grad
-            with torch.no_grad():
-                tensor = tensor.conj_physical()
-            return tensor.requires_grad_(tensor_requires_grad)
+        def conjugate_physical(input):
+            if isinstance(input, torch.Tensor):
+                tensor_requires_grad = input.requires_grad
+                with torch.no_grad():
+                    input = input.conj_physical()
+                return input.requires_grad_(tensor_requires_grad)
+
+            if isinstance(input, Sequence):
+                out = list(map(clone_input_helper, input))
+                out[0] = conjugate_physical(out[0])
+                return tuple(out)
 
         # helper function to clone and conjugate the input if its a tensor
         # else clone the sequence and conjugate the first element in the sequence
@@ -755,38 +760,37 @@ class TestCommon(JitCommonTestCase):
         # have its requires_grad set to that value.
         def clone_conj_input_helper(input, **kwargs):
             if isinstance(input, torch.Tensor):
-                with torch.no_grad():
-                    input = input.clone().conj()
                 requires_grad = kwargs.get('requires_grad', input.requires_grad)
+                with torch.no_grad():
+                    input = input.clone()
+                # Note: .conj() is not called under no_grad mode since it's not allowed to modify a
+                # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
+                # before resetting the requires_grad field for input
+                input = input.conj()
+                assert input.is_leaf
                 return input.requires_grad_(requires_grad)
 
             if isinstance(input, Sequence):
                 out = list(map(clone_input_helper, input))
                 out[0] = clone_conj_input_helper(out[0])
                 return tuple(out)
-            return input
 
         for sample in samples:
+            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
             cloned1 = clone_conj_input_helper(sample.input)
-            cloned2 = clone_conj_input_helper(sample.input, requires_grad=False)
+            sample.input = conjugate_physical(sample.input)
 
-            # Assumes that the input is either a tensor or a tensorlist.
-            if isinstance(sample.input, torch.Tensor):
-                sample.input = conjugate_physical(sample.input)
-            else:
-                sample.input[0] = conjugate_physical(sample.input[0])
-
-            # Computes function forward value with a conj view tensor and a physically
-            # conjugated tensor and verify they are equal.
+            # Computes function forward value with a physically conjugated tensor and
+            # a conj view tensor and verifies that the output in both case are equal.
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
             forward_with_conjview = op(cloned1, *sample.args, **sample.kwargs)
             self.assertEqual(expected_forward, forward_with_conjview)
 
-            # if the op has an inplace variant, and the input doesn't require broadcasting
+            # If the op has an inplace variant, and the input doesn't require broadcasting
             # and has the same dtype as output, verify that the inplace operation on a conjugated
             # input produces correct output, and the output tensor has the conj bit set to True
-            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
             if inplace_variant is not None and not sample.broadcasts_input:
+                cloned2 = clone_conj_input_helper(tensor, requires_grad=False)
                 if (isinstance(expected_forward, torch.Tensor) and
                         expected_forward.dtype is tensor.dtype):
                     inplace_forward = inplace_variant(cloned2, *sample.args, **sample.kwargs)
@@ -799,18 +803,19 @@ class TestCommon(JitCommonTestCase):
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
             if isinstance(expected_forward, torch.Tensor) and expected_forward.requires_grad:
-                expected_forward.sum().backward()
-                forward_with_conjview.sum().backward()
-                if sample.input.grad is not None:
-                    cloned1_tensor = cloned1.input if isinstance(cloned1.input, torch.Tensor) else cloned1.input[0]
+                tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+                expected_forward.sum().backward(retain_graph=True)
+                forward_with_conjview.sum().backward(retain_graph=True)
+                if tensor.grad is not None:
+                    cloned1_tensor = cloned1 if isinstance(cloned1, torch.Tensor) else cloned1[0]
                     self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
-                    tensor1.grad, tensor2.grad = None, None
+                    tensor.grad, cloned1_tensor.grad = None, None
 
                     # a repeat of the above test if output is not complex valued
                     if (expected_forward.is_complex()):
                         grad = torch.randn_like(expected_forward)
-                        expected_forward.backward(grad.conj())
+                        expected_forward.backward(grad.conj_physical())
                         forward_with_conjview.backward(grad.conj())
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
