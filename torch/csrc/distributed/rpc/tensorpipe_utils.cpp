@@ -47,6 +47,12 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
+  // The pickler below might allocate new tensors if RPC arguments contain
+  // Tensor views. Apply stream guard here to include those Tensor allocation
+  // operations to the streams.
+  c10::MultiStreamGuard guard(
+          ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+
   // Metadata
   buffers.type = std::make_unique<MessageType>(rpcMessage.type());
   buffers.id = std::make_unique<int64_t>(rpcMessage.id());
@@ -230,7 +236,15 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
 Message tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
-    TensorpipeReadBuffers&& buffers) {
+    TensorpipeReadBuffers&& buffers,
+    const std::shared_ptr<LazyStreamContext>& ctx) {
+
+  // I believe we don't need this today, as unlike pickling, unpickling does
+  // not insert CUDA ops. But still putting this guard here for safety and
+  // potential future changes.
+  c10::MultiStreamGuard guard(
+        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+
   // Tensors
   std::vector<at::Tensor> tensors;
   const char* pickleData = buffers.pickle.data();
