@@ -134,7 +134,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     current_device = None
     for name, module in modules.named_children():
         device = _retrieve_device(module)
-        if current_device is not None and current_device != device:
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
             partitions.append(_assemble_partition(current_partition))
             devices.append(current_device)
             current_partition = []

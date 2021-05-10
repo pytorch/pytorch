@@ -226,7 +226,6 @@ def test_exception(setup_rpc):
         model(torch.rand(1))
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_exception_early_stop_asap(setup_rpc):
     """Even the first partitions have finished to process, the partition before
     the failed partition should be killed as soon as possible.
@@ -236,10 +235,6 @@ def test_exception_early_stop_asap(setup_rpc):
         pass
 
     class Pass(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.dummy = torch.nn.Parameter(torch.empty(0))
-
         def forward(self, x):
             return x
 
@@ -255,14 +250,10 @@ def test_exception_early_stop_asap(setup_rpc):
             return x
 
     class Raise(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.dummy = torch.nn.Parameter(torch.empty(0))
-
         def forward(self, x):
             raise ExpectedException()
 
-    model = nn.Sequential(Pass(), Pass().to(0), Counter(), Raise().to(0))
+    model = nn.Sequential(Pass(), Pass(), Counter(), Raise())
     model = Pipe(model, chunks=3)
 
     with pytest.raises(ExpectedException):
@@ -455,10 +446,9 @@ def test_deferred_batch_norm_params(checkpoint, setup_rpc):
     assert torch.allclose(pipe[0].bias.grad, bn.bias.grad, atol=1e-4)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_devices(setup_rpc):
     a = nn.Linear(1, 1)
-    b = nn.Linear(1, 1).to(0)
+    b = nn.Linear(1, 1)
     c = nn.Linear(1, 1)
 
     # There are extra two devices.
@@ -466,15 +456,13 @@ def test_devices(setup_rpc):
     model = Pipe(model)
 
     cpu = torch.device("cpu")
-    cuda_0 = torch.device(0)
     # Extra devices must be discarded.
-    assert model.devices == [cpu, cuda_0, cpu]
+    assert model.devices == [cpu, cpu, cpu]
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_partitions(setup_rpc):
     a = nn.Linear(1, 1)
-    b = nn.Linear(1, 1).to(0)
+    b = nn.Linear(1, 1)
 
     model = nn.Sequential(a, b)
     model = Pipe(model)
@@ -488,10 +476,10 @@ def test_partitions(setup_rpc):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_merged_partitions(setup_rpc):
-    a = nn.Linear(1, 1)
-    b = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 2))
-    c = nn.Linear(1, 1).to(0)
-    d = nn.Linear(1, 2).to(0)
+    a = nn.Linear(1, 1).to(0)
+    b = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 2)).to(0)
+    c = nn.Linear(1, 1)
+    d = nn.Linear(1, 2)
 
     model = nn.Sequential(a, b, c, d)
     model = Pipe(model)
@@ -500,7 +488,8 @@ def test_merged_partitions(setup_rpc):
     assert isinstance(model.partitions[0], nn.Sequential)
     assert isinstance(model.partitions[1], nn.Sequential)
     assert list(model.partitions[0]) == [a, b[0], b[1]]
-    assert list(model.partitions[1]) == [c, d]
+    assert list(model.partitions[1]) == [c]
+    assert list(model.partitions[2]) == [d]
 
 
 def test_deny_moving(setup_rpc):
@@ -554,10 +543,9 @@ def test_empty_module(setup_rpc):
         model(42)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_named_children(setup_rpc):
     a = nn.Linear(1, 1)
-    b = nn.Linear(1, 1).to(0)
+    b = nn.Linear(1, 1)
 
     model = nn.Sequential(OrderedDict([("a", a), ("b", b)]))
     model = Pipe(model)
@@ -634,7 +622,6 @@ def test_verify_module_duplicate_parameters_on_same_device(setup_rpc):
     Pipe(model)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_forward_lockstep(setup_rpc):
     timeline = []
 
@@ -644,7 +631,6 @@ def test_forward_lockstep(setup_rpc):
             self.i = 0
             self.j = j
             self.seconds = seconds
-            self.dummy = torch.nn.Parameter(torch.empty(0))
 
         def forward(self, x):
             time.sleep(self.seconds)
@@ -654,7 +640,7 @@ def test_forward_lockstep(setup_rpc):
 
             return x
 
-    model = nn.Sequential(DelayedLog(0, seconds=0), DelayedLog(1, seconds=0.1).to(0))
+    model = nn.Sequential(DelayedLog(0, seconds=0), DelayedLog(1, seconds=0.1))
     model = Pipe(model, chunks=3)
     model(torch.rand(3, 1))
 
