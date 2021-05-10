@@ -43,7 +43,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         print("spvPath {}".format(spvPath))
 
         cmd = [
-            glslcPath, "-fshader-stage=compute",
+            glslcPath, "-fshader-stage=compute", "-Os",
             srcPath, "-o", spvPath,
             "--target-env=vulkan1.0",
             "-Werror"

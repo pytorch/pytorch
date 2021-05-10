@@ -1,6 +1,7 @@
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
+from torch.package.package_exporter import UnhandledDependencyError
 from unittest import skipIf
 
 from torch.package import (
@@ -29,9 +30,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.extern(["package_a.subpackage", "module_a"])
-            he.require_module("package_a.subpackage")
-            he.require_module("module_a")
-            he.save_module("package_a")
+            he.save_source_string("foo", "import package_a.subpackage; import module_a")
         buffer.seek(0)
         hi = PackageImporter(buffer)
         import module_a
@@ -91,23 +90,17 @@ class TestDependencyAPI(PackageTestCase):
         """
         buffer = BytesIO()
 
-        with self.assertRaisesRegex(
-            DeniedModuleError,
-            "required during packaging but has been explicitly blocklisted",
-        ):
+        with self.assertRaises(DeniedModuleError):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
-                exporter.require_module("package_a.subpackage")
+                exporter.save_source_string("foo", "import package_a.subpackage")
 
     def test_deny_glob(self):
         """
         Test marking packages as "deny" using globs instead of package names.
         """
         buffer = BytesIO()
-        with self.assertRaisesRegex(
-            DeniedModuleError,
-            "required during packaging but has been explicitly blocklisted",
-        ):
+        with self.assertRaises(DeniedModuleError):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
@@ -125,9 +118,8 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.mock(["package_a.subpackage", "module_a"])
-            he.save_module("package_a")
-            he.require_module("package_a.subpackage")
-            he.require_module("module_a")
+            # Import something that dependso n package_a.subpackage
+            he.save_source_string("foo", "import package_a.subpackage")
         buffer.seek(0)
         hi = PackageImporter(buffer)
         import package_a.subpackage
@@ -219,10 +211,30 @@ class TestDependencyAPI(PackageTestCase):
                 # informative to what's actually going wrong with packaging.
                 pe.save_source_string("bar", "import foo\n")
 
-    def test_foo(self):
+    def test_implicit_intern(self):
+        """The save_module APIs should implicitly intern the module being saved."""
+        import package_a
+
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.save_module("package_a")
+
+    def test_intern_error(self):
+        """Failure to handle all dependencies should lead to an error."""
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
+        with self.assertRaises(UnhandledDependencyError):
+            with PackageExporter(buffer, verbose=False) as he:
+                he.save_pickle("obj", "obj.pkl", obj2)
+
+        # Interning all dependencies should work
+        with PackageExporter(buffer, verbose=False) as he:
+            he.intern(["package_a", "package_a.subpackage"])
+            he.save_pickle("obj", "obj.pkl", obj2)
 
 
 if __name__ == "__main__":

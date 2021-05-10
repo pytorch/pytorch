@@ -2,7 +2,11 @@ import collections
 import io
 import linecache
 import pickletools
+import pprint
+import textwrap
 import types
+from collections import OrderedDict
+from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
@@ -20,6 +24,7 @@ from urllib.parse import quote
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
+from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -29,6 +34,13 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
+
+
+class _ModuleProviderAction(Enum):
+    INTERN = 1
+    EXTERN = 2
+    MOCK = 3
+    DENY = 4
 
 
 class EmptyMatchError(Exception):
@@ -42,6 +54,14 @@ class EmptyMatchError(Exception):
 class DeniedModuleError(Exception):
     """This is an exception that is thrown when a pattern added with deny matches
     a module required during the packaging process.
+    """
+
+    pass
+
+
+class UnhandledDependencyError(Exception):
+    """This exception is thrown when, at the end of packaging, there are still
+    module dependencies that do not match against any patterns.
     """
 
     pass
@@ -69,8 +89,8 @@ class PackageExporter:
 
     When source code is added to the package, the exporter optionally can scan it
     for further code dependencies (``dependencies=True``). It looks for import statements,
-    resolves relative references to qualified module names, and calls :meth:`require_module`
-    on each it finds, recursively resolving dependencies.
+    resolves relative references to qualified module names, and performs an action specified by the user
+    (See: :meth:`extern`, :meth:`mock`, and :meth:`intern`).
     """
 
     """A importer that will be searched in order to find the modules referenced by other modules or by
@@ -113,6 +133,13 @@ class PackageExporter:
         self.dependency_graph = DiGraph()
         self.verbose = verbose
 
+        # These are OrderedDicts for compatibility with RemovableHandle.
+        # Generic OrderedDict type annotations are not present until 3.7.
+        # The real type signature is OrderedDict[int, Callable[[PackageExporter, str], None]]
+        self._extern_hooks: OrderedDict = OrderedDict()
+        self._mock_hooks: OrderedDict = OrderedDict()
+        self._intern_hooks: OrderedDict = OrderedDict()
+
         if isinstance(importer, Importer):
             self.importer = importer
         else:
@@ -123,9 +150,7 @@ class PackageExporter:
                 )
             self.importer = OrderedImporter(*importer)
 
-        self.patterns: List[
-            Tuple[Any, Callable[[str], None], bool]
-        ] = []  # 'any' is 're.Pattern' but breaks old mypy
+        self.patterns: List[Tuple[GlobGroup, _ModuleProviderAction, bool]] = []
         self.matched_patterns: Set[GlobGroup] = set()
         self._unique_id = 0
 
@@ -195,7 +220,13 @@ class PackageExporter:
                 (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
             dependencies (bool, optional): If True, we scan the source for dependencies.
         """
-        self.dependency_graph.add_node(module_name, src=src, is_package=is_package, provided=True, action="intern")
+        self.dependency_graph.add_node(
+            module_name,
+            src=src,
+            is_package=is_package,
+            provided=True,
+            action=_ModuleProviderAction.INTERN,
+        )
 
         if dependencies:
             deps = self._get_dependencies(src, module_name, is_package)
@@ -272,18 +303,11 @@ node [shape=box];
         return "".join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
-        if module_name in self.dependency_graph and self.dependency_graph.nodes[module_name].get("provided") is True:
+        if (
+            module_name in self.dependency_graph
+            and self.dependency_graph.nodes[module_name].get("provided") is True
+        ):
             return
-
-        self.require_module(module_name, dependencies)
-
-    def require_module(self, module_name: str, dependencies=True):
-        """This is called by dependencies resolution when it finds that something in the package
-        depends on the module and it is not already present. It then decides how to provide that module.
-        The default resolution rules will mark the module as extern if it is part of the standard library,
-        and call :meth:`save_module` otherwise. Clients can subclass this object
-        and override this method to provide other behavior, such as automatically mocking out a whole class
-        of modules"""
 
         if self._can_implicitly_extern(module_name):
             # TODO we are externing individual modules instead just the top level package
@@ -292,15 +316,23 @@ node [shape=box];
                     f"implicitly adding {module_name} to external modules "
                     f"since it is part of the standard library and is a dependency."
                 )
-            self.save_extern_module(module_name)
+            self.dependency_graph.add_node(
+                module_name, action=_ModuleProviderAction.EXTERN, provided=True
+            )
             return
 
         for pattern, action, _ in self.patterns:
             if pattern.matches(module_name):
                 self.matched_patterns.add(pattern)
-                action(module_name)
-                return
+                self.dependency_graph.add_node(
+                    module_name, action=action, provided=True
+                )
 
+                # If we are interning this module, we need to retrieve its
+                # dependencies and package those as well.
+                if action == _ModuleProviderAction.INTERN:
+                    self._add_module_to_dependency_graph(module_name, dependencies)
+                return
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
@@ -316,15 +348,10 @@ node [shape=box];
                 "save_module() expects a string input, did you perhaps mean to pass `__name__`?"
             )
 
-        self.dependency_graph.add_node(module_name, provided=True, action="intern")
-        self._add_module_to_dependency_graph(module_name, dependencies)
-
-    def _implicit_intern(self, module_name):
-        # Save it to the front of the patterns list so that it will be
-        # matched before any other patterns.
-        self.patterns.insert(
-            0, (GlobGroup(module_name), self.save_intern_module, False)
+        self.dependency_graph.add_node(
+            module_name, provided=True, action=_ModuleProviderAction.INTERN
         )
+        self._add_module_to_dependency_graph(module_name, dependencies)
 
     def _add_module_to_dependency_graph(
         self,
@@ -379,7 +406,12 @@ node [shape=box];
         data_value = data_buf.getvalue()
 
         name_in_dependency_graph = f"<{package}.{resource}>"
-        self.dependency_graph.add_node(name_in_dependency_graph, action="intern", provided=True, is_pickle=True)
+        self.dependency_graph.add_node(
+            name_in_dependency_graph,
+            action=_ModuleProviderAction.INTERN,
+            provided=True,
+            is_pickle=True,
+        )
 
         if dependencies:
             all_dependencies = []
@@ -421,6 +453,63 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
+    def register_extern_hook(
+        self, hook: Callable[["PackageExporter", str], None]
+    ) -> RemovableHandle:
+        """Registers an extern hook on the exporter.
+
+        The hook will be called each time a module matches against an :meth:`extern` pattern.
+        It should have the following signature::
+
+            hook(exporter: PackageExporter, module_name: str) -> None
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = RemovableHandle(self._extern_hooks)
+        self._extern_hooks[handle.id] = hook
+        return handle
+
+    def register_mock_hook(
+        self, hook: Callable[["PackageExporter", str], None]
+    ) -> RemovableHandle:
+        """Registers a mock hook on the exporter.
+
+        The hook will be called each time a module matches against a :meth:`mock` pattern.
+        It should have the following signature::
+
+            hook(exporter: PackageExporter, module_name: str) -> None
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = RemovableHandle(self._mock_hooks)
+        self._mock_hooks[handle.id] = hook
+        return handle
+
+    def register_intern_hook(
+        self, hook: Callable[["PackageExporter", str], None]
+    ) -> RemovableHandle:
+        """Registers an intern hook on the exporter.
+
+        The hook will be called each time a module matches against an :meth:`intern` pattern.
+        It should have the following signature::
+
+            hook(exporter: PackageExporter, module_name: str) -> None
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = RemovableHandle(self._intern_hooks)
+        self._intern_hooks[handle.id] = hook
+        return handle
+
     def intern(
         self,
         include: "GlobPattern",
@@ -430,7 +519,11 @@ node [shape=box];
     ):
         """TODO DOC"""
         self.patterns.append(
-            (GlobGroup(include, exclude=exclude), self.save_intern_module, allow_empty)
+            (
+                GlobGroup(include, exclude=exclude),
+                _ModuleProviderAction.INTERN,
+                allow_empty,
+            )
         )
 
     def mock(
@@ -466,7 +559,11 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (GlobGroup(include, exclude=exclude), self.save_mock_module, allow_empty)
+            (
+                GlobGroup(include, exclude=exclude),
+                _ModuleProviderAction.MOCK,
+                allow_empty,
+            )
         )
 
     def extern(
@@ -494,7 +591,11 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (GlobGroup(include, exclude=exclude), self.save_extern_module, allow_empty)
+            (
+                GlobGroup(include, exclude=exclude),
+                _ModuleProviderAction.EXTERN,
+                allow_empty,
+            )
         )
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
@@ -508,37 +609,7 @@ node [shape=box];
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
         """
         self.patterns.append(
-            (GlobGroup(include, exclude=exclude), self._reject_denied_module, True)
-        )
-
-    def save_intern_module(self, module_name: str):
-        """TODO DOC"""
-        self.dependency_graph.add_node(module_name, action="intern", provided=True)
-        # TODO move this somewhere more sensible
-        self._add_module_to_dependency_graph(module_name, dependencies=True)
-
-    def save_extern_module(self, module_name: str):
-        """Add `module_name` to the list of external modules, regardless of whether it is
-        required by other modules.
-
-        Prefer using :meth:`extern` to only mark modules extern if they are actually required by the packaged code.
-        """
-        self.dependency_graph.add_node(module_name, action="extern", provided=True)
-
-    def save_mock_module(self, module_name: str):
-        """Add `module_name` to the package, implemented it with a mocked out version that
-        can be imported but does not include any implementations.
-
-        Prefer using `mock` to only include this module if it is required by other modules.
-        """
-        self.dependency_graph.add_node(module_name, action="mock", provided=True)
-
-    def _reject_denied_module(self, module_name: str):
-        """Throw an exception containing a message that `module_name` was explicitly blocklisted via
-        `deny` and was still required during packaging.
-        """
-        raise DeniedModuleError(
-            f"{module_name} was required during packaging but has been explicitly blocklisted"
+            (GlobGroup(include, exclude=exclude), _ModuleProviderAction.DENY, True)
         )
 
     def _persistent_id(self, obj):
@@ -578,15 +649,34 @@ node [shape=box];
             str_or_bytes = str_or_bytes.encode("utf-8")
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
 
-    def _compute_patterns(self):
-        # At this point, every module should be in either intern, mock, or extern.
-        unmatched = set()
+    def _execute_dependency_graph(self):
+        """Takes a finalized dependency graph describing how to package all
+        modules and executes it, writing to the ZIP archive.
+        """
+        # Pre-validation on the dependency graph:
+        # 1. All modules should have an associated action.
+        # 2. No modules should be dnied.
+        unhandled = set()
+        denied = set()
         for module_name, attrs in self.dependency_graph.nodes.items():
             if attrs.get("action") is None:
-                unmatched.add(module_name)
+                unhandled.add(module_name)
+            elif attrs.get("action") == _ModuleProviderAction.DENY:
+                denied.add(module_name)
 
-        if len(unmatched) != 0:
-            raise RuntimeError(f"TODO {unmatched}")
+        if len(unhandled) != 0:
+            raise UnhandledDependencyError(
+                "The following modules did not match against any patterns. "
+                "Please intern, extern, or mock them:\n"
+                f"{textwrap.indent(pprint.pformat(unhandled), prefix='  ')}"
+            )
+
+        if len(denied) != 0:
+            raise DeniedModuleError(
+                f"The following modules were detected as dependencies but have been denied:"
+                f"{textwrap.indent(pprint.pformat(denied), prefix='  ')}"
+            )
+
 
         # Check for any unmatched patterns
         for pattern, _, allow_empty in self.patterns:
@@ -595,26 +685,42 @@ node [shape=box];
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
+        # Now do the associated action for each module in the dependency graph.
         extern_modules = []
         _mock_written = False
         for module_name, attrs in self.dependency_graph.nodes.items():
             action = attrs["action"]
 
-            if action == "extern":
+            if action == _ModuleProviderAction.EXTERN:
+                for hook in self._extern_hooks.values():
+                    hook(self, module_name)
+
                 extern_modules.append(module_name)
-            elif action == "mock":
+
+            elif action == _ModuleProviderAction.MOCK:
+                for hook in self._mock_hooks.values():
+                    hook(self, module_name)
+
                 if not _mock_written:
                     mock_file = str(Path(__file__).parent / "_mock.py")
-                    self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+                    self._write_source_string(
+                        "_mock", _read_file(mock_file), is_package=False
+                    )
                     _mock_written = True
 
                 is_package = hasattr(self._import_module(module_name), "__path__")
                 self._write_source_string(module_name, _MOCK_IMPL, is_package)
-            elif action == "intern":
+
+            elif action == _ModuleProviderAction.INTERN:
+                for hook in self._intern_hooks.values():
+                    hook(self, module_name)
+
                 # The node in the dependency graph contains metadata that tells us
                 # how to intern the module.
                 if "provided" not in attrs:
-                    raise AssertionError(f"Module was marked `intern` but not provided: {module_name}")
+                    raise AssertionError(
+                        f"Module was marked `intern` but not provided: {module_name}"
+                    )
 
                 if attrs.get("is_pickle") is True:
                     # This node came from save_source_pickle, we don't need to write any source for it.
@@ -631,8 +737,9 @@ node [shape=box];
                     if source is None:
                         raise AssertionError(module_name)
                 self._write_source_string(module_name, source, is_package)
+
             else:
-                raise AssertionError(f"Module has no action: {module_name}")
+                raise AssertionError(f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch.")
 
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
@@ -647,7 +754,7 @@ node [shape=box];
         if self.verbose:
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
-        self._compute_patterns()
+        self._execute_dependency_graph()
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):

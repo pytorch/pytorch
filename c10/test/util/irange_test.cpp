@@ -41,7 +41,6 @@ TEST(irange, empty_reverse_range_two_inputs) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(3, -3)) {
     test_vec.push_back(i);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (i > 20) { // Cap the number of elements we add if something goes wrong
       break;
     }
@@ -55,7 +54,6 @@ TEST(irange, empty_reverse_range_one_input) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(-3)) {
     test_vec.push_back(i);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (i > 20) { // Cap the number of elements we add if something goes wrong
       break;
     }
