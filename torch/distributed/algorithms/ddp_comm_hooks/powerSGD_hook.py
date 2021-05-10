@@ -24,7 +24,7 @@ def _orthogonalize(matrix, epsilon=0):
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             try:
-                col /= torch.norm(col)
+                col /= torch.linalg.norm(col)
             except ZeroDivisionError:
                 logging.error(
                     "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
@@ -33,7 +33,7 @@ def _orthogonalize(matrix, epsilon=0):
                 # Recover the values from NaNs to 0s.
                 col.fill_(0.0)
         else:
-            col /= torch.norm(col) + epsilon
+            col /= torch.linalg.norm(col) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrix[:, i + 1 :]

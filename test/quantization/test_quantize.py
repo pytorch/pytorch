@@ -1855,7 +1855,7 @@ class TestModelNumerics(QuantizationTestCase):
                 qModel(calib_data)
                 torch.quantization.convert(qModel, inplace=True)
                 out_q = qModel(eval_data)
-                SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
+                SQNRdB = 20 * torch.log10(torch.linalg.norm(out_ref) / torch.linalg.norm(out_ref - out_q))
                 # Quantized model output should be close to floating point model output numerically
                 # Setting target SQNR to be 30 dB so that relative error is 1e-3 below the desired
                 # output
@@ -1877,7 +1877,7 @@ class TestModelNumerics(QuantizationTestCase):
         q_model(calib_data)
         torch.quantization.convert(q_model)
         out_q = q_model(eval_data)
-        SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
+        SQNRdB = 20 * torch.log10(torch.linalg.norm(out_ref) / torch.linalg.norm(out_ref - out_q))
         # Quantized model output should be close to floating point model output numerically
         # Setting target SQNR to be 35 dB
         self.assertGreater(SQNRdB, 35, msg='Quantized model numerics diverge from float, expect SQNR > 35 dB')
@@ -1903,13 +1903,13 @@ class TestModelNumerics(QuantizationTestCase):
                 fq_model.apply(torch.quantization.enable_fake_quant)
                 fq_model.apply(torch.quantization.disable_observer)
                 out_fq = fq_model(eval_data)
-                SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
+                SQNRdB = 20 * torch.log10(torch.linalg.norm(out_ref) / torch.linalg.norm(out_ref - out_fq))
                 # Quantized model output should be close to floating point model output numerically
                 # Setting target SQNR to be 35 dB
                 self.assertGreater(SQNRdB, 35, msg='Quantized model numerics diverge from float, expect SQNR > 35 dB')
                 torch.quantization.convert(fq_model)
                 out_q = fq_model(eval_data)
-                SQNRdB = 20 * torch.log10(torch.norm(out_fq) / (torch.norm(out_fq - out_q) + 1e-10))
+                SQNRdB = 20 * torch.log10(torch.linalg.norm(out_fq) / (torch.linalg.norm(out_fq - out_q) + 1e-10))
                 self.assertGreater(SQNRdB, 60, msg='Fake quant and true quant numerics diverge, expect SQNR > 60 dB')
 
     # Test to compare weight only quantized model numerics and
@@ -1939,7 +1939,7 @@ class TestModelNumerics(QuantizationTestCase):
                     fq_model.apply(torch.quantization.enable_fake_quant)
                     fq_model.apply(torch.quantization.disable_observer)
                     out_fq = fq_model(eval_data)
-                    SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
+                    SQNRdB = 20 * torch.log10(torch.linalg.norm(out_ref) / torch.linalg.norm(out_ref - out_fq))
                     self.assertGreater(SQNRdB, SQNRTarget[idx], msg='Quantized model numerics diverge from float')
 
 class TestQuantizeONNXExport(JitTestCase):

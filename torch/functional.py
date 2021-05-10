@@ -232,7 +232,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 [[-1.0947,  0.3736],
                  [ 0.0000,  0.5718]]])
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-        >>> torch.norm(A_ - A)
+        >>> torch.linalg.norm(A_ - A)
         tensor(2.9802e-08)
     """
     if has_torch_function_variadic(LU_data, LU_pivots):

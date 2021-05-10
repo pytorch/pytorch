@@ -1345,5 +1345,5 @@ def _compute_norm(t, n, dim):
         dim = dims[dim]
     dims.remove(dim)
 
-    norm = torch.norm(t, p=n, dim=dims)
+    norm = torch.linalg.norm(t, ord=n, dim=dims)
     return norm

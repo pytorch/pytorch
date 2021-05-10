@@ -5571,7 +5571,7 @@ class TestLinalg(TestCase):
         A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
         X1 = torch.randn((m, k), dtype=dtype, device=device)
         E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
@@ -5625,7 +5625,7 @@ class TestLinalg(TestCase):
 
         E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
 
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # std
         self.assertLess(eq_err_scipy, 1e-6)  # std
@@ -5645,7 +5645,7 @@ class TestLinalg(TestCase):
         iters2 = len(lambdas2)
         self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
 
-        eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # general
         self.assertLess(eq_err_scipy, 1e-6)  # general
@@ -5704,7 +5704,7 @@ scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
 
         E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1 = len(lambdas1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
@@ -5722,7 +5722,7 @@ scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
 
         E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1_general = len(lambdas1)
-        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err_general = torch.linalg.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)

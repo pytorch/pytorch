@@ -270,7 +270,7 @@ float calculate_quant_loss(
 /*
   Helper function to find the best min/max for a tensor to calculate qparams.
   It uses a greedy approach to nudge the min and max and calculate the l2 norm
-  and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
+  and tries to minimize the quant error by doing `torch.linalg.norm(x-fake_quant(x,s,z))`
   Returns the optimized xmax and xmin value of the tensor.
 */
 std::tuple<Tensor, Tensor> choose_qparams_optimized(

@@ -5031,7 +5031,7 @@ Example::
     >>> b = torch.randn(2, 3, 1)
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x) - b)
+    >>> torch.linalg.norm(torch.bmm(A, x) - b)
     tensor(1.00000e-07 *
            2.8312)
 """.format(**common_args))

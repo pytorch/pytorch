@@ -2734,8 +2734,8 @@ torch.cuda.synchronize()
                 # Currently, no ops belonging to this policy support integer inputs.
                 if ignore_type is torch.double:
                     with torch.cuda.amp.autocast(enabled=False):
-                        type_no_autocast = torch.norm(a_ignore).dtype
-                    self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
+                        type_no_autocast = torch.linalg.norm(a_ignore).dtype
+                    self.assertTrue(torch.linalg.norm(a_ignore).dtype is type_no_autocast)
 
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
