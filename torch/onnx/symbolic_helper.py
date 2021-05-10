@@ -125,6 +125,12 @@ def _is_packed_list(list_value):
     return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
 
 
+def _is_sequence(x):
+    if x is None:
+        return False
+    return "List[" in str(x.type())
+
+
 def parse_args(*arg_descriptors):
     """A decorator which converts args from torch._C.Value to built-in types.
 

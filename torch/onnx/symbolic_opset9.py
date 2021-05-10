@@ -1738,7 +1738,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         if dtype is None:
             dtype = data.type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        if "List[" in str(data.type()):
+        if sym_help._is_sequence(data):
             data = g.op("ConcatFromSequence", data, axis_i=0, new_axis_i=1)
 
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
