@@ -21,12 +21,11 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   for (const auto& full_op : nonDispatcherOperators) {
     auto op = full_op->schema();
     int num_schema_args = op.arguments().size();
-    if (op.overload_name() != "") {
-      result.emplace(
-          op.name() + "." + op.overload_name(), OperatorInfo{num_schema_args});
-    } else {
-      result.emplace(op.name(), OperatorInfo{num_schema_args});
+    auto op_name = op.name();
+    if (!op.overload_name().empty()) {
+      op_name += ("." + op.overload_name());
     }
+    result.emplace(op_name, OperatorInfo{num_schema_args});
   }
 
   // Grab the dispatcher operators
@@ -34,17 +33,15 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   for (auto& op : dispatcherOperators) {
     // grab schema
     const auto op_handle = c10::Dispatcher::singleton().findOp(op);
-    int num_schema_args = NO_SCHEMA;
+    c10::optional<int> num_schema_args;
     if (op_handle->hasSchema()) {
       num_schema_args = op_handle->schema().arguments().size();
     }
-
-    if (op.overload_name != "") {
-      result.emplace(
-          op.name + "." + op.overload_name, OperatorInfo{num_schema_args});
-    } else {
-      result.emplace(op.name, OperatorInfo{num_schema_args});
+    auto op_name = op.name;
+    if (!op.overload_name.empty()) {
+      op_name += ("." + op.overload_name);
     }
+    result.emplace(op_name, OperatorInfo{num_schema_args});
   }
 
   return result;
