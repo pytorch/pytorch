@@ -1,10 +1,13 @@
-import torch
-import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
-
+import gzip
+import os
+import tempfile
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 from warnings import warn
+
+import torch
+import torch.autograd.profiler as prof
+from torch.autograd import ProfilerActivity
 
 
 class ProfilerAction(Enum):
@@ -52,7 +55,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
+def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
@@ -73,31 +76,44 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        if use_gzip:
+            file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
 
+def supported_activities():
+    """
+    Returns a set of supported profiler activities
+    """
+    activities = [ProfilerActivity.CPU]
+    # CUPTI profiling is not supported on ROCm
+    if torch.cuda.is_available() and torch.version.hip is None:
+        activities.append(ProfilerActivity.CUDA)
+    return set(activities)
+
 
 class profile(object):
-    """
-    Profiler context manager.
+    """Profiler context manager.
 
     Args:
-
-    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
-      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``;
-      default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA;
-    - ``schedule`` - callable that takes step (int) as a single parameter and returns
-      ``ProfilerAction`` value that specifies the profiler action to perform at each step;
-    - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
-      during the profiling;
-    - ``record_shapes`` - save information about operator's input shapes;
-    - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - record source information (file and line number) for the ops;
-    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
-    - ``use_cuda`` - (deprecated, use ``activities``).
+        activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+        schedule (callable): callable that takes step (int) as a single parameter and returns
+            ``ProfilerAction`` value that specifies the profiler action to perform at each step.
+        on_trace_ready (callable): callable that is called at each step when ``schedule``
+            returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
+        record_shapes (bool): save information about operator's input shapes.
+        profile_memory (bool): track tensor memory allocation/deallocation.
+        with_stack (bool): record source information (file and line number) for the ops.
+        with_flops (bool): use formula to estimate the FLOPS of specific operators
+            (matrix multiplication and 2D convolution).
+        use_cuda (bool):
+            .. deprecated:: 1.8.1
+                use ``activities`` instead.
 
     .. note::
-        Use ``torch.profiler.schedule`` to generate the callable schedule.
+        Use :func:`~torch.profiler.schedule` to generate the callable schedule.
         Non-default schedules are useful when profiling long training jobs
         and allow the user to obtain multiple traces at the different iterations
         of the training process.
@@ -105,7 +121,7 @@ class profile(object):
         duration of the context manager.
 
     .. note::
-        Use ``torch.profiler.tensorboard_trace_handler`` to generate result files for TensorBoard:
+        Use :func:`~torch.profiler.tensorboard_trace_handler` to generate result files for TensorBoard:
 
         ``on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name)``
 
@@ -114,7 +130,8 @@ class profile(object):
         ``tensorboard --logdir dir_name``
 
         to see the results in TensorBoard.
-        For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
+        For more information, see
+        `PyTorch Profiler TensorBoard Plugin <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
@@ -126,7 +143,8 @@ class profile(object):
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA]
+                torch.profiler.ProfilerActivity.CUDA,
+            ]
         ) as p:
             code_to_profile()
         print(p.key_averages().table(
@@ -147,7 +165,8 @@ class profile(object):
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA],
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
 
             # In this example with wait=1, warmup=1, active=2,
             # profiler will skip the first step/iteration,
@@ -185,9 +204,7 @@ class profile(object):
         if activities:
             self.activities = set(activities)
         else:
-            self.activities = set([ProfilerActivity.CPU])
-            if torch.cuda.is_available():
-                self.activities.add(ProfilerActivity.CUDA)
+            self.activities = supported_activities()
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -196,9 +213,11 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
+        for activity in self.activities:
+            if activity not in supported_activities():
+                warn("Unsupported profiler activity specified (" + str(activity) + ")")
+        self.activities = self.activities.intersection(supported_activities())
         assert len(self.activities) > 0, "No profiler activities specified"
-        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
-            "CUDA activity specified, but CUDA is not available"
 
         if schedule:
             self.schedule = schedule
@@ -294,16 +313,24 @@ class profile(object):
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
-        return self.profiler.export_chrome_trace(path)
+        if path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+            fp.close()
+            retvalue = self.profiler.export_chrome_trace(fp.name)
+            with open(fp.name) as fin:
+                with gzip.open(path, 'wt') as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+            return retvalue
+        else:
+            return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """
-        Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces in a file in a format suitable for visualization.
 
         Args:
-
-        - ``path`` - save stacks file to this location;
-        - ``metric`` - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+            path (str): save stacks file to this location;
+            metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
 
         .. note::
             Example of using FlameGraph tool:
@@ -316,11 +343,12 @@ class profile(object):
         return self.profiler.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
-        """
-        Averages events, grouping them by operator name and (optionally) input shapes and
+        """Averages events, grouping them by operator name and (optionally) input shapes and
         stack.
-        Note: to use shape/stack functionality make sure to set record_shapes/with_stack
-        when creating profiler context manager.
+
+        .. note::
+            To use shape/stack functionality make sure to set record_shapes/with_stack
+            when creating profiler context manager.
         """
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
@@ -332,6 +360,12 @@ class profile(object):
         """
         assert self.profiler
         return self.profiler.function_events
+
+    def add_metadata(self, key: str, value: str):
+        """
+        Adds a user defined key/value metadata into the trace file
+        """
+        torch.autograd._add_metadata(key, value)
 
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
@@ -361,11 +395,11 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace()
+        self.profiler._prepare_trace()
 
     def _start_trace(self):
         assert self.profiler is not None
-        self.profiler._start_kineto_trace()
+        self.profiler._start_trace()
 
     def _stop_trace(self):
         assert self.profiler is not None

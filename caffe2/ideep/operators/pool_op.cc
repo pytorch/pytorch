@@ -33,6 +33,7 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPPoolOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -86,6 +87,7 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPPoolGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -109,10 +111,14 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(MaxPool, IDEEPPoolOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(MaxPoolGradient, IDEEPPoolGradientOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(AveragePool, IDEEPPoolOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(AveragePoolGradient, IDEEPPoolGradientOp);
 
 } // namespace

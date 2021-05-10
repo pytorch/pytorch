@@ -54,6 +54,7 @@ class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
   SimplifierHashType hash(const T* e) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
   }
@@ -232,11 +233,13 @@ class TORCH_API HashProvider : public IRVisitor {
   size_t te_hash(std::string val) {
     size_t hash{0};
     int64_t intval{0};
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int s = val.size() - 1;
     while (s >= 0) {
       for (unsigned int i = 0; i < 8; ++i) {
         if (s < 0)
           break;
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         int64_t c = val.data()[s];
         intval |= (c << (i * 8));
 
@@ -251,6 +254,7 @@ class TORCH_API HashProvider : public IRVisitor {
 
   size_t te_hash(double d) {
     // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t n;
     std::memcpy(&n, &d, sizeof d);
     return te_hash(n);
@@ -258,6 +262,7 @@ class TORCH_API HashProvider : public IRVisitor {
 
   size_t te_hash(float d) {
     // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int32_t n;
     std::memcpy(&n, &d, sizeof d);
     return te_hash(n);
@@ -265,6 +270,7 @@ class TORCH_API HashProvider : public IRVisitor {
 
   size_t te_hash(at::Half d) {
     // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int16_t n;
     std::memcpy(&n, &d, sizeof d);
     return te_hash(n);

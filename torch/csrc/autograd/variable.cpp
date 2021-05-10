@@ -32,15 +32,21 @@ namespace autograd {
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
+  bool shared_view_info,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
+      shared_view_info_(shared_view_info),
       creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+  }
+  if (shared_view_info_) {
+    TORCH_INTERNAL_ASSERT(backward_info_.has_value(), "Shared view info require a backward view info.");
+    TORCH_INTERNAL_ASSERT(!forward_info_.has_value(), "Shared view info require forward view info to be empty")
   }
 }
 
@@ -105,6 +111,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
@@ -116,8 +123,10 @@ struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcreteAutogradMetaFactory meta_factory;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
 }
@@ -165,10 +174,12 @@ namespace impl {
 
   void create_cpp_hook(const Variable& self) {
     auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
+    // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
     add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto fn = self.grad_fn();
     if (fn) {
       fn->add_pre_hook(std::move(hook_ptr));
@@ -279,6 +290,7 @@ namespace impl {
   }
 
   namespace {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
   }
 
@@ -353,10 +365,12 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
-  Tensor& requires_grad_(const Tensor& self, bool _requires_grad) const override;
+  void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 VariableHooks variableHooks;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
 Tensor VariableHooks::variable_data(const Tensor& self) const {
@@ -478,13 +492,13 @@ void VariableHooks::_backward(
   torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
-Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
+void VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
       autograd::utils::requires_grad_leaf_error(_requires_grad)
     );
   }
-  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
+  self.set_requires_grad(_requires_grad);
 }
 
 // Backward View Variables
@@ -510,6 +524,7 @@ const Tensor& VariableHooks::base(const Tensor& self) const {
 }
 
 namespace {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::string singleton_string;
 }
 
@@ -523,6 +538,7 @@ const std::string& VariableHooks::name(const Tensor& self) const {
 }
 
 namespace {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 
@@ -645,14 +661,13 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else {
       if (creation_meta == CreationMeta::NO_GRAD_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
-        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
-                       "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
-                       " can clarify your code and remove this warning by moving both the view and the inplace either both"
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden."
+                       " You can clarify your code and remove this warning by moving both the view and the inplace either both"
                        " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
       } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
-        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden. "
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden."
                        " You can clarify your code by moving both the view and the inplace either both"
                        " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
@@ -660,27 +675,18 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
       } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
         msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"
-                       " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
-                       " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+                       " Function, leading to incorrect gradients. This behavior is forbidden. You can remove this warning by"
+                       " cloning the output of the custom Function.");
       } else if (creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
         msg = c10::str(msg, " This view is an output of a function that "
                        "returns multiple views. Inplace operators on such "
-                       "views are being deprecated and will be forbidden "
-                       "starting from version 1.8. Consider using `unsafe_` "
-                       "version of the function that produced this view or "
-                       "don't modify this view inplace.");
+                       "views is forbidden. You should replace the inplace "
+                       "operation by an out-of-place one.");
       } else {
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 
-      if (!indirect && !grad_fn && diff_view_meta->requires_grad()) {
-        // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
-        // requires grad is being used in an in-place operation." after the warning from the `check_inplace` function in
-        // VariabbleTypeUtils.h. So we make the warning an error directly.
-        TORCH_CHECK(false, msg);
-      } else {
-        TORCH_WARN(msg);
-      }
+      TORCH_CHECK(false, msg);
     }
 
     // We warn only once per view

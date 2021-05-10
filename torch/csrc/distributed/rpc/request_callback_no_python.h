@@ -14,7 +14,9 @@ namespace rpc {
 // RequestCallback implementation with no Python dependencies.
 class TORCH_API RequestCallbackNoPython : public RequestCallback {
  public:
-  std::shared_ptr<JitFuture> processMessage(Message& request) const override;
+  c10::intrusive_ptr<JitFuture> processMessage(
+      Message& request,
+      std::shared_ptr<LazyStreamContext> ctx) const override;
 
  protected:
   virtual std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
@@ -25,7 +27,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   bool processScriptCallOp(
       ScriptCall& scriptCall,
@@ -36,7 +38,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   virtual TypePtr getScriptRemoteCallType(
       ScriptRemoteCall& scriptRemoteCall) const;
@@ -51,7 +53,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   bool processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
@@ -63,18 +65,20 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processScriptRRefFetchCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   virtual void processPythonRRefFetchCall(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processRRefUserDelete(
       RpcCommandBase& rpc,
@@ -91,12 +95,13 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   void processForwardAutogradReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processBackwardAutogradReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   void processCleanupAutogradContextReq(
       RpcCommandBase& rpc,
@@ -105,7 +110,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   void processRunWithProfilingReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
   virtual void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const;
 
@@ -113,13 +118,15 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   virtual void processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> ctx) const;
 
   IValue handleError(
       const std::exception& e,
@@ -131,7 +138,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   virtual void processRRefBackward(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 };
 
 } // namespace rpc

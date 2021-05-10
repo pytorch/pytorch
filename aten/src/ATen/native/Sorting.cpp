@@ -7,13 +7,16 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 #include <utility>
 
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sort_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(topk_stub);
 
 namespace {
@@ -39,6 +42,7 @@ void quick_select_template(
     int64_t k,
     Comp gt_or_nan,
     Fn swap_fn) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t P, L, R, i, j;
   scalar_t piv;
   L = 0;
@@ -254,13 +258,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  // FIXME: This seems bogus, I only do this because it was the old behaviour.
-  //        The reductions are fine, as long as the axis being reduced along
-  //        isn't of 0 elements (and the output has elements).
-  TORCH_CHECK(
-      self.numel() > 0,
-      "cannot perform reduction function kthvalue",
-      " on tensor with no elements because the operation does not have an identity");
+  zero_numel_check_dims(self, dim, "kthvalue()");
   TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
@@ -322,10 +320,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
-  TORCH_CHECK(
-      size > 0,
-      "median() cannot compute median for a dimension of size 0 because ",
-      "the operation does not have an identity");
+  zero_numel_check_dims(self, dim, "median()");
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
@@ -409,14 +404,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
-  int64_t size = self.numel();
-  TORCH_CHECK(
-      size > 0,
-      "median() operation does not have an identity for empty input tensor");
-
   // Clone the input tensor so we can partition it around the median value
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
+  const int64_t size = self.numel();
 
   AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_cpu", [&] {
     scalar_t* op = out.data_ptr<scalar_t>();
@@ -463,6 +454,7 @@ Tensor& quantile_out(
       out,
       self,
       q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
@@ -482,6 +474,7 @@ Tensor& quantile_out(
   return at::native::quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       interpolation,
@@ -499,6 +492,7 @@ Tensor quantile(
       out,
       self,
       q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
@@ -515,6 +509,7 @@ Tensor quantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
 }
 
@@ -529,6 +524,7 @@ Tensor& nanquantile_out(
       out,
       self,
       q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
@@ -548,6 +544,7 @@ Tensor& nanquantile_out(
   return at::native::nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       interpolation,
@@ -565,6 +562,7 @@ Tensor nanquantile(
       out,
       self,
       q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
@@ -581,6 +579,7 @@ Tensor nanquantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
 }
 
@@ -590,6 +589,7 @@ Tensor& quantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
@@ -599,6 +599,7 @@ Tensor& quantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
@@ -607,6 +608,7 @@ Tensor quantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
 }
 
@@ -615,6 +617,7 @@ Tensor quantile(
     double q,
     optional<int64_t> dim,
     bool keepdim) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
 }
 
@@ -624,6 +627,7 @@ Tensor& nanquantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
@@ -633,6 +637,7 @@ Tensor& nanquantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
@@ -641,6 +646,7 @@ Tensor nanquantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
 }
 
@@ -649,6 +655,7 @@ Tensor nanquantile(
     double q,
     optional<int64_t> dim,
     bool keepdim) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
 }
 

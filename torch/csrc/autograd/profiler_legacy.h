@@ -104,6 +104,7 @@ enum class C10_API_ENUM EventKind : uint16_t {
 
 // To be deprecated, once we switch to Kineto profiling
 struct TORCH_API LegacyEvent {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   LegacyEvent(
       EventKind kind,
       at::StringView name,
@@ -111,17 +112,20 @@ struct TORCH_API LegacyEvent {
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      int node_id = -1)
+      int node_id = -1,
+      bool is_async = false)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
         shapes_(shapes),
-        node_id_(node_id) {
+        node_id_(node_id),
+        is_async_(is_async) {
     record(record_cuda);
   }
 
   // Constructor to be used in conjunction with LegacyEvent::fromIValue.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   LegacyEvent(
       EventKind kind,
       at::StringView name,
@@ -192,6 +196,7 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
 
@@ -312,6 +317,10 @@ struct TORCH_API LegacyEvent {
     return flops_;
   }
 
+  bool isAsync() {
+    return is_async_;
+  }
+
   void setFlops(uint64_t flops) {
     flops_ = flops;
   }
@@ -333,6 +342,7 @@ struct TORCH_API LegacyEvent {
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
   int64_t sequence_nr_ = -1;
+  bool is_async_ = false;
 
   std::vector<std::string> stack_;
   uint8_t scope_;
@@ -483,6 +493,7 @@ struct TORCH_API TLSProfilerGuard {
       c10::optional<ProfilerDisableOptions> profilerDisableOptions =
           c10::nullopt)
       : cb_(std::move(resultCallback)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         profilerDisableOptions_(std::move(profilerDisableOptions)) {
     enableProfilerLegacy(cfg);
   }
@@ -561,12 +572,17 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   RangeEventList& getEventList(int64_t thread_id = -1);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
+      // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
       event_lists_map_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::CallbackHandle handle_ = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
 };
 
