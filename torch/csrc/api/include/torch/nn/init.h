@@ -34,7 +34,6 @@ namespace nn {
 namespace init {
 
 /// Return the recommended gain value for the given nonlinearity function.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
@@ -73,7 +72,6 @@ TORCH_API Tensor orthogonal_(Tensor tensor, double gain = 1.0);
 /// value between 0 and 1 that controls the fraction of elements in each column
 /// to be set to zero.
 /// No gradient will be recorded for this operation.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 TORCH_API Tensor sparse_(Tensor tensor, double sparsity, double std = 0.01);
 
 /// Fills the given 2-dimensional `matrix` with values drawn from a uniform
