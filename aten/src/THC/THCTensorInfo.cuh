@@ -1,11 +1,11 @@
 #ifndef THC_TENSOR_INFO_INC
 #define THC_TENSOR_INFO_INC
 
-#include <cuda.h>
-#include <assert.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCIntegerDivider.cuh>
 #include <THC/THCTensor.h>
+#include <assert.h>
+#include <cuda.h>
+#include <THC/THCIntegerDivider.cuh>
 
 // Maximum number of dimensions allowed for cutorch
 #define MAX_CUTORCH_DIMS 25
@@ -13,16 +13,17 @@
 // Warning string for tensor arguments that are too large or have too
 // many dimensions
 #define CUTORCH_STR(X) #X
-#define CUTORCH_DIM_WARNING "tensor too large or too many (>" \
-  CUTORCH_STR(MAX_CUTORCH_DIMS) ") dimensions"
+#define CUTORCH_DIM_WARNING \
+  "tensor too large or too many (>" CUTORCH_STR(MAX_CUTORCH_DIMS) ") dimensions"
 
 // CUDA kernel argument that defines tensor layout
 template <typename T, typename IndexType>
 struct TensorInfo {
-  TensorInfo(T* p,
-             int dim,
-             IndexType sz[MAX_CUTORCH_DIMS],
-             IndexType st[MAX_CUTORCH_DIMS]);
+  TensorInfo(
+      T* p,
+      int dim,
+      IndexType sz[MAX_CUTORCH_DIMS],
+      IndexType st[MAX_CUTORCH_DIMS]);
 
   // Set the size of the given dimension to 1, as if it were a
   // reduction dim (allows you to calculate offsets of the reduction
@@ -56,10 +57,11 @@ struct TensorInfo {
 };
 
 template <typename T, typename IndexType>
-TensorInfo<T, IndexType>::TensorInfo(T* p,
-                                     int dim,
-                                     IndexType sz[MAX_CUTORCH_DIMS],
-                                     IndexType st[MAX_CUTORCH_DIMS]) {
+TensorInfo<T, IndexType>::TensorInfo(
+    T* p,
+    int dim,
+    IndexType sz[MAX_CUTORCH_DIMS],
+    IndexType st[MAX_CUTORCH_DIMS]) {
   data = p;
   dims = dim;
   assert(dims > 0 && dims < MAX_CUTORCH_DIMS);
@@ -71,16 +73,13 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
 }
 
 template <typename T, typename IndexType>
-void
-TensorInfo<T, IndexType>::reduceDim(int dim) {
+void TensorInfo<T, IndexType>::reduceDim(int dim) {
   TORCH_INTERNAL_ASSERT(dim < dims && dim >= 0);
   sizes[dim] = 1;
 }
 
 template <typename T, typename IndexType>
-int
-TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
-
+int TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
   TORCH_INTERNAL_ASSERT(excludeDim >= -1 && excludeDim < dims);
 
   int stopDim = (excludeDim == -1) ? dims : excludeDim;
@@ -119,7 +118,6 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
     // Handles excludeDim being set (oldIndex == excludeDim)
     if (oldIndex != dims) {
-
       // Preserves excluded dimension
       ++newIndex;
       sizes[newIndex] = sizes[oldIndex];
@@ -149,10 +147,8 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 // specialized on `Dims` to reduce nvcc compilation time
 template <typename T, typename IndexType, int Dims>
 struct IndexToOffset {
-  static __host__ __device__ IndexType get(
-    IndexType linearId,
-    const TensorInfo<T, IndexType>& info) {
-
+  static __host__ __device__ IndexType
+  get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
     IndexType offset = 0;
 
     // Uses static dims
@@ -169,10 +165,8 @@ struct IndexToOffset {
 
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
-  static inline __host__ __device__ IndexType get(
-    IndexType linearId,
-    const TensorInfo<T, IndexType>& info) {
-
+  static inline __host__ __device__ IndexType
+  get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
     IndexType offset = 0;
 
     // Uses dynamic dims
@@ -223,7 +217,7 @@ struct OffsetInfo {
 template <typename T, typename IndexType>
 struct OffsetInfo<T, IndexType, 1> {
   explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo)
-    : data{tinfo.data}, stride{tinfo.strides[0]} {}
+      : data{tinfo.data}, stride{tinfo.strides[0]} {}
 
   __host__ __device__ T* get(IndexType linearIndex) const {
     return &data[linearIndex * stride];
@@ -246,8 +240,7 @@ struct OffsetInfo<T, IndexType, 1> {
 
 template <typename T, typename IndexType>
 struct OffsetInfo<T, IndexType, -1> {
-  explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo)
-    : tinfo(tinfo) { }
+  explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo) : tinfo(tinfo) {}
 
   __host__ __device__ T* get(IndexType linearIndex) const {
     IndexType offset = IndexToOffset<T, IndexType, -1>::get(linearIndex, tinfo);

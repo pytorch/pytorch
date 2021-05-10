@@ -3,11 +3,11 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include <TH/THTensor.h>
 #include <TH/THStorageFunctions.hpp>
+#include <TH/THTensor.h>
 
-#include <atomic>
 #include <ATen/ATen.h>
+#include <atomic>
 
 // Returns a Tensor given a TensorImpl. The TensorImpl remains valid after the
 // the Tensor is destroyed.
@@ -34,17 +34,21 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   // for the first time (providing the necessary type).  It is an ERROR to
   // invoke any PyTorch operations on such a half-constructed storage,
   // and this check tests for that case.
-  TORCH_CHECK(tensor->storage(), "Cannot use PyTorch operations on a half-constructed "
-           "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
-           "it first; otherwise, this is a bug, please report it.");
+  TORCH_CHECK(
+      tensor->storage(),
+      "Cannot use PyTorch operations on a half-constructed "
+      "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
+      "it first; otherwise, this is a bug, please report it.");
   return tensor->storage().unsafeGetStorageImpl();
 }
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 // nDimension                 corresponds to the "true" ATen dimension.
-// nDimensionLegacyNoScalars  corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
-// nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
-//                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
+// nDimensionLegacyNoScalars  corresponds to the ATen dimension, except scalars
+// are viewed as 1-dimensional tensors. nDimensionLegacyAll        corresponds
+// to the ATen dimension, except scalars are viewed as 1-dimensional tensors
+//                            and tensors with a dimension of size zero are
+//                            collapsed to 0-dimensional tensors.
 //
 // Eventually, everything should go through nDimension or tensor->dim().
 inline int THTensor_nDimension(const THTensor* tensor) {
@@ -69,19 +73,27 @@ inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   }
 }
 
-inline int64_t THTensor_strideLegacyNoScalars(const THTensor *self, int dim) {
-  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
-      dim, THTensor_nDimensionLegacyNoScalars(self));
+inline int64_t THTensor_strideLegacyNoScalars(const THTensor* self, int dim) {
+  THArgCheck(
+      (dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)),
+      2,
+      "dimension %d out of range of %dD tensor",
+      dim,
+      THTensor_nDimensionLegacyNoScalars(self));
   return self->dim() == 0 ? 1 : self->stride(dim);
 }
 
-inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
-{
-  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
-      dim, THTensor_nDimensionLegacyNoScalars(self));
+inline int64_t THTensor_sizeLegacyNoScalars(const THTensor* self, int dim) {
+  THArgCheck(
+      (dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)),
+      2,
+      "dimension %d out of range of %dD tensor",
+      dim,
+      THTensor_nDimensionLegacyNoScalars(self));
   return self->dim() == 0 ? 1 : self->size(dim);
 }
 
+// clang-format off
 #include <TH/generic/THTensorFastGetSet.hpp>
 #include <TH/THGenerateAllTypes.h>
 
@@ -90,8 +102,10 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
 
 #include <TH/generic/THTensorFastGetSet.hpp>
 #include <TH/THGenerateBFloat16Type.h>
+// clang-format on
 
-inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
+inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(
+    const THTensor* self) {
   if (self->dim() == 0) {
     return {1};
   } else {
@@ -99,7 +113,8 @@ inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) 
   }
 }
 
-inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self) {
+inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(
+    const THTensor* self) {
   if (self->dim() == 0) {
     return {1};
   } else {
@@ -108,14 +123,29 @@ inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self
 }
 
 // NB: Steals ownership of storage
-TH_API void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
+TH_API void THTensor_stealAndSetStoragePtr(
+    THTensor* tensor,
+    THStorage* storage);
 
-TH_API void THTensor_free(THTensor *self);
-TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
+TH_API void THTensor_free(THTensor* self);
+TH_API void THTensor_resizeNd(
+    THTensor* self,
+    int nDimension,
+    const int64_t* size,
+    const int64_t* stride);
 
-TH_CPP_API void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
-TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
+TH_CPP_API void THTensor_resize(
+    THTensor* self,
+    at::IntArrayRef size,
+    at::IntArrayRef stride);
+TH_CPP_API void THTensor_setStorage(
+    THTensor* self,
+    THStorage* storage_,
+    ptrdiff_t storageOffset_,
+    at::IntArrayRef size_,
+    at::IntArrayRef stride_);
 
+// clang-format off
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateAllTypes.h>
 
@@ -130,3 +160,4 @@ TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateBFloat16Type.h>
+// clang-format on

@@ -1,6 +1,7 @@
 #pragma once
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -15,11 +16,9 @@ class operator_brackets_proxy {
   using reference = typename std::iterator_traits<Accessor>::reference;
   using value_type = typename std::iterator_traits<Accessor>::value_type;
 
-public:
+ public:
   C10_HOST_DEVICE
-  operator_brackets_proxy(Accessor const& accessor)
-    : accessor(accessor)
-  {}
+  operator_brackets_proxy(Accessor const& accessor) : accessor(accessor) {}
 
   C10_HOST_DEVICE
   operator reference() {
@@ -37,11 +36,11 @@ public:
     return *this;
   }
 
-private:
+ private:
   Accessor accessor;
 };
 
-}
+} // namespace
 
 // references_holder is used as a surrogate for the
 // references type from std::iterator_traits in CompositeRandomAccessor.
@@ -54,14 +53,12 @@ private:
 // define 'swap` and `get`(aka std::get) methods.
 template <typename Values, typename References>
 class references_holder {
-public:
+ public:
   using values = Values;
   using references = References;
 
   C10_HOST_DEVICE
-  references_holder(references refs)
-    : refs{refs}
-  {}
+  references_holder(references refs) : refs{refs} {}
 
   C10_HOST_DEVICE
   operator references() {
@@ -84,7 +81,7 @@ public:
     return refs;
   }
 
-protected:
+ protected:
   references refs;
 };
 
@@ -94,32 +91,34 @@ protected:
 // which constructs a tuple of references from a variadic list of arguments.
 template <typename KeyAccessor, typename ValueAccessor, typename TupleInfo>
 class CompositeRandomAccessor {
-  using self_type = CompositeRandomAccessor<KeyAccessor, ValueAccessor, TupleInfo>;
+  using self_type =
+      CompositeRandomAccessor<KeyAccessor, ValueAccessor, TupleInfo>;
 
   using key_accessor_value_type =
-    typename std::iterator_traits<KeyAccessor>::value_type;
+      typename std::iterator_traits<KeyAccessor>::value_type;
   using value_accessor_value_type =
-    typename std::iterator_traits<ValueAccessor>::value_type;
+      typename std::iterator_traits<ValueAccessor>::value_type;
   using key_accessor_reference_type =
-    typename std::iterator_traits<KeyAccessor>::reference;
+      typename std::iterator_traits<KeyAccessor>::reference;
   using value_accessor_reference_type =
-    typename std::iterator_traits<ValueAccessor>::reference;
+      typename std::iterator_traits<ValueAccessor>::reference;
 
-  using composite_value_type = typename TupleInfo::template tuple<
-    key_accessor_value_type,
-    value_accessor_value_type>;
+  using composite_value_type = typename TupleInfo::
+      template tuple<key_accessor_value_type, value_accessor_value_type>;
   using composite_reference = typename TupleInfo::template tuple<
-    key_accessor_reference_type,
-    value_accessor_reference_type>;
+      key_accessor_reference_type,
+      value_accessor_reference_type>;
 
-public:
+ public:
   using value_type = composite_value_type;
-  using reference = references_holder<composite_value_type, composite_reference>;
+  using reference =
+      references_holder<composite_value_type, composite_reference>;
   // Note that CompositeRandomAccessor does not hold key and values
   // in a specific datastrcture, which means that a pointer to a (key, value)
   // is not defined. Hence we just use a pointer type of the KeyAccessor.
   using pointer = typename std::iterator_traits<KeyAccessor>::pointer;
-  using difference_type = typename std::iterator_traits<KeyAccessor>::difference_type;
+  using difference_type =
+      typename std::iterator_traits<KeyAccessor>::difference_type;
   using iterator_category = std::random_access_iterator_tag;
 
   C10_HOST_DEVICE
@@ -127,8 +126,7 @@ public:
 
   C10_HOST_DEVICE
   CompositeRandomAccessor(KeyAccessor keys, ValueAccessor values)
-    : keys(keys), values(values)
-  {}
+      : keys(keys), values(values) {}
 
   // Pointer-like operations {
   C10_HOST_DEVICE
@@ -147,8 +145,7 @@ public:
   C10_HOST_DEVICE
   reference operator[](difference_type idx) {
     return operator_brackets_proxy<self_type>(
-      CompositeRandomAccessor(keys + idx, values + idx)
-    );
+        CompositeRandomAccessor(keys + idx, values + idx));
   }
   // }
 
@@ -197,9 +194,8 @@ public:
 
   C10_HOST_DEVICE
   friend CompositeRandomAccessor operator+(
-    difference_type offset,
-    const CompositeRandomAccessor& accessor
-  ) {
+      difference_type offset,
+      const CompositeRandomAccessor& accessor) {
     return accessor + offset;
   }
 
@@ -253,9 +249,10 @@ public:
   }
   // }
 
-protected:
+ protected:
   KeyAccessor keys;
   ValueAccessor values;
 };
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

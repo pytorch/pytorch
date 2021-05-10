@@ -29,38 +29,36 @@ at::Allocator* GetMetaAllocator() {
 }
 
 Tensor empty_meta(
-  IntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
-) {
-
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
   // NB: because there is no SparseMeta (yet), non-strided layout is
   // exerciseable
   TORCH_CHECK_NOT_IMPLEMENTED(
-    layout_or_default(layout_opt) == Layout::Strided,
-    "strided meta tensors not supported yet"
-  );
+      layout_or_default(layout_opt) == Layout::Strided,
+      "strided meta tensors not supported yet");
 
   auto* allocator = GetMetaAllocator();
   auto dtype = dtype_or_default(dtype_opt);
-  auto r = at::detail::empty_generic(size, allocator, at::DispatchKey::Meta, dtype, device, memory_format_opt);
+  auto r = at::detail::empty_generic(
+      size, allocator, at::DispatchKey::Meta, dtype, device, memory_format_opt);
   return r;
 }
 
 Tensor empty_strided_meta(
-  IntArrayRef size,
-  IntArrayRef stride,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt
-) {
-  auto t = at::native::empty_meta({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  auto t = at::native::empty_meta(
+      {0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // Amazingly the CPU implementation will work for us, because most of resize
   // is generic except the memcpy, but the memcpy will be skipped if the source
   // storage is nullptr (which it always is, for meta tensors)

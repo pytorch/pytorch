@@ -25,5 +25,5 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset);
-} // native
-} // at
+} // namespace native
+} // namespace at

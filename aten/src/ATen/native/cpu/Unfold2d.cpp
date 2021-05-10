@@ -17,11 +17,12 @@ static inline void cadd(
     int64_t n) {
   using Vec = vec256::Vec256<scalar_t>;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  char* ptrs[] = {reinterpret_cast<char*>(z),
-                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-                  reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
-                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-                  reinterpret_cast<char*>(const_cast<scalar_t*>(y))};
+  char* ptrs[] = {
+      reinterpret_cast<char*>(z),
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      reinterpret_cast<char*>(const_cast<scalar_t*>(y))};
   vectorized_loop(
       ptrs,
       n,
@@ -83,7 +84,8 @@ static void unfolded2d_acc(
                     if (ix < 0 || ix >= input_width) {
                     } else {
                       scalar_t* dst_slice = dst + (size_t)iy * input_width + ix;
-                      *dst_slice = *dst_slice + src[(size_t)y * output_width + x];
+                      *dst_slice =
+                          *dst_slice + src[(size_t)y * output_width + x];
                     }
                   }
                 }

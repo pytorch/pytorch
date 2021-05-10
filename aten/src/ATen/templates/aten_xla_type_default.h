@@ -1,3 +1,4 @@
+// clang-format off
 // ${generated_comment}
 
 #include <ATen/Tensor.h>
@@ -17,3 +18,4 @@ ${dispatch_aten_fallback_declarations}
 void RegisterAtenTypeFunctions();
 
 }  // namespace torch_xla
+// clang-format on

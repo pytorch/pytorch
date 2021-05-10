@@ -77,7 +77,8 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   return output;
 }
 
-Tensor& max_unpooling2d_forward_out_cpu(const Tensor& self_,
+Tensor& max_unpooling2d_forward_out_cpu(
+    const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     Tensor& output) {
@@ -125,7 +126,8 @@ Tensor max_unpooling2d_forward_cpu(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling2d_forward_out_cpu(self, indices, output_size, output);
+  at::native::max_unpooling2d_forward_out_cpu(
+      self, indices, output_size, output);
   return output;
 }
 
@@ -284,7 +286,8 @@ static void max_unpooling3d_shape_check(
   }
 }
 
-Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
+Tensor& max_unpooling3d_forward_out_cpu(
+    const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
@@ -311,12 +314,7 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   AT_DISPATCH_FLOATING_TYPES(
       self.scalar_type(), "max_unpooling3d_forward_out_cpu_frame", ([&] {
         max_unpooling3d_forward_out_cpu_frame<scalar_t>(
-            output,
-            self,
-            indices,
-            oT,
-            oH,
-            oW);
+            output, self, indices, oT, oH, oW);
       }));
   return output;
 }
@@ -385,7 +383,8 @@ static void max_unpooling2d_backward_out_cpu_frame(
   }
 }
 
-Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
+Tensor& max_unpooling2d_backward_out_cpu(
+    const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
     IntArrayRef output_size,
@@ -529,7 +528,8 @@ static void max_unpooling3d_backward_out_cpu_frame(
   }
 }
 
-Tensor& max_unpooling3d_backward_out_cpu(const Tensor& grad_output_,
+Tensor& max_unpooling3d_backward_out_cpu(
+    const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
     IntArrayRef output_size,

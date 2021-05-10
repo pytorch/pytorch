@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/macros/Export.h>
 #include <ATen/core/Tensor.h>
+#include <c10/macros/Export.h>
 
 // A little explanation about why this file exists at all.  We have
 // a few methods on Tensor class which require access to reified access to
@@ -29,11 +29,13 @@
 // have weird signatures that are not supported by autograd, and (2)
 // see this bug https://github.com/pytorch/pytorch/issues/30102
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+}
+} // namespace torch
 
 namespace at {
 namespace impl {
@@ -42,8 +44,11 @@ struct TORCH_API VariableHooksInterface {
   virtual ~VariableHooksInterface() = default;
   virtual Tensor tensor_data(const Tensor&) const = 0;
   virtual Tensor variable_data(const Tensor&) const = 0;
-  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const = 0;
-  virtual unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const = 0;
+  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(
+      const Tensor&) const = 0;
+  virtual unsigned _register_hook(
+      const Tensor&,
+      std::function<Tensor(const Tensor&)> hook) const = 0;
   virtual void remove_hook(const Tensor&, unsigned pos) const = 0;
   virtual bool is_view(const Tensor&) const = 0;
   virtual const Tensor& base(const Tensor&) const = 0;
@@ -54,7 +59,12 @@ struct TORCH_API VariableHooksInterface {
   virtual Tensor data(const Tensor&) const = 0;
   virtual int64_t _version(const Tensor&) const = 0;
   virtual void retain_grad(const Tensor&) const = 0;
-  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual void _backward(
+      const Tensor&,
+      TensorList,
+      const c10::optional<Tensor>&,
+      c10::optional<bool>,
+      bool) const = 0;
   virtual void requires_grad_(const Tensor&, bool) const = 0;
 };
 
@@ -67,4 +77,5 @@ struct TORCH_API VariableHooksRegisterer {
   }
 };
 
-}} // namespace at::impl
+} // namespace impl
+} // namespace at

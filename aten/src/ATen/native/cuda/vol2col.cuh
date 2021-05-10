@@ -105,7 +105,8 @@ void vol2col(
   // We are going to launch channels * depth_col * height_col * width_col
   // kernels, each kernel responsible for copying a single-channel grid.
   // We cast an operand to int64 so that the product will not overflow
-  const auto num_kernels = static_cast<int64_t>(channels) * depth_col * height_col * width_col;
+  const auto num_kernels =
+      static_cast<int64_t>(channels) * depth_col * height_col * width_col;
   // Launch
   vol2col_kernel<<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
       num_kernels,
@@ -190,9 +191,8 @@ __global__ void vol2im_kernel(
             const int64_t idx_k =
                 ((c_im * kernel_t + t_k) * kernel_h + h_k) * kernel_w + w_k;
             const int64_t data_col_index =
-                ((idx_k * depth_col + t_col) *
-                    height_col + h_col) *
-                  width_col + w_col;
+                ((idx_k * depth_col + t_col) * height_col + h_col) * width_col +
+                w_col;
             val += data_col[data_col_index];
           }
         }
@@ -228,12 +228,11 @@ void col2vol(
     T* data_vol) {
   const auto num_kernels = channels * depth * height * width;
 
-  auto check_fits_in_unsigned =
-    [](int64_t val, const char * name) {
-      constexpr auto umax = std::numeric_limits<unsigned>::max();
-      TORCH_CHECK(val >= 0 && val <= umax,
-                  name, " must fit in a 32-bit unsigned value");
-    };
+  auto check_fits_in_unsigned = [](int64_t val, const char* name) {
+    constexpr auto umax = std::numeric_limits<unsigned>::max();
+    TORCH_CHECK(
+        val >= 0 && val <= umax, name, " must fit in a 32-bit unsigned value");
+  };
   check_fits_in_unsigned(num_kernels, "input size");
   check_fits_in_unsigned(
       channels * patch_t * patch_h * patch_w, "channels x kernel size");

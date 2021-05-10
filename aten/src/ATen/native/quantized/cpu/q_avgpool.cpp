@@ -5,8 +5,8 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <c10/util/math_compat.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 #include <cmath>
@@ -128,9 +128,9 @@ inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : safe_downcast<int, int64_t>(stride[1]);
   return std::make_pair(dW, dH);
 }
 
@@ -392,7 +392,7 @@ Tensor qnnpack_avg_pool2d(
       "failed to run QNNPACK Average Pool operator");
   return output.contiguous(input.suggest_memory_format());
 }
-} // qnnp_avgpool_helper
+} // namespace qnnp_avgpool_helper
 #endif
 
 Tensor avg_pool2d_quantized_cpu(
@@ -417,16 +417,17 @@ Tensor avg_pool2d_quantized_cpu(
         divisor_override);
   }
 #endif
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
-    output = q_avg_pool2d<scalar_t>(
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override);
-  });
+  AT_DISPATCH_QINT_TYPES(
+      input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
+        output = q_avg_pool2d<scalar_t>(
+            input,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override);
+      });
   return output;
 }
 

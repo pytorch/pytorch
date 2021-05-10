@@ -3,13 +3,13 @@
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 #include <sstream>
 
 using at::Tensor;
-using c10::WeakIValue;
 using c10::IValue;
+using c10::WeakIValue;
 
 // Weak pointer tests
 // gets invalidated

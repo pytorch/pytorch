@@ -33,15 +33,9 @@ Tensor convolution2d(
 // Linear
 //
 
-bool use_linear(
-  const Tensor& input,
-  const Tensor& weight,
-  const Tensor& bias);
+bool use_linear(const Tensor& input, const Tensor& weight, const Tensor& bias);
 
-Tensor linear(
-  const Tensor& input,
-  const Tensor& weight,
-  const Tensor& bias);
+Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias);
 
 //
 // Max Pooling
@@ -78,13 +72,9 @@ Tensor global_average_pool(const Tensor& input);
 // Channel Shuffle
 //
 
-bool use_channel_shuffle(
-    const Tensor& input,
-    const int64_t groups);
+bool use_channel_shuffle(const Tensor& input, const int64_t groups);
 
-Tensor channel_shuffle(
-    const Tensor& input,
-    const int64_t groups);
+Tensor channel_shuffle(const Tensor& input, const int64_t groups);
 
 //
 // Activations

@@ -89,8 +89,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
   const float scaled_max = (float)(int32_t)output_max;
   const float inv_output_scale = 1.0f / output_scale;
   for (int32_t i = 0; i < 256; i++) {
-    float x =
-        input_scale * (float)(i - (int32_t)(uint32_t)input_zero_point);
+    float x = input_scale * (float)(i - (int32_t)(uint32_t)input_zero_point);
     // hardswish, no min/max functions in C
     float x2 = x + 3.0f;
     x2 = x2 > 0.0f ? x2 : 0.0f;

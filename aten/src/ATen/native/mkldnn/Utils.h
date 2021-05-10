@@ -1,10 +1,11 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <vector>
 #include <cpuinfo.h>
+#include <vector>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
@@ -17,8 +18,8 @@ std::vector<int64_t> pool_output_sizes(
 };
 
 inline bool mkldnn_bf16_device_check() {
-  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bw()
-      && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq();
+  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bw() &&
+      cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq();
 }
 
-}
+} // namespace at

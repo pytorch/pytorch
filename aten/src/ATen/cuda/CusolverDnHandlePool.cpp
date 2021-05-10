@@ -3,10 +3,11 @@
 
 #ifdef CUDART_VERSION
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 namespace {
 
-void createCusolverDnHandle(cusolverDnHandle_t *handle) {
+void createCusolverDnHandle(cusolverDnHandle_t* handle) {
   TORCH_CUSOLVER_CHECK(cusolverDnCreate(handle));
 }
 
@@ -19,11 +20,14 @@ void destroyCusolverDnHandle(cusolverDnHandle_t handle) {
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cusolverDnDestroy(handle);
+  cusolverDnDestroy(handle);
 #endif
 }
 
-using CuSolverDnPoolType = DeviceThreadHandlePool<cusolverDnHandle_t, createCusolverDnHandle, destroyCusolverDnHandle>;
+using CuSolverDnPoolType = DeviceThreadHandlePool<
+    cusolverDnHandle_t,
+    createCusolverDnHandle,
+    destroyCusolverDnHandle>;
 
 } // namespace
 
@@ -46,6 +50,7 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at
 
 #endif // CUDART_VERSION

@@ -1,9 +1,9 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <THC/THC.h>  // for USE_MAGMA
+#include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
 #include <magma_types.h>
@@ -17,7 +17,6 @@ namespace native {
 
 // RAII for a MAGMA Queue
 struct MAGMAQueue {
-
   // Default constructor without a device will cause
   // destroying a queue which has not been initialized.
   MAGMAQueue() = delete;
@@ -33,15 +32,17 @@ struct MAGMAQueue {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 #endif
     magma_queue_create_from_cuda(
-      device_id,
-      at::cuda::getCurrentCUDAStream(),
-      handle,
-      at::cuda::getCurrentCUDASparseHandle(),
-      &magma_queue_);
+        device_id,
+        at::cuda::getCurrentCUDAStream(),
+        handle,
+        at::cuda::getCurrentCUDASparseHandle(),
+        &magma_queue_);
   }
 
   // Getter
-  magma_queue_t get_queue() const { return magma_queue_; }
+  magma_queue_t get_queue() const {
+    return magma_queue_;
+  }
 
   // Destructor
   ~MAGMAQueue() {
@@ -64,8 +65,14 @@ struct MAGMAQueue {
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<magma_int_t>(value);
   if (static_cast<int64_t>(result) != value) {
-    AT_ERROR("magma: The value of ", varname, "(", (long long)value,
-             ") is too large to fit into a magma_int_t (", sizeof(magma_int_t), " bytes)");
+    AT_ERROR(
+        "magma: The value of ",
+        varname,
+        "(",
+        (long long)value,
+        ") is too large to fit into a magma_int_t (",
+        sizeof(magma_int_t),
+        " bytes)");
   }
   return result;
 }
@@ -91,15 +98,21 @@ struct MagmaStreamSyncGuard {
 
 static inline int cuda_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<int>(value);
-  TORCH_CHECK(static_cast<int64_t>(result) == value,
-              "cuda_int_cast: The value of ", varname, "(", (long long)value,
-              ") is too large to fit into a int (", sizeof(int), " bytes)");
+  TORCH_CHECK(
+      static_cast<int64_t>(result) == value,
+      "cuda_int_cast: The value of ",
+      varname,
+      "(",
+      (long long)value,
+      ") is too large to fit into a int (",
+      sizeof(int),
+      " bytes)");
   return result;
 }
 
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
-template<class T>
+template <class T>
 static inline Storage pin_memory(int64_t size) {
   auto* allocator = cuda::getPinnedMemoryAllocator();
   int64_t adjusted_size = size * sizeof(T);

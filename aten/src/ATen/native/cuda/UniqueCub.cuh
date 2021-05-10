@@ -12,5 +12,5 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     const bool return_counts);
 
 } // namespace internal
-} // namespace at
 } // namespace native
+} // namespace at

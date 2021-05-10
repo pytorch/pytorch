@@ -63,14 +63,18 @@ void pytorch_qnnp_requantize_gemmlowp__scalar(
     const int32_t w_biased = w_scaled + zero_point;
 
     /* Clamp scaled value with zero point between smin and smax */
-    const int32_t x_clamped =
-        x_biased < smin ? smin : x_biased > smax ? smax : x_biased;
-    const int32_t y_clamped =
-        y_biased < smin ? smin : y_biased > smax ? smax : y_biased;
-    const int32_t z_clamped =
-        z_biased < smin ? smin : z_biased > smax ? smax : z_biased;
-    const int32_t w_clamped =
-        w_biased < smin ? smin : w_biased > smax ? smax : w_biased;
+    const int32_t x_clamped = x_biased < smin ? smin
+        : x_biased > smax                     ? smax
+                                              : x_biased;
+    const int32_t y_clamped = y_biased < smin ? smin
+        : y_biased > smax                     ? smax
+                                              : y_biased;
+    const int32_t z_clamped = z_biased < smin ? smin
+        : z_biased > smax                     ? smax
+                                              : z_biased;
+    const int32_t w_clamped = w_biased < smin ? smin
+        : w_biased > smax                     ? smax
+                                              : w_biased;
 
     output[0] = (uint8_t)x_clamped;
     output[1] = (uint8_t)y_clamped;

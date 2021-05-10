@@ -1,9 +1,9 @@
-#include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <ATen/core/Array.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <gtest/gtest.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/core/Array.h>
 
 using namespace at::native;
 using namespace at::native::memory;
@@ -34,16 +34,24 @@ TEST(TestLoops, HasSameArgTypes) {
   using func2_t = int (*)(bool, float, float);
   using func3_t = int (*)(float);
   using func4_t = int (*)();
-  static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
-  static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
-  static_assert(has_same_arg_types<func3_t>::value, "func3_t has the same argument types");
-  static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
+  static_assert(
+      has_same_arg_types<func1_t>::value,
+      "func1_t has the same argument types");
+  static_assert(
+      !has_same_arg_types<func2_t>::value,
+      "func2_t does not have the same argument types");
+  static_assert(
+      has_same_arg_types<func3_t>::value,
+      "func3_t has the same argument types");
+  static_assert(
+      has_same_arg_types<func4_t>::value,
+      "func4_t has the same argument types");
   return;
 }
 #endif
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
-  char *ptr = reinterpret_cast<char *>(buffer1);
+  char* ptr = reinterpret_cast<char*>(buffer1);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 4);
@@ -73,16 +81,16 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 // The following kernel copy values by using vectorized policies
 // defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
-__global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
+__global__ void vectorized_copy(scalar_t* dst, scalar_t* src) {
   using array_t = at::detail::Array<char*, 2>;
   array_t data;
-  data[0] = reinterpret_cast<char *>(dst);
-  data[1] = reinterpret_cast<char *>(src);
+  data[0] = reinterpret_cast<char*>(dst);
+  data[1] = reinterpret_cast<char*>(src);
   int idx = blockIdx.x;
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size];
-  auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
+  auto accessor = [&](int index) -> scalar_t& { return buf[index]; };
   policy.load_single_arg(accessor, src + 256 * blockIdx.x);
   policy.store(buf, idx);
 }
@@ -92,8 +100,8 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     return;
   }
 
-  double *b1 = reinterpret_cast<double *>(buffer1);
-  double *b2 = reinterpret_cast<double *>(buffer2);
+  double* b1 = reinterpret_cast<double*>(buffer1);
+  double* b2 = reinterpret_cast<double*>(buffer2);
 
   // vec4 copy
   reset_buffers();
@@ -136,7 +144,8 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     ASSERT_EQ(buffer1[i].z, buffer2[i].z);
     ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
-// Skipping this part until https://github.com/pytorch/pytorch/issues/51863 is resolved
+  // Skipping this part until https://github.com/pytorch/pytorch/issues/51863 is
+  // resolved
 
 #if 0
   // unaligned

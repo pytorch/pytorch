@@ -108,12 +108,12 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   if (ndims <= 1) {
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
-  }
-  else {
+  } else {
     nframe = input.size(0);
     dim = input.size(1);
   }
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(
+      nframe, dim, ndims, target_arg, input, target);
 
   // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
@@ -142,7 +142,13 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_forward_out_frame", [&] {
         multilabel_margin_loss_forward_out_frame<scalar_t>(
-            input_contiguous, target_contiguous, output, is_target, reduction, nframe, dim);
+            input_contiguous,
+            target_contiguous,
+            output,
+            is_target,
+            reduction,
+            nframe,
+            dim);
       });
 }
 
@@ -161,9 +167,13 @@ static void multilabel_margin_loss_backward_out_frame(
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
 
   TORCH_CHECK(
-      is_target_contiguous.min().item<scalar_t>() >= 0, is_target_arg, " is out of range");
+      is_target_contiguous.min().item<scalar_t>() >= 0,
+      is_target_arg,
+      " is out of range");
   TORCH_CHECK(
-      is_target_contiguous.max().item<scalar_t>() <= 1, is_target_arg, " is out of range");
+      is_target_contiguous.max().item<scalar_t>() <= 1,
+      is_target_arg,
+      " is out of range");
 
   scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
   int64_t* target_data = target_contiguous.data_ptr<int64_t>();
@@ -230,7 +240,8 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
   const int64_t ndims = input.dim();
 
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(
+      nframe, dim, ndims, target_arg, input, target);
   checkSameSize(c, target_arg, is_target_arg);
 
   grad_input.resize_as_(input);
@@ -266,7 +277,8 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(const Tensor& self,
+std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(
+    const Tensor& self,
     const Tensor& target,
     int64_t reduction,
     Tensor& output,
@@ -287,7 +299,8 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
   return std::make_tuple(output, is_target);
 }
 
-Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,
+Tensor& multilabel_margin_loss_backward_cpu_out(
+    const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
     int64_t reduction,
@@ -310,13 +323,22 @@ Tensor multilabel_margin_loss_backward_cpu(
   return grad_input;
 }
 
-Tensor & multilabel_margin_loss_out(const Tensor & self, const Tensor & target, int64_t reduction, Tensor & output) {
+Tensor& multilabel_margin_loss_out(
+    const Tensor& self,
+    const Tensor& target,
+    int64_t reduction,
+    Tensor& output) {
   Tensor is_target = at::empty({0}, self.options());
-  return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
+  return std::get<0>(at::multilabel_margin_loss_forward_out(
+      output, is_target, self, target, reduction));
 }
 
-Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
+Tensor multilabel_margin_loss(
+    const Tensor& self,
+    const Tensor& target,
+    int64_t reduction) {
+  return std::get<0>(
+      at::multilabel_margin_loss_forward(self, target, reduction));
 }
 
 } // namespace native

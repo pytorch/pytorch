@@ -129,7 +129,8 @@ namespace {
 //
 // Python example examining a packed 8bit zero_point and scale:
 //
-// >> x = torch.from_numpy(np.array([[[10, 20], [30, 40]],[[50, 60], [70, 80]]], dtype=np.float32))
+// >> x = torch.from_numpy(np.array([[[10, 20], [30, 40]],[[50, 60], [70, 80]]],
+// dtype=np.float32))
 // >> x_packed = torch.ops.quantized.embedding_bag_byte_prepack(x)
 //
 // # Pull out and examine packed scales, zero_points and values
@@ -223,8 +224,10 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
           fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
-            weight_data + row * embedding_cols, 1,
-              embedding_cols, output_data + row * output_columns);
+              weight_data + row * embedding_cols,
+              1,
+              embedding_cols,
+              output_data + row * output_columns);
         }
       });
 
@@ -255,7 +258,8 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
-// TODO: Extend support to N-D batched embeddings, similar to qembeddingbag_byte_prepack
+// TODO: Extend support to N-D batched embeddings, similar to
+// qembeddingbag_byte_prepack
 Tensor _qembeddingbag_nbit_prepack_helper(
     const Tensor& weight,
     int bit_width,
@@ -300,13 +304,16 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 #ifdef USE_FBGEMM
   if (!optimized_qparams) {
     at::parallel_for(
-      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
-            bit_width, weight_data + row * embedding_cols, 1,
-            embedding_cols, output_data + row * output_shape[1]);
-        }
-      });
+        0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+          for (int64_t row = start_idx; row < end_idx; ++row) {
+            fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+                bit_width,
+                weight_data + row * embedding_cols,
+                1,
+                embedding_cols,
+                output_data + row * output_shape[1]);
+          }
+        });
   } else {
 #endif // USE_FBGEMM
     const auto output_columns = output.size(output.dim() - 1);

@@ -257,7 +257,10 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        w_scales, input_scale, output_scale, requantization_scales);
+        w_scales,
+        input_scale,
+        output_scale,
+        requantization_scales);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
@@ -296,8 +299,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
     packB = w.get();
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
-      // On mobile, we release the original weight by resetting the intrusive_ptr.
-      // Calling unpack after this will throw an assertion.
+      // On mobile, we release the original weight by resetting the
+      // intrusive_ptr. Calling unpack after this will throw an assertion.
       orig_weight.reset();
     }
   }
@@ -325,10 +328,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   std::vector<int64_t> out_sizes = input.sizes().vec();
   out_sizes.back() = static_cast<long>(rows_w);
   at::Tensor output = at::_empty_affine_quantized(
-      out_sizes,
-      input.options(),
-      output_scale,
-      output_zero_point);
+      out_sizes, input.options(), output_scale, output_zero_point);
 
   auto output_min = ReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -406,12 +406,18 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear"),
+      TORCH_FN(QLinearInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_relu"),
+      TORCH_FN(QLinearInt8<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::linear"),
+      TORCH_FN(QLinearInt8<false>::run));
 }
 
 } // namespace

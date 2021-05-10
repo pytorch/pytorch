@@ -1,8 +1,8 @@
 #ifndef THC_TENSOR_MASKED_CUH
 #define THC_TENSOR_MASKED_CUH
-#include <THC/THCTensorMath.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCReduce.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -16,9 +16,10 @@
 template <typename T, typename MaskT, typename MaskPrefixSumT>
 struct TensorMaskedSelectOp {
   TensorMaskedSelectOp(T* t) : out(t) {}
-  __device__ inline void operator()(MaskT* mask,
-                                    MaskPrefixSumT* maskPrefixSum,
-                                    T* in) {
+  __device__ inline void operator()(
+      MaskT* mask,
+      MaskPrefixSumT* maskPrefixSum,
+      T* in) {
     if (*mask) {
       out[*maskPrefixSum] = *in;
     }

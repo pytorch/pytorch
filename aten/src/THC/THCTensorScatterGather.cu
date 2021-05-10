@@ -1,9 +1,9 @@
-#include <THC/THCTensorMath.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCApply.cuh>
-#include <c10/macros/Macros.h>
 #include <ATen/WrapDimUtils.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorMath.h>
+#include <c10/macros/Macros.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCAtomics.cuh>
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
@@ -12,11 +12,15 @@
 template <typename IndexType, typename Real, int Dims>
 struct IndexToScatterGatherOffsets {
   static __device__ void compute(
-      IndexType linearId, const int dim,
-      const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
-      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
-    static_assert(Dims>=0, "this template only handles non-negative Dims");
+      IndexType linearId,
+      const int dim,
+      const TensorInfo<int64_t, IndexType>& index,
+      IndexType* indexOffset,
+      const TensorInfo<Real, IndexType>& t1,
+      IndexType* t1Offset,
+      const TensorInfo<Real, IndexType>& t2,
+      IndexType* t2Offset) {
+    static_assert(Dims >= 0, "this template only handles non-negative Dims");
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -29,10 +33,13 @@ struct IndexToScatterGatherOffsets {
   }
 
   static __device__ void compute(
-      IndexType linearId, const int dim,
-      const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
-    static_assert(Dims>=0, "this template only handles non-negative Dims");
+      IndexType linearId,
+      const int dim,
+      const TensorInfo<int64_t, IndexType>& index,
+      IndexType* indexOffset,
+      const TensorInfo<Real, IndexType>& t2,
+      IndexType* t2Offset) {
+    static_assert(Dims >= 0, "this template only handles non-negative Dims");
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -48,10 +55,14 @@ struct IndexToScatterGatherOffsets {
 template <typename IndexType, typename Real>
 struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   static __device__ void compute(
-      IndexType linearId, const int dim,
-      const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
-      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
+      IndexType linearId,
+      const int dim,
+      const TensorInfo<int64_t, IndexType>& index,
+      IndexType* indexOffset,
+      const TensorInfo<Real, IndexType>& t1,
+      IndexType* t1Offset,
+      const TensorInfo<Real, IndexType>& t2,
+      IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -64,9 +75,12 @@ struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   }
 
   static __device__ void compute(
-      IndexType linearId, const int dim,
-      const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
+      IndexType linearId,
+      const int dim,
+      const TensorInfo<int64_t, IndexType>& index,
+      IndexType* indexOffset,
+      const TensorInfo<Real, IndexType>& t2,
+      IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -93,10 +107,15 @@ __global__ void THCudaTensor_gatherKernel(
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
 
-    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
-                                                          index, &indexOffset,
-                                                          tensor, &tensorOffset,
-                                                          src, &srcOffset);
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(
+        linearId,
+        dim,
+        index,
+        &indexOffset,
+        tensor,
+        &tensorOffset,
+        src,
+        &srcOffset);
 
     int64_t indexValue = index.data[indexOffset];
     CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < src.sizes[dim]);
@@ -106,8 +125,8 @@ __global__ void THCudaTensor_gatherKernel(
   }
 }
 
-#include <THC/generic/THCTensorScatterGather.cu>
 #include <THC/THCGenerateAllTypes.h>
-
 #include <THC/generic/THCTensorScatterGather.cu>
+
 #include <THC/THCGenerateBoolType.h>
+#include <THC/generic/THCTensorScatterGather.cu>

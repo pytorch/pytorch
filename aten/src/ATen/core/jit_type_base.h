@@ -1,12 +1,12 @@
 #pragma once
 
-#include <functional>
-#include <string>
-#include <memory>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <functional>
+#include <memory>
+#include <string>
 
 namespace c10 {
 
@@ -21,7 +21,7 @@ namespace c10 {
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexType)      \
+  _(ComplexType)            \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -83,9 +83,10 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
-  // This additional information should only contain details that are not obvious
-  // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
-  // but not clear why `Foo <: InterfaceBar` might be false.
+  // This additional information should only contain details that are not
+  // obvious from the annotation_str() that describes the type. For instance it
+  // is clear that `int <: str` is false but not clear why `Foo <: InterfaceBar`
+  // might be false.
   virtual bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
   bool isSubtypeOf(const TypePtr& rhs) const {
@@ -219,4 +220,4 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
 };
 
-}
+} // namespace c10

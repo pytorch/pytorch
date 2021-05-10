@@ -4,20 +4,20 @@
 
 #define THCStorage THStorage
 
-// These used to be distinct types; for some measure of backwards compatibility and documentation
-// alias these to the single THCStorage type.
-#define THCudaStorage                       THCStorage
-#define THCudaDoubleStorage                 THCStorage
-#define THCudaHalfStorage                   THCStorage
-#define THCudaByteStorage                   THCStorage
-#define THCudaCharStorage                   THCStorage
-#define THCudaShortStorage                  THCStorage
-#define THCudaIntStorage                    THCStorage
-#define THCudaLongStorage                   THCStorage
-#define THCudaBoolStorage                   THCStorage
-#define THCudaBFloat16Storage               THCStorage
-#define THCudaComplexFloatStorage           THCStorage
-#define THCudaComplexDoubleStorage          THCStorage
+// These used to be distinct types; for some measure of backwards compatibility
+// and documentation alias these to the single THCStorage type.
+#define THCudaStorage THCStorage
+#define THCudaDoubleStorage THCStorage
+#define THCudaHalfStorage THCStorage
+#define THCudaByteStorage THCStorage
+#define THCudaCharStorage THCStorage
+#define THCudaShortStorage THCStorage
+#define THCudaIntStorage THCStorage
+#define THCudaLongStorage THCStorage
+#define THCudaBoolStorage THCStorage
+#define THCudaBFloat16Storage THCStorage
+#define THCudaComplexFloatStorage THCStorage
+#define THCudaComplexDoubleStorage THCStorage
 
 TORCH_CUDA_CU_API scalar_t* THCStorage_(
     data)(THCState* state, const THCStorage*);

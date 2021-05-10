@@ -5,7 +5,8 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at { namespace detail {
+namespace at {
+namespace detail {
 
 template <typename T, int size>
 struct Array {
@@ -35,4 +36,5 @@ struct Array {
   }
 };
 
-}}
+} // namespace detail
+} // namespace at

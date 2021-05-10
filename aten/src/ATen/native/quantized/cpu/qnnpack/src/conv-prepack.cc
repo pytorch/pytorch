@@ -172,14 +172,14 @@ PrePackConvWeights::PrePackConvWeights(
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;
-        case pytorch_qnnp_ukernel_type_conv:  // The transpose can only be here
+        case pytorch_qnnp_ukernel_type_conv: // The transpose can only be here
           for (uint32_t group = 0; group < groups; group++) {
-            const uint8_t* const kernel_p = kernel
-              + group * conv_p.group_output_channels * kernel_size
-              * conv_p.group_input_channels;
-            const int32_t* const bias_p = bias
-              + group * conv_p.group_output_channels;
-            if (conv_p.transpose) {  // Note that only runtime packing is here
+            const uint8_t* const kernel_p = kernel +
+                group * conv_p.group_output_channels * kernel_size *
+                    conv_p.group_input_channels;
+            const int32_t* const bias_p =
+                bias + group * conv_p.group_output_channels;
+            if (conv_p.transpose) { // Note that only runtime packing is here
               pytorch_pack_q8deconv_wrq(
                   conv_p.group_output_channels,
                   kernel_size,

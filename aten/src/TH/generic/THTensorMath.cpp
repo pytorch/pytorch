@@ -2,8 +2,8 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
-#include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
+#include <TH/generic/THTensorApply.hpp>
 
 // HEY YOU!
 //

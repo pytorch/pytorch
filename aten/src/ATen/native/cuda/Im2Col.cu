@@ -8,8 +8,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/im2col_shape_check.h>
+#include <ATen/native/cuda/im2col.cuh>
 
 namespace at {
 namespace native {
@@ -96,38 +96,38 @@ static void im2col_out_cuda_template(
   output.zero_();
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
-      input.scalar_type(), "im2col_out_cuda", [&] {
-    Tensor input_n;
-    Tensor output_n;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kHalf, input.scalar_type(), "im2col_out_cuda", [&] {
+        Tensor input_n;
+        Tensor output_n;
 
-    for (int64_t elt = 0; elt < batch_size; elt++) {
-      input_n = input.select(0, elt);
-      output_n = output.select(0, elt);
+        for (int64_t elt = 0; elt < batch_size; elt++) {
+          input_n = input.select(0, elt);
+          output_n = output.select(0, elt);
 
-      im2col<scalar_t>(
-          at::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
-          n_input_plane,
-          input_height,
-          input_width,
-          output_height,
-          output_width,
-          kernel_height,
-          kernel_width,
-          pad_height,
-          pad_width,
-          stride_height,
-          stride_width,
-          dilation_height,
-          dilation_width,
-          output_n.data_ptr<scalar_t>());
-    }
+          im2col<scalar_t>(
+              at::cuda::getCurrentCUDAStream(),
+              input_n.data_ptr<scalar_t>(),
+              n_input_plane,
+              input_height,
+              input_width,
+              output_height,
+              output_width,
+              kernel_height,
+              kernel_width,
+              pad_height,
+              pad_width,
+              stride_height,
+              stride_width,
+              dilation_height,
+              dilation_width,
+              output_n.data_ptr<scalar_t>());
+        }
 
-    if (!batched_input) {
-      output.resize_({n_output_plane, output_length});
-    }
-  });
+        if (!batched_input) {
+          output.resize_({n_output_plane, output_length});
+        }
+      });
 }
 
 static void im2col_backward_out_cuda_template(
@@ -155,7 +155,8 @@ static void im2col_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& im2col_out_cuda(const Tensor& input,
+Tensor& im2col_out_cuda(
+    const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
@@ -178,7 +179,8 @@ Tensor im2col_cuda(
   return output;
 }
 
-Tensor& im2col_backward_out_cuda(const Tensor& grad_output,
+Tensor& im2col_backward_out_cuda(
+    const Tensor& grad_output,
     IntArrayRef input_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
@@ -203,7 +205,8 @@ Tensor im2col_backward_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor grad_input =
+      at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   im2col_backward_out_cuda_template(
       grad_input,
       grad_output,

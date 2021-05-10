@@ -3,47 +3,60 @@
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at { struct TensorIterator; }
+namespace at {
+struct TensorIterator;
+}
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
-  TORCH_CHECK(! alpha.isBoolean() || dtype == ScalarType::Bool,
-              "Boolean alpha only supported for Boolean results.");
-  TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype)
-              || alpha.isIntegral(true),
-              "For integral input tensors, argument alpha must not be a floating point number.");
-  TORCH_CHECK(isComplexType(dtype) || !alpha.isComplex(),
-              "For non-complex input tensors, argument alpha must not be a complex number.")
+  TORCH_CHECK(
+      !alpha.isBoolean() || dtype == ScalarType::Bool,
+      "Boolean alpha only supported for Boolean results.");
+  TORCH_CHECK(
+      isFloatingType(dtype) || isComplexType(dtype) || alpha.isIntegral(true),
+      "For integral input tensors, argument alpha must not be a floating point number.");
+  TORCH_CHECK(
+      isComplexType(dtype) || !alpha.isComplex(),
+      "For non-complex input tensors, argument alpha must not be a complex number.")
 }
 
 // Basic checking for all sub functions.
 inline void sub_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  TORCH_CHECK(
+      self.scalar_type() != kBool || other.scalar_type() != kBool,
+      "Subtraction, the `-` operator, with two bool tensors is not supported. "
+      "Use the `^` or `logical_xor()` operator instead.")
+  TORCH_CHECK(
+      self.scalar_type() != kBool && other.scalar_type() != kBool,
+      "Subtraction, the `-` operator, with a bool tensor is not supported. "
+      "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
 inline void sub_check(const Tensor& self, const Scalar& scalar) {
-  TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with two bool tensors is not supported."
-              "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  TORCH_CHECK(
+      self.scalar_type() != kBool || !scalar.isBoolean(),
+      "Subtraction, the `-` operator, with two bool tensors is not supported."
+      "Use the `^` or `logical_xor()` operator instead.")
+  TORCH_CHECK(
+      self.scalar_type() != kBool && !scalar.isBoolean(),
+      "Subtraction, the `-` operator, with a bool tensor is not supported. "
+      "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
-using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
-using structured_binary_fn = void(*)(TensorIteratorBase&);
+using structured_binary_fn_alpha =
+    void (*)(TensorIteratorBase&, const Scalar& alpha);
+using structured_binary_fn = void (*)(TensorIteratorBase&);
 
-using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
-using binary_fn_double = void(*)(TensorIterator&, double);
-using binary_fn = void(*)(TensorIterator&);
-using binary_clamp_fn_alpha =
-    void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
+using binary_fn_alpha = void (*)(TensorIterator&, const Scalar& alpha);
+using binary_fn_double = void (*)(TensorIterator&, double);
+using binary_fn = void (*)(TensorIterator&);
+using binary_clamp_fn_alpha = void (*)(
+    TensorIterator&,
+    const Scalar& alpha,
+    const Scalar& min_val,
+    const Scalar& max_val);
 
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
@@ -94,4 +107,5 @@ DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
 DECLARE_DISPATCH(binary_fn, xlogy_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <caffe2/core/tensor.h>
+#include <gtest/gtest.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorImplTest, Caffe2Constructor) {

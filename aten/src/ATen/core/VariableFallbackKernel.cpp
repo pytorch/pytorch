@@ -1,5 +1,5 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 
 /*
@@ -19,12 +19,12 @@
 // TODO This whole file should be deleted and replaced with the mechanism
 //      described in https://github.com/pytorch/pytorch/issues/29548
 
-using c10::OperatorHandle;
-using c10::Stack;
+using c10::Dispatcher;
 using c10::DispatchKey;
 using c10::DispatchKeySet;
-using c10::Dispatcher;
 using c10::KernelFunction;
+using c10::OperatorHandle;
+using c10::Stack;
 
 namespace {
 
@@ -58,7 +58,7 @@ TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
 
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
-      m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-}
+} // namespace

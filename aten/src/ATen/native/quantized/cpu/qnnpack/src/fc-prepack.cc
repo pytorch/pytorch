@@ -1,8 +1,8 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 
 namespace qnnpack {
 // For runtime quantization packing.
@@ -20,7 +20,8 @@ PackBMatrix::PackBMatrix(
           "failed to create fully connected operator with requant scale of "
           "%.7g for output channel %d."
           "Scale must be finite and positive",
-          requantization_scales[i], (int)i);
+          requantization_scales[i],
+          (int)i);
       assert("QNNPACK Runtime Error.");
     }
   }

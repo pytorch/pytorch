@@ -6,7 +6,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 
-
 /**
  * Note [compute_scales_value]
  * Note [area_pixel_compute_scale]
@@ -50,11 +49,13 @@ namespace native {
 namespace upsample {
 
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
-    c10::IntArrayRef input_size,  // Full input tensor size.
+    c10::IntArrayRef input_size, // Full input tensor size.
     c10::optional<c10::IntArrayRef> output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 
-inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+inline c10::optional<double> get_scale_value(
+    c10::optional<c10::ArrayRef<double>> scales,
+    int idx) {
   if (!scales) {
     return nullopt;
   }
@@ -64,13 +65,43 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 } // namespace upsample
 
 using scale_t = c10::optional<double>;
-using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
-using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
-using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
-using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
-using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
-using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
-using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using upsampling_nearest1d =
+    void (*)(const Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_nearest2d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    scale_t scales_h,
+    scale_t scales_w);
+using upsampling_nearest3d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    scale_t scales_d,
+    scale_t scales_h,
+    scale_t scales_w);
+using upsampling_linear1d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    scale_t scales_w);
+using upsampling_bilinear2d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    scale_t scales_h,
+    scale_t scales_w);
+using upsampling_trilinear3d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    scale_t scales_d,
+    scale_t scales_h,
+    scale_t scales_w);
+using upsampling_bicubic2d = void (*)(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    scale_t scales_h,
+    scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
@@ -85,7 +116,9 @@ DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 
-static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static std::array<int64_t, 3> upsample_1d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -113,7 +146,9 @@ static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_width};
 }
 
-static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static std::array<int64_t, 4> upsample_2d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -149,7 +184,9 @@ static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_height, output_width};
 }
 
-static std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static std::array<int64_t, 5> upsample_3d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -187,7 +224,6 @@ static std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, I
       output_width,
       ")");
 
-
   return {nbatch, channels, output_depth, output_height, output_width};
 }
 
@@ -217,12 +253,11 @@ static inline void upsample_2d_shape_check(
   if (input.defined()) {
     // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-                (input.numel() != 0 ||
-                 (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)
-                 ) &&
-                input.dim() == 4,
-                "Non-empty 4D data tensor expected but got a tensor with sizes ",
-                input.sizes());
+        (input.numel() != 0 ||
+         (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)) &&
+            input.dim() == 4,
+        "Non-empty 4D data tensor expected but got a tensor with sizes ",
+        input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -236,11 +271,12 @@ static inline scalar_t compute_scales_value(
     const c10::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
-      // see Note [compute_scales_value]
-      // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
-      return (scale.has_value() && scale.value() > 0.)
-          ? static_cast<scalar_t>(1.0 / scale.value())
-          : (static_cast<scalar_t>(input_size) / output_size);
+  // see Note [compute_scales_value]
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1
+  // defaults.
+  return (scale.has_value() && scale.value() > 0.)
+      ? static_cast<scalar_t>(1.0 / scale.value())
+      : (static_cast<scalar_t>(input_size) / output_size);
 }
 
 template <typename scalar_t>
@@ -360,7 +396,7 @@ static inline scalar_t cubic_interp1d(
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
-template<typename scalar_t>
+template <typename scalar_t>
 static inline void compute_source_index_and_lambda(
     int64_t& input_index0,
     int64_t& input_index1,

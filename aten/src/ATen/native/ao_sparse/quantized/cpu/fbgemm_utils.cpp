@@ -10,8 +10,7 @@ namespace ao {
 namespace sparse {
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "sparse", "LinearPackedParamsBase")
+      torch::class_<LinearPackedParamsBase>("sparse", "LinearPackedParamsBase")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> LinearPackedSerializationType { // __getstate__
@@ -71,6 +70,7 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 namespace {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
-}  // namespace
+} // namespace
 
-}}  // namespace ao::sparse
+} // namespace sparse
+} // namespace ao

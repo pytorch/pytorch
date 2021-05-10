@@ -1,10 +1,10 @@
 #ifndef THC_REDUCE_APPLY_UTILS_INC
 #define THC_REDUCE_APPLY_UTILS_INC
 
-#include <cuda.h>
-#include <assert.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCTensor.h>
+#include <assert.h>
+#include <cuda.h>
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorInfo.cuh>
 
@@ -14,9 +14,8 @@ enum TensorArgType { ReadWrite, ReadOnly };
 
 template <typename IndexType>
 __device__ __forceinline__ IndexType getLinearBlockId() {
-  return blockIdx.z * gridDim.y * gridDim.x +
-    blockIdx.y * gridDim.x +
-    blockIdx.x;
+  return blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x +
+      blockIdx.x;
 }
 
 // Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
@@ -28,13 +27,14 @@ __device__ __forceinline__ IndexType getLinearBlockId() {
 // then __syncthreads is needed either before or afterwards to prevent non-0
 // threads overriding smem in the next loop before num-0 thread reads from it.
 template <typename T, typename ReduceOp, int N>
-__device__ void reduceNValuesInBlock(T *smem,
-                             T threadVals[N],
-                             const unsigned int numVals,
-                             ReduceOp reduceOp,
-                             T init) {
+__device__ void reduceNValuesInBlock(
+    T* smem,
+    T threadVals[N],
+    const unsigned int numVals,
+    ReduceOp reduceOp,
+    T init) {
   if (numVals == 0) {
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; ++i) {
       threadVals[i] = init;
     }
@@ -45,7 +45,7 @@ __device__ void reduceNValuesInBlock(T *smem,
   // the first threadVal for each thread in the block are stored followed by
   // all of the values for the second threadVal for each thread in the block
   if (threadIdx.x < numVals) {
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; ++i) {
       smem[i * numVals + threadIdx.x] = threadVals[i];
     }
@@ -58,20 +58,20 @@ __device__ void reduceNValuesInBlock(T *smem,
   // followed by the 32 outputs for the second threadVal, etc.
   const unsigned int numLanesParticipating = min(numVals, warpSize);
 
-  if (numVals > warpSize && ((threadIdx.x / warpSize) == 0 )) {
-    #pragma unroll
+  if (numVals > warpSize && ((threadIdx.x / warpSize) == 0)) {
+#pragma unroll
     for (int i = 0; i < N; ++i) {
       threadVals[i] = threadIdx.x < numVals ? threadVals[i] : init;
     }
 
     for (int i = warpSize + threadIdx.x; i < numVals; i += warpSize) {
-      #pragma unroll
+#pragma unroll
       for (int j = 0; j < N; ++j) {
         threadVals[j] = reduceOp(threadVals[j], smem[j * numVals + i]);
       }
     }
 
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; ++i) {
       smem[i * numLanesParticipating + threadIdx.x] = threadVals[i];
     }
@@ -80,15 +80,15 @@ __device__ void reduceNValuesInBlock(T *smem,
 
   if (threadIdx.x == 0) {
     if (numLanesParticipating == 32) {
-      #pragma unroll
+#pragma unroll
       for (int i = 0; i < N; ++i) {
-        #pragma unroll
+#pragma unroll
         for (int j = 1; j < 32; ++j) {
           threadVals[i] = reduceOp(threadVals[i], smem[i * 32 + j]);
         }
       }
     } else {
-      #pragma unroll
+#pragma unroll
       for (int i = 0; i < N; ++i) {
         for (int j = 1; j < numLanesParticipating; ++j) {
           threadVals[i] = reduceOp(threadVals[i], smem[i * numVals + j]);
@@ -106,12 +106,14 @@ __device__ void reduceNValuesInBlock(T *smem,
 // then __syncthreads is needed either before or afterwards to prevent non-0
 // threads overriding smem in the next loop before num-0 thread reads from it.
 template <typename T, typename ReduceOp>
-__device__ T reduceBlock(T* smem,
-                         const unsigned int numVals,
-                         T threadVal,
-                         ReduceOp reduceOp,
-                         T init) {
-  reduceNValuesInBlock<T, ReduceOp, 1>(smem, &threadVal, numVals, reduceOp, init);
+__device__ T reduceBlock(
+    T* smem,
+    const unsigned int numVals,
+    T threadVal,
+    ReduceOp reduceOp,
+    T init) {
+  reduceNValuesInBlock<T, ReduceOp, 1>(
+      smem, &threadVal, numVals, reduceOp, init);
   return threadVal;
 }
 

@@ -7,14 +7,14 @@ namespace native {
 namespace metal {
 
 std::vector<fp16_t> Fp32ToFp16(const std::vector<float>& src) {
-    unsigned long count = src.size();
-    std::vector<fp16_t> output(count, 0);
-    vImage_Buffer float32{(void*)src.data(), 1, count, count * sizeof(float)};
-    vImage_Buffer float16{(void*)output.data(), 1, count, count * sizeof(fp16_t)};
-    if (vImageConvert_PlanarFtoPlanar16F(&float32, &float16, 0) !=
-        kvImageNoError) {
-      TORCH_CHECK(false);
-    }
+  unsigned long count = src.size();
+  std::vector<fp16_t> output(count, 0);
+  vImage_Buffer float32{(void*)src.data(), 1, count, count * sizeof(float)};
+  vImage_Buffer float16{(void*)output.data(), 1, count, count * sizeof(fp16_t)};
+  if (vImageConvert_PlanarFtoPlanar16F(&float32, &float16, 0) !=
+      kvImageNoError) {
+    TORCH_CHECK(false);
+  }
   return output;
 }
 

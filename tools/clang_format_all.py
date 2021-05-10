@@ -18,6 +18,7 @@ from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 # (recursively) will be checked.
 # If you edit this, please edit the allowlist in clang_format_ci.sh as well.
 CLANG_FORMAT_ALLOWLIST = [
+    "aten/",
     "c10/",
     "torch/csrc/jit/",
     "test/cpp/jit/",

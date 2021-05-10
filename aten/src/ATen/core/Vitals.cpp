@@ -1,7 +1,6 @@
 #include <ATen/core/Vitals.h>
 #include <cstdlib>
 
-
 namespace at {
 namespace vitals {
 
@@ -43,9 +42,10 @@ bool APIVitals::setVital(
   }
 
   auto iter = name_map_.find(vital_name);
-  TorchVital *vital = nullptr;
+  TorchVital* vital = nullptr;
   if (iter == name_map_.end()) {
-    auto r = name_map_.emplace(std::make_pair(vital_name, TorchVital(vital_name)));
+    auto r =
+        name_map_.emplace(std::make_pair(vital_name, TorchVital(vital_name)));
     vital = &r.first->second;
   } else {
     vital = &iter->second;
@@ -55,5 +55,5 @@ bool APIVitals::setVital(
   return true;
 }
 
-} // namespace at
 } // namespace vitals
+} // namespace at

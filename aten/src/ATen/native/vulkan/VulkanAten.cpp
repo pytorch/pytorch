@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
@@ -6,6 +5,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/Vulkan.h>
+#include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/VulkanOps.h>
 #include <ATen/vulkan/Context.h>
@@ -141,9 +141,9 @@ Tensor avg_pool2d(
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
   const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : safe_downcast<int>(stride[1]);
 
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
@@ -164,7 +164,21 @@ Tensor avg_pool2d(
       pooling_output_shape<int64_t>(iW, kW, padW, dW, 1, ceil_mode);
 
   pool2d_shape_check(
-      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW, self.suggest_memory_format());
+      self,
+      kH,
+      kW,
+      dH,
+      dW,
+      padH,
+      padW,
+      1,
+      1,
+      iC,
+      iH,
+      iW,
+      oH,
+      oW,
+      self.suggest_memory_format());
 
   VulkanTensor y{{iN, iC, oH, oW}};
   vulkan::detail::avg_pool2d(
@@ -189,9 +203,9 @@ Tensor max_pool2d(
       stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
       "Vulkan max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : safe_downcast<int>(stride[1]);
 
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
@@ -373,7 +387,10 @@ Tensor& add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return self;
 }
 
-Tensor add_scalar(const Tensor& self, const Scalar& other, const Scalar& alpha) {
+Tensor add_scalar(
+    const Tensor& self,
+    const Scalar& other,
+    const Scalar& alpha) {
   const auto& x = vtensor_from_vulkan(self);
   const float s = other.to<float>();
   const float a = alpha.to<float>();
@@ -570,8 +587,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
   m.impl("mul.Scalar", TORCH_FN(at::native::vulkan::aten::mul_scalar));
   m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
-  m.impl(
-      "convolution_overrideable", at::native::vulkan::aten::convolution);
+  m.impl("convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl("hardtanh_", at::native::vulkan::aten::hardtanh_);
   m.impl("relu_", at::native::vulkan::aten::relu_);
   m.impl("add_.Tensor", at::native::vulkan::aten::add_);

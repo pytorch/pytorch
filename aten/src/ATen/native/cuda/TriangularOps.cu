@@ -1,8 +1,8 @@
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -11,7 +11,8 @@
 namespace at {
 namespace native {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t, typename IndexType, bool upper>
 C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
@@ -42,7 +43,7 @@ __global__ void triu_tril_kernel(
 
   // Compute remaining offsets
   IndexType running_index;
-  #pragma unroll
+#pragma unroll
   for (IndexType i = dims - 3; i >= 0; --i) {
     running_index = linear_idx % self_info.sizes[i];
     linear_idx /= self_info.sizes[i];
@@ -51,39 +52,52 @@ __global__ void triu_tril_kernel(
   }
 
   bool mask = upper ? (col - row >= k) : (col - row <= k);
-  result_info.data[result_offset] = mask ? self_info.data[self_offset] : scalar_t(0);
+  result_info.data[result_offset] =
+      mask ? self_info.data[self_offset] : scalar_t(0);
 }
 
 template <bool upper>
-Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
+Tensor& triu_tril_cuda_template(
+    Tensor& result,
+    const Tensor& self,
+    int64_t k,
+    const char* name) {
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu_tril_cuda_template", [&]{
-    if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
-      triu_tril_kernel<scalar_t, int32_t, upper>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
-      triu_tril_kernel<scalar_t, int64_t, upper>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::Bool,
+      self.scalar_type(),
+      "triu_tril_cuda_template",
+      [&] {
+        if (cuda::detail::canUse32BitIndexMath(result) &&
+            cuda::detail::canUse32BitIndexMath(self)) {
+          auto result_info =
+              cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
+          auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
+          triu_tril_kernel<scalar_t, int32_t, upper>
+              <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                  result_info, self_info, k, N);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        } else {
+          auto result_info =
+              cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
+          auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
+          triu_tril_kernel<scalar_t, int64_t, upper>
+              <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                  result_info, self_info, k, N);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+      });
   return result;
 }
 
-Tensor& tril_cuda_(Tensor &self, int64_t k) {
+Tensor& tril_cuda_(Tensor& self, int64_t k) {
   return tril_cuda_out(self, k, self);
 }
 
-Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
+Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor& result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -93,11 +107,11 @@ Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
   return triu_tril_cuda_template<false>(result, self, k, "tril");
 }
 
-Tensor& triu_cuda_(Tensor &self, int64_t k) {
+Tensor& triu_cuda_(Tensor& self, int64_t k) {
   return triu_cuda_out(self, k, self);
 }
 
-Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
+Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor& result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -224,9 +238,10 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cuda_out(const Tensor& self, int64_t dimension, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
+        apply_diag<scalar_t>(result, self, dimension);
+      });
   return result;
 }
 

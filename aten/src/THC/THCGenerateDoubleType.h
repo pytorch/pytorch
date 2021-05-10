@@ -1,5 +1,6 @@
 #ifndef THC_GENERIC_FILE
-#error "You must define THC_GENERIC_FILE before including THGenerateDoubleType.h"
+#error \
+    "You must define THC_GENERIC_FILE before including THGenerateDoubleType.h"
 #endif
 
 #define scalar_t double

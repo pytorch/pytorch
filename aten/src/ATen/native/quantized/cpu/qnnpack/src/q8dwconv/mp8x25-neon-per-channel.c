@@ -26,8 +26,10 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
 #ifdef __aarch64__
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
-  const uint8x8_t voutput_min = vld1_dup_u8(&quantization_params->neon.output_min);
-  const uint8x8_t voutput_max = vld1_dup_u8(&quantization_params->neon.output_max);
+  const uint8x8_t voutput_min =
+      vld1_dup_u8(&quantization_params->neon.output_min);
+  const uint8x8_t voutput_max =
+      vld1_dup_u8(&quantization_params->neon.output_max);
 #else
   const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
   const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
@@ -213,8 +215,8 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         i8 -= c_predecrement;
         i9 -= c_predecrement;
 
-        const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+        const uint8x8_t vkernel_zero_point = vld1_u8(
+            &quantization_params->neon.kernel_zero_points[channels - c]);
         int32x4_t vaccX1_lo = vld1q_s32(w);
         w = (void*)((uintptr_t)w + sizeof(int32x4_t));
         int32x4_t vaccX1_hi = vld1q_s32(w);
@@ -532,8 +534,8 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         i8 -= c_predecrement;
         i9 -= c_predecrement;
 
-        const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+        const uint8x8_t vkernel_zero_point = vld1_u8(
+            &quantization_params->neon.kernel_zero_points[channels - c]);
         const uint8x8_t vk0 = vld1_u8(w);
         w = (void*)((uintptr_t)w + sizeof(uint8x8_t));
         const uint8x8_t vi0 = vreinterpret_u8_u64(
@@ -773,9 +775,9 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
             vld1q_f32(requantization_scales_ptr - c + 4);
 
         const float32x4_t vacc_lo_f =
-          vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v_lo);
+            vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v_lo);
         const float32x4_t vacc_hi_f =
-          vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v_hi);
+            vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v_hi);
 
 #ifdef __aarch64__
         vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
@@ -793,9 +795,11 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         const float32x4_t vacc_hi_f_clamped =
             vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
         vacc_lo = vsubq_s32(
-            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)),
+            vimagic);
         vacc_hi = vsubq_s32(
-            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)),
+            vimagic);
         const int16x8_t vacc =
             vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
 
@@ -814,8 +818,8 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         i3 -= c_predecrement;
         i4 -= c_predecrement;
 
-        const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+        const uint8x8_t vkernel_zero_point = vld1_u8(
+            &quantization_params->neon.kernel_zero_points[channels - c]);
         const uint8x8_t vk0 = vld1_u8(w);
         w = (void*)((uintptr_t)w + sizeof(uint8x8_t));
         const uint8x8_t vi0 = vreinterpret_u8_u64(
@@ -887,15 +891,15 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         vacc_lo = vaddq_s32(vacc_lo, vacc_lo_old);
         vacc_hi = vaddq_s32(vacc_hi, vacc_hi_old);
 
-        const float32x4_t requantization_scale_v_lo =
-            vld1q_f32(&quantization_params->neon.requantization_scales[channels - c]);
-        const float32x4_t requantization_scale_v_hi =
-            vld1q_f32(&quantization_params->neon.requantization_scales[channels - c + 4]);
+        const float32x4_t requantization_scale_v_lo = vld1q_f32(
+            &quantization_params->neon.requantization_scales[channels - c]);
+        const float32x4_t requantization_scale_v_hi = vld1q_f32(
+            &quantization_params->neon.requantization_scales[channels - c + 4]);
 
         const float32x4_t vacc_lo_f =
-          vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v_lo);
+            vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v_lo);
         const float32x4_t vacc_hi_f =
-          vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v_hi);
+            vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v_hi);
 
 #ifdef __aarch64__
         vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
@@ -913,9 +917,11 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         const float32x4_t vacc_hi_f_clamped =
             vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
         vacc_lo = vsubq_s32(
-            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)),
+            vimagic);
         vacc_hi = vsubq_s32(
-            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)),
+            vimagic);
         const int16x8_t vacc =
             vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
 

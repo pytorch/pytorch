@@ -39,7 +39,9 @@ struct Command final {
     void barrier(const Pipeline::Barrier& barrier);
     void bind(const Pipeline::Object& pipeline);
     void bind(const Descriptor::Set& set);
-    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
+    void copy(
+        Resource::Buffer::Object source,
+        Resource::Buffer::Object destination);
     void dispatch(const Shader::WorkGroup& global_work_group);
 
    private:
@@ -119,9 +121,7 @@ struct Command final {
     } stream_;
   } pool /* [thread_count] */;
 
-  explicit Command(const GPU& gpu)
-    : pool(gpu) {
-  }
+  explicit Command(const GPU& gpu) : pool(gpu) {}
 };
 
 //

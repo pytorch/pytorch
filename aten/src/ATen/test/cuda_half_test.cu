@@ -2,16 +2,16 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/NumericLimits.cuh>
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <ATen/cuda/NumericLimits.cuh>
 
 #include <assert.h>
 
 using namespace at;
 
-__device__ void test(){
+__device__ void test() {
   // test half construction and implicit conversions in device
   assert(Half(3) == Half(3.0f));
   assert(static_cast<Half>(3.0f) == Half(3.0f));
@@ -77,17 +77,18 @@ __device__ void test(){
 #endif
 }
 
-__global__ void kernel(){
+__global__ void kernel() {
   test();
 }
 
-void launch_function(){
+void launch_function() {
   kernel<<<1, 1>>>();
 }
 
 // half common math functions tests in device
 TEST(HalfCuda, HalfCuda) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   launch_function();
   cudaError_t err = cudaDeviceSynchronize();
   bool isEQ = err == cudaSuccess;

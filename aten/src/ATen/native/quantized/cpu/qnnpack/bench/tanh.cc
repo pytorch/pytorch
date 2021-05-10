@@ -61,8 +61,7 @@ static void tanh_q8(benchmark::State& state) {
   }
 
   for (auto _ : state) {
-    status =
-        pytorch_qnnp_run_operator(tanhOperator, nullptr /* thread pool */);
+    status = pytorch_qnnp_run_operator(tanhOperator, nullptr /* thread pool */);
     if (status != pytorch_qnnp_status_success) {
       state.SkipWithError("failed to run TanH operator");
     }

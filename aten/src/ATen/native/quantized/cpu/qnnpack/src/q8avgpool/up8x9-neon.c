@@ -28,8 +28,7 @@ void pytorch_q8avgpool_ukernel_up8x9__neon(
   assert(kc >= 8);
 
   const int32x4_t vbias = vld1q_dup_s32(&quantization_params->neon.bias);
-  const float32x4_t vscale =
-      vdupq_n_f32(quantization_params->neon.scale);
+  const float32x4_t vscale = vdupq_n_f32(quantization_params->neon.scale);
 #if defined(__aarch64__)
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);

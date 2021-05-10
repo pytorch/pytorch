@@ -2,19 +2,19 @@
 
 #include <cstdint>
 
+#include <cublas_v2.h>
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
-#include <cublas_v2.h>
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
 #endif
 
-#include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
-#include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDAFunctions.h>
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/cuda/Exceptions.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace at {
 namespace cuda {
@@ -44,7 +44,7 @@ manage their own state. There is only a single CUDA context/state.
  * DEPRECATED: use device_count() instead
  */
 inline int64_t getNumGPUs() {
-    return c10::cuda::device_count();
+  return c10::cuda::device_count();
 }
 
 /**
@@ -53,7 +53,7 @@ inline int64_t getNumGPUs() {
  * this function will report CUDA is not available (rather than raise an error.)
  */
 inline bool is_available() {
-    return c10::cuda::device_count() > 0;
+  return c10::cuda::device_count() > 0;
 }
 
 TORCH_CUDA_CPP_API cudaDeviceProp* getCurrentDeviceProperties();

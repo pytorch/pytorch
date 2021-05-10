@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <torch/library.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <vector>
@@ -40,7 +40,8 @@ void compute_fused_params(
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     alpha_data[c] = inv_sigma * weight_v * (input_scale / output_scale);
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    beta_data[c] = (bias_v - mean_data[c] * inv_sigma * weight_v) / output_scale;
+    beta_data[c] =
+        (bias_v - mean_data[c] * inv_sigma * weight_v) / output_scale;
   }
 }
 
@@ -54,7 +55,6 @@ Tensor q_batch_norm1d_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   TORCH_CHECK(mb_weight.has_value(), "Weight must be provided");
   TORCH_CHECK(mb_bias.has_value(), "Bias must be provided");
   const auto& weight = *mb_weight;
@@ -65,7 +65,8 @@ Tensor q_batch_norm1d_impl(
     return out;
   }
   int64_t ndim = qx.dim();
-  TORCH_CHECK(ndim == 2 || ndim == 3, "Expecting the input tensor of rank 2 or 3.");
+  TORCH_CHECK(
+      ndim == 2 || ndim == 3, "Expecting the input tensor of rank 2 or 3.");
   const int64_t N = qx.size(0);
   const int64_t C = qx.size(1);
   const int64_t H = ndim == 3 ? qx.size(2) : 1;
@@ -100,8 +101,8 @@ Tensor q_batch_norm1d_impl(
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
       at::device(kCPU)
-        .dtype(qx_nhwc.scalar_type())
-        .memory_format(MemoryFormat::ChannelsLast),
+          .dtype(qx_nhwc.scalar_type())
+          .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
       c10::nullopt);
@@ -158,7 +159,6 @@ Tensor q_batch_norm2d_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   TORCH_CHECK(mb_weight.has_value(), "Weight must be provided");
   TORCH_CHECK(mb_bias.has_value(), "Bias must be provided");
   const auto& weight = *mb_weight;
@@ -197,8 +197,8 @@ Tensor q_batch_norm2d_impl(
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
       at::device(kCPU)
-        .dtype(qx_nhwc.scalar_type())
-        .memory_format(MemoryFormat::ChannelsLast),
+          .dtype(qx_nhwc.scalar_type())
+          .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
       c10::nullopt);
@@ -252,7 +252,6 @@ Tensor q_batch_norm3d_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   TORCH_CHECK(mb_weight.has_value(), "Weight must be provided")
   TORCH_CHECK(mb_bias.has_value(), "Bias must be provided")
 
@@ -293,8 +292,8 @@ Tensor q_batch_norm3d_impl(
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
       at::device(kCPU)
-        .dtype(qx_nhwc.scalar_type())
-        .memory_format(MemoryFormat::ChannelsLast3d),
+          .dtype(qx_nhwc.scalar_type())
+          .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
       c10::nullopt);
@@ -353,15 +352,37 @@ Tensor q_batch_norm_impl(
   int64_t dim = qx.dim();
   if (dim == 2 || dim == 3) {
     qy = q_batch_norm1d_impl<ReluFused>(
-        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+        qx,
+        mb_weight,
+        mb_bias,
+        mean,
+        var,
+        eps,
+        output_scale,
+        output_zero_point);
   } else if (dim == 4) {
     qy = q_batch_norm2d_impl<ReluFused>(
-        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+        qx,
+        mb_weight,
+        mb_bias,
+        mean,
+        var,
+        eps,
+        output_scale,
+        output_zero_point);
   } else if (dim == 5) {
     qy = q_batch_norm3d_impl<ReluFused>(
-        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+        qx,
+        mb_weight,
+        mb_bias,
+        mean,
+        var,
+        eps,
+        output_scale,
+        output_zero_point);
   } else {
-    TORCH_CHECK(false, "quantized::batch_norm only support 2d, 3d, 4d or 5d inputs.");
+    TORCH_CHECK(
+        false, "quantized::batch_norm only support 2d, 3d, 4d or 5d inputs.");
   }
   return qy;
 }
@@ -369,16 +390,19 @@ Tensor q_batch_norm_impl(
 } // namespace
 
 Tensor quantized_batch_norm(
-    const Tensor& qx, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& qx,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     const Tensor& mean /* optional */,
     const Tensor& var /* optional */,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
   Tensor qy;
   // TODO: this should arguably support 3d as well
@@ -386,19 +410,39 @@ Tensor quantized_batch_norm(
       qx,
       weight.defined() ? c10::make_optional(weight) : c10::nullopt,
       bias.defined() ? c10::make_optional(bias) : c10::nullopt,
-      mean, var, eps, output_scale, output_zero_point);
+      mean,
+      var,
+      eps,
+      output_scale,
+      output_zero_point);
   return qy;
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm"),        TORCH_FN(q_batch_norm_impl<false>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm_relu"),   TORCH_FN(q_batch_norm_impl<true>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm1d"),      TORCH_FN(q_batch_norm1d_impl<false>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm1d_relu"), TORCH_FN(q_batch_norm1d_impl<true>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm2d"),      TORCH_FN(q_batch_norm2d_impl<false>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm2d_relu"), TORCH_FN(q_batch_norm2d_impl<true>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d"),      TORCH_FN(q_batch_norm3d_impl<false>));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm"),
+      TORCH_FN(q_batch_norm_impl<false>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm_relu"),
+      TORCH_FN(q_batch_norm_impl<true>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm1d"),
+      TORCH_FN(q_batch_norm1d_impl<false>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm1d_relu"),
+      TORCH_FN(q_batch_norm1d_impl<true>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm2d"),
+      TORCH_FN(q_batch_norm2d_impl<false>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm2d_relu"),
+      TORCH_FN(q_batch_norm2d_impl<true>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm3d"),
+      TORCH_FN(q_batch_norm3d_impl<false>));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"),
+      TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
 } // namespace native

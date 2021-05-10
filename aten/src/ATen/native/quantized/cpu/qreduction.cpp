@@ -75,7 +75,8 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   return output;
 }
 #endif
-Tensor& mean_out_quantized_cpu(const Tensor& self,
+Tensor& mean_out_quantized_cpu(
+    const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype,
@@ -85,11 +86,7 @@ Tensor& mean_out_quantized_cpu(const Tensor& self,
       self.scalar_type() == kQUInt8 &&
       // QNNPACK currently is only supported for NCHW + dim=(2, 3)
       // Remove these checks after generic version is implemented.
-      self.ndimension() == 4 &&
-      dim.size() == 2 &&
-      dim[0] == 2 &&
-      dim[1] == 3
-     ){
+      self.ndimension() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3) {
     result = qnnpack_mean(self, dim);
     return result;
   }

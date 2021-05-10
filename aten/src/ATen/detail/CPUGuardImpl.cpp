@@ -7,4 +7,5 @@ namespace detail {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_GUARD_IMPL(CPU, c10::impl::NoOpDeviceGuardImpl<DeviceType::CPU>);
 
-}} // namespace at::detail
+} // namespace detail
+} // namespace at

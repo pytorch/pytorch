@@ -6,9 +6,13 @@ namespace at {
 namespace native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
-using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
-                                const Scalar& /*negval_*/);
-using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, double output_scale, int64_t output_zero_point);
+using qrelu_leaky_fn =
+    void (*)(Tensor& /*out*/, const Tensor& /*qx*/, const Scalar& /*negval_*/);
+using qsigmoid_fn = void (*)(
+    const at::Tensor& /*qx*/,
+    at::Tensor& /*qy*/,
+    double output_scale,
+    int64_t output_zero_point);
 using qhardsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
     const at::Tensor& /*qx*/,
@@ -25,7 +29,7 @@ using qthreshold_fn = void (*)(
     const Scalar& value,
     at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
-using qelu_fn = void(*)(
+using qelu_fn = void (*)(
     const at::Tensor& /*qx*/,
     const Scalar& /*alpha*/,
     const Scalar& /*scale*/,
@@ -33,8 +37,10 @@ using qelu_fn = void(*)(
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
-using qadd_scalar_fn =
-    void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Scalar& other /*other*/);
+using qadd_scalar_fn = void (*)(
+    Tensor& /*out*/,
+    const Tensor& /*self*/,
+    const Scalar& other /*other*/);
 using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
@@ -140,9 +146,19 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t dim,
     double scale,
     int64_t zero_point);
-using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
+using qtopk_fn =
+    void (*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
 
-using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
+using qbatch_norm_fn = void (*)(
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    const Tensor&,
+    const Tensor&,
+    const Tensor&,
+    Tensor&);
 
 using qnormalize_fn = void (*)(
     const Tensor& /* X */,

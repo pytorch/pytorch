@@ -247,9 +247,10 @@ class VBuffer final {
   VBuffer& operator=(VBuffer&&) = default;
 
   static inline VBuffer makeUniformBuffer(const VkDeviceSize bufferSize) {
-    return VBuffer{bufferSize,
-                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                   VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+    return VBuffer{
+        bufferSize,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
   }
 
   MapMemory map() const {

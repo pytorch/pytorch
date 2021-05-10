@@ -10,8 +10,8 @@
 #include <c10/core/ScalarType.h>
 
 #include <cuda.h>
-#include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_runtime.h>
 
 TORCH_CUDA_CU_API THCStorage* THCStorage_new(THCState* state);
 

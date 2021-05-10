@@ -46,7 +46,9 @@ Tensor sparse_csr_tensor(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
   TORCH_CHECK(
       options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
@@ -95,14 +97,18 @@ Tensor sparse_csr_tensor(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
       options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
-  TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
-              crow_indices.numel());
+  TORCH_CHECK(
+      crow_indices.numel() >= 1,
+      "expected crow_indices.numel() >= 1, but got ",
+      crow_indices.numel());
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 2> size;
 
@@ -113,10 +119,12 @@ Tensor sparse_csr_tensor(
     AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
       auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
       TORCH_CHECK(
-          crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
+          crow_indices_accessor[crow_indices.numel() - 1] <=
+              col_indices.numel(),
           "last value of crow_indices should be less than length of col_indices.");
       TORCH_CHECK(
-          crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+          crow_indices_accessor[0] == 0,
+          "0th value of crow_indices must be 0.");
 
       size[1] = *max_col_indices.data_ptr<index_t>() + 1;
     });

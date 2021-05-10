@@ -1,3 +1,4 @@
+// clang-format off
 // ${generated_comment}
 #include <torch_xla/csrc/aten_xla_type_default.h>
 
@@ -28,3 +29,4 @@ ${dispatch_autograd_registrations}
 }
 
 }  // namespace torch_xla
+// clang-format on

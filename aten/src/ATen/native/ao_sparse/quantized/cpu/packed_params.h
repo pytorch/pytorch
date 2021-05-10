@@ -45,4 +45,5 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   const int64_t out_features_block_size_, in_features_block_size_;
 };
 
-}}  // namespace ao::sparse
+} // namespace sparse
+} // namespace ao

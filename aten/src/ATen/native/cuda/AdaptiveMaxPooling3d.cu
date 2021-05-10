@@ -1,18 +1,17 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
-
 
 namespace at {
 namespace native {
@@ -31,33 +30,40 @@ __device__ inline int end_index(int a, int b, int c) {
 
 /*
  * Description:
- *    this function adaptively maxpools an input 4D tensor along dimensions 2 and 3
- *    4D input, 4D output, 4D argmax x and y
+ *    this function adaptively maxpools an input 4D tensor along dimensions 2
+ * and 3 4D input, 4D output, 4D argmax x and y
  */
- template <typename T>
+template <typename T>
 __global__ void adaptivemaxpool(
-                        T *input, T *output, int64_t *indices,
-                        int isizeT, int isizeH, int isizeW,
-                        int osizeT, int osizeH, int osizeW,
-                        int64_t istrideD,
-                        int64_t istrideT, int64_t istrideH, int64_t istrideW,
-                        int64_t offsetZ)
-{
+    T* input,
+    T* output,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideT,
+    int64_t istrideH,
+    int64_t istrideW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int ot, oh, ow;
 
   // compute offsets based on thread/block ID
   int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
+  int oendH = osizeH;
+  int ostepH = gridDim.y * blockDim.y;
   int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
-  ot = o_plane % osizeT;     // output frame/time
-  int d = o_plane / osizeT;  // slice/feature
+  ot = o_plane % osizeT; // output frame/time
+  int d = o_plane / osizeT; // slice/feature
 
   // input frame/time ramge is fixed.
   int istartT = start_index(ot, osizeT, isizeT);
@@ -65,44 +71,43 @@ __global__ void adaptivemaxpool(
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
-  T *input_dt = input + d*istrideD + istartT*istrideT;
+  T* input_dt = input + d * istrideD + istartT * istrideT;
   // output offset by slice/feature and frame/time
-  T *output_dt = output + o_plane*osizeH*osizeW;
+  T* output_dt = output + o_plane * osizeH * osizeW;
   // indices offset by slice/feature and frame/time
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  int64_t* indices_dt = indices + o_plane * osizeH * osizeW;
 
   // For all output pixels...
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
     int istartH = start_index(oh, osizeH, isizeH);
-    int iendH   = end_index(oh, osizeH, isizeH);
+    int iendH = end_index(oh, osizeH, isizeH);
     int kH = iendH - istartH;
 
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
-
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
       int istartW = start_index(ow, osizeW, isizeW);
-      int iendW   = end_index(ow, osizeW, isizeW);
+      int iendW = end_index(ow, osizeW, isizeW);
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
-      T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
-      T *ptr_output = output_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
-      int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
+      T* ptr_input = input_dt + istartH * istrideH + istartW * istrideW;
+      T* ptr_output = output_dt + oh * osizeW + ow;
+      int64_t* ptr_ind = indices_dt + oh * osizeW + ow;
+      int64_t argmax = istartT * isizeH * isizeW + istartH * isizeW + istartW;
       T max = at::numeric_limits<T>::lower_bound(); // -Infinity
 
       int it, ih, iw;
-      for(it = 0; it < kT; ++it) {
-        for(ih = 0; ih < kH; ++ih) {
-          for(iw = 0; iw < kW; ++iw) {
-            T val = ptr_input[ih*istrideH + iw*istrideW];
+      for (it = 0; it < kT; ++it) {
+        for (ih = 0; ih < kH; ++ih) {
+          for (iw = 0; iw < kW; ++iw) {
+            T val = ptr_input[ih * istrideH + iw * istrideW];
             if ((val > max) || THCNumerics<T>::isnan(val)) {
               max = val;
-              argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW;
+              argmax = (it + istartT) * isizeH * isizeW +
+                  (ih + istartH) * isizeW + iw + istartW;
             }
           }
         }
-        ptr_input += istrideT;   // next input frame
+        ptr_input += istrideT; // next input frame
       }
       // Update output and argmax
       *ptr_output = max;
@@ -113,15 +118,20 @@ __global__ void adaptivemaxpool(
 
 template <typename scalar_t>
 void adaptivemaxpool_loop(
-                        scalar_t *input_data,
-                        scalar_t *output_data,
-                        int64_t *indices_data,
-                        int64_t totalZ,
-                        int isizeT, int isizeH, int isizeW,
-                        int osizeT, int osizeH, int osizeW,
-                        int64_t istrideD,
-                        int64_t istrideT, int64_t istrideH, int64_t istrideW)
-{
+    scalar_t* input_data,
+    scalar_t* output_data,
+    int64_t* indices_data,
+    int64_t totalZ,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideT,
+    int64_t istrideH,
+    int64_t istrideW) {
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
@@ -129,8 +139,20 @@ void adaptivemaxpool_loop(
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
     adaptivemaxpool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      input_data, output_data, indices_data, isizeT, isizeH, isizeW,
-      osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW, offsetZ);
+        input_data,
+        output_data,
+        indices_data,
+        isizeT,
+        isizeH,
+        isizeW,
+        osizeT,
+        osizeH,
+        osizeW,
+        istrideD,
+        istrideT,
+        istrideH,
+        istrideW,
+        offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
@@ -148,42 +170,46 @@ void adaptivemaxpool_loop(
  *    Assumes that input size can be perfectly divided by output size, i.e.
  *    each input pixel can only be argmax of one output pixel.
  */
- template <typename T>
+template <typename T>
 __global__ void adaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
-  int64_t offsetZ
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int oh, ow;
 
   // compute offsets based on thread/block ID
   int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
+  int oendH = osizeH;
+  int ostepH = gridDim.y * blockDim.y;
   int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
-  int d = o_plane / osizeT;     // output slice/feature
+  int d = o_plane / osizeT; // output slice/feature
 
   // gradInput offset by slice/feature
-  T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
+  T* gradInput_d = gradInput + d * isizeT * isizeH * isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  T* gradOutput_dt = gradOutput + o_plane * osizeH * osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  int64_t* indices_dt = indices + o_plane * osizeH * osizeW;
 
   // For all output pixels...
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      T* ptr_gradOutput = gradOutput_dt + oh * osizeW + ow;
+      int64_t* ptr_ind = indices_dt + oh * osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int argmax = (*ptr_ind);
       gradInput_d[argmax] += grad_delta;
@@ -193,22 +219,37 @@ __global__ void adaptivemaxgradinput(
 
 template <typename scalar_t>
 void adaptivemaxgradinput_loop(
-  scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
-  int64_t totalZ,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW)
-{
+    scalar_t* gradInput_data,
+    scalar_t* gradOutput_data,
+    int64_t* indices_data,
+    int64_t totalZ,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW) {
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
-    adaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      gradInput_data, gradOutput_data, indices_data,
-      isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
+    adaptivemaxgradinput<<<
+        blocks,
+        threads,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        gradInput_data,
+        gradOutput_data,
+        indices_data,
+        isizeT,
+        isizeH,
+        isizeW,
+        osizeT,
+        osizeH,
+        osizeW,
+        offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
@@ -224,42 +265,46 @@ void adaptivemaxgradinput_loop(
  *
  *    Uses atomic add.
  */
- template <typename T>
+template <typename T>
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
-  int64_t offsetZ
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int oh, ow;
 
   // compute offsets based on thread/block ID
   int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
+  int oendH = osizeH;
+  int ostepH = gridDim.y * blockDim.y;
   int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
-  int d = o_plane / osizeT;     // output slice/feature
+  int d = o_plane / osizeT; // output slice/feature
 
   // gradInput offset by slice/feature
-  T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
+  T* gradInput_d = gradInput + d * isizeT * isizeH * isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  T* gradOutput_dt = gradOutput + o_plane * osizeH * osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  int64_t* indices_dt = indices + o_plane * osizeH * osizeW;
 
   // For all output pixels...
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      T* ptr_gradOutput = gradOutput_dt + oh * osizeW + ow;
+      int64_t* ptr_ind = indices_dt + oh * osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
       gpuAtomicAdd(&(gradInput_d[argmax]), grad_delta);
@@ -269,22 +314,37 @@ __global__ void atomicadaptivemaxgradinput(
 
 template <typename scalar_t>
 void atomicadaptivemaxgradinput_loop(
-  scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
-  int64_t totalZ,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW)
-{
+    scalar_t* gradInput_data,
+    scalar_t* gradOutput_data,
+    int64_t* indices_data,
+    int64_t totalZ,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW) {
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
-    atomicadaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      gradInput_data, gradOutput_data, indices_data,
-      isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
+    atomicadaptivemaxgradinput<<<
+        blocks,
+        threads,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        gradInput_data,
+        gradOutput_data,
+        indices_data,
+        isizeT,
+        isizeH,
+        isizeW,
+        osizeT,
+        osizeH,
+        osizeW,
+        offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
@@ -466,6 +526,6 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
               osizeW);
         });
   }
- }
-} // at::native
-} // at
+}
+} // namespace native
+} // namespace at

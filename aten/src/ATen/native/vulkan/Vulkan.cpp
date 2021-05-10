@@ -1,7 +1,7 @@
 #include <ATen/Utils.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/accumulate.h>
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>
@@ -19,13 +19,12 @@
 #include <ATen/native/vulkan/spv.h>
 #endif
 
+#include <stdio.h>
+#include <unistd.h>
 #include <cstring>
 #include <functional>
 #include <iostream>
 #include <numeric>
-#include <stdio.h>
-#include <unistd.h>
-
 
 #define VK_CHECK(f)                                                \
   {                                                                \
@@ -49,8 +48,9 @@ VContext::VContext(const bool enableValidationLayers)
 
 VContext::~VContext() {
   if (enableValidationLayers_) {
-    const auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
-        instance_, "vkDestroyDebugReportCallbackEXT");
+    const auto func =
+        (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+            instance_, "vkDestroyDebugReportCallbackEXT");
     if (func) {
       func(instance_, debugReportCallback_, nullptr);
     }
@@ -94,7 +94,8 @@ void VContext::createInstance() {
     uint32_t layerPresentCount = 0;
     VK_CHECK(vkEnumerateInstanceLayerProperties(&layerPresentCount, nullptr));
     std::vector<VkLayerProperties> layerProps(layerPresentCount);
-    VK_CHECK(vkEnumerateInstanceLayerProperties(&layerPresentCount, layerProps.data()));
+    VK_CHECK(vkEnumerateInstanceLayerProperties(
+        &layerPresentCount, layerProps.data()));
     std::array<const char*, 6> instanceLayers{
         "VK_LAYER_GOOGLE_unique_objects",
         "VK_LAYER_GOOGLE_threading",
@@ -114,9 +115,11 @@ void VContext::createInstance() {
     }
 
     uint32_t extCount = 0;
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr));
+    VK_CHECK(
+        vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr));
     std::vector<VkExtensionProperties> extProps(extCount);
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, extProps.data()));
+    VK_CHECK(vkEnumerateInstanceExtensionProperties(
+        nullptr, &extCount, extProps.data()));
     bool foundExt = false;
     for (VkExtensionProperties p : extProps) {
       if (strcmp(VK_EXT_DEBUG_REPORT_EXTENSION_NAME, p.extensionName) == 0) {
@@ -186,8 +189,7 @@ uint32_t VContext::getComputeQueueFamilyIndex() {
 
   vkGetPhysicalDeviceQueueFamilyProperties(
       physicalDevice_, &queueFamilyCount, nullptr);
-  TORCH_CHECK(
-      queueFamilyCount > 0, "Vulkan: Invalid number of queue families");
+  TORCH_CHECK(queueFamilyCount > 0, "Vulkan: Invalid number of queue families");
   std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
   vkGetPhysicalDeviceQueueFamilyProperties(
       physicalDevice_, &queueFamilyCount, queueFamilies.data());
@@ -339,7 +341,8 @@ VBuffer::~VBuffer() {
 }
 
 void VBuffer::copy_from_device_to_host(
-    void* const outputData, const int64_t size) const {
+    void* const outputData,
+    const int64_t size) const {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
@@ -347,7 +350,8 @@ void VBuffer::copy_from_device_to_host(
 }
 
 void VBuffer::copy_from_host_to_device(
-    const void* const data, const int64_t size) {
+    const void* const data,
+    const int64_t size) {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(mm.ptr(), data, size);
@@ -386,7 +390,8 @@ VkWriteDescriptorSet VBuffer::makeWriteDescriptorSet(
   return writeSet;
 }
 
-void VBuffer::bind(const VkDescriptorSet descriptorSet, const uint32_t binding) const {
+void VBuffer::bind(const VkDescriptorSet descriptorSet, const uint32_t binding)
+    const {
   const auto descrBufferInfo = makeDescriptorBufferInfo();
   const auto writeDescrSet =
       makeWriteDescriptorSet(descriptorSet, binding, &descrBufferInfo);
@@ -549,7 +554,8 @@ void VImage::bind(
 }
 
 void VImage::bindShaderRead(
-    const VkDescriptorSet descriptorSet, const uint32_t binding) const {
+    const VkDescriptorSet descriptorSet,
+    const uint32_t binding) const {
   bind(
       descriptorSet,
       binding,
@@ -558,7 +564,8 @@ void VImage::bindShaderRead(
 }
 
 void VImage::bindStorageImage(
-    const VkDescriptorSet descriptorSet, const uint32_t binding) const {
+    const VkDescriptorSet descriptorSet,
+    const uint32_t binding) const {
   bind(
       descriptorSet,
       binding,
@@ -841,13 +848,14 @@ void ComputeUnit::createComputePipelineCompile(
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
   options.SetForcedVersionProfile(450, shaderc_profile_core);
-  const shaderc::SpvCompilationResult compilationResult = compiler.CompileGlslToSpv(
-      glslSrc.c_str(),
-      glslSrc.size(),
-      shaderc_compute_shader,
-      "vulkan_shader.comp",
-      "main",
-      options);
+  const shaderc::SpvCompilationResult compilationResult =
+      compiler.CompileGlslToSpv(
+          glslSrc.c_str(),
+          glslSrc.size(),
+          shaderc_compute_shader,
+          "vulkan_shader.comp",
+          "main",
+          options);
   const auto compilationStatus = compilationResult.GetCompilationStatus();
   TORCH_INTERNAL_ASSERT(
       compilationStatus == shaderc_compilation_status_success,
@@ -1050,9 +1058,10 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
   VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+  VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
   createDescriptorPool(
       device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
@@ -1389,7 +1398,8 @@ VImage* VulkanTensor::image(const c10::optional<ImageSizes> imageSizes) {
   return impl()->image(imageSizes);
 }
 
-const VImage* VulkanTensor::image(const c10::optional<ImageSizes> imageSizes) const {
+const VImage* VulkanTensor::image(
+    const c10::optional<ImageSizes> imageSizes) const {
   return impl()->image(imageSizes);
 }
 

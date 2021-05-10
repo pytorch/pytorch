@@ -18,11 +18,7 @@ TEST(TANH_OP, zero_batch) {
 
 TEST(TANH_OP, unit_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
-    TanHOperatorTester()
-        .batchSize(1)
-        .channels(channels)
-        .iterations(3)
-        .testQ8();
+    TanHOperatorTester().batchSize(1).channels(channels).iterations(3).testQ8();
   }
 }
 
@@ -78,11 +74,7 @@ TEST(TANH_OP, unit_batch_with_input_zero_point) {
 
 TEST(TANH_OP, small_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
-    TanHOperatorTester()
-        .batchSize(3)
-        .channels(channels)
-        .iterations(3)
-        .testQ8();
+    TanHOperatorTester().batchSize(3).channels(channels).iterations(3).testQ8();
   }
 }
 

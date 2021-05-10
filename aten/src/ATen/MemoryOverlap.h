@@ -30,4 +30,4 @@ void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b);
 TORCH_API void assert_no_overlap(const Tensor& a, const Tensor& b);
 TORCH_API void assert_no_overlap(TensorImpl* a, TensorImpl* b);
 
-}
+} // namespace at

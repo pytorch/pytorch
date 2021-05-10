@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 // ${generated_comment}
 
@@ -20,3 +21,4 @@ ${dispatch_xla_declarations}
 };
 
 }  // namespace torch_xla
+// clang-format on

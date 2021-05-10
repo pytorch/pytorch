@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
-#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -26,8 +26,7 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
-      0, outer_size * inner_size, grain_size,
-      [&](int64_t begin, int64_t end) {
+      0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
@@ -69,7 +68,6 @@ void host_softmax_backward(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim) {
-
   int64_t outer_size = 1;
   int64_t dim_size = grad.size(dim);
   int64_t inner_size = 1;
@@ -117,8 +115,13 @@ void host_softmax_backward(
 }
 } // namespace
 
-Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
+Tensor softmax_cpu(
+    const Tensor& input_,
+    const int64_t dim_,
+    const bool half_to_float) {
+  TORCH_CHECK(
+      !half_to_float,
+      "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(
       input,
@@ -132,7 +135,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.numel() == 0) {
     return output;
   }
- if (input.dim() == 0)
+  if (input.dim() == 0)
     input = input.view(1);
   TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
@@ -147,8 +150,13 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   return output;
 }
 
-Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
+Tensor log_softmax_cpu(
+    const Tensor& input_,
+    const int64_t dim_,
+    const bool half_to_float) {
+  TORCH_CHECK(
+      !half_to_float,
+      "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(
       input,
@@ -171,8 +179,9 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
     log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input.scalar_type(), "log_softmax",
-        [&] { host_softmax<scalar_t, true>(output, input, dim); });
+        at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
+          host_softmax<scalar_t, true>(output, input, dim);
+        });
   }
   return output;
 }
@@ -246,11 +255,13 @@ Tensor log_softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(),
-                                   "log_softmax_backward", [&] {
-                                     host_softmax_backward<scalar_t, true>(
-                                         grad_input, grad, output, dim);
-                                   });
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        at::ScalarType::BFloat16,
+        grad.scalar_type(),
+        "log_softmax_backward",
+        [&] {
+          host_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
+        });
   }
   return grad_input;
 }
@@ -264,14 +275,19 @@ Tensor softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor softmax(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-        return at::_softmax(input_, dim_, true);
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+        dtype == ScalarType::Float) {
+      return at::_softmax(input_, dim_, true);
     } else {
-        Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-        return at::_softmax(converted, dim_, false);
+      Tensor converted =
+          dtype.has_value() ? input_.toType(dtype.value()) : input_;
+      return at::_softmax(converted, dim_, false);
     }
   }();
   namedinference::propagate_names(result, input_);
@@ -287,14 +303,19 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor log_softmax(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-        return at::_log_softmax(input_, dim_, true);
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+        dtype == ScalarType::Float) {
+      return at::_log_softmax(input_, dim_, true);
     } else {
-        Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
-        return at::_log_softmax(converted, dim_, false);
+      Tensor converted =
+          dtype.has_value() ? input_.toType(dtype.value()) : input_;
+      return at::_log_softmax(converted, dim_, false);
     }
   }();
   namedinference::propagate_names(result, input_);
@@ -314,9 +335,12 @@ Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor log_softmax(
+    const Tensor& self,
+    Dimname dim,
+    optional<ScalarType> dtype) {
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-}
-}
+} // namespace native
+} // namespace at

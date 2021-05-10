@@ -1,8 +1,8 @@
 #include <ATen/Tensor.h>
-#include <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <ATen/native/metal/MetalCommandBuffer.h>
 #include <ATen/native/metal/MetalTensorImpl.h>
 #include <ATen/native/metal/MetalTensorImplStorage.h>
+#include <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <vector>
 
 #if (defined(__ARM_NEON__) || defined(__ARM_NEON))
@@ -100,13 +100,13 @@ static inline MetalCommandBuffer* getCommandBufferFromTensor(
   return cmdBuffer;
 }
 
-template<typename T>
-id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
-    id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
-          newBufferWithLength:src.size() * sizeof(T)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
-    memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
-    return buffer;
+template <typename T>
+id<MTLBuffer> makeMTLBuffer(const std::vector<T>& src) {
+  id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+      newBufferWithLength:src.size() * sizeof(T)
+                  options:MTLResourceOptionCPUCacheModeWriteCombined];
+  memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
+  return buffer;
 }
 
 } // namespace metal

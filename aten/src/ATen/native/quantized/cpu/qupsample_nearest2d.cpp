@@ -8,7 +8,6 @@
 
 #include <cstring>
 
-
 namespace at {
 namespace native {
 
@@ -25,8 +24,10 @@ static void upsample_nearest2d_out_frame(
     int64_t channels,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+  float height_scale =
+      compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale =
+      compute_scales_value<float>(scales_w, input_width, output_width);
 
   channels = channels * nbatch;
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
@@ -34,7 +35,11 @@ static void upsample_nearest2d_out_frame(
 
   // special case: just copy
   if (input_height == output_height && input_width == output_width) {
-    std::memcpy(o_p, i_p, channels * input_height * input_width * sizeof(typename scalar_t::underlying));
+    std::memcpy(
+        o_p,
+        i_p,
+        channels * input_height * input_width *
+            sizeof(typename scalar_t::underlying));
     return;
   }
 
@@ -70,15 +75,23 @@ static void upsample_nearest2d_out_frame_nhwc(
     int64_t channels,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+  float height_scale =
+      compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale =
+      compute_scales_value<float>(scales_w, input_width, output_width);
 
   for (const auto b : c10::irange(nbatch)) {
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
-    auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
+    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
+        idata + b * input_height * input_width * channels);
+    auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+        odata + b * output_height * output_width * channels);
     // special case: just copy
     if (input_height == output_height && input_width == output_width) {
-      std::memcpy(o_p, i_p, channels * input_height * input_width * sizeof(typename scalar_t::underlying));
+      std::memcpy(
+          o_p,
+          i_p,
+          channels * input_height * input_width *
+              sizeof(typename scalar_t::underlying));
       return;
     }
 
@@ -90,9 +103,10 @@ static void upsample_nearest2d_out_frame_nhwc(
         const int64_t w1 =
             nearest_neighbor_compute_source_index(width_scale, w2, input_width);
 
-        const auto* pos1 = &i_p[(h1 * input_width + w1)*channels];
-        auto* pos2 = &o_p[(h2 * output_width + w2)*channels];
-        std::memcpy(pos2, pos1, channels * sizeof(typename scalar_t::underlying));
+        const auto* pos1 = &i_p[(h1 * input_width + w1) * channels];
+        auto* pos2 = &o_p[(h2 * output_width + w2) * channels];
+        std::memcpy(
+            pos2, pos1, channels * sizeof(typename scalar_t::underlying));
       }
     }
   }
@@ -120,7 +134,7 @@ Tensor upsample_nearest2d_quantized_cpu(
   int64_t channels = input.size(1);
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
-    AT_ASSERT(input_width > 0 && output_width > 0);
+  AT_ASSERT(input_width > 0 && output_width > 0);
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     Tensor output = at::_empty_affine_quantized(
         {nbatch, channels, output_height, output_width},
@@ -154,21 +168,22 @@ Tensor upsample_nearest2d_quantized_cpu(
 
     auto input_contig = input.contiguous();
 
-    AT_DISPATCH_QINT_TYPES(input_contig.scalar_type(), "upsample_nearest2d", [&] {
-      auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
-      auto* odata = static_cast<scalar_t*>(output.data_ptr());
-      upsample_nearest2d_out_frame<scalar_t>(
-          odata,
-          idata,
-          input_height,
-          input_width,
-          output_height,
-          output_width,
-          nbatch,
-          channels,
-          scales_h,
-          scales_w);
-    });
+    AT_DISPATCH_QINT_TYPES(
+        input_contig.scalar_type(), "upsample_nearest2d", [&] {
+          auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
+          auto* odata = static_cast<scalar_t*>(output.data_ptr());
+          upsample_nearest2d_out_frame<scalar_t>(
+              odata,
+              idata,
+              input_height,
+              input_width,
+              output_height,
+              output_width,
+              nbatch,
+              channels,
+              scales_h,
+              scales_w);
+        });
     return output;
   }
 }

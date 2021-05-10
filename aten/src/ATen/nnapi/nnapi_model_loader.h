@@ -24,6 +24,7 @@ int load_nnapi_model(
     int32_t* out_output_count,
     size_t* out_bytes_consumed);
 
-}} // namespace caffe2::nnapi
+}
+} // namespace caffe2
 
 #endif // NNAPI_MODEL_LOADER_H_

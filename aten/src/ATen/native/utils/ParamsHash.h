@@ -3,11 +3,13 @@
 #include <memory>
 #include <mutex>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // Hashing machinery for Params
 // Fowler–Noll–Vo hash function
-// see https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
+// see
+// https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
 template <typename Params>
 struct ParamsHash {
   // Params must be a POD because we read out its memory
@@ -38,5 +40,5 @@ struct ParamsEqual {
   }
 };
 
-
-}}  // at::native
+} // namespace native
+} // namespace at

@@ -98,7 +98,7 @@ class Q8GEMM : public benchmark::Fixture {
         kcStride() * ncStride() +
         ncStride() * sizeof(int32_t) / sizeof(uint8_t));
     std::fill(w_.begin(), w_.end(), 127);
-    size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
+    size_t num_zero_points_kernel = (nc_ + (nr_ - 1)) & -nr_;
     std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
     std::vector<float> requantization_scales(num_zero_points_kernel, 0.75f);
     pytorch_pack_q8gemm_w(
@@ -121,8 +121,12 @@ class Q8GEMM : public benchmark::Fixture {
     std::fill(c_.begin(), c_.end(), 0xA5);
 
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
-        127, kernel_zero_points.data(),
-        requantization_scales.data(), 127, 1, 254);
+        127,
+        kernel_zero_points.data(),
+        requantization_scales.data(),
+        127,
+        1,
+        254);
   }
 
   virtual void TearDown(benchmark::State& state) override {
@@ -635,7 +639,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__aarch32_neon, 4, 8, 8, 1)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x8__aarch32_neon(
             mrr,
@@ -735,7 +739,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_8x8__aarch64_neon(
             mrr,
@@ -803,7 +807,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__neon, 4, 8, 8, 1)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x8__neon(
             mrr,
@@ -832,7 +836,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__neon, 8, 8, 8, 1)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_8x8__neon(
             mrr,
@@ -980,7 +984,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 2x4c8__sse2, 2, 4, 1, 8)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_2x4c8__sse2(
             mrr,
@@ -1010,7 +1014,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x4c2__sse2, 4, 4, 4, 2)
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0, channel_offset = 0; n < nc();
-          n += nr(), channel_offset += nr()) {
+           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x4c2__sse2(
             mrr,

@@ -1,10 +1,11 @@
 #pragma once
 
-#include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace apply {
 
@@ -13,24 +14,30 @@ using indexT = int64_t;
 
 template <typename IndexType, typename Real, typename Op>
 __device__ void applyOp2(
-    Op op, IndexType blockSize,
-    TensorInfo<Real, IndexType> values1, IndexType idx1,
-    TensorInfo<Real, IndexType> values2, IndexType idx2) {
-  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x;
-       k < blockSize;
+    Op op,
+    IndexType blockSize,
+    TensorInfo<Real, IndexType> values1,
+    IndexType idx1,
+    TensorInfo<Real, IndexType> values2,
+    IndexType idx2) {
+  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x; k < blockSize;
        k += gridDim.x * blockDim.x) {
-    op(values1.data + idx1 * blockSize + k, values2.data + idx2 * blockSize + k);
+    op(values1.data + idx1 * blockSize + k,
+       values2.data + idx2 * blockSize + k);
   }
 }
 
 template <typename IndexType, typename Real, typename Op>
 __device__ void applyOp3(
-    Op op, IndexType blockSize,
-    TensorInfo<Real, IndexType> values1, IndexType idx1,
-    TensorInfo<Real, IndexType> values2, IndexType idx2,
-    TensorInfo<Real, IndexType> values3, IndexType idx3) {
-  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x;
-       k < blockSize;
+    Op op,
+    IndexType blockSize,
+    TensorInfo<Real, IndexType> values1,
+    IndexType idx1,
+    TensorInfo<Real, IndexType> values2,
+    IndexType idx2,
+    TensorInfo<Real, IndexType> values3,
+    IndexType idx3) {
+  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x; k < blockSize;
        k += gridDim.x * blockDim.x) {
     op(values1.data + idx1 * blockSize + k,
        values2.data + idx2 * blockSize + k,
@@ -52,17 +59,17 @@ __global__ void sparseElementwiseKernel(
     const IndexType nnz) {
   IndexType ind_skip = indices.strides[0];
   IndexType ind_nnz_skip = indices.strides[1];
-  IndexType value_size = values.strides[0];  // numel of each slice in values
-  for (IndexType linearId = blockIdx.x;
-       linearId < nnz;
-       linearId += gridDim.x) {
+  IndexType value_size = values.strides[0]; // numel of each slice in values
+  for (IndexType linearId = blockIdx.x; linearId < nnz; linearId += gridDim.x) {
     IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nnz_skip];
+      index = dense.sizes[d] * index +
+          indices.data[d * ind_skip + linearId * ind_nnz_skip];
     }
-    Real *dst = dense.data + index * value_size;
-    Real *src = values.data + linearId * value_size;
-    for (IndexType linearId2 = threadIdx.x; linearId2 < value_size; linearId2 += blockDim.x) {
+    Real* dst = dense.data + index * value_size;
+    Real* src = values.data + linearId * value_size;
+    for (IndexType linearId2 = threadIdx.x; linearId2 < value_size;
+         linearId2 += blockDim.x) {
       op(dst + linearId2, src + linearId2);
     }
   }
@@ -88,13 +95,19 @@ __global__ void sparseElementwiseKernelScalar(
        linearId += gridDim.x * blockDim.x) {
     IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nnz_skip];
+      index = dense.sizes[d] * index +
+          indices.data[d * ind_skip + linearId * ind_nnz_skip];
     }
     op(dense.data + index, values.data + linearId * value_skip);
   }
 }
 
-template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
+template <
+    typename OpBoth,
+    typename OpLeft,
+    typename OpRight,
+    typename IndexType,
+    typename Real>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
@@ -108,7 +121,8 @@ __global__ void valueSparseUnionKernel(
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
-    const IndexType t_nnz, const IndexType s_nnz) {
+    const IndexType t_nnz,
+    const IndexType s_nnz) {
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t cmp, d;
@@ -123,19 +137,25 @@ __global__ void valueSparseUnionKernel(
     } else {
       cmp = 0;
       for (d = 0; d < nDimI; d++) {
-        if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
+        if (t_indices.data[d * t_indskip + t_i] <
+            s_indices.data[d * s_indskip + s_i]) {
           cmp = 1;
           break;
         }
-        if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
+        if (t_indices.data[d * t_indskip + t_i] >
+            s_indices.data[d * s_indskip + s_i]) {
           cmp = -1;
           break;
         }
       }
     }
-    if (cmp == 0) applyOp3(opBoth, valueSize, r_values, r_i, t_values, t_i++, s_values, s_i++);
-    else if (cmp > 0) applyOp2(opLeft, valueSize, r_values, r_i, t_values, t_i++);
-    else if (cmp < 0) applyOp2(opRight, valueSize, r_values, r_i, s_values, s_i++);
+    if (cmp == 0)
+      applyOp3(
+          opBoth, valueSize, r_values, r_i, t_values, t_i++, s_values, s_i++);
+    else if (cmp > 0)
+      applyOp2(opLeft, valueSize, r_values, r_i, t_values, t_i++);
+    else if (cmp < 0)
+      applyOp2(opRight, valueSize, r_values, r_i, s_values, s_i++);
     r_i++;
   }
 }
@@ -149,7 +169,9 @@ __global__ void indexSparseUnionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
-    const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
+    const IndexType t_nnz,
+    const IndexType s_nnz,
+    IndexType* resultNnz) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
@@ -164,11 +186,13 @@ __global__ void indexSparseUnionKernel(
     } else {
       cmp = 0;
       for (d = 0; d < nDimI; d++) {
-        if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
+        if (t_indices.data[d * t_indskip + t_i] <
+            s_indices.data[d * s_indskip + s_i]) {
           cmp = 1;
           break;
         }
-        if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
+        if (t_indices.data[d * t_indskip + t_i] >
+            s_indices.data[d * s_indskip + s_i]) {
           cmp = -1;
           break;
         }
@@ -176,13 +200,15 @@ __global__ void indexSparseUnionKernel(
     }
     if (cmp >= 0) {
       for (d = 0; d < nDimI; d++) {
-        r_indices.data[d * r_indskip + r_i] = t_indices.data[d * t_indskip + t_i];
+        r_indices.data[d * r_indskip + r_i] =
+            t_indices.data[d * t_indskip + t_i];
       }
       t_i++;
     }
     if (cmp <= 0) {
       for (d = 0; d < nDimI; d++) {
-        r_indices.data[d * r_indskip + r_i] = s_indices.data[d * s_indskip + s_i];
+        r_indices.data[d * r_indskip + r_i] =
+            s_indices.data[d * s_indskip + s_i];
       }
       s_i++;
     }
@@ -203,7 +229,8 @@ __global__ void valueSparseIntersectionKernel(
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
-    const IndexType t_nnz, const IndexType s_nnz) {
+    const IndexType t_nnz,
+    const IndexType s_nnz) {
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t match, d;
@@ -213,18 +240,21 @@ __global__ void valueSparseIntersectionKernel(
   while (t_i < t_nnz && s_i < s_nnz) {
     match = 1;
     for (d = 0; d < nDimI; d++) {
-      if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
+      if (t_indices.data[d * t_indskip + t_i] <
+          s_indices.data[d * s_indskip + s_i]) {
         t_i++;
         match = 0;
         break;
       }
-      if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
+      if (t_indices.data[d * t_indskip + t_i] >
+          s_indices.data[d * s_indskip + s_i]) {
         s_i++;
         match = 0;
         break;
       }
     }
-    if (!match) continue;
+    if (!match)
+      continue;
     applyOp3(op, valueSize, r_values, r_i++, t_values, t_i++, s_values, s_i++);
   }
 }
@@ -238,7 +268,9 @@ __global__ void indexSparseIntersectionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
-    const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
+    const IndexType t_nnz,
+    const IndexType s_nnz,
+    IndexType* resultNnz) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
@@ -248,22 +280,27 @@ __global__ void indexSparseIntersectionKernel(
   while (t_i < t_nnz && s_i < s_nnz) {
     match = 1;
     for (d = 0; d < nDimI; d++) {
-      if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
+      if (t_indices.data[d * t_indskip + t_i] <
+          s_indices.data[d * s_indskip + s_i]) {
         t_i++;
         match = 0;
         break;
       }
-      if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
+      if (t_indices.data[d * t_indskip + t_i] >
+          s_indices.data[d * s_indskip + s_i]) {
         s_i++;
         match = 0;
         break;
       }
     }
-    if (!match) continue;
+    if (!match)
+      continue;
     for (d = 0; d < nDimI; d++) {
       r_indices.data[d * r_indskip + r_i] = t_indices.data[d * t_indskip + t_i];
     }
-    r_i++; t_i++; s_i++;
+    r_i++;
+    t_i++;
+    s_i++;
   }
   *resultNnz = r_i;
 }
@@ -297,12 +334,15 @@ __global__ void indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE * 4)
 __global__ void coalesceValuesKernel(
-  int64_t *segment_offsets, int64_t *value_indices,
-  Dtype *values, Dtype *newValues,
-  int64_t nnz, int64_t newNnz, int64_t stride) {
-
+    int64_t* segment_offsets,
+    int64_t* value_indices,
+    Dtype* values,
+    Dtype* newValues,
+    int64_t nnz,
+    int64_t newNnz,
+    int64_t stride) {
   int seg = blockIdx.x * 4 + threadIdx.y;
 
   // Number of values processed by each thread (grain size)
@@ -314,30 +354,25 @@ __global__ void coalesceValuesKernel(
     const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
     Acctype tmp[SZ];
-    #pragma unroll
+#pragma unroll
     for (int ii = 0; ii < SZ; ii++) {
       tmp[ii] = 0;
     }
     for (int row = begin; row < end; row++) {
-      const int valueRow = ((int) value_indices[row]) * stride;
+      const int valueRow = ((int)value_indices[row]) * stride;
 
-
-      #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
-      {
+#pragma unroll
+      for (int ii = 0; ii < SZ; ii++) {
         int featureDim = startFeature + ii * C10_WARP_SIZE;
-        if (featureDim < stride)
-        {
+        if (featureDim < stride) {
           tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
         }
       }
     }
-    #pragma unroll
-    for (int ii = 0; ii < SZ; ii++)
-    {
+#pragma unroll
+    for (int ii = 0; ii < SZ; ii++) {
       int featureDim = startFeature + ii * C10_WARP_SIZE;
-      if (featureDim < stride)
-      {
+      if (featureDim < stride) {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
       }
     }
@@ -346,4 +381,5 @@ __global__ void coalesceValuesKernel(
 
 } // namespace apply
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

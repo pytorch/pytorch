@@ -99,7 +99,7 @@ void MPSImageWrapper::allocateTemporaryStorage(
 
 void MPSImageWrapper::setImage(MPSImage* image) {
   TORCH_CHECK(image);
-  if(image.isTemporaryImage) {
+  if (image.isTemporaryImage) {
     TORCH_CHECK(_commandBuffer && _commandBuffer.valid);
   }
   _image = image;
@@ -115,7 +115,7 @@ void MPSImageWrapper::prepare() {
 }
 
 void MPSImageWrapper::synchronize() {
-  if(_commandBuffer && _commandBuffer.valid) {
+  if (_commandBuffer && _commandBuffer.valid) {
     [_commandBuffer commit];
   }
 }

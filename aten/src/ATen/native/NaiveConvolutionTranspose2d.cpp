@@ -10,8 +10,19 @@
 namespace at {
 namespace native {
 
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+template <typename scalar_t>
+void gemv(
+    char trans,
+    int64_t m,
+    int64_t n,
+    scalar_t alpha,
+    scalar_t* a,
+    int64_t lda,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t beta,
+    scalar_t* y,
+    int64_t incy);
 
 namespace {
 
@@ -238,8 +249,9 @@ void slow_conv_transpose2d_out_cpu_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
 
   // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height,
-                   input_height * input_width});
+  columns.resize_(
+      {n_output_plane * kernel_width * kernel_height,
+       input_height * input_width});
   columns.zero_();
 
   // Define a buffer of ones, for bias accumulation
@@ -252,8 +264,11 @@ void slow_conv_transpose2d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Long,
+      input.scalar_type(),
+      "slow_conv_transpose2d_out_cpu",
+      [&] {
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
           // Helpers
@@ -440,8 +455,9 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   grad_input.zero_();
 
   // Resize temporary columns
-  grad_columns.resize_({n_output_plane * kernel_width * kernel_height,
-                        input_height * input_width});
+  grad_columns.resize_(
+      {n_output_plane * kernel_width * kernel_height,
+       input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
       grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
@@ -460,21 +476,21 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
               dilation_height != 1 || dilation_width != 1) {
             // Extract columns:
             im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
-                  n_output_plane,
-                  output_height,
-                  output_width,
-                  input_height,
-                  input_width,
-                  kernel_height,
-                  kernel_width,
-                  pad_height,
-                  pad_width,
-                  stride_height,
-                  stride_width,
-                  dilation_height,
-                  dilation_width,
-                  grad_columns.data_ptr<scalar_t>());
+                grad_output_n.data_ptr<scalar_t>(),
+                n_output_plane,
+                output_height,
+                output_width,
+                input_height,
+                input_width,
+                kernel_height,
+                kernel_width,
+                pad_height,
+                pad_width,
+                stride_height,
+                stride_width,
+                dilation_height,
+                dilation_width,
+                grad_columns.data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -636,11 +652,14 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   }
 
   // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height,
-                   input_height * input_width});
+  columns.resize_(
+      {n_output_plane * kernel_width * kernel_height,
+       input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
+      input.scalar_type(),
+      "slow_conv_transpose2d_acc_grad_parameters_cpu",
+      [&] {
         // Helpers
         Tensor input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -743,16 +762,19 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
+Tensor& slow_conv_transpose2d_out_cpu(
+    const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -777,13 +799,15 @@ Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
 Tensor slow_conv_transpose2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -806,7 +830,8 @@ Tensor slow_conv_transpose2d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,

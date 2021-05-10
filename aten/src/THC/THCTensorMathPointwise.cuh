@@ -1,14 +1,14 @@
 #ifndef THC_TENSORMATH_POINTWISE_CUH
 #define THC_TENSORMATH_POINTWISE_CUH
 
-#include <type_traits>
-#include <THC/THCTensorMath.h>
-#include <THC/THCGeneral.h>
 #include <TH/THHalf.h>
+#include <THC/THCGeneral.h>
 #include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
+#include <type_traits>
 
 template <typename T>
 struct TensorCAddOp {
@@ -40,21 +40,18 @@ template <typename T>
 struct TensorCrossOp {
   TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
-  __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
+  __device__ __forceinline__ void operator()(T* out, T* x, T* y) {
     T val0 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[1 * sx], y[2 * sy]),
-        THCNumerics<T>::mul(x[2 * sx], y[1 * sy])
-    );
+        THCNumerics<T>::mul(x[2 * sx], y[1 * sy]));
 
     T val1 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[2 * sx], y[0 * sy]),
-        THCNumerics<T>::mul(x[0 * sx], y[2 * sy])
-    );
+        THCNumerics<T>::mul(x[0 * sx], y[2 * sy]));
 
     T val2 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[0 * sx], y[1 * sy]),
-        THCNumerics<T>::mul(x[1 * sx], y[0 * sy])
-    );
+        THCNumerics<T>::mul(x[1 * sx], y[0 * sy]));
 
     out[0 * so] = val0;
     out[1 * so] = val1;

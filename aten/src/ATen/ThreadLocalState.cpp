@@ -24,8 +24,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
 }
 
 /* static */
-void ThreadLocalState::setThreadLocalState(
-    const ThreadLocalState& state) {
+void ThreadLocalState::setThreadLocalState(const ThreadLocalState& state) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   if (state.keep_grad_mode_) {
     GradMode::set_enabled(state.grad_mode_enabled_);

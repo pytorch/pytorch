@@ -29,7 +29,7 @@ DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__neon)
 DECLARE_PYTORCH_XZIPC_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_x4__sse2)
 
 #define DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(fn_name) \
-  PYTORCH_QNNP_INTERNAL void fn_name(           \
+  PYTORCH_QNNP_INTERNAL void fn_name(                   \
       size_t n, size_t m, const void* x, void* y);
 
 DECLARE_PYTORCH_XZIPV_UKERNEL_FUNCTION(pytorch_qnnp_x8zip_xm__neon)

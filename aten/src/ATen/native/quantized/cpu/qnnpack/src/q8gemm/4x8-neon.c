@@ -53,8 +53,8 @@ void pytorch_q8gemm_ukernel_4x8__neon(
   // Assumes that kernel_zero_points is an array padded with necessary elements
   // in order to make it multiple of 8.
   const uint8x8_t vb_zero_point =
-      vld1_u8((const uint8_t*)&quantization_params->neon.kernel_zero_points
-          [output_channel_index]);
+      vld1_u8((const uint8_t*)&quantization_params->neon
+                  .kernel_zero_points[output_channel_index]);
   for (; k >= 8; k -= 8) {
     const uint8x8_t va0 = vld1_u8(a0);
     a0 += 8;
@@ -511,14 +511,11 @@ void pytorch_q8gemm_ukernel_4x8__neon(
   // Doing 2 VLD1 instead of 1 VLD2 because A75 has higher latency
   // 8 vs. 5 for VLD2 with both VLD1 and VLD2 having throughput of
   // 2 per cycle. So probably this is better.
-  const float32x4_t requantization_scale_c0123 =
-      vld1q_f32(
-          &quantization_params->neon.requantization_scales[output_channel_index]
-          );
+  const float32x4_t requantization_scale_c0123 = vld1q_f32(
+      &quantization_params->neon.requantization_scales[output_channel_index]);
   const float32x4_t requantization_scale_c4567 =
-      vld1q_f32(
-          &quantization_params->neon.requantization_scales[
-              output_channel_index + 4]);
+      vld1q_f32(&quantization_params->neon
+                     .requantization_scales[output_channel_index + 4]);
 
   /*
    * Convert int32_t input to FP32 and multiply by FP32 scale.
@@ -531,21 +528,21 @@ void pytorch_q8gemm_ukernel_4x8__neon(
    * even.
    */
   const float32x4_t vacc0x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_c0123);
+      vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_c0123);
   const float32x4_t vacc1x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_c0123);
+      vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_c0123);
   const float32x4_t vacc2x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_c0123);
+      vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_c0123);
   const float32x4_t vacc3x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_c0123);
+      vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_c0123);
   const float32x4_t vacc0x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc0x4567), requantization_scale_c4567);
+      vmulq_f32(vcvtq_f32_s32(vacc0x4567), requantization_scale_c4567);
   const float32x4_t vacc1x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc1x4567), requantization_scale_c4567);
+      vmulq_f32(vcvtq_f32_s32(vacc1x4567), requantization_scale_c4567);
   const float32x4_t vacc2x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc2x4567), requantization_scale_c4567);
+      vmulq_f32(vcvtq_f32_s32(vacc2x4567), requantization_scale_c4567);
   const float32x4_t vacc3x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc3x4567), requantization_scale_c4567);
+      vmulq_f32(vcvtq_f32_s32(vacc3x4567), requantization_scale_c4567);
 
 #ifdef __aarch64__
   const int16x8_t voutput_zero_point =

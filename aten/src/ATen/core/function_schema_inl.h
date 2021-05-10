@@ -5,7 +5,9 @@
 
 namespace c10 {
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const FunctionSchema& schema) {
   // eventually this should look almost identical to python arg parser, but
   // it is simpler for now to work directly on this schema
 
@@ -16,8 +18,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
+  for (size_t i = 0; i < schema.arguments().size(); ++i) {
+    if (i > 0)
+      out << ", ";
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
@@ -25,8 +28,8 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     out << schema.arguments()[i];
   }
 
-  if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
+  if (schema.is_vararg()) {
+    if (schema.arguments().size() > 0)
       out << ", ";
     out << "...";
   }
@@ -35,7 +38,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   const auto& returns = schema.returns();
   out << "(";
-  for(size_t i = 0; i < returns.size(); ++i) {
+  for (size_t i = 0; i < returns.size(); ++i) {
     if (i > 0) {
       out << ", ";
     }
@@ -52,26 +55,25 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 }
 
 inline bool Argument::isBackwardCompatibleWith(
-      const Argument& old,
-      std::ostream* why_not) const {
-    const Argument* lhs = this;
-    const Argument* rhs = &old;
-    if (!(lhs->name() == rhs->name()
-        && lhs->N() == rhs->N()
-        && lhs->alias_info() == rhs->alias_info())) {
-      return false;
-    }
-    if (lhs->kwarg_only() && !rhs->kwarg_only()) {
-      return false;
-    }
-    if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
-      return false;
-    }
-    if (rhs->default_value().has_value() &&
-        lhs->default_value() != rhs->default_value()) {
-      return false;
-    }
-    return true;
+    const Argument& old,
+    std::ostream* why_not) const {
+  const Argument* lhs = this;
+  const Argument* rhs = &old;
+  if (!(lhs->name() == rhs->name() && lhs->N() == rhs->N() &&
+        lhs->alias_info() == rhs->alias_info())) {
+    return false;
+  }
+  if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+    return false;
+  }
+  if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+    return false;
+  }
+  if (rhs->default_value().has_value() &&
+      lhs->default_value() != rhs->default_value()) {
+    return false;
+  }
+  return true;
 }
 
 inline std::string FunctionSchema::formatTypeMismatchMsg(
@@ -100,14 +102,13 @@ inline std::string FunctionSchema::formatTypeMismatchMsg(
 inline bool FunctionSchema::isBackwardCompatibleWith(
     const FunctionSchema& old,
     std::ostream* why_not) const {
-  if (!(name() == old.name()
-        && overload_name() == old.overload_name()
+  if (!(name() == old.name() &&
+        overload_name() == old.overload_name()
         // we are conservative on is_vararg and is_varret,
         // since they are only used by internal operators
-        && is_vararg() == old.is_vararg()
-        && is_varret() == old.is_varret()
-        && returns().size() == old.returns().size()
-        && arguments().size() >= old.arguments().size())) {
+        && is_vararg() == old.is_vararg() && is_varret() == old.is_varret() &&
+        returns().size() == old.returns().size() &&
+        arguments().size() >= old.arguments().size())) {
     return false;
   }
   for (size_t i = 0; i < returns().size(); ++i) {
@@ -115,8 +116,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     // (i.e. more generic), and contravariance on return types (i.e.
     //  more specific).
     if (!old.returns().at(i).isBackwardCompatibleWith(
-          returns().at(i),
-          why_not)) {
+            returns().at(i), why_not)) {
       return false;
     }
   }
@@ -125,7 +125,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   // compatible arguments in this schema.
   for (size_t i = 0; i < old.arguments().size(); ++i) {
     if (!arguments().at(i).isBackwardCompatibleWith(
-          old.arguments().at(i), why_not)) {
+            old.arguments().at(i), why_not)) {
       return false;
     }
   }
@@ -157,13 +157,12 @@ inline void FunctionSchema::checkArg(
   }
   if (!value.type()->isSubtypeOf(argument.type())) {
     TORCH_CHECK(
-        false,
-        formatTypeMismatchMsg(
-            argument, value.type()->repr_str(), pos));
+        false, formatTypeMismatchMsg(argument, value.type()->repr_str(), pos));
   }
 }
 
-inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
+inline std::string FunctionSchema::findErrorInKwargs(
+    const std::vector<std::string>& kwargs) const {
   // First check if any of the kwargs are unknown, i.e. don't match the name of
   // any argument in the schema.
   for (const auto& kwarg : kwargs) {
@@ -185,7 +184,8 @@ inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::stri
   // If there are unconsumed kwargs but none of them were unknown, the first
   // positional argument present in the kwargs is duplicated.
   for (const auto& argument : arguments()) {
-    if (std::find(kwargs.begin(), kwargs.end(), argument.name()) != kwargs.end()) {
+    if (std::find(kwargs.begin(), kwargs.end(), argument.name()) !=
+        kwargs.end()) {
       AT_ASSERT(!argument.default_value());
       return c10::str(
           "Argument '",
@@ -240,7 +240,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   }
   if (consumed_kwargs != kwargs.size()) {
     std::vector<std::string> names;
-    for(const auto& k : kwargs) {
+    for (const auto& k : kwargs) {
       names.emplace_back(k.first);
     }
     throw std::runtime_error(findErrorInKwargs(names));
@@ -252,7 +252,7 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
   auto update_args = [&](const std::vector<Argument>& args) {
     std::vector<Argument> new_args;
     new_args.reserve(args.size());
-    for(const Argument& arg : args) {
+    for (const Argument& arg : args) {
       new_args.emplace_back(arg.cloneWithType(type_map(arg.type())));
     }
     return new_args;

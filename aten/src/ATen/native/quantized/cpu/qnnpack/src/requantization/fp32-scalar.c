@@ -47,13 +47,21 @@ void pytorch_qnnp_requantize_fp32__scalar_lrintf(
     const long w_rounded = lrintf(w_scaled);
 
     const int32_t x_clamped = (int32_t)(
-        x_rounded < lmin ? lmin : x_rounded > lmax ? lmax : x_rounded);
+        x_rounded < lmin       ? lmin
+            : x_rounded > lmax ? lmax
+                               : x_rounded);
     const int32_t y_clamped = (int32_t)(
-        y_rounded < lmin ? lmin : y_rounded > lmax ? lmax : y_rounded);
+        y_rounded < lmin       ? lmin
+            : y_rounded > lmax ? lmax
+                               : y_rounded);
     const int32_t z_clamped = (int32_t)(
-        z_rounded < lmin ? lmin : z_rounded > lmax ? lmax : z_rounded);
+        z_rounded < lmin       ? lmin
+            : z_rounded > lmax ? lmax
+                               : z_rounded);
     const int32_t w_clamped = (int32_t)(
-        w_rounded < lmin ? lmin : w_rounded > lmax ? lmax : w_rounded);
+        w_rounded < lmin       ? lmin
+            : w_rounded > lmax ? lmax
+                               : w_rounded);
 
     const int32_t x_biased = x_clamped + (int32_t)(uint32_t)zero_point;
     const int32_t y_biased = y_clamped + (int32_t)(uint32_t)zero_point;
@@ -98,14 +106,18 @@ void pytorch_qnnp_requantize_fp32__scalar_magic(
     const float z_scaled = (float)z * scale;
     const float w_scaled = (float)w * scale;
 
-    const float x_clamped =
-        x_scaled < fmin ? fmin : x_scaled > fmax ? fmax : x_scaled;
-    const float y_clamped =
-        y_scaled < fmin ? fmin : y_scaled > fmax ? fmax : y_scaled;
-    const float z_clamped =
-        z_scaled < fmin ? fmin : z_scaled > fmax ? fmax : z_scaled;
-    const float w_clamped =
-        w_scaled < fmin ? fmin : w_scaled > fmax ? fmax : w_scaled;
+    const float x_clamped = x_scaled < fmin ? fmin
+        : x_scaled > fmax                   ? fmax
+                                            : x_scaled;
+    const float y_clamped = y_scaled < fmin ? fmin
+        : y_scaled > fmax                   ? fmax
+                                            : y_scaled;
+    const float z_clamped = z_scaled < fmin ? fmin
+        : z_scaled > fmax                   ? fmax
+                                            : z_scaled;
+    const float w_clamped = w_scaled < fmin ? fmin
+        : w_scaled > fmax                   ? fmax
+                                            : w_scaled;
 
     const int32_t x_biased = (int32_t)fp32_to_bits(x_clamped + fmagic) - imagic;
     const int32_t y_biased = (int32_t)fp32_to_bits(y_clamped + fmagic) - imagic;

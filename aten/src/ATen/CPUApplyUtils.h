@@ -2,9 +2,9 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <cstring>
 #include <limits>
 #include <utility>
-#include <cstring>
 
 namespace at {
 
@@ -160,9 +160,7 @@ struct strided_tensor_iter_fixed {
       std::memcpy(
           sizes_, tensor.sizes().data(), tensor.dim() * sizeof(int64_t));
       std::memcpy(
-          strides_,
-          tensor.strides().data(),
-          tensor.dim() * sizeof(int64_t));
+          strides_, tensor.strides().data(), tensor.dim() * sizeof(int64_t));
     }
     dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
   }
@@ -311,8 +309,11 @@ inline int64_t max_dim(Arg& iter, Args&... iter_tail) {
 inline void apply_op(){};
 
 template <typename Op, typename... Args>
-inline void
-apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
+inline void apply_op(
+    int64_t numel,
+    int64_t offset,
+    const Op& op,
+    Args... iters) {
   // For 0-dim tensors
   if (numel == 1 && max_dim(iters...) == 0) {
     op(*iters.data_...);
@@ -363,8 +364,11 @@ inline void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
 }
 
 template <typename scalar1, typename scalar2, typename scalar3, typename Op>
-inline void
-CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, const Op op) {
+inline void CPU_tensor_apply3(
+    Tensor tensor1,
+    Tensor tensor2,
+    Tensor tensor3,
+    const Op op) {
   if (!_apply_preamble({tensor1, tensor2, tensor3}))
     return;
   if (_max_dim_tensors({tensor1, tensor2, tensor3}) <= 8) {

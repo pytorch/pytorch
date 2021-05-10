@@ -56,12 +56,13 @@ namespace prepack {
 
 Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   MPSImage* X = imageFromTensor(input);
-  Conv2DParams params{input.sizes(),
-                      context.weight.sizes(),
-                      context.padding,
-                      context.stride,
-                      context.dilation,
-                      context.groups};
+  Conv2DParams params{
+      input.sizes(),
+      context.weight.sizes(),
+      context.padding,
+      context.stride,
+      context.dilation,
+      context.groups};
   MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.conv2dOp);
   NeuronType nt = neuronType(context);
   if (!op) {

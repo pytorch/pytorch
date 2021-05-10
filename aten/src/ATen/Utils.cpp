@@ -1,10 +1,9 @@
 #include <ATen/Context.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/accumulate.h>
-
 
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdarg.h>
@@ -32,10 +31,10 @@ Tensor empty_cpu(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   bool pin_memory = pinned_memory_or_default(pin_memory_opt);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -47,20 +46,20 @@ Tensor empty_cpu(
   }
   auto dtype = dtype_or_default(dtype_opt);
 
-  return empty_generic(size, allocator, at::DispatchKey::CPU, dtype, device, memory_format_opt);
+  return empty_generic(
+      size, allocator, at::DispatchKey::CPU, dtype, device, memory_format_opt);
 }
 
 Tensor empty_generic(
-  IntArrayRef size,
-  c10::Allocator* allocator,
-  // technically this can be inferred from the device, but usually the
-  // correct setting is obvious from the call site so just make callers
-  // pass it in
-  c10::DispatchKey dispatch_key,
-  ScalarType scalar_type,
-  Device device,
-  c10::optional<c10::MemoryFormat> memory_format_opt) {
-
+    IntArrayRef size,
+    c10::Allocator* allocator,
+    // technically this can be inferred from the device, but usually the
+    // correct setting is obvious from the call site so just make callers
+    // pass it in
+    c10::DispatchKey dispatch_key,
+    ScalarType scalar_type,
+    Device device,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
   check_size_nonnegative(size);
 
   int64_t nelements = c10::multiply_integers(size);

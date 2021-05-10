@@ -499,8 +499,22 @@ BENCHMARK_CAPTURE(
     8,
     1);
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
-BENCHMARK_CAPTURE(sgemm_in_l1, 5x8__neon, pytorch_sgemm_ukernel_5x8__neon, 5, 8, 8, 1);
-BENCHMARK_CAPTURE(sgemm_in_l1, 6x8__neon, pytorch_sgemm_ukernel_6x8__neon, 6, 8, 8, 1);
+BENCHMARK_CAPTURE(
+    sgemm_in_l1,
+    5x8__neon,
+    pytorch_sgemm_ukernel_5x8__neon,
+    5,
+    8,
+    8,
+    1);
+BENCHMARK_CAPTURE(
+    sgemm_in_l1,
+    6x8__neon,
+    pytorch_sgemm_ukernel_6x8__neon,
+    6,
+    8,
+    8,
+    1);
 #endif
 
 static void sgemm_6x8__psimd(benchmark::State& state, const char* net) {

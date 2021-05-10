@@ -71,8 +71,9 @@ class Vec256<int64_t> {
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask > 0 && mask < 3), Vec256<int64_t>> C10_ALWAYS_INLINE
-  blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  static std::enable_if_t<(mask > 0 && mask < 3), Vec256<int64_t>>
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
     constexpr uint64_t g0 = (mask & 1) * 0xffffffffffffffff;
     constexpr uint64_t g1 = ((mask & 2) >> 1) * 0xffffffffffffffff;
     const vbool64 mask_1st = (vbool64){g0, g1};
@@ -81,7 +82,8 @@ class Vec256<int64_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask > 3) && (mask & 3) == 0, Vec256<int64_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
     constexpr uint64_t g0_2 = ((mask & 4) >> 2) * 0xffffffffffffffff;
     constexpr uint64_t g1_2 = ((mask & 8) >> 3) * 0xffffffffffffffff;
 
@@ -93,7 +95,8 @@ class Vec256<int64_t> {
   static std::enable_if_t<
       (mask > 3) && (mask & 3) != 0 && (mask & 15) != 15,
       Vec256<int64_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
     constexpr uint64_t g0 = (mask & 1) * 0xffffffffffffffff;
     constexpr uint64_t g1 = ((mask & 2) >> 1) * 0xffffffffffffffff;
     constexpr uint64_t g0_2 = ((mask & 4) >> 2) * 0xffffffffffffffff;

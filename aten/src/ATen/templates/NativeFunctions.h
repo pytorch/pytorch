@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 
 // ${generated_comment}
@@ -30,3 +31,4 @@ ${native_function_declarations}
 
 } // namespace native
 } // namespace at
+// clang-format on

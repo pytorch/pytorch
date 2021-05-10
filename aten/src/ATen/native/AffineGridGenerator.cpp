@@ -1,10 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
-                                 bool align_corners) {
+at::Tensor linspace_from_neg_one(
+    const Tensor& grid,
+    int64_t num_steps,
+    bool align_corners) {
   if (num_steps <= 1) {
     return at::tensor(0, grid.options());
   }
@@ -25,7 +28,8 @@ Tensor make_base_grid_4D(
   auto base_grid = at::empty({N, H, W, 3}, theta.options());
 
   base_grid.select(-1, 0).copy_(linspace_from_neg_one(theta, W, align_corners));
-  base_grid.select(-1, 1).copy_(linspace_from_neg_one(theta, H, align_corners).unsqueeze_(-1));
+  base_grid.select(-1, 1).copy_(
+      linspace_from_neg_one(theta, H, align_corners).unsqueeze_(-1));
   base_grid.select(-1, 2).fill_(1);
 
   return base_grid;
@@ -42,8 +46,11 @@ Tensor make_base_grid_5D(
   auto base_grid = at::empty({N, D, H, W, 4}, theta.options());
 
   base_grid.select(-1, 0).copy_(linspace_from_neg_one(theta, W, align_corners));
-  base_grid.select(-1, 1).copy_(linspace_from_neg_one(theta, H, align_corners).unsqueeze_(-1));
-  base_grid.select(-1, 2).copy_(linspace_from_neg_one(theta, D, align_corners).unsqueeze_(-1).unsqueeze_(-1));
+  base_grid.select(-1, 1).copy_(
+      linspace_from_neg_one(theta, H, align_corners).unsqueeze_(-1));
+  base_grid.select(-1, 2).copy_(linspace_from_neg_one(theta, D, align_corners)
+                                    .unsqueeze_(-1)
+                                    .unsqueeze_(-1));
   base_grid.select(-1, 3).fill_(1);
 
   return base_grid;
@@ -74,7 +81,10 @@ Tensor affine_grid_generator_5D(
   return grid.view({N, D, H, W, 3});
 }
 
-Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size, bool align_corners) {
+Tensor affine_grid_generator(
+    const Tensor& theta,
+    IntArrayRef size,
+    bool align_corners) {
   TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
@@ -118,7 +128,10 @@ Tensor affine_grid_generator_5D_backward(
   return grad_theta.transpose(1, 2);
 }
 
-Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size, bool align_corners) {
+Tensor affine_grid_generator_backward(
+    const Tensor& grad,
+    IntArrayRef size,
+    bool align_corners) {
   TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
@@ -131,4 +144,5 @@ Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size, bool
   }
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

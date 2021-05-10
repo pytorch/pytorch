@@ -1,10 +1,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 namespace {
 
-void createCublasHandle(cublasHandle_t *handle) {
+void createCublasHandle(cublasHandle_t* handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
 
@@ -17,11 +18,14 @@ void destroyCublasHandle(cublasHandle_t handle) {
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cublasDestroy(handle);
+  cublasDestroy(handle);
 #endif
 }
 
-using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+using CuBlasPoolType = DeviceThreadHandlePool<
+    cublasHandle_t,
+    createCublasHandle,
+    destroyCublasHandle>;
 
 } // namespace
 
@@ -44,8 +48,10 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #if CUDA_VERSION >= 11000
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
-  // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
+  // To enable TF32, set the math mode of the handle to
+  // CUBLAS_TF32_TENSOR_OP_MATH.
+  if (!NoTF32Guard::should_disable_tf32() &&
+      at::globalContext().allowTF32CuBLAS()) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
@@ -63,4 +69,5 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at

@@ -1,8 +1,8 @@
+#include <ATen/metal/Context.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/MetalUtils.h>
-#include <ATen/metal/Context.h>
+#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <torch/script.h>
 
 namespace at {
@@ -81,8 +81,7 @@ Tensor empty(
       !memory_format.has_value(),
       "'memory_format' argument is incompatible with Metal tensor");
   MetalTensorImplStorage mt{size.vec()};
-  return makeTensor(
-      std::move(mt), at::device(at::kMetal).dtype(dtype));
+  return makeTensor(std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
 at::Tensor empty_strided(
@@ -96,10 +95,8 @@ at::Tensor empty_strided(
       !pin_memory.has_value() || !pin_memory.value(),
       "'pin_memory' argument is incompatible with Metal tensor");
   MetalTensorImplStorage mt{size.vec(), stride.vec()};
-  return makeTensor(
-      std::move(mt), at::device(at::kMetal).dtype(dtype));
+  return makeTensor(std::move(mt), at::device(at::kMetal).dtype(dtype));
 }
-
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("empty.memory_format", empty);

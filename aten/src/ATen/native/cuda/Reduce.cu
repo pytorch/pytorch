@@ -1,10 +1,10 @@
-#include <ATen/native/cuda/Reduce.cuh>
 #include <c10/util/ArrayRef.h>
+#include <ATen/native/cuda/Reduce.cuh>
 
 #include <iostream>
 
-
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 static inline std::ostream& operator<<(std::ostream& out, dim3 dim) {
   if (dim.y == 1 && dim.z == 1) {
@@ -52,4 +52,5 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   return out;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

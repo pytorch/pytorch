@@ -2,9 +2,9 @@
 
 #ifdef USE_XNNPACK
 
+#include <ATen/Tensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/native/xnnpack/Common.h>
-#include <ATen/Tensor.h>
 
 namespace at {
 namespace native {
@@ -35,8 +35,6 @@ using SerializationTypeTransposeConv2dPrePack = std::tuple<
     c10::optional<Scalar>,
     c10::optional<Scalar>>;
 
-
-
 class LinearOpContext : public torch::jit::CustomClassHolder {
  protected:
   Tensor orig_weight_;
@@ -47,7 +45,9 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
 
  public:
   SerializationTypeLinearPrePack unpack() {
-    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
+    TORCH_CHECK(
+        !orig_weight_and_bias_freed_,
+        "Original weight and bias have been freed");
     return std::make_tuple(orig_weight_, orig_bias_, output_min_, output_max_);
   }
 
@@ -98,7 +98,9 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
 
  public:
   SerializationTypeConv2dPrePack unpack() {
-    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
+    TORCH_CHECK(
+        !orig_weight_and_bias_freed_,
+        "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -129,7 +131,9 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
 
  public:
   SerializationTypeTransposeConv2dPrePack unpack() {
-    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
+    TORCH_CHECK(
+        !orig_weight_and_bias_freed_,
+        "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,

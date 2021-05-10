@@ -16,5 +16,5 @@ inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
       "_internal_get_SparseCsrTensorImpl: not a sparse CSR tensor");
   return static_cast<SparseCsrTensorImpl*>(self.unsafeGetTensorImpl());
 }
-} // namespace sparse
+} // namespace sparse_csr
 } // namespace at

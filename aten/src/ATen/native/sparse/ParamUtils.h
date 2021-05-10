@@ -13,7 +13,8 @@ TORCH_API std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
     const bool half_to_float,
     CheckedFrom function_name);
 
-TORCH_API std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
+TORCH_API std::tuple<Tensor, Tensor, Tensor>
+softmax_backward_sparse_input_preprocessing(
     const Tensor& grad_,
     const Tensor& output_,
     int64_t dim_,

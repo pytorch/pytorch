@@ -21,9 +21,11 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
 #else
-  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32 bit aligned)
+  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32
+  // bit aligned)
   __half* target_addr = reinterpret_cast<__half*>(tensor + index);
-  bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
+  bool low_byte =
+      (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
 
   if (low_byte && index < (numel - 1)) {
     __half2 value2;

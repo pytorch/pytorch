@@ -267,29 +267,36 @@ static void upsample_bicubic2d_backward_out_cuda_template(
 
 } // namespace
 
-TORCH_IMPL_FUNC(upsample_bicubic2d_out_cuda) (
-    const Tensor& input,
-    IntArrayRef output_size,
-    bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& output) {
-  upsample_bicubic2d_out_cuda_template(output, input, output_size, align_corners, scales_h, scales_w);
+TORCH_IMPL_FUNC(upsample_bicubic2d_out_cuda)
+(const Tensor& input,
+ IntArrayRef output_size,
+ bool align_corners,
+ c10::optional<double> scales_h,
+ c10::optional<double> scales_w,
+ const Tensor& output) {
+  upsample_bicubic2d_out_cuda_template(
+      output, input, output_size, align_corners, scales_h, scales_w);
 }
 
-TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda) (
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& grad_input) {
+TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ c10::optional<double> scales_h,
+ c10::optional<double> scales_w,
+ const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_bicubic2d_backward_out_cuda");
   upsample_bicubic2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
+      grad_input,
+      grad_output,
+      output_size,
+      input_size,
+      align_corners,
+      scales_h,
+      scales_w);
 }
 
 } // namespace native

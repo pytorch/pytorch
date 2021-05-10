@@ -38,16 +38,17 @@ inline void parallel_for(
 
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
-  tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, chunk_size),
-    [&eptr, &err_flag, f](const tbb::blocked_range<int64_t>& r) {
-      try {
-        f(r.begin(), r.end());
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+  tbb::parallel_for(
+      tbb::blocked_range<int64_t>(begin, end, chunk_size),
+      [&eptr, &err_flag, f](const tbb::blocked_range<int64_t>& r) {
+        try {
+          f(r.begin(), r.end());
+        } catch (...) {
+          if (!err_flag.test_and_set()) {
+            eptr = std::current_exception();
+          }
         }
-      }
-    });
+      });
   if (eptr) {
     std::rethrow_exception(eptr);
   }
@@ -79,27 +80,27 @@ inline scalar_t parallel_reduce(
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
   result = tbb::parallel_reduce(
-    tbb::blocked_range<int64_t>(begin, end, chunk_size), ident,
-    [&eptr, &err_flag, f]
-        (const tbb::blocked_range<int64_t>& r, scalar_t ident) {
-      try {
-        return f(r.begin(), r.end(), ident);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+      tbb::blocked_range<int64_t>(begin, end, chunk_size),
+      ident,
+      [&eptr, &err_flag, f](
+          const tbb::blocked_range<int64_t>& r, scalar_t ident) {
+        try {
+          return f(r.begin(), r.end(), ident);
+        } catch (...) {
+          if (!err_flag.test_and_set()) {
+            eptr = std::current_exception();
+          }
+          return ident;
         }
-        return ident;
-      }
-    },
-    sf
-  );
+      },
+      sf);
   if (eptr) {
     std::rethrow_exception(eptr);
   }
   return result;
 }
 
-template<typename F0, typename F1>
+template <typename F0, typename F1>
 void intraop_invoke(const F0& f0, const F1& f1) {
   tbb::parallel_invoke(f0, f1);
 }

@@ -1,8 +1,9 @@
-#include <climits>
 #include <c10/util/intrusive_ptr.h>
+#include <climits>
 
 #include <TH/THStorageFunctions.hpp>
 
+// clang-format off
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateAllTypes.h>
@@ -50,14 +51,13 @@
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBFloat16Type.h>
+// clang-format on
 
 THStorage* THStorage_new() {
-  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           0,
-                           getTHDefaultAllocator(),
-                           true)
-                           .release();
+  THStorage* storage =
+      c10::make_intrusive<at::StorageImpl>(
+          c10::StorageImpl::use_byte_size_t(), 0, getTHDefaultAllocator(), true)
+          .release();
   return storage;
 }
 
@@ -69,8 +69,7 @@ void THStorage_free(THStorage* storage) {
   c10::raw::intrusive_ptr::decref(storage);
 }
 
-void THStorage_retain(THStorage *storage)
-{
+void THStorage_retain(THStorage* storage) {
   if (storage) {
     c10::raw::intrusive_ptr::incref(storage);
   }

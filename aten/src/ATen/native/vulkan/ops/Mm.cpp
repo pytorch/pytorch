@@ -9,9 +9,7 @@ namespace {
 
 using namespace api::utils;
 
-vTensor pack_weights(
-    api::Resource::Pool& pool,
-    const Tensor& weight_arg) {
+vTensor pack_weights(api::Resource::Pool& pool, const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
@@ -36,15 +34,16 @@ vTensor pack_weights(
       context,
       &pool,
       {
-        4,
-        dst_kh_sz,
-        dst_kw_sz,
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
       },
       weight.options(),
   };
 
   using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future v_weight_future =
+      v_weight.host<float, vTensor::Access::Write>(command_buffer);
   Future::Payload v_weight_payload = v_weight_future.wait();
 
   float* const dst_weight_ptr = v_weight_payload.get();
@@ -52,8 +51,8 @@ vTensor pack_weights(
 
   for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
     for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
-      int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-      int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+      int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+      int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
       memcpy(
           dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
           src_weight_ptr + src_h * src_kw_sz + src_w,
@@ -86,8 +85,7 @@ vTensor pack_biases(
     if (bias.sizes().size() == 2) {
       src_kw_sz = b_sizes[Layout::Parameter::width];
       src_kh_sz = b_sizes[Layout::Parameter::height];
-    }
-    else {
+    } else {
       src_kw_sz = b_sizes[Layout::Parameter::height];
       src_kh_sz = 1;
     }
@@ -101,14 +99,15 @@ vTensor pack_biases(
         context,
         &pool,
         {
-          4,
-          dst_kh_sz,
-          dst_kw_sz,
+            4,
+            dst_kh_sz,
+            dst_kw_sz,
         },
         bias_arg->options(),
     };
 
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+    Future v_bias_future =
+        v_bias.host<float, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
 
     float* const dst_bias_ptr = v_bias_payload.get();
@@ -116,8 +115,8 @@ vTensor pack_biases(
 
     for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
       for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
-        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+        int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+        int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
         memcpy(
             dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
             src_bias_ptr + src_h * src_kw_sz + src_w,
@@ -126,15 +125,15 @@ vTensor pack_biases(
     }
 
     return v_bias;
-  }
-  else {
+  } else {
     vTensor v_bias{
         api::context(),
         &pool,
         {1},
         weight_arg.options(),
     };
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+    Future v_bias_future =
+        v_bias.host<float, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
     memset(
         v_bias_payload.get(),
@@ -148,30 +147,28 @@ vTensor pack_biases(
   }
 }
 
-bool available(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
+bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
   return api::available() &&
-         // Weight
-         (2 == weight.ndimension()) &&
-         (weight.size(Layout::Parameter::height) > 0) &&
-         (weight.size(Layout::Parameter::width) > 0) &&
-         ((weight.device().is_cpu()) ||
-          (c10::DeviceType::Vulkan == weight.device().type())) &&
-         (kFloat == weight.scalar_type()) &&
-         !weight.requires_grad() &&
-         // Bias
-         ((bias && bias->defined()) ? ((bias->ndimension() > 0) &&
-                                       ((bias->device().is_cpu()) ||
-                                        (c10::DeviceType::Vulkan == bias->device().type())) &&
-                                       (kFloat == bias->scalar_type()) &&
-                                       ((bias->ndimension() > 1) ?
-                                            (bias->size(Layout::Parameter::width) ==
-                                                weight.size(Layout::Parameter::width))
-                                            : true) &&
-                                       !bias->requires_grad())
-                                    : true) &&
-         true;
+      // Weight
+      (2 == weight.ndimension()) &&
+      (weight.size(Layout::Parameter::height) > 0) &&
+      (weight.size(Layout::Parameter::width) > 0) &&
+      ((weight.device().is_cpu()) ||
+       (c10::DeviceType::Vulkan == weight.device().type())) &&
+      (kFloat == weight.scalar_type()) && !weight.requires_grad() &&
+      // Bias
+      ((bias && bias->defined())
+           ? ((bias->ndimension() > 0) &&
+              ((bias->device().is_cpu()) ||
+               (c10::DeviceType::Vulkan == bias->device().type())) &&
+              (kFloat == bias->scalar_type()) &&
+              ((bias->ndimension() > 1)
+                   ? (bias->size(Layout::Parameter::width) ==
+                      weight.size(Layout::Parameter::width))
+                   : true) &&
+              !bias->requires_grad())
+           : true) &&
+      true;
 }
 
 bool usable(
@@ -179,12 +176,11 @@ bool usable(
     const Tensor& weight,
     const c10::optional<Tensor>& /* bias */) {
   return (2 == input.ndimension()) &&
-         (c10::DeviceType::Vulkan == input.device().type()) &&
-         (kFloat == input.scalar_type()) &&
-         (input.size(Layout::Parameter::width) ==
-              weight.size(Layout::Parameter::height)) &&
-         !input.requires_grad() &&
-         true;
+      (c10::DeviceType::Vulkan == input.device().type()) &&
+      (kFloat == input.scalar_type()) &&
+      (input.size(Layout::Parameter::width) ==
+       weight.size(Layout::Parameter::height)) &&
+      !input.requires_grad() && true;
 }
 
 Tensor addmm(
@@ -193,25 +189,14 @@ Tensor addmm(
     const Tensor& weight,
     const Scalar& beta,
     const Scalar& alpha) {
-  return LinearOpContext::create(
-      api::context()->resource().pool,
-      weight,
-      bias).run(
-          input,
-          alpha.to<float>(),
-          beta.to<float>());
+  return LinearOpContext::create(api::context()->resource().pool, weight, bias)
+      .run(input, alpha.to<float>(), beta.to<float>());
 }
 
-Tensor mm(
-    const Tensor& mat1_arg,
-    const Tensor& mat2_arg) {
+Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
   return LinearOpContext::create(
-      api::context()->resource().pool,
-      mat2_arg,
-      c10::optional<Tensor>()).run(
-          mat1_arg,
-          1.0f,
-          1.0f);
+             api::context()->resource().pool, mat2_arg, c10::optional<Tensor>())
+      .run(mat1_arg, 1.0f, 1.0f);
 }
 
 #ifdef USE_VULKAN_API
@@ -278,11 +263,11 @@ Tensor LinearOpContext::run(
       unpacked_.weight.sizes()[Layout::Parameter::width],
   };
 
-  vTensor v_output {
+  vTensor v_output{
       context,
       {
-        v_input.sizes()[Layout::Parameter::height],
-        unpacked_.weight.sizes()[Layout::Parameter::width],
+          v_input.sizes()[Layout::Parameter::height],
+          unpacked_.weight.sizes()[Layout::Parameter::width],
       },
       input.options(),
   };
@@ -291,20 +276,20 @@ Tensor LinearOpContext::run(
 
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_input.has_image() &&
-        packed_.v_weight.has_image() &&
+    if (v_input.has_image() && packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
       if (unpacked_.bias && unpacked_.bias->defined()) {
         const struct {
           uvec3 size;
           int32_t K;
           vec2 multiplier;
-        } block {
+        } block{
             v_output.extents(),
-            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+            safe_downcast<int32_t>(
+                div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
             {
-              alpha,
-              beta,
+                alpha,
+                beta,
             },
         };
 
@@ -319,43 +304,40 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(addmm),
             {
-              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-              1,
+                safe_downcast<uint32_t>(div_up(
+                    unpacked_.weight.sizes()[Layout::Parameter::width],
+                    INT64_C(2))),
+                safe_downcast<uint32_t>(div_up(
+                    v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                1,
             },
             {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
+            // Write-only access bypasses synchronization but inserts
+            // appropriate barriers if necessary.
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            v_input.image(
-                command_buffer,
-                vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_.v_weight.image(
-                command_buffer,
-                vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_.v_bias.image(
-                command_buffer,
-                vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an
+            // async synchronization if necessary.
+            v_input.image(command_buffer, vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an
+            // async synchronization if necessary.
+            packed_.v_weight.image(command_buffer, vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an
+            // async synchronization if necessary.
+            packed_.v_bias.image(command_buffer, vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
             context->resource().pool.uniform(block).object);
-      }
-      else {
+      } else {
         const struct {
           uvec3 size;
           int32_t K;
-        } block_no_bias {
+        } block_no_bias{
             v_output.extents(),
-            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+            safe_downcast<int32_t>(
+                div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
         };
 
         context->dispatch(
@@ -368,33 +350,31 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(mm),
             {
-              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-              1,
+                safe_downcast<uint32_t>(div_up(
+                    unpacked_.weight.sizes()[Layout::Parameter::width],
+                    INT64_C(2))),
+                safe_downcast<uint32_t>(div_up(
+                    v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                1,
             },
             {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
+            // Write-only access bypasses synchronization but inserts
+            // appropriate barriers if necessary.
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            v_input.image(
-                command_buffer,
-                vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_.v_weight.image(
-                command_buffer,
-                vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an
+            // async synchronization if necessary.
+            v_input.image(command_buffer, vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an
+            // async synchronization if necessary.
+            packed_.v_weight.image(command_buffer, vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
             context->resource().pool.uniform(block_no_bias).object);
       }
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -413,11 +393,8 @@ LinearOpContext::State LinearOpContext::unpack() const {
 c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias) {
-  return c10::make_intrusive<LinearOpContext>(
-      LinearOpContext::create(
-          persistent()->pool,
-          std::move(weight),
-          std::move(bias)));
+  return c10::make_intrusive<LinearOpContext>(LinearOpContext::create(
+      persistent()->pool, std::move(weight), std::move(bias)));
 }
 
 Tensor linear_run(

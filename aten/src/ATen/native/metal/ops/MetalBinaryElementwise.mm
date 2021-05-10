@@ -17,8 +17,7 @@ namespace metal {
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
 static inline bool broadCastFirstInput(MPSImage* X1, MPSImage* X2) {
-  if ((X2.height > 1 && X1.height == 1) ||
-      (X2.width > 1 && X1.width == 1)) {
+  if ((X2.height > 1 && X1.height == 1) || (X2.width > 1 && X1.width == 1)) {
     return true;
   }
   return false;
@@ -31,8 +30,9 @@ Tensor binaryElementwiseShaderKernel(
     NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
-  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
-              X1.featureChannels == X2.featureChannels)
+  TORCH_CHECK(
+      X1.numberOfImages == X2.numberOfImages &&
+      X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
@@ -69,8 +69,9 @@ Tensor& binaryElementwiseShaderKernel_(
     NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
-  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
-              X1.featureChannels == X2.featureChannels)
+  TORCH_CHECK(
+      X1.numberOfImages == X2.numberOfImages &&
+      X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
@@ -106,8 +107,9 @@ Tensor binaryElementwiseMPSCNNKernel(
     const Tensor& input2) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
-  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
-              X1.featureChannels == X2.featureChannels)
+  TORCH_CHECK(
+      X1.numberOfImages == X2.numberOfImages &&
+      X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
@@ -136,8 +138,9 @@ template <typename T>
 Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
-  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
-              X1.featureChannels == X2.featureChannels)
+  TORCH_CHECK(
+      X1.numberOfImages == X2.numberOfImages &&
+      X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
@@ -162,7 +165,10 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   return input1;
 }
 
-Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+Tensor add_Tensor(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -184,7 +190,10 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   }
 }
 
-Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+Tensor sub_Tensor(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {

@@ -8,8 +8,10 @@ struct Bitfield {};
 
 template <>
 struct Bitfield<unsigned int> {
-  static __device__ __forceinline__
-  unsigned int getBitfield(unsigned int val, int pos, int len) {
+  static __device__ __forceinline__ unsigned int getBitfield(
+      unsigned int val,
+      int pos,
+      int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0xff;
     len &= 0xff;
@@ -23,8 +25,11 @@ struct Bitfield<unsigned int> {
 #endif
   }
 
-  static __device__ __forceinline__
-  unsigned int setBitfield(unsigned int val, unsigned int toInsert, int pos, int len) {
+  static __device__ __forceinline__ unsigned int setBitfield(
+      unsigned int val,
+      unsigned int toInsert,
+      int pos,
+      int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0xff;
     len &= 0xff;
@@ -37,8 +42,9 @@ struct Bitfield<unsigned int> {
     return (val & ~m) | toInsert;
 #else
     unsigned int ret;
-    asm("bfi.b32 %0, %1, %2, %3, %4;" :
-        "=r"(ret) : "r"(toInsert), "r"(val), "r"(pos), "r"(len));
+    asm("bfi.b32 %0, %1, %2, %3, %4;"
+        : "=r"(ret)
+        : "r"(toInsert), "r"(val), "r"(pos), "r"(len));
     return ret;
 #endif
   }
@@ -46,8 +52,8 @@ struct Bitfield<unsigned int> {
 
 template <>
 struct Bitfield<uint64_t> {
-  static __device__ __forceinline__
-  uint64_t getBitfield(uint64_t val, int pos, int len) {
+  static __device__ __forceinline__ uint64_t
+  getBitfield(uint64_t val, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0xff;
     len &= 0xff;
@@ -61,8 +67,8 @@ struct Bitfield<uint64_t> {
 #endif
   }
 
-  static __device__ __forceinline__
-  uint64_t setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
+  static __device__ __forceinline__ uint64_t
+  setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0xff;
     len &= 0xff;
@@ -75,8 +81,9 @@ struct Bitfield<uint64_t> {
     return (val & ~m) | toInsert;
 #else
     uint64_t ret;
-    asm("bfi.b64 %0, %1, %2, %3, %4;" :
-        "=l"(ret) : "l"(toInsert), "l"(val), "r"(pos), "r"(len));
+    asm("bfi.b64 %0, %1, %2, %3, %4;"
+        : "=l"(ret)
+        : "l"(toInsert), "l"(val), "r"(pos), "r"(len));
     return ret;
 #endif
   }
@@ -87,7 +94,7 @@ __device__ __forceinline__ int getLaneId() {
   return __lane_id();
 #else
   int laneId;
-  asm("mov.s32 %0, %%laneid;" : "=r"(laneId) );
+  asm("mov.s32 %0, %%laneid;" : "=r"(laneId));
   return laneId;
 #endif
 }
@@ -105,9 +112,10 @@ __device__ __forceinline__ unsigned getLaneMaskLt() {
 }
 #endif
 
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__)
 __device__ __forceinline__ unsigned long long int getLaneMaskLe() {
-  std::uint64_t m = UINT64_MAX >> (sizeof(std::uint64_t) * CHAR_BIT - (getLaneId() + 1));
+  std::uint64_t m =
+      UINT64_MAX >> (sizeof(std::uint64_t) * CHAR_BIT - (getLaneId() + 1));
   return m;
 }
 #else

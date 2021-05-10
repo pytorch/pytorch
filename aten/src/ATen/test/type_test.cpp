@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
-#include <gtest/gtest.h>
-#include <torch/torch.h>
 #include <ATen/core/jit_type.h>
+#include <gtest/gtest.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/torch.h>
 
 namespace c10 {
 
@@ -44,7 +44,8 @@ TEST(TypeCustomPrinter, ContainedTypes) {
   const auto tupleType = TupleType::create({type, IntType::get(), type});
   EXPECT_EQ(tupleType->annotation_str(), "Tuple[Tensor, int, Tensor]");
   EXPECT_EQ(
-      tupleType->annotation_str(printer), "Tuple[CustomTensor, int, CustomTensor]");
+      tupleType->annotation_str(printer),
+      "Tuple[CustomTensor, int, CustomTensor]");
   const auto dictType = DictType::create(IntType::get(), type);
   EXPECT_EQ(dictType->annotation_str(printer), "Dict[int, CustomTensor]");
   const auto listType = ListType::create(tupleType);
@@ -73,7 +74,8 @@ TEST(TypeCustomPrinter, NamedTuples) {
   EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work
-  const auto outerTupleType = TupleType::create({IntType::get(), namedTupleType});
+  const auto outerTupleType =
+      TupleType::create({IntType::get(), namedTupleType});
   EXPECT_EQ(outerTupleType->annotation_str(printer), "Tuple[int, Rewritten]");
 }
 
@@ -183,8 +185,16 @@ class OneForward(Interface):
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, TupleEquality) {
   // Tuples should be structurally typed
-  auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
-  auto type2 = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+  auto type = TupleType::create(
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
+  auto type2 = TupleType::create(
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
 
   EXPECT_EQ(*type, *type2);
 }
@@ -195,23 +205,35 @@ TEST(TypeEquality, NamedTupleEquality) {
   auto type = TupleType::createNamed(
       "MyNamedTuple",
       {"a", "b", "c", "d"},
-      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
   auto type2 = TupleType::createNamed(
       "MyNamedTuple",
       {"a", "b", "c", "d"},
-      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
   EXPECT_EQ(*type, *type2);
 
   auto differentName = TupleType::createNamed(
       "WowSoDifferent",
       {"a", "b", "c", "d"},
-      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
   EXPECT_NE(*type, *differentName);
 
   auto differentField = TupleType::createNamed(
       "MyNamedTuple",
       {"wow", "so", "very", "different"},
-      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+      {IntType::get(),
+       TensorType::get(),
+       FloatType::get(),
+       ComplexType::get()});
   EXPECT_NE(*type, *differentField);
 }
 } // namespace c10

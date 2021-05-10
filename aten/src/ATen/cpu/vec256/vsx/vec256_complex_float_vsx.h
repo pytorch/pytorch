@@ -551,11 +551,11 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> hypot(const Vec256<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexFlt> nextafter(const Vec256<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexFlt> igamma(const Vec256<ComplexFlt>& x) const {
@@ -567,21 +567,21 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> atan2(const Vec256<ComplexFlt>& b) const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<ComplexFlt> erf() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<ComplexFlt> erfc() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexFlt> log1p() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexFlt> expm1() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexFlt> operator<(const Vec256<ComplexFlt>& other) const {

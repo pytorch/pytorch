@@ -10,18 +10,15 @@ class PrePackConvWeights final {
       const uint8_t* kernel,
       const int32_t* bias);
 
-  void* getPackedWeights() const
-  {
+  void* getPackedWeights() const {
     return packed_weights_;
   }
 
-  int64_t getOutputChannels() const
-  {
+  int64_t getOutputChannels() const {
     return output_channels_;
   }
 
-  ~PrePackConvWeights()
-  {
+  ~PrePackConvWeights() {
     if (packed_weights_ != nullptr) {
       free(packed_weights_);
     }
@@ -59,23 +56,19 @@ class PackBMatrix final {
       const uint8_t* kernel,
       const int32_t* bias);
 
-  void* getPackedWeights() const
-  {
+  void* getPackedWeights() const {
     return packed_weights_;
   }
 
-  size_t getInputChannels() const
-  {
+  size_t getInputChannels() const {
     return input_channels_;
   }
 
-  size_t getOutputChannels() const
-  {
+  size_t getOutputChannels() const {
     return output_channels_;
   }
 
-  ~PackBMatrix()
-  {
+  ~PackBMatrix() {
     if (packed_weights_ != nullptr) {
       free(packed_weights_);
     }

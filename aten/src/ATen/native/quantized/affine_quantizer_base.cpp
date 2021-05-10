@@ -149,14 +149,19 @@ TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
 #endif // USE_FBGEMM
 
 /*
-* Quantize value based on the following equation
-* Xq = Round(Xf * inv_scale + zero_point)
-* where zero_point is in float.
-*
-* Note: For the case of embedding quantization we will set zero_point
-* to (-Xmin/scale), where Xmin is the min value in input tensor row.
-*/
-int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
+ * Quantize value based on the following equation
+ * Xq = Round(Xf * inv_scale + zero_point)
+ * where zero_point is in float.
+ *
+ * Note: For the case of embedding quantization we will set zero_point
+ * to (-Xmin/scale), where Xmin is the min value in input tensor row.
+ */
+int quantize_val_float_qparams(
+    float scale,
+    float zero_point,
+    float value,
+    int qmin,
+    int qmax) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int qvalue;
 
@@ -247,10 +252,8 @@ template TORCH_API qint32
 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
 
 template TORCH_API qint8 requantize_from_int<qint8>(double, int64_t, int64_t);
-template TORCH_API quint8
-requantize_from_int<quint8>(double, int64_t, int64_t);
-template TORCH_API qint32
-requantize_from_int<qint32>(double, int64_t, int64_t);
+template TORCH_API quint8 requantize_from_int<quint8>(double, int64_t, int64_t);
+template TORCH_API qint32 requantize_from_int<qint32>(double, int64_t, int64_t);
 
 } // namespace native
 } // namespace at

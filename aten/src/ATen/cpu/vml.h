@@ -40,10 +40,10 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type_)                              \
-  using value_t = typename c10::scalar_value_type<type_>::type;\
-  volatile value_t x = (value_t)(1);                           \
-  x = std::op(x);                                              \
+#define DL_RUNTIME_BUG(op, type_)                               \
+  using value_t = typename c10::scalar_value_type<type_>::type; \
+  volatile value_t x = (value_t)(1);                            \
+  x = std::op(x);                                               \
   _mm256_zeroall();
 #define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
 #else
@@ -78,33 +78,33 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 // this. This duplication is also necessary since not all functions (e.g. rsqrt)
 // might be part of cmath.
 
-// for BFloat16, we need specialize it, the reason is that avx/avx2 and glic=2.23,
-// we can't give DL_RUNTIME_BUG volatile type in x = std::op(x);
+// for BFloat16, we need specialize it, the reason is that avx/avx2 and
+// glic=2.23, we can't give DL_RUNTIME_BUG volatile type in x = std::op(x);
 
-#define IMPLEMENT_VML_BUG(op)                                                     \
-  template <typename scalar_t>                                                    \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
-    DL_RUNTIME_BUG(op, scalar_t)                                                  \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      map([](const Vec256<scalar_t>& x) { return x.op(); },                       \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
-  }                                                                               \
-  template <>                                                                     \
-  inline void v##op<c10::BFloat16>(                                               \
-      c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      map([](const Vec256<c10::BFloat16>& x) { return x.op(); },                  \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
+#define IMPLEMENT_VML_BUG(op)                                           \
+  template <typename scalar_t>                                          \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
+    DL_RUNTIME_BUG(op, scalar_t)                                        \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+      map([](const Vec256<scalar_t>& x) { return x.op(); },             \
+          out + begin,                                                  \
+          in + begin,                                                   \
+          end - begin);                                                 \
+    });                                                                 \
+  }                                                                     \
+  template <>                                                           \
+  inline void v##op<c10::BFloat16>(                                     \
+      c10::BFloat16 * out, const c10::BFloat16* in, int64_t size) {     \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+      DL_RUNTIME_BUG_BFLOAT16()                                         \
+      map([](const Vec256<c10::BFloat16>& x) { return x.op(); },        \
+          out + begin,                                                  \
+          in + begin,                                                   \
+          end - begin);                                                 \
+    });                                                                 \
   }
 
-#define IMPLEMENT_VML(op)                                              \
+#define IMPLEMENT_VML(op)                                               \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
@@ -146,7 +146,6 @@ IMPLEMENT_VML_BUG(tanh)
 IMPLEMENT_VML_BUG(trunc)
 IMPLEMENT_VML_BUG(lgamma)
 
-
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
@@ -155,9 +154,9 @@ IMPLEMENT_VML_BUG(lgamma)
 static_assert(
     std::is_same<MKL_INT, int32_t>::value,
     "MKL_INT is assumed to be int32_t");
-#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
+#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
-  inline void v##op(type * out, const type * in, int64_t size) {          \
+  inline void v##op(type* out, const type* in, int64_t size) {          \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \

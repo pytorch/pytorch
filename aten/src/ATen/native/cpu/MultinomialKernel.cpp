@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace at {
 namespace native {
@@ -17,7 +17,8 @@ void multinomial_with_replacement_apply(
     const Tensor& self,
     const int64_t n_sample,
     c10::optional<Generator> generator) {
-  auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
+  auto gen = get_generator_or_default<CPUGeneratorImpl>(
+      generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
@@ -27,9 +28,9 @@ void multinomial_with_replacement_apply(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options());
 
-  const scalar_t * const self_ptr = self.data_ptr<scalar_t>();
-  scalar_t * const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
-  int64_t * const result_ptr = result.data_ptr<int64_t>();
+  const scalar_t* const self_ptr = self.data_ptr<scalar_t>();
+  scalar_t* const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
+  int64_t* const result_ptr = result.data_ptr<int64_t>();
 
   auto self_stride_0 = self.dim() > 1 ? self.stride(-2) : 0;
   auto self_stride_1 = self.stride(-1);
@@ -47,15 +48,19 @@ void multinomial_with_replacement_apply(
     int n_zeros = 0;
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
-      TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
+      TORCH_CHECK(
+          val >= 0,
+          "invalid multinomial distribution (encountering probability entry < 0)");
 // NB: std::isfinite doesn't bode well with libc++ for half datatypes,
 // so we manually cast it to a double and perform the check.
 #if defined(_LIBCPP_VERSION)
-      TORCH_CHECK(std::isfinite(static_cast<double>(val)),
-                  "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
+      TORCH_CHECK(
+          std::isfinite(static_cast<double>(val)),
+          "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #else
-      TORCH_CHECK(std::isfinite(val),
-                  "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
+      TORCH_CHECK(
+          std::isfinite(val),
+          "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #endif
 
       sum += val;
@@ -65,7 +70,9 @@ void multinomial_with_replacement_apply(
       cum_dist_ptr[j * cum_dist_stride_0] = sum;
     }
 
-    TORCH_CHECK(sum > 0, "invalid multinomial distribution (sum of probabilities <= 0)");
+    TORCH_CHECK(
+        sum > 0,
+        "invalid multinomial distribution (sum of probabilities <= 0)");
 
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original self row sums to one */
@@ -92,20 +99,21 @@ void multinomial_with_replacement_apply(
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
-      while(right_pointer - left_pointer > 0) {
+      while (right_pointer - left_pointer > 0) {
         mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
         cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
-        }
-        else {
+        } else {
           right_pointer = mid_pointer;
         }
       }
       sample_idx = left_pointer;
 
-      /* store in result tensor (will be incremented for lua compat by wrapper) */
-      result_ptr[i * result_dist_stride_0 + j * result_dist_stride_1] = sample_idx;
+      /* store in result tensor (will be incremented for lua compat by wrapper)
+       */
+      result_ptr[i * result_dist_stride_0 + j * result_dist_stride_1] =
+          sample_idx;
     }
   }
 }
@@ -119,11 +127,11 @@ static void multinomial_with_replacement_kernel_impl(
     multinomial_with_replacement_apply<scalar_t>(result, self, n_sample, gen);
   });
 }
-}
+} // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-}
-}
+} // namespace native
+} // namespace at

@@ -4,7 +4,9 @@
 
 namespace c10 {
 
-void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
+void DispatchKeyExtractor::setOperatorHasFallthroughForKey(
+    DispatchKey k,
+    bool has_fallthrough) {
   if (has_fallthrough) {
     nonFallthroughKeys_ = nonFallthroughKeys_.remove(k);
   } else {
@@ -14,7 +16,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
 
 std::string DispatchKeyExtractor::dumpState() const {
   std::ostringstream oss;
-  for (size_t i=0; i < c10::utils::bitset::NUM_BITS(); ++i) {
+  for (size_t i = 0; i < c10::utils::bitset::NUM_BITS(); ++i) {
     if (dispatch_arg_indices_reverse_.get(i)) {
       oss << "1";
     } else {
@@ -26,7 +28,8 @@ std::string DispatchKeyExtractor::dumpState() const {
 }
 
 void DispatchKeyExtractor::checkInvariants(const FunctionSchema& schema) const {
-  TORCH_INTERNAL_ASSERT(makeBitsetForDispatchArgs(schema) == dispatch_arg_indices_reverse_);
+  TORCH_INTERNAL_ASSERT(
+      makeBitsetForDispatchArgs(schema) == dispatch_arg_indices_reverse_);
 }
 
 } // namespace c10

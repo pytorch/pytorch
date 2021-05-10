@@ -1,14 +1,16 @@
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtils.h>
 
-namespace at { namespace namedinference {
-
+namespace at {
+namespace namedinference {
 
 Dimname TensorName::toDimname() const {
   return name_;
 }
 
-const TensorName& TensorName::unify(const TensorName& other, const char* op_name) const {
+const TensorName& TensorName::unify(
+    const TensorName& other,
+    const char* op_name) const {
   // unify(None, None)
   if (name_.isWildcard() && other.name_.isWildcard()) {
     return *this;
@@ -21,11 +23,19 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
 
   // unify(A, None)
   if (other.name_.isWildcard()) {
-    const auto it = std::find(other.origin_.begin(), other.origin_.end(), name_);
-    TORCH_CHECK(it == other.origin_.end(),
-        op_name, ":",
-        " Cannot match ", *this, " with ", other,
-        " because the latter names already have ", name_, ".",
+    const auto it =
+        std::find(other.origin_.begin(), other.origin_.end(), name_);
+    TORCH_CHECK(
+        it == other.origin_.end(),
+        op_name,
+        ":",
+        " Cannot match ",
+        *this,
+        " with ",
+        other,
+        " because the latter names already have ",
+        name_,
+        ".",
         " Are your tensors misaligned?");
     return *this;
   }
@@ -36,10 +46,14 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
   }
 
   // unify(A, B)
-  TORCH_CHECK(name_ == other.name_,
-      op_name, ":",
-      " Expected ", *this,
-      " to match ", other,
+  TORCH_CHECK(
+      name_ == other.name_,
+      op_name,
+      ":",
+      " Expected ",
+      *this,
+      " to match ",
+      other,
       " but they do not match.");
   return *this;
 }
@@ -61,7 +75,9 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   }
 }
 
-TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
+TensorNames& TensorNames::unifyFromRightInplace(
+    const TensorNames& other,
+    const char* op_name) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,clang-diagnostic-absolute-value,cppcoreguidelines-narrowing-conversions)
   size_t size_diff = std::labs(names_.size() - other.names_.size());
 
@@ -72,9 +88,7 @@ TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const 
   } else {
     // pad names_ to the same length as other.names_ before unification
     names_.insert(
-        names_.begin(),
-        other.names_.begin(),
-        other.names_.begin() + size_diff);
+        names_.begin(), other.names_.begin(), other.names_.begin() + size_diff);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
       names_[idx] = names_[idx].unify(other.names_[idx], op_name);
@@ -95,14 +109,23 @@ void TensorNames::checkUnique(const char* op_name) const {
   // might dominate for small sizes.
   for (auto it = names_.begin(); it != names_.end(); ++it) {
     const auto name = it->toDimname();
-    if (name.isWildcard()) continue;
+    if (name.isWildcard())
+      continue;
 
-    auto dup = std::find_if(it + 1, names_.end(),
-        [&](const TensorName& other) { return other.toDimname() == name; });
-    TORCH_CHECK(dup == names_.end(),
-        op_name, ": ",
-        "Attempted to propagate dims ", *it, " and ", *dup, " to the output, ",
-        "but that would create a tensor with duplicate names [", toDimnameVec(),
+    auto dup = std::find_if(it + 1, names_.end(), [&](const TensorName& other) {
+      return other.toDimname() == name;
+    });
+    TORCH_CHECK(
+        dup == names_.end(),
+        op_name,
+        ": ",
+        "Attempted to propagate dims ",
+        *it,
+        " and ",
+        *dup,
+        " to the output, ",
+        "but that would create a tensor with duplicate names [",
+        toDimnameVec(),
         "]. Please rename your inputs with Tensor.rename to prevent this.");
   }
 }
@@ -126,5 +149,5 @@ std::vector<Dimname> TensorNames::toDimnameVec() const {
   return result;
 }
 
-
-}} // namespace at::namedinference
+} // namespace namedinference
+} // namespace at

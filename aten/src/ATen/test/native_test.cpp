@@ -42,11 +42,11 @@ void TestChunk(TensorOptions T, Tensor& t) {
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
 }
 
-typedef Tensor StackFunc (TensorList, int64_t);
+typedef Tensor StackFunc(TensorList, int64_t);
 
 // helper function for TestStack
 void _test_stack(TensorList inputs, int64_t dim, StackFunc stack_func) {
-  auto const &x = inputs[0];
+  auto const& x = inputs[0];
 
   auto res = stack_func(inputs, dim);
   auto res_neg = stack_func(inputs, dim - x.dim() - 1);
@@ -255,8 +255,7 @@ void test(TensorOptions T, TensorOptions AccT) {
 TEST(TestNative, NativeTestCPU) {
   manual_seed(123);
 
-  test(at::device(kCPU).dtype(kFloat),
-       at::device(kCPU).dtype(kDouble));
+  test(at::device(kCPU).dtype(kFloat), at::device(kCPU).dtype(kDouble));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -264,7 +263,6 @@ TEST(TestNative, NativeTestGPU) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
-    test(at::device(kCUDA).dtype(kFloat),
-         at::device(kCUDA).dtype(kDouble));
+    test(at::device(kCUDA).dtype(kFloat), at::device(kCUDA).dtype(kDouble));
   }
 }

@@ -24,7 +24,6 @@ inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
 
-
 template <typename scalar_t>
 static void nll_loss_out_frame(
     Tensor& output,
@@ -90,8 +89,8 @@ static void nll_loss_out_frame(
   TORCH_CHECK(target.size(0) == batch_size);
 
   constexpr int64_t cascade_sum_num_levels = 8;
-  const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+  const int64_t level_power = std::max(
+      int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
@@ -137,15 +136,15 @@ static void nll_loss_out_frame(
     }
   }
 
-  const scalar_t total_weight_val = !weight_data ?
-    static_cast<scalar_t>(batch_size - num_ignored) :
-    std::accumulate(std::begin(weight_partial_sums),
-                    std::end(weight_partial_sums),
-                    scalar_t{0});
+  const scalar_t total_weight_val = !weight_data
+      ? static_cast<scalar_t>(batch_size - num_ignored)
+      : std::accumulate(
+            std::begin(weight_partial_sums),
+            std::end(weight_partial_sums),
+            scalar_t{0});
 
-  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
-                                        std::end(loss_partial_sums),
-                                        scalar_t{0});
+  scalar_t output_val = std::accumulate(
+      std::begin(loss_partial_sums), std::end(loss_partial_sums), scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {
@@ -353,14 +352,17 @@ void nll_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cpu(const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cpu(
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     Tensor& output,
     Tensor& total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   nll_loss_forward_out_cpu_template(
@@ -370,11 +372,13 @@ std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cpu(const Tensor& self,
 
 std::tuple<Tensor, Tensor> nll_loss_forward_cpu(
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   auto output = at::empty({0}, self.options());
@@ -384,15 +388,18 @@ std::tuple<Tensor, Tensor> nll_loss_forward_cpu(
   return std::make_tuple(output, total_weight);
 }
 
-Tensor& nll_loss_backward_out_cpu(const Tensor& grad_output,
+Tensor& nll_loss_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight,
     Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   nll_loss_backward_out_cpu_template(
@@ -410,12 +417,14 @@ Tensor& nll_loss_backward_out_cpu(const Tensor& grad_output,
 Tensor nll_loss_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -446,21 +455,36 @@ Tensor cross_entropy_loss(
       ignore_index);
 }
 
-Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
+Tensor& nll_loss_out(
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    int64_t ignore_index,
+    Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   Tensor total_weight = at::empty({0}, self.options());
-  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_out(
+      output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+Tensor nll_loss(
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(
+      at::nll_loss_forward(self, target, weight, reduction, ignore_index));
 }
 
 Tensor nll_loss_nd(

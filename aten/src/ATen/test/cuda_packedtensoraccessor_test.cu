@@ -23,7 +23,8 @@ __global__ void test_tensor_packed_accessor_kernel(
 
 // test GenericPackedTensorAccessor and Tensor.generic_packed_accessor
 TEST(PackedtensoraccessorTest, PackedtensoraccessorTestCUDA) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   manual_seed(123);
 
   Tensor t1 = rand({4, 4}, CUDA(kFloat));

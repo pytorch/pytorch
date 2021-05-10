@@ -23,7 +23,8 @@ bool initialize() {
       if (xnn_status_out_of_memory == status) {
         TORCH_WARN_ONCE("Failed to initialize XNNPACK! Reason: Out of memory.");
       } else if (xnn_status_unsupported_hardware == status) {
-        TORCH_WARN_ONCE("Failed to initialize XNNPACK! Reason: Unsupported hardware.");
+        TORCH_WARN_ONCE(
+            "Failed to initialize XNNPACK! Reason: Unsupported hardware.");
       } else {
         TORCH_WARN_ONCE("Failed to initialize XNNPACK! Reason: Unknown error!");
       }
@@ -53,7 +54,8 @@ bool deinitialize() {
 } // namespace
 
 bool available() {
-  // Add extra conditions here that should disable mobile CPU impl at runtime in its totality.
+  // Add extra conditions here that should disable mobile CPU impl at runtime in
+  // its totality.
   return internal::initialize();
 }
 

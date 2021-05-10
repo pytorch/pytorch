@@ -32,18 +32,18 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   MetalTensorImplStorage mt{inferred_size, stride_value};
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:@"reshape"
-                     Constants:@[
-                       @(Y.height),
-                       @(Y.width),
-                       @(Y.featureChannels),
-                       @(Y.numberOfImages),
-                       @(X.height),
-                       @(X.width),
-                       @(X.featureChannels),
-                       @(X.numberOfImages),
-                     ]];
+  id<MTLComputePipelineState> state =
+      [[MPSCNNContext sharedInstance] specializedPipelineState:@"reshape"
+                                                     Constants:@[
+                                                       @(Y.height),
+                                                       @(Y.width),
+                                                       @(Y.featureChannels),
+                                                       @(Y.numberOfImages),
+                                                       @(X.height),
+                                                       @(X.width),
+                                                       @(X.featureChannels),
+                                                       @(X.numberOfImages),
+                                                     ]];
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];

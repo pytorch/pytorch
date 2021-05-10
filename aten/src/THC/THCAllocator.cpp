@@ -18,12 +18,18 @@ void deleteTHCIpcDeleter(void* ptr) {
 // the reference count on the memory region will be decreased by one, until
 // it's zero, at which point IPC memory region is closed (by calling
 // cudaIpcCloseMemHandle).
-at::DataPtr THCIpcDeleter::makeDataPtr(std::shared_ptr<void> basePtr, void* data) {
+at::DataPtr THCIpcDeleter::makeDataPtr(
+    std::shared_ptr<void> basePtr,
+    void* data) {
   // The dynamic allocation here is a bit unfortunate
   int cur_device;
   THCudaCheck(cudaGetDevice(&cur_device));
   auto* context = new THCIpcDeleter(std::move(basePtr));
-  return {data, context, &deleteTHCIpcDeleter, at::Device(at::DeviceType::CUDA, cur_device)};
+  return {
+      data,
+      context,
+      &deleteTHCIpcDeleter,
+      at::Device(at::DeviceType::CUDA, cur_device)};
 }
 
 THCIpcDeleter::THCIpcDeleter(std::shared_ptr<void> basePtr)

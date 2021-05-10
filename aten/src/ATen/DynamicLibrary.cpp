@@ -1,7 +1,7 @@
-#include <c10/util/Exception.h>
-#include <c10/util/Unicode.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/Utils.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Unicode.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -11,7 +11,6 @@
 #endif
 
 namespace at {
-
 
 #ifndef C10_MOBILE
 #ifndef _WIN32
@@ -61,11 +60,10 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
   bool reload = true;
   auto wname = c10::u8u16(name);
   // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
-  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") != NULL) {
-    theModule = LoadLibraryExW(
-        wname.c_str(),
-        NULL,
-        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") !=
+      NULL) {
+    theModule =
+        LoadLibraryExW(wname.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
       reload = false;
     }
@@ -80,9 +78,14 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
   } else {
     char buf[256];
     DWORD dw = GetLastError();
-    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                  buf, (sizeof(buf) / sizeof(char)), NULL);
+    FormatMessageA(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        dw,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        buf,
+        (sizeof(buf) / sizeof(char)),
+        NULL);
     AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }

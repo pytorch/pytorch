@@ -1,13 +1,12 @@
 #ifndef THC_TENSOR_TYPE_UTILS_INC
 #define THC_TENSOR_TYPE_UTILS_INC
 
-#include <cuda.h>
-#include <assert.h>
-#include <THC/THCGeneral.h>
 #include <TH/THHalf.h>
+#include <THC/THCGeneral.h>
 #include <THC/THCTensor.hpp>
+#include <assert.h>
+#include <cuda.h>
 #include <THC/THCTensorInfo.cuh>
-#include <THC/THCTensor.hpp>
 
 /// A utility for accessing THCuda*Tensor types in a generic manner
 
@@ -48,15 +47,17 @@ bool isSameType() {
 //
 // data is a float* to the underlying storage at position 8
 // dims is 2
-// sizes is a MAX_CUTORCH_DIMS element array with [3, 4] in its first two positions
-// strides is a MAX_CUTORCH_DIMS element array with [4, 1] in its first two positions
+// sizes is a MAX_CUTORCH_DIMS element array with [3, 4] in its first two
+// positions strides is a MAX_CUTORCH_DIMS element array with [4, 1] in its
+// first two positions
 //
-// TensorInfos can then be passed to CUDA kernels, but we can use the static functions
-// defined above to perform Tensor Operations that are appropriate for each
-// TensorType.
+// TensorInfos can then be passed to CUDA kernels, but we can use the static
+// functions defined above to perform Tensor Operations that are appropriate for
+// each TensorType.
 template <typename ScalarType, typename TensorType, typename IndexType>
-TensorInfo<ScalarType, IndexType>
-getTensorInfo(THCState* state, TensorType* t) {
+TensorInfo<ScalarType, IndexType> getTensorInfo(
+    THCState* state,
+    TensorType* t) {
   IndexType sz[MAX_CUTORCH_DIMS];
   IndexType st[MAX_CUTORCH_DIMS];
 
@@ -67,17 +68,21 @@ getTensorInfo(THCState* state, TensorType* t) {
   }
 
   return TensorInfo<ScalarType, IndexType>(
-    t->template data<ScalarType>(), dims, sz, st);
+      t->template data<ScalarType>(), dims, sz, st);
 }
 
 template <typename T>
 struct ScalarNegate {
-  static __host__ __device__ T to(const T v) { return -v; }
+  static __host__ __device__ T to(const T v) {
+    return -v;
+  }
 };
 
 template <typename T>
 struct ScalarInv {
-  static __host__ __device__ T to(const T v) { return ((T) 1) / v; }
+  static __host__ __device__ T to(const T v) {
+    return ((T)1) / v;
+  }
 };
 
 #endif // THC_TENSOR_TYPE_UTILS_INC

@@ -1,5 +1,5 @@
-#include <ATen/native/vulkan/VulkanOpContext.h>
 #include <ATen/native/vulkan/VulkanConvolution.h>
+#include <ATen/native/vulkan/VulkanOpContext.h>
 
 namespace at {
 namespace native {

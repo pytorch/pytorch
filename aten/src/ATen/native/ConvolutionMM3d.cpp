@@ -191,11 +191,13 @@ static void slow_conv3d_update_output_frame(
     int64_t output_width) {
   if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
       (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
-      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
+      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) &&
+      (groups == 1)) {
     auto output2d = output.reshape(
         {n_output_plane, output_depth * output_height * output_width});
     auto weight_new = weight.reshape({n_output_plane, n_input_plane});
-    auto input_new = input.reshape({n_input_plane, output_depth * output_height * output_width});
+    auto input_new = input.reshape(
+        {n_input_plane, output_depth * output_height * output_width});
     if (bias.defined()) {
       output.copy_(bias.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1));
       output2d.addmm_(weight_new, input_new, 1, 1);
@@ -225,10 +227,10 @@ static void slow_conv3d_update_output_frame(
       &finput);
 
   if (groups > 1) {
-    auto output2d =
-        output.reshape({groups,
-                        n_output_plane / groups,
-                        output_depth * output_height * output_width});
+    auto output2d = output.reshape(
+        {groups,
+         n_output_plane / groups,
+         output_depth * output_height * output_width});
     auto weight_g = weight.reshape(
         {groups,
          n_output_plane / groups,
@@ -518,16 +520,19 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& self,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
+    const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output,
     Tensor& finput,
     Tensor& fgrad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   const int64_t kernel_depth = kernel_size[0];
@@ -586,12 +591,19 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
   const int64_t batch_size = input.size(0);
   if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
       (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
-      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
-    finput = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) &&
+      (groups == 1)) {
+    finput = input
+                 .view(
+                     {batch_size,
+                      n_input_plane,
+                      output_height * output_width * output_depth})
+                 .detach();
   } else {
-    finput.resize_({batch_size,
-                    n_input_plane * kernel_depth * kernel_height * kernel_width,
-                    output_depth * output_height * output_width});
+    finput.resize_(
+        {batch_size,
+         n_input_plane * kernel_depth * kernel_height * kernel_width,
+         output_depth * output_height * output_width});
   }
   output.resize_(
       {batch_size, n_output_plane, output_depth, output_height, output_width});
@@ -636,11 +648,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
 std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   auto output = at::empty({0}, self.options());
@@ -659,7 +673,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
   return std::make_tuple(output, finput, fgrad_input);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -758,14 +773,17 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-Tensor& slow_conv3d_out(const Tensor& self,
+Tensor& slow_conv3d_out(
+    const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor finput = at::empty({0}, self.options());
@@ -785,11 +803,13 @@ Tensor& slow_conv3d_out(const Tensor& self,
 Tensor slow_conv3d(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   return std::get<0>(at::slow_conv3d_forward(

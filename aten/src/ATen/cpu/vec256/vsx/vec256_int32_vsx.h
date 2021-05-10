@@ -76,7 +76,8 @@ class Vec256<int32_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask > 0 && mask < 15), Vec256<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
     constexpr uint32_t g0 = (mask & 1) * 0xffffffff;
     constexpr uint32_t g1 = ((mask & 2) >> 1) * 0xffffffff;
     constexpr uint32_t g2 = ((mask & 4) >> 2) * 0xffffffff;
@@ -90,7 +91,8 @@ class Vec256<int32_t> {
   static std::enable_if_t<
       (mask > 15 && (mask & 255) != 255 && ((mask & 15) == 15)),
       Vec256<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
     constexpr uint32_t mask2 = (mask & 255) >> 4;
     constexpr uint32_t g0_2 = (mask2 & 1) * 0xffffffff;
     constexpr uint32_t g1_2 = ((mask2 & 2) >> 1) * 0xffffffff;
@@ -106,7 +108,8 @@ class Vec256<int32_t> {
   static std::enable_if_t<
       (mask > 15 && ((mask & 255) != 255) && ((mask & 15) == 0)),
       Vec256<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
     constexpr uint32_t mask2 = (mask & 255) >> 4;
     constexpr uint32_t g0_2 = (mask2 & 1) * 0xffffffff;
     constexpr uint32_t g1_2 = ((mask2 & 2) >> 1) * 0xffffffff;
@@ -123,7 +126,8 @@ class Vec256<int32_t> {
       (mask > 15 && ((mask & 255) != 255) && ((mask & 15) != 0) &&
        ((mask & 15) != 15)),
       Vec256<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
     constexpr uint32_t g0 = (mask & 1) * 0xffffffff;
     constexpr uint32_t g1 = ((mask & 2) >> 1) * 0xffffffff;
     constexpr uint32_t g2 = ((mask & 4) >> 2) * 0xffffffff;

@@ -23,7 +23,7 @@ Tensor empty_memory_format(
           .device(device)
           .pinned_memory(pin_memory)
           .memory_format(memory_format),
-    });
+  });
 }
 
 Tensor empty_strided(
@@ -34,12 +34,7 @@ Tensor empty_strided(
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(
-      sizes,
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      c10::MemoryFormat::Contiguous);
+      sizes, dtype, layout, device, pin_memory, c10::MemoryFormat::Contiguous);
 }
 
 #ifdef USE_VULKAN_API

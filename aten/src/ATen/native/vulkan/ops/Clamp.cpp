@@ -13,9 +13,7 @@ Tensor clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max) {
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
 
@@ -23,34 +21,34 @@ Tensor clamp(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
+      } block{
+          v_output.extents(),
+          0u,
+          {
+              min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+              max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+          },
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(clamp),
           v_output.extents(),
@@ -58,19 +56,14 @@ Tensor clamp(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -85,9 +78,7 @@ Tensor& clamp_(
     const c10::optional<Scalar>& max) {
   api::Context* const context = api::context();
 
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
       self.is_vulkan(),
@@ -98,25 +89,25 @@ Tensor& clamp_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
-      } block {
-        v_self.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
+      } block{
+          v_self.extents(),
+          0u,
+          {
+              min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+              max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+          },
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(clamp_),
           v_self.extents(),
@@ -130,8 +121,7 @@ Tensor& clamp_(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -149,29 +139,29 @@ Tensor activation(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
-      } block {
-        v_output.extents(),
-        0u,
+      } block{
+          v_output.extents(),
+          0u,
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_output.extents(),
@@ -179,19 +169,14 @@ Tensor activation(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -214,20 +199,20 @@ Tensor& activation_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
-      } block {
-        v_self.extents(),
-        0u,
+      } block{
+          v_self.extents(),
+          0u,
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_self.extents(),
@@ -241,8 +226,7 @@ Tensor& activation_(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -251,17 +235,11 @@ Tensor& activation_(
   return self;
 }
 
-Tensor hardtanh(
-    const Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::clamp(self, min, max);
 }
 
-Tensor& hardtanh_(
-    Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::clamp_(self, min, max);
 }
 

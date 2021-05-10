@@ -2,8 +2,8 @@
 #define THC_GENERIC_FILE "THCUNN/generic/THCUNN.h"
 #else
 
-#include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
+#include <ATen/core/Reduction.h>
 
 TORCH_CUDA_CU_API void THNN_(ClassNLLCriterion_updateOutput)(
     THCState* state,

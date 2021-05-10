@@ -14,12 +14,14 @@ struct SizeAndStride {
  A comparator that will sort SizeAndStride structs by stride,
  in ascending order.
  */
- int compareSizeAndStride(const void* a, const void* b) {
-  const SizeAndStride* aS = (const SizeAndStride*) a;
-  const SizeAndStride* bS = (const SizeAndStride*) b;
+int compareSizeAndStride(const void* a, const void* b) {
+  const SizeAndStride* aS = (const SizeAndStride*)a;
+  const SizeAndStride* bS = (const SizeAndStride*)b;
 
-  if (aS->stride < bS->stride) return -1;
-  if (aS->stride == bS->stride) return 0;
+  if (aS->stride < bS->stride)
+    return -1;
+  if (aS->stride == bS->stride)
+    return 0;
   return 1;
 }
 
@@ -70,6 +72,6 @@ bool maybeOverlappingIndices(const Tensor& t) {
   return false;
 }
 
-} // detail
-} // cuda
-} // at
+} // namespace detail
+} // namespace cuda
+} // namespace at

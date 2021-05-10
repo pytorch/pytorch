@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/im2col.cuh>
-#include <ATen/native/cuda/vol2col.cuh>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <c10/util/accumulate.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/im2col.cuh>
+#include <ATen/native/cuda/vol2col.cuh>
 
 #include <tuple>
 
@@ -143,9 +143,11 @@ void slow_conv_dilated_location_check(
   // checking data locations of user-provided tensor arguments
   TensorArg input_arg{input, "input", 2}, weight_arg{weight, "weight", 3},
       bias_arg{bias, "bias", 4}, grad_output_arg{grad_output, "grad_output", 5};
-  checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, weight_arg});
+  checkAllSameGPU(
+      "slow_conv_dilated_all_cuda_template", {input_arg, weight_arg});
   if (bias.defined()) {
-    checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, bias_arg});
+    checkAllSameGPU(
+        "slow_conv_dilated_all_cuda_template", {input_arg, bias_arg});
   }
   if (grad_output.defined()) {
     checkAllSameGPU(
@@ -226,12 +228,12 @@ void slow_conv_dilated_all_cuda_template(
       /*    m=*/output_vsize,                        \
       /*    n=*/nOutputPlane,                        \
       /*alpha=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    A=*/grad_output_n.data_ptr<scalar_t>(),      \
+      /*    A=*/grad_output_n.data_ptr<scalar_t>(),  \
       /*  lda=*/output_vsize,                        \
-      /*    x=*/ones.data_ptr<scalar_t>(),               \
+      /*    x=*/ones.data_ptr<scalar_t>(),           \
       /* incx=*/1,                                   \
       /* beta=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    y=*/grad_bias.data_ptr<scalar_t>(),          \
+      /*    y=*/grad_bias.data_ptr<scalar_t>(),      \
       /* incy=*/1)
 #else
 #define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
@@ -242,8 +244,8 @@ void slow_conv_dilated_all_cuda_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
-      input.scalar_type(), "slow_conv_dilated<>", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
           // Matrix multiply per output:
@@ -387,12 +389,14 @@ void slow_conv_dilated_all_cuda_template(
 Tensor slow_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;
@@ -493,12 +497,14 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
 Tensor slow_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;

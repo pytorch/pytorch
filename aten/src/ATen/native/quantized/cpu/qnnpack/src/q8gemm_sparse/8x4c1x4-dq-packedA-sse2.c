@@ -13,18 +13,18 @@
 
 #include "8x4c1x4-packed-sse2.h"
 
-#define CONVERT_TO_FP_AND_TRANSPOSE(a, b, c, d, t_a, t_b, t_c, t_d)  \
-  a_ps = _mm_cvtepi32_ps(a);                                         \
-  b_ps = _mm_cvtepi32_ps(b);                                         \
-  c_ps = _mm_cvtepi32_ps(c);                                         \
-  d_ps = _mm_cvtepi32_ps(d);                                         \
-  tmp0 = _mm_shuffle_ps(a_ps, b_ps, _MM_SHUFFLE(1, 0, 1, 0));        \
-  tmp1 = _mm_shuffle_ps(a_ps, b_ps, _MM_SHUFFLE(3, 2, 3, 2));        \
-  tmp2 = _mm_shuffle_ps(c_ps, d_ps, _MM_SHUFFLE(1, 0, 1, 0));        \
-  tmp3 = _mm_shuffle_ps(c_ps, d_ps, _MM_SHUFFLE(3, 2, 3, 2));        \
-  t_a = _mm_shuffle_ps(tmp0, tmp2, _MM_SHUFFLE(2, 0, 2, 0));         \
-  t_b = _mm_shuffle_ps(tmp0, tmp2, _MM_SHUFFLE(3, 1, 3, 1));         \
-  t_c = _mm_shuffle_ps(tmp1, tmp3, _MM_SHUFFLE(2, 0, 2, 0));         \
+#define CONVERT_TO_FP_AND_TRANSPOSE(a, b, c, d, t_a, t_b, t_c, t_d) \
+  a_ps = _mm_cvtepi32_ps(a);                                        \
+  b_ps = _mm_cvtepi32_ps(b);                                        \
+  c_ps = _mm_cvtepi32_ps(c);                                        \
+  d_ps = _mm_cvtepi32_ps(d);                                        \
+  tmp0 = _mm_shuffle_ps(a_ps, b_ps, _MM_SHUFFLE(1, 0, 1, 0));       \
+  tmp1 = _mm_shuffle_ps(a_ps, b_ps, _MM_SHUFFLE(3, 2, 3, 2));       \
+  tmp2 = _mm_shuffle_ps(c_ps, d_ps, _MM_SHUFFLE(1, 0, 1, 0));       \
+  tmp3 = _mm_shuffle_ps(c_ps, d_ps, _MM_SHUFFLE(3, 2, 3, 2));       \
+  t_a = _mm_shuffle_ps(tmp0, tmp2, _MM_SHUFFLE(2, 0, 2, 0));        \
+  t_b = _mm_shuffle_ps(tmp0, tmp2, _MM_SHUFFLE(3, 1, 3, 1));        \
+  t_c = _mm_shuffle_ps(tmp1, tmp3, _MM_SHUFFLE(2, 0, 2, 0));        \
   t_d = _mm_shuffle_ps(tmp1, tmp3, _MM_SHUFFLE(3, 1, 3, 1));
 
 void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
@@ -40,21 +40,21 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
     size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params
         quantization_params[RESTRICT_STATIC 1]) {
-
-  const __m128i va_zero_point = _mm_set1_epi16(quantization_params->input_zero_point);
+  const __m128i va_zero_point =
+      _mm_set1_epi16(quantization_params->input_zero_point);
   const __m128 vbias = _mm_load_ps(b);
   const __m128i vzero = _mm_setzero_si128();
 
   // Packed A format.
-  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
-  // Original A
+  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous
+  // memory. Original A
   // --------- K -----------          -- (K + 4 - 1) / 4 --
   // |                     |          |                   |
   // |                     |        (M + 8 - 1)/8         |
   // |                     | Packed   |                   |
   // M                     |  =>      |-------------------|
-  // |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8 -1)/8 blocks
-  // |                     |
+  // |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8
+  // -1)/8 blocks |                     |
   // |---------------------|
   //
   // Each 8 x 4 blocks is transposed and stored.
@@ -77,10 +77,10 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
     vacc_low[n] = _mm_setzero_si128();
     vacc_high[n] = _mm_setzero_si128();
     const int16_t b_zero_point =
-      (int16_t)(uint16_t)quantization_params->kernel_zero_points[
-      output_channel_index + n];
+        (int16_t)(uint16_t)
+            quantization_params->kernel_zero_points[output_channel_index + n];
 
-    int32_t num_blocks = w_row_ptr[n+1] - w_row_ptr[n];
+    int32_t num_blocks = w_row_ptr[n + 1] - w_row_ptr[n];
     // Offset into compressed values.
     // w_row_ptr[0] is the block offset in the compressed values.
     // Where the corresponding row of the weight matrix starts.
@@ -124,30 +124,22 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
       int32_t col_block_id_0 = temp_w_block_ids_ptr[0];
       // Load column id of the second 1x4 block
       int32_t col_block_id_1 = temp_w_block_ids_ptr[1];
-      const __m128i va0 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 0));
-      const __m128i va1 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 1));
-      const __m128i va2 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 2));
-      const __m128i va3 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 3));
-      const __m128i va4 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 0));
-      const __m128i va5 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 1));
-      const __m128i va6 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 2));
-      const __m128i va7 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 3));
+      const __m128i va0 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 0));
+      const __m128i va1 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 1));
+      const __m128i va2 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 2));
+      const __m128i va3 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 3));
+      const __m128i va4 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 0));
+      const __m128i va5 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 1));
+      const __m128i va6 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 2));
+      const __m128i va7 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_1 * PACKED_A_BLOCK_SIZE + MR * 3));
 
       const __m128i vxa0 =
           sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point);
@@ -169,61 +161,62 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
       // acc += a0 * b0;
       __m128i vacc_low_16bits = _mm_mullo_epi16(vxa0, vxb0);
       __m128i vacc_high_16bits = _mm_mulhi_epi16(vxa0, vxb0);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a1 * b1;
       vacc_low_16bits = _mm_mullo_epi16(vxa1, vxb1);
       vacc_high_16bits = _mm_mulhi_epi16(vxa1, vxb1);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a2 * b2;
       vacc_low_16bits = _mm_mullo_epi16(vxa2, vxb2);
       vacc_high_16bits = _mm_mulhi_epi16(vxa2, vxb2);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a3 * b3;
       vacc_low_16bits = _mm_mullo_epi16(vxa3, vxb3);
       vacc_high_16bits = _mm_mulhi_epi16(vxa3, vxb3);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a4 * b4;
       vacc_low_16bits = _mm_mullo_epi16(vxa4, vxb4);
       vacc_high_16bits = _mm_mulhi_epi16(vxa4, vxb4);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a5 * b5;
       vacc_low_16bits = _mm_mullo_epi16(vxa5, vxb5);
       vacc_high_16bits = _mm_mulhi_epi16(vxa5, vxb5);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a6 * b6;
       vacc_low_16bits = _mm_mullo_epi16(vxa6, vxb6);
       vacc_high_16bits = _mm_mulhi_epi16(vxa6, vxb6);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a7 * b7;
       vacc_low_16bits = _mm_mullo_epi16(vxa7, vxb7);
       vacc_high_16bits = _mm_mulhi_epi16(vxa7, vxb7);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
 
-      // Now we have 1x8 m acculated 32 bit values in vacc_low[n](4) and vacc_high[n](4)
+      // Now we have 1x8 m acculated 32 bit values in vacc_low[n](4) and
+      // vacc_high[n](4)
 
       temp_packed_w = temp_packed_w + COL_BLOCK_SIZE * 2;
       temp_w_block_ids_ptr += 2;
@@ -249,18 +242,14 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
 
       // Load column id of the first 1x4 block
       int32_t col_block_id_0 = temp_w_block_ids_ptr[0];
-      const __m128i va0 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 0));
-      const __m128i va1 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 1));
-      const __m128i va2 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 2));
-      const __m128i va3 =
-        _mm_loadl_epi64((const __m128i*) (a_packed +
-            col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 3));
+      const __m128i va0 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 0));
+      const __m128i va1 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 1));
+      const __m128i va2 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 2));
+      const __m128i va3 = _mm_loadl_epi64((
+          const __m128i*)(a_packed + col_block_id_0 * PACKED_A_BLOCK_SIZE + MR * 3));
       const __m128i vxa0 =
           sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point);
       const __m128i vxa1 =
@@ -273,33 +262,34 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
       // acc += a0 * b0;
       __m128i vacc_low_16bits = _mm_mullo_epi16(vxa0, vxb0);
       __m128i vacc_high_16bits = _mm_mulhi_epi16(vxa0, vxb0);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a1 * b1;
       vacc_low_16bits = _mm_mullo_epi16(vxa1, vxb1);
       vacc_high_16bits = _mm_mulhi_epi16(vxa1, vxb1);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a2 * b2;
       vacc_low_16bits = _mm_mullo_epi16(vxa2, vxb2);
       vacc_high_16bits = _mm_mulhi_epi16(vxa2, vxb2);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
       // acc += a3 * b3;
       vacc_low_16bits = _mm_mullo_epi16(vxa3, vxb3);
       vacc_high_16bits = _mm_mulhi_epi16(vxa3, vxb3);
-      vacc_low[n] = _mm_add_epi32(vacc_low[n],
-        _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
-      vacc_high[n] = _mm_add_epi32(vacc_high[n],
-        _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_low[n] = _mm_add_epi32(
+          vacc_low[n], _mm_unpacklo_epi16(vacc_low_16bits, vacc_high_16bits));
+      vacc_high[n] = _mm_add_epi32(
+          vacc_high[n], _mm_unpackhi_epi16(vacc_low_16bits, vacc_high_16bits));
 
-      // Now we have 1x8 m acculated 32 bit values in vacc_low[n](4) and vacc_high[n](4)
+      // Now we have 1x8 m acculated 32 bit values in vacc_low[n](4) and
+      // vacc_high[n](4)
     }
   }
 
@@ -309,22 +299,24 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2(
   // Transform low half of 4x8 result
   // That is 4x4 block (4n x 4m)
   // Convert to FP and transpose: 4m x 4n
-  CONVERT_TO_FP_AND_TRANSPOSE(vacc_low[0],
-                              vacc_low[1],
-                              vacc_low[2],
-                              vacc_low[3],
-                              vout[0],
-                              vout[1],
-                              vout[2],
-                              vout[3])
-  CONVERT_TO_FP_AND_TRANSPOSE(vacc_high[0],
-                              vacc_high[1],
-                              vacc_high[2],
-                              vacc_high[3],
-                              vout[4],
-                              vout[5],
-                              vout[6],
-                              vout[7])
+  CONVERT_TO_FP_AND_TRANSPOSE(
+      vacc_low[0],
+      vacc_low[1],
+      vacc_low[2],
+      vacc_low[3],
+      vout[0],
+      vout[1],
+      vout[2],
+      vout[3])
+  CONVERT_TO_FP_AND_TRANSPOSE(
+      vacc_high[0],
+      vacc_high[1],
+      vacc_high[2],
+      vacc_high[3],
+      vout[4],
+      vout[5],
+      vout[6],
+      vout[7])
 
   vout[0] = _mm_mul_ps(vmultiplier, vout[0]);
   vout[1] = _mm_mul_ps(vmultiplier, vout[1]);

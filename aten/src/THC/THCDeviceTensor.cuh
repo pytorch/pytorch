@@ -9,23 +9,26 @@ template <bool>
 struct THCStaticAssert;
 
 template <>
-struct THCStaticAssert<true> {
-};
+struct THCStaticAssert<true> {};
 
 #define thc_static_assert(expr) (THCStaticAssert<(expr) != 0>())
 
 /// Our tensor type
-template <typename T,
-          int Dim,
-          typename IndexT,
-          template <typename U> class PtrTraits>
+template <
+    typename T,
+    int Dim,
+    typename IndexT,
+    template <typename U>
+    class PtrTraits>
 class THCDeviceTensor;
 
 /// Type of a subspace of a tensor
 namespace detail {
-template <typename TensorType,
-          int SubDim,
-          template <typename U> class PtrTraits>
+template <
+    typename TensorType,
+    int SubDim,
+    template <typename U>
+    class PtrTraits>
 class THCDeviceSubTensor;
 }
 
@@ -53,10 +56,11 @@ struct DefaultPtrTraits {
 - this is just T*, but RestrictPtrTraits can be used to apply T*
 - __restrict__ for alias-free analysis.
 */
-template <typename T,
-          int Dim,
-          typename IndexT = int,
-          template <typename U> class PtrTraits = DefaultPtrTraits>
+template <
+    typename T,
+    int Dim,
+    typename IndexT = int,
+    template <typename U> class PtrTraits = DefaultPtrTraits>
 class THCDeviceTensor {
  public:
   enum { NumDim = Dim };
@@ -69,29 +73,30 @@ class THCDeviceTensor {
   __host__ __device__ THCDeviceTensor();
 
   /// Constructor that calculates strides with no padding
-  __host__ __device__ THCDeviceTensor(DataPtrType data,
+  __host__ __device__ THCDeviceTensor(
+      DataPtrType data,
 #ifdef _MSC_VER
-                                      const IndexT (&sizes)[Dim]);
+      const IndexT (&sizes)[Dim]);
 #else
-                                      const IndexT sizes[Dim]);
+      const IndexT sizes[Dim]);
 #endif
 
   /// Constructor that takes arbitrary size/stride arrays
-  __host__ __device__ THCDeviceTensor(DataPtrType data,
+  __host__ __device__ THCDeviceTensor(
+      DataPtrType data,
 #ifdef _MSC_VER
-                                      const IndexT (&sizes)[Dim],
-                                      const IndexT (&strides)[Dim]);
+      const IndexT (&sizes)[Dim],
+      const IndexT (&strides)[Dim]);
 #else
-                                      const IndexT sizes[Dim],
-                                      const IndexT strides[Dim]);
+      const IndexT sizes[Dim],
+      const IndexT strides[Dim]);
 #endif
 
   /// Returns true if the two tensors are of the same dimensionality,
   /// size and stride.
   template <int OtherDim>
-  __host__ __device__ bool
-  isSameSizeAndStride(
-    const THCDeviceTensor<T, OtherDim, IndexT, PtrTraits>& rhs) const;
+  __host__ __device__ bool isSameSizeAndStride(
+      const THCDeviceTensor<T, OtherDim, IndexT, PtrTraits>& rhs) const;
 
   /// Cast to a tensor of a different type of the same size and stride
   template <typename U>
@@ -99,8 +104,8 @@ class THCDeviceTensor {
 
   /// Const version of `cast`
   template <typename U>
-  __host__ __device__
-  const THCDeviceTensor<U, Dim, IndexT, PtrTraits> cast() const;
+  __host__ __device__ const THCDeviceTensor<U, Dim, IndexT, PtrTraits> cast()
+      const;
 
   /// Returns a raw pointer to the start of our data.
   __host__ __device__ __forceinline__ DataPtrType data() {
@@ -108,34 +113,32 @@ class THCDeviceTensor {
   }
 
   /// Returns a raw pointer to the start of our data (const).
-  __host__ __device__ __forceinline__
-  const DataPtrType data() const {
+  __host__ __device__ __forceinline__ const DataPtrType data() const {
     return data_;
   }
 
   /// Cast to a different datatype
   template <typename U>
-  __host__ __device__ __forceinline__
-  typename PtrTraits<U>::PtrType dataAs() {
+  __host__ __device__ __forceinline__ typename PtrTraits<U>::PtrType dataAs() {
     return reinterpret_cast<typename PtrTraits<U>::PtrType>(data_);
   }
 
   /// Cast to a different datatype
   template <typename U>
-  __host__ __device__ __forceinline__
-  const typename PtrTraits<const U>::PtrType dataAs() const {
+  __host__ __device__ __forceinline__ const typename PtrTraits<const U>::PtrType
+  dataAs() const {
     return reinterpret_cast<typename PtrTraits<const U>::PtrType>(data_);
   }
 
   /// Returns a read/write view of a portion of our tensor.
   __host__ __device__ __forceinline__
-  detail::THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>
-    operator[](IndexT);
+      detail::THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>
+      operator[](IndexT);
 
   /// Returns a read/write view of a portion of our tensor (const).
-  __host__ __device__ __forceinline__
-  const detail::THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>
-    operator[](IndexT) const;
+  __host__ __device__ __forceinline__ const detail::
+      THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>
+      operator[](IndexT) const;
 
   /// Returns the size of a given dimension, `[0, Dim - 1]`. No bounds
   /// checking.
@@ -188,8 +191,9 @@ class THCDeviceTensor {
   /// dimensions given. Does not actually move elements; transposition
   /// is made by permuting the size/stride arrays.
   /// If the dimensions are not valid, asserts.
-  __host__ __device__ THCDeviceTensor<T, Dim, IndexT, PtrTraits>
-  transpose(int dim1, int dim2) const;
+  __host__ __device__ THCDeviceTensor<T, Dim, IndexT, PtrTraits> transpose(
+      int dim1,
+      int dim2) const;
 
   /// Upcast a tensor of dimension `D` to some tensor of dimension
   /// D' > D by padding the leading dimensions by 1
@@ -209,27 +213,26 @@ class THCDeviceTensor {
   /// D' < D by collapsing the leading dimensions. asserts if there is
   /// padding on the leading dimensions.
   template <int NewDim>
-  __host__ __device__
-  THCDeviceTensor<T, NewDim, IndexT, PtrTraits> downcastOuter();
+  __host__ __device__ THCDeviceTensor<T, NewDim, IndexT, PtrTraits>
+  downcastOuter();
 
   /// Downcast a tensor of dimension `D` to some tensor of dimension
   /// D' < D by collapsing the leading dimensions. asserts if there is
   /// padding on the leading dimensions.
   template <int NewDim>
-  __host__ __device__
-  THCDeviceTensor<T, NewDim, IndexT, PtrTraits> downcastInner();
+  __host__ __device__ THCDeviceTensor<T, NewDim, IndexT, PtrTraits>
+  downcastInner();
 
   /// Returns a tensor that is a view of the `SubDim`-dimensional slice
   /// of this tensor, starting at `at`.
   template <int SubDim>
-  __host__ __device__ THCDeviceTensor<T, SubDim, IndexT, PtrTraits>
-  view(DataPtrType at);
+  __host__ __device__ THCDeviceTensor<T, SubDim, IndexT, PtrTraits> view(
+      DataPtrType at);
 
   /// Returns a tensor that is a view of the `SubDim`-dimensional slice
   /// of this tensor, starting where our data begins
   template <int SubDim>
-  __host__ __device__ THCDeviceTensor<T, SubDim, IndexT, PtrTraits>
-  view();
+  __host__ __device__ THCDeviceTensor<T, SubDim, IndexT, PtrTraits> view();
 
   /// Zeroes out the tensor asynchronously. Asserts if the contents
   /// in question are not contiguous.
@@ -252,19 +255,19 @@ namespace detail {
 template <typename TensorType, template <typename U> class PtrTraits>
 class THCDeviceSubTensor<TensorType, 0, PtrTraits> {
  public:
-  __host__ __device__ THCDeviceSubTensor<TensorType, 0, PtrTraits>
-  operator=(typename TensorType::DataType val) {
+  __host__ __device__ THCDeviceSubTensor<TensorType, 0, PtrTraits> operator=(
+      typename TensorType::DataType val) {
     *data_ = val;
     return *this;
   }
 
   // operator T&
-  __host__ __device__ operator typename TensorType::DataType&() {
+  __host__ __device__ operator typename TensorType::DataType &() {
     return *data_;
   }
 
   // const operator T& returning const T&
-  __host__ __device__ operator const typename TensorType::DataType&() const {
+  __host__ __device__ operator const typename TensorType::DataType &() const {
     return *data_;
   }
 
@@ -284,8 +287,8 @@ class THCDeviceSubTensor<TensorType, 0, PtrTraits> {
   }
 
   /// Returns a raw accessor to our slice (const).
-  __host__ __device__ __forceinline__
-  const typename TensorType::DataPtrType data() const {
+  __host__ __device__ __forceinline__ const typename TensorType::DataPtrType
+  data() const {
     return data_;
   }
 
@@ -303,15 +306,14 @@ class THCDeviceSubTensor<TensorType, 0, PtrTraits> {
 
   /// Cast to a different datatype
   template <typename T>
-  __host__ __device__ __forceinline__
-  typename PtrTraits<T>::PtrType dataAs() {
+  __host__ __device__ __forceinline__ typename PtrTraits<T>::PtrType dataAs() {
     return reinterpret_cast<typename PtrTraits<T>::PtrType>(data_);
   }
 
   /// Cast to a different datatype (const)
   template <typename T>
-  __host__ __device__ __forceinline__
-  typename PtrTraits<const T>::PtrType dataAs() const {
+  __host__ __device__ __forceinline__ typename PtrTraits<const T>::PtrType
+  dataAs() const {
     return reinterpret_cast<typename PtrTraits<const T>::PtrType>(data_);
   }
 
@@ -334,22 +336,20 @@ class THCDeviceSubTensor<TensorType, 0, PtrTraits> {
 #endif
   }
 
-  private:
+ private:
   /// One dimension greater can create us
   friend class THCDeviceSubTensor<TensorType, 1, PtrTraits>;
 
   /// Our parent tensor can create us
-  friend class THCDeviceTensor<typename TensorType::DataType,
-                               1,
-                               typename TensorType::IndexType,
-                               PtrTraits>;
+  friend class THCDeviceTensor<
+      typename TensorType::DataType,
+      1,
+      typename TensorType::IndexType,
+      PtrTraits>;
 
-  __host__ __device__ __forceinline__ THCDeviceSubTensor(
-    TensorType& t,
-    typename TensorType::DataPtrType data)
-      : tensor_(t),
-        data_(data) {
-  }
+  __host__ __device__ __forceinline__
+  THCDeviceSubTensor(TensorType& t, typename TensorType::DataPtrType data)
+      : tensor_(t), data_(data) {}
 
   /// The tensor we're referencing
   TensorType& tensor_;
@@ -359,29 +359,33 @@ class THCDeviceSubTensor<TensorType, 0, PtrTraits> {
 };
 
 /// A `SubDim`-rank slice of a parent THCDeviceTensor
-template <typename TensorType,
-          int SubDim,
-          template <typename U> class PtrTraits>
+template <
+    typename TensorType,
+    int SubDim,
+    template <typename U>
+    class PtrTraits>
 class THCDeviceSubTensor {
  public:
   /// Returns a view of the data located at our offset (the dimension
   /// `SubDim` - 1 tensor).
   __host__ __device__ __forceinline__
-  THCDeviceSubTensor<TensorType, SubDim - 1, PtrTraits>
-    operator[](typename TensorType::IndexType index) {
+      THCDeviceSubTensor<TensorType, SubDim - 1, PtrTraits>
+      operator[](typename TensorType::IndexType index) {
     return THCDeviceSubTensor<TensorType, SubDim - 1, PtrTraits>(
-      tensor_,
-      data_ + index * tensor_.getStride(TensorType::NumDim - SubDim));
+        tensor_,
+        data_ + index * tensor_.getStride(TensorType::NumDim - SubDim));
   }
 
   /// Returns a view of the data located at our offset (the dimension
   /// `SubDim` - 1 tensor) (const).
-  __host__ __device__ __forceinline__
-  const THCDeviceSubTensor<TensorType, SubDim - 1, PtrTraits>
-    operator[](typename TensorType::IndexType index) const {
+  __host__ __device__ __forceinline__ const THCDeviceSubTensor<
+      TensorType,
+      SubDim - 1,
+      PtrTraits>
+  operator[](typename TensorType::IndexType index) const {
     return THCDeviceSubTensor<TensorType, SubDim - 1, PtrTraits>(
-      tensor_,
-      data_ + index * tensor_.getStride(TensorType::NumDim - SubDim));
+        tensor_,
+        data_ + index * tensor_.getStride(TensorType::NumDim - SubDim));
   }
 
   // operator& returning T*
@@ -400,8 +404,8 @@ class THCDeviceSubTensor {
   }
 
   /// Returns a raw accessor to our slice (const).
-  __host__ __device__ __forceinline__
-  const typename TensorType::DataPtrType data() const {
+  __host__ __device__ __forceinline__ const typename TensorType::DataPtrType
+  data() const {
     return data_;
   }
 
@@ -419,15 +423,14 @@ class THCDeviceSubTensor {
 
   /// Cast to a different datatype
   template <typename T>
-  __host__ __device__ __forceinline__
-  typename PtrTraits<T>::PtrType dataAs() {
+  __host__ __device__ __forceinline__ typename PtrTraits<T>::PtrType dataAs() {
     return reinterpret_cast<typename PtrTraits<T>::PtrType>(data_);
   }
 
   /// Cast to a different datatype (const)
   template <typename T>
-  __host__ __device__ __forceinline__
-  typename PtrTraits<const T>::PtrType dataAs() const {
+  __host__ __device__ __forceinline__ typename PtrTraits<const T>::PtrType
+  dataAs() const {
     return reinterpret_cast<typename PtrTraits<const T>::PtrType>(data_);
   }
 
@@ -452,10 +455,12 @@ class THCDeviceSubTensor {
 
   /// Returns a tensor that is a view of the SubDim-dimensional slice
   /// of this tensor, starting where our data begins
-  THCDeviceTensor<typename TensorType::DataType,
-               SubDim,
-               typename TensorType::IndexType,
-               PtrTraits> view() {
+  THCDeviceTensor<
+      typename TensorType::DataType,
+      SubDim,
+      typename TensorType::IndexType,
+      PtrTraits>
+  view() {
     return tensor_.template view<SubDim>(data_);
   }
 
@@ -464,18 +469,15 @@ class THCDeviceSubTensor {
   friend class THCDeviceSubTensor<TensorType, SubDim + 1, PtrTraits>;
 
   /// Our parent tensor can create us
-  friend class
-  THCDeviceTensor<typename TensorType::DataType,
-               TensorType::NumDim,
-               typename TensorType::IndexType,
-               PtrTraits>;
+  friend class THCDeviceTensor<
+      typename TensorType::DataType,
+      TensorType::NumDim,
+      typename TensorType::IndexType,
+      PtrTraits>;
 
-  __host__ __device__ __forceinline__ THCDeviceSubTensor(
-    TensorType& t,
-    typename TensorType::DataPtrType data)
-      : tensor_(t),
-        data_(data) {
-  }
+  __host__ __device__ __forceinline__
+  THCDeviceSubTensor(TensorType& t, typename TensorType::DataPtrType data)
+      : tensor_(t), data_(data) {}
 
   /// The tensor we're referencing
   TensorType& tensor_;
@@ -486,26 +488,36 @@ class THCDeviceSubTensor {
 
 } // namespace detail
 
-template <typename T, int Dim,
-          typename IndexT, template <typename U> class PtrTraits>
-__host__ __device__ __forceinline__
-detail::THCDeviceSubTensor<THCDeviceTensor<T, Dim, IndexT, PtrTraits>,
-                        Dim - 1, PtrTraits>
+template <
+    typename T,
+    int Dim,
+    typename IndexT,
+    template <typename U>
+    class PtrTraits>
+__host__ __device__ __forceinline__ detail::THCDeviceSubTensor<
+    THCDeviceTensor<T, Dim, IndexT, PtrTraits>,
+    Dim - 1,
+    PtrTraits>
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::operator[](IndexT index) {
   return detail::THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>(
-    detail::THCDeviceSubTensor<TensorType, Dim, PtrTraits>(
-      *this, data_)[index]);
+      detail::THCDeviceSubTensor<TensorType, Dim, PtrTraits>(
+          *this, data_)[index]);
 }
 
-template <typename T, int Dim,
-          typename IndexT, template <typename U> class PtrTraits>
-__host__ __device__ __forceinline__
-const detail::THCDeviceSubTensor<THCDeviceTensor<T, Dim, IndexT, PtrTraits>,
-                              Dim - 1, PtrTraits>
+template <
+    typename T,
+    int Dim,
+    typename IndexT,
+    template <typename U>
+    class PtrTraits>
+__host__ __device__ __forceinline__ const detail::THCDeviceSubTensor<
+    THCDeviceTensor<T, Dim, IndexT, PtrTraits>,
+    Dim - 1,
+    PtrTraits>
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::operator[](IndexT index) const {
   return detail::THCDeviceSubTensor<TensorType, Dim - 1, PtrTraits>(
-    detail::THCDeviceSubTensor<TensorType, Dim, PtrTraits>(
-      const_cast<TensorType&>(*this), data_)[index]);
+      detail::THCDeviceSubTensor<TensorType, Dim, PtrTraits>(
+          const_cast<TensorType&>(*this), data_)[index]);
 }
 
 #include <THC/THCDeviceTensor-inl.cuh>

@@ -147,7 +147,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 
   at::Tensor weight_contig = weight.contiguous();
   std::vector<uint8_t> w_zero_points;
-  at::Tensor  w_scales;
+  at::Tensor w_scales;
   std::tie(w_zero_points, w_scales) =
       make_zero_points_and_scales_tensor(weight_contig);
 
@@ -173,7 +173,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
     at::Tensor weight,
     c10::optional<at::Tensor> bias) {
-
   weight = at::_saturate_weight_to_fp16(weight);
 
   const int64_t K = weight.size(1);
@@ -201,7 +200,8 @@ namespace native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
-  quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
+  quant_utils::HandleWeightsSaturation(
+      weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }
 
@@ -323,22 +323,36 @@ class QLinearPackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_legacy"), TORCH_FN(QLinearPackWeightInt8Legacy::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_prepack"),
+      TORCH_FN(QLinearPackWeightInt8::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_prepack_legacy"),
+      TORCH_FN(QLinearPackWeightInt8Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16"),
+      TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16_legacy"),
+      TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::linear_prepack"),
+      TORCH_FN(QLinearPackWeightInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"),
+      TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"),
+      TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 } // namespace

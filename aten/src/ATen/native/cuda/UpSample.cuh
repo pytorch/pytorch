@@ -11,7 +11,7 @@ namespace native {
 namespace upsample {
 // TODO: Remove duplicate declaration.
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
-    c10::IntArrayRef input_size,  // Full input tensor size.
+    c10::IntArrayRef input_size, // Full input tensor size.
     c10::optional<c10::IntArrayRef> output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 } // namespace upsample
@@ -19,7 +19,9 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
 namespace upsample_cuda {
 
 // TODO: Remove duplication with Upsample.h (CPU).
-inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+inline c10::optional<double> get_scale_value(
+    c10::optional<c10::ArrayRef<double>> scales,
+    int idx) {
   if (!scales) {
     return nullopt;
   }
@@ -27,7 +29,6 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 }
 
 } // namespace upsample_cuda
-
 
 /* TODO: move this to a common place */
 template <typename scalar_t>
@@ -72,9 +73,11 @@ __host__ __forceinline__ static accscalar_t compute_scales_value(
     const c10::optional<double> scale,
     int64_t src_size,
     int64_t dst_size) {
-  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
-  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)(1.0 / scale.value())
-                                                   : (accscalar_t)src_size / dst_size;
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1
+  // defaults.
+  return (scale.has_value() && scale.value() > 0.)
+      ? (accscalar_t)(1.0 / scale.value())
+      : (accscalar_t)src_size / dst_size;
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
@@ -83,9 +86,11 @@ __host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
     const c10::optional<double> scale,
     int64_t src_size,
     int64_t dst_size) {
-  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
-  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)scale.value()
-                                                   : (accscalar_t)src_size / dst_size;
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1
+  // defaults.
+  return (scale.has_value() && scale.value() > 0.)
+      ? (accscalar_t)scale.value()
+      : (accscalar_t)src_size / dst_size;
 }
 
 template <typename accscalar_t>
@@ -95,8 +100,9 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   if (output_size > 1) {
-    return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
+    return align_corners
+        ? (accscalar_t)(input_size - 1) / (output_size - 1)
+        : compute_scales_value<accscalar_t>(scale, input_size, output_size);
   } else {
     return static_cast<accscalar_t>(0);
   }

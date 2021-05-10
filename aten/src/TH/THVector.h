@@ -2,8 +2,9 @@
 #define TH_VECTOR_INC
 
 #include <TH/THGeneral.h>
-#define THVector_(NAME) TH_CONCAT_4(TH,Real,Vector_,NAME)
+#define THVector_(NAME) TH_CONCAT_4(TH, Real, Vector_, NAME)
 
+// clang-format off
 /* We are going to use dynamic dispatch, and want only to generate declarations
  * of the vector functions */
 #include <TH/generic/THVector.h>
@@ -20,5 +21,6 @@
 
 #include <TH/generic/THVector.h>
 #include <TH/THGenerateComplexTypes.h>
+// clang-format on
 
 #endif // TH_VECTOR_INC

@@ -8,8 +8,19 @@
 namespace at {
 namespace native {
 
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+template <typename scalar_t>
+void gemv(
+    char trans,
+    int64_t m,
+    int64_t n,
+    scalar_t alpha,
+    scalar_t* a,
+    int64_t lda,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t beta,
+    scalar_t* y,
+    int64_t incy);
 
 namespace {
 
@@ -279,8 +290,9 @@ void slow_conv_transpose3d_out_cpu_template(
       {batch_size, n_output_plane, output_depth, output_height, output_width});
 
   // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
-                   input_depth * input_height * input_width});
+  columns.resize_(
+      {n_output_plane * kernel_width * kernel_height * kernel_depth,
+       input_depth * input_height * input_width});
   columns.zero_();
 
   // Define a buffer of ones, for bias accumulation
@@ -294,8 +306,11 @@ void slow_conv_transpose3d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Long,
+      input.scalar_type(),
+      "slow_conv_transpose3d_out_cpu",
+      [&] {
         // Helpers
         Tensor input_n;
         Tensor output_n;
@@ -484,11 +499,12 @@ void slow_conv_transpose3d_backward_out_cpu_template(
     is_batch = true;
     input.resize_(
         {1, input.size(0), input.size(1), input.size(2), input.size(3)});
-    grad_output.resize_({1,
-                         grad_output.size(0),
-                         grad_output.size(1),
-                         grad_output.size(2),
-                         grad_output.size(3)});
+    grad_output.resize_(
+        {1,
+         grad_output.size(0),
+         grad_output.size(1),
+         grad_output.size(2),
+         grad_output.size(3)});
   }
 
   const int64_t input_width = input.size(4);
@@ -701,7 +717,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   Tensor grad_output = grad_output_.contiguous();
 
   if (grad_weight.defined()) {
-    TORCH_CHECK(grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
+    TORCH_CHECK(
+        grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
   }
   if (grad_bias.defined()) {
     TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");
@@ -714,11 +731,12 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
     is_batch = true;
     input.resize_(
         {1, input.size(0), input.size(1), input.size(2), input.size(3)});
-    grad_output.resize_({1,
-                         grad_output.size(0),
-                         grad_output.size(1),
-                         grad_output.size(2),
-                         grad_output.size(3)});
+    grad_output.resize_(
+        {1,
+         grad_output.size(0),
+         grad_output.size(1),
+         grad_output.size(2),
+         grad_output.size(3)});
   }
 
   const int64_t input_width = input.size(4);
@@ -748,8 +766,9 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   }
 
   // Resize temporary columns
-  columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
-                   input_depth * input_height * input_width});
+  columns.resize_(
+      {n_output_plane * kernel_width * kernel_height * kernel_depth,
+       input_depth * input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(),
@@ -870,16 +889,19 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
+Tensor& slow_conv_transpose3d_out_cpu(
+    const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -904,13 +926,15 @@ Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
 Tensor slow_conv_transpose3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -933,7 +957,8 @@ Tensor slow_conv_transpose3d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,

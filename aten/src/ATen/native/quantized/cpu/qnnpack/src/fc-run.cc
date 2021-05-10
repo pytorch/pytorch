@@ -26,8 +26,7 @@ static void compute_q8gemm(
     size_t group_range /* always 1 */,
     size_t pixel_range,
     size_t mr_block_size,
-    size_t nr_block_size)
-{
+    size_t nr_block_size) {
   const size_t k = context->k;
   const size_t k_stride = context->k_stride;
   const size_t n = context->n;
@@ -45,8 +44,9 @@ static void compute_q8gemm(
       k,
       a + (pixel_index + mr_block_start) * a_stride + group_index * k,
       a_stride,
-      (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
-      c + (pixel_index + mr_block_start) * c_stride + nr_block_start + group_index * n,
+      (const void*)((uintptr_t)packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
+      c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
+          group_index * n,
       c_stride,
       output_channel_index,
       &context->quantization_params);
@@ -67,8 +67,7 @@ enum pytorch_qnnp_status qnnpackLinear(
     void* packed_weights,
     uint8_t* output,
     const size_t output_stride,
-    pthreadpool_t threadpool)
-{
+    pthreadpool_t threadpool) {
   const size_t groups = 1;
   const size_t group_input_channels = input_channels;
   const size_t group_output_channels = output_channels;
@@ -81,8 +80,12 @@ enum pytorch_qnnp_status qnnpackLinear(
   const size_t output_size = batch_size * 1;
   union pytorch_qnnp_conv_quantization_params conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
-          input_zero_point, kernel_zero_points,
-          requantization_scales, output_zero_point, output_min, output_max);
+          input_zero_point,
+          kernel_zero_points,
+          requantization_scales,
+          output_zero_point,
+          output_min,
+          output_max);
 
   struct q8gemm_context q8gemm_context = {
       .k = group_input_channels,
@@ -91,7 +94,7 @@ enum pytorch_qnnp_status qnnpackLinear(
       .n_stride = n_stride,
       .a = input,
       .a_stride = input_stride,
-      .packed_w = (uint8_t*) packed_weights,
+      .packed_w = (uint8_t*)packed_weights,
       .c = output,
       .c_stride = output_stride,
       .quantization_params = conv_quantization_params,
@@ -99,14 +102,14 @@ enum pytorch_qnnp_status qnnpackLinear(
   };
 
   if (output_size == 0) {
-      // pthreadpool can tolerate a range of 0, but not a tile of 0.
-      // We use output_size as a tile size, so bail here if it's 0.
-      return pytorch_qnnp_status_success;
+    // pthreadpool can tolerate a range of 0, but not a tile of 0.
+    // We use output_size as a tile size, so bail here if it's 0.
+    return pytorch_qnnp_status_success;
   }
 
   pthreadpool_compute_4d_tiled(
       threadpool,
-      (pthreadpool_function_4d_tiled_t) compute_q8gemm,
+      (pthreadpool_function_4d_tiled_t)compute_q8gemm,
       &q8gemm_context,
       groups,
       1 * output_size,

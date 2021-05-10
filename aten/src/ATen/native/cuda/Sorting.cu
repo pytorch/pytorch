@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/MemoryOverlap.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
@@ -91,7 +91,8 @@ __global__ void gatherKthValue(
   }
 }
 
-// CUDA kernel to find the median, and its index, of the values along dimension dim
+// CUDA kernel to find the median, and its index, of the values along dimension
+// dim
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherMedian(
     cuda::detail::TensorInfo<scalar_t, index_t> values,
@@ -101,8 +102,8 @@ __global__ void gatherMedian(
     index_t numInputSlices,
     index_t inputWithinSliceStride,
     bool ignore_nan) {
-  // Shared memory for the subroutine RadixSelect. Note that RadixSelect converts the
-  // floating point type to int with the same relative ordering.
+  // Shared memory for the subroutine RadixSelect. Note that RadixSelect
+  // converts the floating point type to int with the same relative ordering.
   __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
 
   index_t slice = getLinearBlockId<index_t>();
@@ -280,11 +281,14 @@ void kthvalue_cuda_template(
   if (self.numel() != 0) {
     AT_DISPATCH_INDEX_TYPES(
         cuda::detail::canUse32BitIndexMath(self) &&
-        cuda::detail::canUse32BitIndexMath(values) &&
-        cuda::detail::canUse32BitIndexMath(indices) ? ScalarType::Int : ScalarType::Long,
-        "kth_value_launcher", [&] {
+                cuda::detail::canUse32BitIndexMath(values) &&
+                cuda::detail::canUse32BitIndexMath(indices)
+            ? ScalarType::Int
+            : ScalarType::Long,
+        "kth_value_launcher",
+        [&] {
           run_launcher<scalar_t, index_t>(
-            values, indices, self, dim, KthValueLauncher(k));
+              values, indices, self, dim, KthValueLauncher(k));
         });
   }
 
@@ -317,8 +321,9 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     bool keepdim,
     bool ignore_nan) {
   // See note [Writing Nondeterministic Operations]
-  // If there are duplicate elements of a median value, the procedure for choosing which
-  // of the duplicates to use for the indices output is nondeterministic.
+  // If there are duplicate elements of a median value, the procedure for
+  // choosing which of the duplicates to use for the indices output is
+  // nondeterministic.
   at::globalContext().alertNotDeterministic("median CUDA with indices output");
   NoNamesGuard guard;
 
@@ -408,13 +413,15 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     Tensor& values,
     Tensor& indices) {
   // See note [Writing Nondeterministic Operations]
-  // If there are duplicate elements of the kth value, the procedure for choosing which
-  // of the duplicates to use for the indices output is nondeterministic.
+  // If there are duplicate elements of the kth value, the procedure for
+  // choosing which of the duplicates to use for the indices output is
+  // nondeterministic.
   at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
     NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.
-    return kthvalue_out_impl_cuda(values, indices, self.contiguous(), k, dim, keepdim);
+    return kthvalue_out_impl_cuda(
+        values, indices, self.contiguous(), k, dim, keepdim);
   }();
   namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);

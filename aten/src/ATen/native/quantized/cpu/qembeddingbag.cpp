@@ -94,18 +94,14 @@ at::Tensor& embedding_lookup_fallback_impl(
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
         uint32_t scale_val_int32 = 0;
-        scale_val_int32 = scale_val_int32 |
-          (scale_bias[0]) |
-          (scale_bias[1] << 8) |
-          (scale_bias[2] << 16) |
-          (scale_bias[3] << 24);
+        scale_val_int32 = scale_val_int32 | (scale_bias[0]) |
+            (scale_bias[1] << 8) | (scale_bias[2] << 16) |
+            (scale_bias[3] << 24);
         float scale_val = (reinterpret_cast<float*>(&scale_val_int32))[0];
         uint32_t bias_val_int32 = 0;
-        bias_val_int32 = bias_val_int32 |
-          (scale_bias[4]) |
-          (scale_bias[5] << 8) |
-          (scale_bias[6] << 16) |
-          (scale_bias[7] << 24);
+        bias_val_int32 = bias_val_int32 | (scale_bias[4]) |
+            (scale_bias[5] << 8) | (scale_bias[6] << 16) |
+            (scale_bias[7] << 24);
         float bias_val = (reinterpret_cast<float*>(&bias_val_int32))[0];
         scale = weight_val * scale_val;
         bias = weight_val * bias_val;
@@ -113,14 +109,12 @@ at::Tensor& embedding_lookup_fallback_impl(
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half);
         uint16_t scale_val_int16 = 0;
-        scale_val_int16 = scale_val_int16 |
-          (scale_bias[0]) |
-          (scale_bias[1] << 8);
+        scale_val_int16 =
+            scale_val_int16 | (scale_bias[0]) | (scale_bias[1] << 8);
         at::Half scale_val = (reinterpret_cast<at::Half*>(&scale_val_int16))[0];
         uint16_t bias_val_int16 = 0;
-        bias_val_int16 = bias_val_int16 |
-          (scale_bias[2]) |
-          (scale_bias[3] << 8);
+        bias_val_int16 =
+            bias_val_int16 | (scale_bias[2]) | (scale_bias[3] << 8);
         at::Half bias_val = (reinterpret_cast<at::Half*>(&bias_val_int16))[0];
         scale = weight_val * scale_val;
         bias = weight_val * bias_val;
@@ -442,7 +436,8 @@ at::Tensor& embedding_bag_byte_helper(
         !offsets_in.has_value(),
         "embedding_bag_byte operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
+    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(
+        0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
 
   } else {
     TORCH_CHECK(
@@ -480,7 +475,8 @@ at::Tensor& embedding_bag_byte_helper(
         include_last_offset,
         is_embedding_op);
   } else if (
-      indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kLong) {
+      indices.scalar_type() == at::kInt &&
+      offsets->scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
         output,
         weight,
@@ -492,7 +488,8 @@ at::Tensor& embedding_bag_byte_helper(
         include_last_offset,
         is_embedding_op);
   } else if (
-      indices.scalar_type() == at::kLong && offsets->scalar_type() == at::kInt) {
+      indices.scalar_type() == at::kLong &&
+      offsets->scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
         output,
         weight,
@@ -577,7 +574,8 @@ at::Tensor& embedding_bag_4bit_helper(
         compressed_indices_mapping,
         include_last_offset);
   } else if (
-      indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kLong) {
+      indices.scalar_type() == at::kInt &&
+      offsets->scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
         output,
         weight,
@@ -588,7 +586,8 @@ at::Tensor& embedding_bag_4bit_helper(
         compressed_indices_mapping,
         include_last_offset);
   } else if (
-      indices.scalar_type() == at::kLong && offsets->scalar_type() == at::kInt) {
+      indices.scalar_type() == at::kLong &&
+      offsets->scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
         output,
         weight,
@@ -650,16 +649,16 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
 
   auto output = at::empty({0}, packed_w.options().dtype(at::kFloat));
   return embedding_bag_4bit_helper(
-    output,
-    packed_w,
-    indices,
-    offsets_in,
-    pruned_weights,
-    per_sample_weights_.has_value()
-        ? per_sample_weights_.value().to(at::kFloat)
-        : per_sample_weights_,
-    compressed_indices_mapping,
-    include_last_offset);
+      output,
+      packed_w,
+      indices,
+      offsets_in,
+      pruned_weights,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
+      compressed_indices_mapping,
+      include_last_offset);
 }
 
 namespace at {
@@ -699,7 +698,6 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-
   if (per_sample_weights_.has_value()) {
     TORCH_CHECK(
         (per_sample_weights_.value().scalar_type() == at::kFloat ||
@@ -722,7 +720,6 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
 }
 
 namespace {
-
 
 inline at::Tensor create_empty_from(
     const at::Tensor& t,
@@ -766,20 +763,18 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-
   auto output = create_empty_from(weight, at::kFloat);
   embedding_bag_4bit_rowwise_offsets_out(
-    output,
-    weight,
-    indices,
-    offsets_in,
-    false, // unused scale_grad_by_freq
-    0, // unused mode
-    pruned_weights,
-    per_sample_weights_,
-    compressed_indices_mapping,
-    include_last_offset
-  );
+      output,
+      weight,
+      indices,
+      offsets_in,
+      false, // unused scale_grad_by_freq
+      0, // unused mode
+      pruned_weights,
+      per_sample_weights_,
+      compressed_indices_mapping,
+      include_last_offset);
   return output;
 }
 

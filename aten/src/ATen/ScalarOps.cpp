@@ -6,8 +6,8 @@
 #include <math.h>
 #endif
 
-#include <ATen/ScalarOps.h>
 #include <ATen/ATen.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/Utils.h>
 
 namespace at {
@@ -18,7 +18,7 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
   scalar_t* dptr = static_cast<scalar_t*>(self.data_ptr());
   *dptr = value;
 }
-}
+} // namespace
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, const Scalar& value) {
@@ -29,10 +29,14 @@ Tensor& scalar_fill(Tensor& self, const Scalar& value) {
   return self;
 }
 
-Tensor scalar_tensor_static(const Scalar& s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt) {
+Tensor scalar_tensor_static(
+    const Scalar& s,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Device> device_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoDispatchBelowAutograd mode;
-  auto result = at::detail::empty_cpu({}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
+  auto result = at::detail::empty_cpu(
+      {}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
   scalar_fill(result, s);
   return result;
 }

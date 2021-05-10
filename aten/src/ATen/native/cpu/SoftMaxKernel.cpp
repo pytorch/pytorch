@@ -19,7 +19,8 @@
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 namespace {
 
 template <typename scalar_t>
@@ -34,64 +35,62 @@ inline void _vec_log_softmax_lastdim(
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;
 
-  parallel_for(
-      0,
-      outer_size,
-      grain_size,
-      [&](int64_t begin, int64_t end) {
-        for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t tmp_sum_scalar[CHUNK_SIZE];
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t max_input_arr[CHUNK_SIZE];
-          int64_t loop_end = CHUNK_SIZE;
-          if (ii + CHUNK_SIZE > end)
-            loop_end = end - ii;
-          for (int64_t j = 0; j < loop_end; j++) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            max_input_arr[j] = vec256::reduce_all<scalar_t>(
-                [](Vec& x, Vec& y) { return vec256::maximum(x, y); },
-                input_data,
-                dim_size);
-          }
-          for (int64_t j = 0; j < loop_end; j++) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            scalar_t max_input = max_input_arr[j];
-            tmp_sum_scalar[j] = vec256::map_reduce_all<scalar_t>(
-                [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-                [](Vec x, Vec y) { return x + y; },
-                input_data,
-                dim_size);
-          }
-          // See [Note AVX-SSE transitions] for why this should call the
-          // vectorized version (aside from perf improvements).
-          vec256::map(
-              [](Vec x) { return x.log(); },
-              tmp_sum_scalar,
-              tmp_sum_scalar,
-              loop_end);
-          for (int64_t j = 0; j < loop_end; j++) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            scalar_t* output_data = output_data_base + i * dim_size;
-            scalar_t tmp_sum = tmp_sum_scalar[j];
-            scalar_t max_input = max_input_arr[j];
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+      scalar_t tmp_sum_scalar[CHUNK_SIZE];
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+      scalar_t max_input_arr[CHUNK_SIZE];
+      int64_t loop_end = CHUNK_SIZE;
+      if (ii + CHUNK_SIZE > end)
+        loop_end = end - ii;
+      for (int64_t j = 0; j < loop_end; j++) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+        max_input_arr[j] = vec256::reduce_all<scalar_t>(
+            [](Vec& x, Vec& y) { return vec256::maximum(x, y); },
+            input_data,
+            dim_size);
+      }
+      for (int64_t j = 0; j < loop_end; j++) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+        scalar_t max_input = max_input_arr[j];
+        tmp_sum_scalar[j] = vec256::map_reduce_all<scalar_t>(
+            [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+            [](Vec x, Vec y) { return x + y; },
+            input_data,
+            dim_size);
+      }
+      // See [Note AVX-SSE transitions] for why this should call the
+      // vectorized version (aside from perf improvements).
+      vec256::map(
+          [](Vec x) { return x.log(); },
+          tmp_sum_scalar,
+          tmp_sum_scalar,
+          loop_end);
+      for (int64_t j = 0; j < loop_end; j++) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+        scalar_t* output_data = output_data_base + i * dim_size;
+        scalar_t tmp_sum = tmp_sum_scalar[j];
+        scalar_t max_input = max_input_arr[j];
 
-            // It's necessary to keep the order of the operations below.
-            // In some cases that input is large digits and the difference
-            // is small, if we compute `max_input` plus `tmp_sum` before,
-            // there would be a numerical problem. See an example in
-            // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
-            vec256::map(
-                [tmp_sum, max_input](Vec x) { return x - Vec(max_input) - Vec(tmp_sum); },
-                output_data,
-                input_data,
-                dim_size);
-          }
-        }
-      });
+        // It's necessary to keep the order of the operations below.
+        // In some cases that input is large digits and the difference
+        // is small, if we compute `max_input` plus `tmp_sum` before,
+        // there would be a numerical problem. See an example in
+        // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
+        vec256::map(
+            [tmp_sum, max_input](Vec x) {
+              return x - Vec(max_input) - Vec(tmp_sum);
+            },
+            output_data,
+            input_data,
+            dim_size);
+      }
+    }
+  });
 }
 
 template <typename scalar_t>
@@ -105,33 +104,29 @@ inline void _vec_softmax_lastdim(
   if (grain_size < 1)
     grain_size = 1;
 
-  parallel_for(
-      0,
-      outer_size,
-      grain_size,
-      [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
-          scalar_t* input_data = input_data_base + i * dim_size;
-          scalar_t* output_data = output_data_base + i * dim_size;
-          scalar_t max_input = vec256::reduce_all<scalar_t>(
-              [](Vec& x, Vec& y) { return vec256::maximum(x, y); },
-              input_data,
-              dim_size);
-          vec256::map(
-              [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-              output_data,
-              input_data,
-              dim_size);
-          scalar_t tmp_sum = vec256::reduce_all<scalar_t>(
-              [](Vec x, Vec y) { return x + y; }, output_data, dim_size);
-          tmp_sum = 1 / tmp_sum;
-          vec256::map(
-              [tmp_sum](Vec x) { return x * Vec(tmp_sum); },
-              output_data,
-              output_data,
-              dim_size);
-        }
-      });
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    for (int64_t i = begin; i < end; i++) {
+      scalar_t* input_data = input_data_base + i * dim_size;
+      scalar_t* output_data = output_data_base + i * dim_size;
+      scalar_t max_input = vec256::reduce_all<scalar_t>(
+          [](Vec& x, Vec& y) { return vec256::maximum(x, y); },
+          input_data,
+          dim_size);
+      vec256::map(
+          [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+          output_data,
+          input_data,
+          dim_size);
+      scalar_t tmp_sum = vec256::reduce_all<scalar_t>(
+          [](Vec x, Vec y) { return x + y; }, output_data, dim_size);
+      tmp_sum = 1 / tmp_sum;
+      vec256::map(
+          [tmp_sum](Vec x) { return x * Vec(tmp_sum); },
+          output_data,
+          output_data,
+          dim_size);
+    }
+  });
 }
 
 template <typename scalar_t, bool log_softmax>
@@ -146,45 +141,41 @@ inline void _vec_host_softmax_backward_lastdim(
   if (grain_size < 1)
     grain_size = 1;
 
-  parallel_for(
-      0,
-      outer_size,
-      grain_size,
-      [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
-          scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
-          scalar_t* grad_data = grad_data_base + i * dim_size;
-          scalar_t* output_data = output_data_base + i * dim_size;
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-          scalar_t sum;
-          if (log_softmax) {
-            sum = vec256::reduce_all<scalar_t>(
-                [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
-          } else {
-            sum = vec256::map2_reduce_all<scalar_t>(
-                [](Vec x, Vec y) { return x * y; },
-                [](Vec x, Vec y) { return x + y; },
-                grad_data,
-                output_data,
-                dim_size);
-          }
-          if (log_softmax) {
-            vec256::map2(
-                [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
-                grad_input_data,
-                grad_data,
-                output_data,
-                dim_size);
-          } else {
-            vec256::map2(
-                [sum](Vec x, Vec y) { return (x - Vec(sum)) * y; },
-                grad_input_data,
-                grad_data,
-                output_data,
-                dim_size);
-          }
-        }
-      });
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    for (int64_t i = begin; i < end; i++) {
+      scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
+      scalar_t* grad_data = grad_data_base + i * dim_size;
+      scalar_t* output_data = output_data_base + i * dim_size;
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+      scalar_t sum;
+      if (log_softmax) {
+        sum = vec256::reduce_all<scalar_t>(
+            [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
+      } else {
+        sum = vec256::map2_reduce_all<scalar_t>(
+            [](Vec x, Vec y) { return x * y; },
+            [](Vec x, Vec y) { return x + y; },
+            grad_data,
+            output_data,
+            dim_size);
+      }
+      if (log_softmax) {
+        vec256::map2(
+            [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
+            grad_input_data,
+            grad_data,
+            output_data,
+            dim_size);
+      } else {
+        vec256::map2(
+            [sum](Vec x, Vec y) { return (x - Vec(sum)) * y; },
+            grad_input_data,
+            grad_data,
+            output_data,
+            dim_size);
+      }
+    }
+  });
 }
 
 template <typename scalar_t, bool LogSoftMax>
@@ -208,8 +199,10 @@ struct vec_host_softmax_lastdim {
 
 template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_backward_lastdim {
-  static void
-  apply(Tensor& grad_input, const Tensor& grad, const Tensor& output) {
+  static void apply(
+      Tensor& grad_input,
+      const Tensor& grad,
+      const Tensor& output) {
     int64_t outer_size = 1;
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
@@ -227,16 +220,18 @@ struct vec_host_softmax_backward_lastdim {
 };
 
 static void softmax_lastdim_kernel_impl(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "softmax_lastdim_kernel_impl", [&] {
-    vec_host_softmax_lastdim<scalar_t, false>::apply(result, self);
-  });
+  AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "softmax_lastdim_kernel_impl", [&] {
+        vec_host_softmax_lastdim<scalar_t, false>::apply(result, self);
+      });
 }
 
 static void log_softmax_lastdim_kernel_impl(
     Tensor& result,
     const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, self.scalar_type(),
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
       "log_softmax_lastdim_kernel_impl",
       [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self); });
 }
@@ -257,8 +252,10 @@ static void log_softmax_backward_lastdim_kernel_impl(
     const Tensor& grad,
     const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(),
-      "log_softmax_backward_lastdim_kernel_impl", [&] {
+      at::ScalarType::BFloat16,
+      grad.scalar_type(),
+      "log_softmax_backward_lastdim_kernel_impl",
+      [&] {
         vec_host_softmax_backward_lastdim<scalar_t, true>::apply(
             grad_input, grad, output);
       });
@@ -279,4 +276,5 @@ REGISTER_DISPATCH(
     log_softmax_backward_lastdim_kernel,
     &log_softmax_backward_lastdim_kernel_impl);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -9,4 +9,4 @@ std::ostream& operator<<(std::ostream& out, const Range& range) {
   return out;
 }
 
-}  // namespace at
+} // namespace at

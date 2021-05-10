@@ -13,10 +13,11 @@ namespace detail {
 template <typename T, typename IndexType>
 struct TensorInfo {
   TensorInfo();
-  TensorInfo(T* p,
-             int dim,
-             IndexType sz[MAX_TENSORINFO_DIMS],
-             IndexType st[MAX_TENSORINFO_DIMS]);
+  TensorInfo(
+      T* p,
+      int dim,
+      IndexType sz[MAX_TENSORINFO_DIMS],
+      IndexType st[MAX_TENSORINFO_DIMS]);
 
   // Set the size of the given dimension to 1, as if it were a
   // reduction dim (allows you to calculate offsets of the reduction
@@ -45,10 +46,11 @@ TensorInfo<T, IndexType>::TensorInfo() {
 }
 
 template <typename T, typename IndexType>
-TensorInfo<T, IndexType>::TensorInfo(T* p,
-                                     int dim,
-                                     IndexType sz[MAX_TENSORINFO_DIMS],
-                                     IndexType st[MAX_TENSORINFO_DIMS]) {
+TensorInfo<T, IndexType>::TensorInfo(
+    T* p,
+    int dim,
+    IndexType sz[MAX_TENSORINFO_DIMS],
+    IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
   AT_ASSERT(dims < MAX_TENSORINFO_DIMS);
@@ -60,15 +62,13 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
 }
 
 template <typename T, typename IndexType>
-void
-TensorInfo<T, IndexType>::reduceDim(int dim) {
+void TensorInfo<T, IndexType>::reduceDim(int dim) {
   TORCH_CHECK(dim < dims && dim >= 0, "expected dim between 0 and dims - 1");
   sizes[dim] = 1;
 }
 
 template <typename T, typename IndexType>
-int
-TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
+int TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
   auto result = at::collapse_dims(sizes, strides, dims, excludeDim);
   dims = std::get<1>(result);
   return std::get<0>(result);
@@ -78,10 +78,8 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 // specialized on `Dims` to reduce nvcc compilation time
 template <typename T, typename IndexType, int Dims>
 struct IndexToOffset {
-  static __host__ __device__ IndexType get(
-    IndexType linearId,
-    const TensorInfo<T, IndexType>& info) {
-
+  static __host__ __device__ IndexType
+  get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
     IndexType offset = 0;
 
     // Uses static dims
@@ -99,23 +97,21 @@ struct IndexToOffset {
 // Uses dynamic (runtime) instead of static (compiletime) dims
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
-  static inline __host__ __device__ IndexType get(
-    IndexType linearId,
-    const TensorInfo<T, IndexType>& info) {
+  static inline __host__ __device__ IndexType
+  get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
+    IndexType offset = 0;
 
-      IndexType offset = 0;
+    for (int i = info.dims - 1; i > 0; --i) {
+      IndexType curDimIndex = linearId % info.sizes[i];
+      IndexType curDimOffset = curDimIndex * info.strides[i];
+      offset += curDimOffset;
+      linearId /= info.sizes[i];
+    }
 
-      for (int i = info.dims - 1; i > 0; --i) {
-        IndexType curDimIndex = linearId % info.sizes[i];
-        IndexType curDimOffset = curDimIndex * info.strides[i];
-        offset += curDimOffset;
-        linearId /= info.sizes[i];
-      }
-
-      return offset + linearId * info.strides[0];
+    return offset + linearId * info.strides[0];
   }
 };
 
-} // detail
-} // cuda
-} // at
+} // namespace detail
+} // namespace cuda
+} // namespace at

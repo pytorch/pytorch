@@ -1,5 +1,5 @@
-#include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocal.h>
 #include <algorithm>
@@ -12,22 +12,22 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_cb_id {1};
+  static std::atomic<uint64_t> unique_cb_id{1};
   return CallbackHandle(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
-  static std::atomic<uint64_t> unique_rf_id {1};
+  static std::atomic<uint64_t> unique_rf_id{1};
   return RecordFunctionHandle(unique_rf_id++);
 }
 
 RecordFunctionTLS& rf_tls() {
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static c10::ThreadLocal<RecordFunctionTLS> rf_tls_;
   return rf_tls_.get();
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local RecordFunctionTLS rf_tls_;
   return rf_tls_;
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
@@ -40,7 +40,7 @@ std::atomic<int64_t> defaultNodeId(-1);
 // note: std::this_thread::get_id may return potentially
 // reused thread id
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::atomic<uint64_t> next_thread_id_ {0};
+std::atomic<uint64_t> next_thread_id_{0};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t current_thread_id_ = 0;
 
@@ -56,15 +56,19 @@ struct CoinflipTLS {
 };
 
 CoinflipTLS::CoinflipTLS()
-    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+    : tries_left_(0),
+      genGeo_(std::random_device()()),
+      genZeroOne_(std::random_device()()),
+      distGeo_(kLowProb),
+      distZeroOne_(0.0, 1.0) {}
 
 CoinflipTLS& coinflip_tls() {
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static c10::ThreadLocal<CoinflipTLS> coinflip_tls_;
   return coinflip_tls_.get();
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local CoinflipTLS coinflip_tls_;
   return coinflip_tls_;
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
@@ -116,13 +120,12 @@ class CallbackManager {
   void removeCallback(CallbackHandle handle) {
     auto find_and_remove = [handle](RecordFunctionCallbacks& cbs) {
       auto it = std::find_if(
-        cbs.begin(), cbs.end(),
-        [handle](
-            const std::pair<
-                RecordFunctionCallback,
-                CallbackHandle>& el) {
-          return el.second == handle;
-        });
+          cbs.begin(),
+          cbs.end(),
+          [handle](
+              const std::pair<RecordFunctionCallback, CallbackHandle>& el) {
+            return el.second == handle;
+          });
       if (it != cbs.end()) {
         if (it->first.samplingProb() > kLowProb) {
           // try to restore pre-sampling of RecordFunction
@@ -164,7 +167,9 @@ class CallbackManager {
   // times per init(). Profiling shows that the function prologue is
   // taking up a significant fraction of the time.
   static bool C10_ALWAYS_INLINE callbackShouldRun(
-      const RecordFunctionCallback& cb, RecordScope scope, bool pre_sampled) {
+      const RecordFunctionCallback& cb,
+      RecordScope scope,
+      bool pre_sampled) {
     TORCH_INTERNAL_ASSERT(
         !pre_sampled || (cb.sampling_prob_ <= kLowProb),
         "Incorrect usage of a pre-sampled RecordFunction with a high-frequency "
@@ -213,12 +218,15 @@ class CallbackManager {
   // init is called by RecordFunction in constructor to
   // determine which thread local and global callbacks are going
   // to be executed and whether any of them need inputs
-  inline void init(RecordFunction& rec_fn, RecordScope scope, bool pre_sampled) {
+  inline void init(
+      RecordFunction& rec_fn,
+      RecordScope scope,
+      bool pre_sampled) {
     bool found_needs_inputs = false;
     bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
-    for (const auto& cb: rf_tls().sorted_tls_callbacks_) {
+    for (const auto& cb : rf_tls().sorted_tls_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
@@ -236,7 +244,7 @@ class CallbackManager {
       }
     }
 
-    for (const auto& cb: sorted_global_callbacks_) {
+    for (const auto& cb : sorted_global_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
@@ -259,8 +267,10 @@ class CallbackManager {
     }
 
     // Pre-allocate observer context list with nullptr.
-    rec_fn.state_->tls_ctx_.resize(rec_fn.state_->sorted_active_tls_handles_.size());
-    rec_fn.state_->global_ctx_.resize(rec_fn.state_->sorted_active_global_handles_.size());
+    rec_fn.state_->tls_ctx_.resize(
+        rec_fn.state_->sorted_active_tls_handles_.size());
+    rec_fn.state_->global_ctx_.resize(
+        rec_fn.state_->sorted_active_global_handles_.size());
 
     rec_fn.state_->needs_inputs = found_needs_inputs;
     rec_fn.state_->needs_outputs = found_needs_outputs;
@@ -312,20 +322,19 @@ class CallbackManager {
     try {
       if (is_start) {
         ctx = rfcb.start() ? rfcb.start()(rf) : nullptr;
-      }
-      else {
+      } else {
         if (rfcb.end()) {
           rfcb.end()(rf, ctx.get());
         }
       }
       return true;
-    } catch (const std::exception &e) {
-      LOG(WARNING) << "Exception in RecordFunction callback: "
-          << e.what() << " , for the range " << rf.name();
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Exception in RecordFunction callback: " << e.what()
+                   << " , for the range " << rf.name();
       return false;
     } catch (...) {
       LOG(WARNING) << "Exception in RecordFunction callback: unknown"
-          << " , for the range " << rf.name();
+                   << " , for the range " << rf.name();
       return false;
     }
   }
@@ -338,16 +347,19 @@ class CallbackManager {
       RecordFunction& rf) {
     size_t num_executed = 0;
     size_t idx_c = 0;
-    for (size_t idx_h = 0; idx_h < sorted_handles.size() && idx_h < ctx_list.size(); ++idx_h) {
+    for (size_t idx_h = 0;
+         idx_h < sorted_handles.size() && idx_h < ctx_list.size();
+         ++idx_h) {
       while (idx_c < sorted_callbacks.size() &&
-            sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
+             sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
         ++idx_c;
       }
       if (idx_c >= sorted_callbacks.size()) {
         break;
       }
       if (sorted_callbacks[idx_c].second == sorted_handles[idx_h]) {
-        tryRunCallback(sorted_callbacks[idx_c].first, rf, ctx_list[idx_h], is_start);
+        tryRunCallback(
+            sorted_callbacks[idx_c].first, rf, ctx_list[idx_h], is_start);
         ++num_executed;
       }
     }
@@ -362,11 +374,11 @@ class CallbackManager {
 };
 
 namespace {
-  // Keeping this static manager local.
-  CallbackManager& manager() {
-    static CallbackManager _manager;
-    return _manager;
-  }
+// Keeping this static manager local.
+CallbackManager& manager() {
+  static CallbackManager _manager;
+  return _manager;
+}
 } // namespace
 
 bool hasCallbacks() {
@@ -382,14 +394,12 @@ bool hasThreadLocalCallbacks() {
   return manager().hasThreadLocalCallbacks();
 }
 
-CallbackHandle addThreadLocalCallback(
-    RecordFunctionCallback cb) {
+CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
   // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addThreadLocalCallback(std::move(cb));
 }
 
-CallbackHandle addGlobalCallback(
-    RecordFunctionCallback cb) {
+CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
   // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addGlobalCallback(std::move(cb));
 }
@@ -424,7 +434,8 @@ RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
   auto* rf_tls_ptr = &rf_tls();
   if (rf_tls_ptr->tls_record_function_enabled_) {
     auto& m = manager();
-    if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
+    if (!m.sorted_global_callbacks_.empty() ||
+        !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
       m.init(*this, scope, pre_sampled);
     }
   }
@@ -517,15 +528,17 @@ namespace {
 // Whether to try to create RecordFunction on each call (>0) or
 // use pre-sampling (=0)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::atomic<int> global_record_all_functions_ {0};
-}
+std::atomic<int> global_record_all_functions_{0};
+} // namespace
 
 void bumpRecordAllFunctions() {
   global_record_all_functions_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void releaseRecordAllFunctions() {
-  TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >= 0);
+  TORCH_CHECK(
+      global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >=
+      0);
 }
 
 bool checkRecordAllFunctions() {
@@ -534,7 +547,8 @@ bool checkRecordAllFunctions() {
 
 bool shouldRunRecordFunction(bool* pre_sampled) {
   auto* rf_tls_ptr = &rf_tls();
-  if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
+  if (rf_tls_ptr->sorted_tls_callbacks_.empty() &&
+      !manager().hasGlobalCallbacks()) {
     *pre_sampled = false;
     return false;
   }

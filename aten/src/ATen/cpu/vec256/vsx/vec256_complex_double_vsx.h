@@ -473,11 +473,11 @@ class Vec256<ComplexDbl> {
   }
 
   Vec256<ComplexDbl> hypot(const Vec256<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexDbl> nextafter(const Vec256<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<ComplexDbl> igamma(const Vec256<ComplexDbl>& x) const {
@@ -590,7 +590,6 @@ Vec256<ComplexDbl> inline minimum(
   // auto isnan = _mm256_cmp_ps(abs_a, abs_b, _CMP_UNORD_Q);
   // return _mm256_or_ps(min, isnan);
 }
-
 
 } // namespace
 } // namespace vec256

@@ -32,7 +32,7 @@ void pytorch_q8conv_ukernel_4x4c2__sse2(
   const __m128i va_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
   const int16_t vb_zero_point_0 =
-    quantization_params->sse2.kernel_zero_points[output_channel_index];
+      quantization_params->sse2.kernel_zero_points[output_channel_index];
   const int16_t vb_zero_point_1 =
       quantization_params->sse2.kernel_zero_points[output_channel_index + 1];
   const int16_t vb_zero_point_2 =
@@ -40,15 +40,15 @@ void pytorch_q8conv_ukernel_4x4c2__sse2(
   const int16_t vb_zero_point_3 =
       quantization_params->sse2.kernel_zero_points[output_channel_index + 3];
 
-  const __m128i vb_zero_point = _mm_set_epi16(vb_zero_point_3,
-                                              vb_zero_point_3,
-                                              vb_zero_point_2,
-                                              vb_zero_point_2,
-                                              vb_zero_point_1,
-                                              vb_zero_point_1,
-                                              vb_zero_point_0,
-                                              vb_zero_point_0
-                                              );
+  const __m128i vb_zero_point = _mm_set_epi16(
+      vb_zero_point_3,
+      vb_zero_point_3,
+      vb_zero_point_2,
+      vb_zero_point_2,
+      vb_zero_point_1,
+      vb_zero_point_1,
+      vb_zero_point_0,
+      vb_zero_point_0);
   const __m128i vzero = _mm_setzero_si128();
   do {
     const uint8_t* restrict a0 = *a++;
@@ -274,34 +274,17 @@ void pytorch_q8conv_ukernel_4x4c2__sse2(
     }
   } while (--ks != 0);
 
-  const __m128 vmultiplier =
-      _mm_loadu_ps(&quantization_params->sse2.requantization_scales
-          [output_channel_index]);
+  const __m128 vmultiplier = _mm_loadu_ps(
+      &quantization_params->sse2.requantization_scales[output_channel_index]);
 
-  vacc0x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc0x0123),
-                  vmultiplier
-                  )
-                );
-  vacc1x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc1x0123),
-                  vmultiplier
-                  )
-                );
-  vacc2x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc2x0123),
-                  vmultiplier
-                  )
-                );
-  vacc3x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc3x0123),
-                  vmultiplier
-                  )
-                );
+  vacc0x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc0x0123), vmultiplier));
+  vacc1x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc1x0123), vmultiplier));
+  vacc2x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc2x0123), vmultiplier));
+  vacc3x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc3x0123), vmultiplier));
 
   const __m128i voutput_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.output_zero_point);

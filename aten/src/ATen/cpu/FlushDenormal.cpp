@@ -3,14 +3,16 @@
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <cpuinfo.h>
 
-namespace at { namespace cpu {
+namespace at {
+namespace cpu {
 
 static constexpr unsigned int DENORMALS_ZERO = 0x0040;
 static constexpr unsigned int FLUSH_ZERO = 0x8000;
 
 bool set_flush_denormal(bool on) {
   // Compile if we have SSE support (GCC), x86-64 (MSVC), or x86 with SSE (MSVC)
-#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+#if defined(__SSE__) || defined(_M_X64) || \
+    (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
   // Denormals-Are-Zero is supported by most SSE2 processors, with the exception
   // of some early Pentium 4 processors. We guard it with a runtime check.
   // Flush-To-Zero (FTZ) only requires SSE.
@@ -29,4 +31,5 @@ bool set_flush_denormal(bool on) {
   return false;
 }
 
-}}  // namespace at::cpu
+} // namespace cpu
+} // namespace at

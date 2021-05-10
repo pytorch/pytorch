@@ -1,16 +1,16 @@
 #include <limits>
 
-#include <THCUNN/THCUNN.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCAtomics.cuh>
+#include <THCUNN/THCUNN.h>
 #include <THCUNN/common.h>
+#include <c10/macros/Macros.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCDeviceTensor.cuh>
 #include <THC/THCDeviceTensorUtils.cuh>
 #include <THC/THCDeviceUtils.cuh>
-#include <THC/THCApply.cuh>
-#include <c10/macros/Macros.h>
-#include <ATen/cuda/detail/KernelUtils.h>
+#include <THC/THCNumerics.cuh>
 
 #include <thrust/functional.h>
 
@@ -109,9 +109,11 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
     }
   }
 
-  input_sum = reduceBlock(partial_sums, blockDim.x, input_sum, thrust::plus<AccumT>(), AccumT(0));
+  input_sum = reduceBlock(
+      partial_sums, blockDim.x, input_sum, thrust::plus<AccumT>(), AccumT(0));
   __syncthreads();
-  acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
+  acc_weight = reduceBlock(
+      partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
     gpuAtomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
@@ -119,12 +121,11 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   }
 }
 
-template<typename T>
+template <typename T>
 __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
-          T *output,
-          T *total_weight,
-          int nElement)
-{
+    T* output,
+    T* total_weight,
+    int nElement) {
   if (nElement == 0) {
     // Mean reduction on empty tensors produces NaN
     *output = std::numeric_limits<double>::quiet_NaN();
@@ -152,7 +153,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
     return;
 
   int i, t;
-  T norm = size_average ? (ScalarConvert<int, T>::to(1) / *total_weight) : ScalarConvert<int, T>::to(1);
+  T norm = size_average ? (ScalarConvert<int, T>::to(1) / *total_weight)
+                        : ScalarConvert<int, T>::to(1);
 
   int sample = blockIdx.x / blocks_per_sample;
   int step = blockDim.x * blocks_per_sample;
@@ -164,13 +166,15 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
     t = (int)target[toffset + i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
+      gradInput[ioffset + i + map_nelem * t] =
+          -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm *
+          gradOutput[0];
     }
   }
 }
 
-#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
-
 #include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+
 #include <THC/THCGenerateBFloat16Type.h>
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>

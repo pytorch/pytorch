@@ -4,8 +4,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <type_traits>
 #include <atomic>
+#include <type_traits>
 
 // Implements instruction set specific function dispatch.
 //
@@ -43,7 +43,8 @@
 #pragma clang diagnostic ignored "-Wundefined-var-template"
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
@@ -69,77 +70,85 @@ struct DispatchStub;
  */
 struct TORCH_API DispatchStubImpl {
   void* get_call_ptr(
-    DeviceType device_type
-    , void *DEFAULT
+      DeviceType device_type,
+      void* DEFAULT
 #ifdef HAVE_AVX_CPU_DEFINITION
-      , void *AVX
+      ,
+      void* AVX
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-      , void *AVX2
+      ,
+      void* AVX2
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-      , void *VSX
+      ,
+      void* VSX
 #endif
   );
 
   /**
-   * The CPU Dispatch actual method is chosen in decreasing order of preference by
-   * DispatchStubImpl::choose_cpu_impl() in case none is found by
+   * The CPU Dispatch actual method is chosen in decreasing order of preference
+   * by DispatchStubImpl::choose_cpu_impl() in case none is found by
    * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
    */
   void* choose_cpu_impl(
-    void *DEFAULT
+      void* DEFAULT
 #ifdef HAVE_AVX_CPU_DEFINITION
-    , void *AVX
+      ,
+      void* AVX
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-    , void *AVX2
+      ,
+      void* AVX2
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-    , void *VSX
+      ,
+      void* VSX
 #endif
   );
 
-  // Fixing dispatch error in Windows debug builds.
-  // See https://github.com/pytorch/pytorch/issues/22681 for more details.
-  #if defined(_MSC_VER) && defined(_DEBUG)
-    std::atomic<void*> cpu_dispatch_ptr;
-    void* cuda_dispatch_ptr;
-    void* hip_dispatch_ptr;
-  #else
-    std::atomic<void*> cpu_dispatch_ptr{nullptr};
-    void* cuda_dispatch_ptr = nullptr;
-    void* hip_dispatch_ptr = nullptr;
-  #endif
+// Fixing dispatch error in Windows debug builds.
+// See https://github.com/pytorch/pytorch/issues/22681 for more details.
+#if defined(_MSC_VER) && defined(_DEBUG)
+  std::atomic<void*> cpu_dispatch_ptr;
+  void* cuda_dispatch_ptr;
+  void* hip_dispatch_ptr;
+#else
+  std::atomic<void*> cpu_dispatch_ptr{nullptr};
+  void* cuda_dispatch_ptr = nullptr;
+  void* hip_dispatch_ptr = nullptr;
+#endif
 };
 
 template <typename rT, typename T, typename... Args>
 struct DispatchStub<rT (*)(Args...), T> {
-  using FnPtr = rT (*) (Args...);
+  using FnPtr = rT (*)(Args...);
 
   DispatchStub() = default;
   DispatchStub(const DispatchStub&) = delete;
   DispatchStub& operator=(const DispatchStub&) = delete;
 
-private:
+ private:
   FnPtr get_call_ptr(DeviceType device_type) {
-    return reinterpret_cast<FnPtr>(
-      impl.get_call_ptr(device_type
-      , reinterpret_cast<void*>(DEFAULT)
+    return reinterpret_cast<FnPtr>(impl.get_call_ptr(
+        device_type,
+        reinterpret_cast<void*>(DEFAULT)
 #ifdef HAVE_AVX_CPU_DEFINITION
-      , reinterpret_cast<void*>(AVX)
+            ,
+        reinterpret_cast<void*>(AVX)
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-      , reinterpret_cast<void*>(AVX2)
+            ,
+        reinterpret_cast<void*>(AVX2)
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-      , reinterpret_cast<void*>(VSX)
+            ,
+        reinterpret_cast<void*>(VSX)
 #endif
-      )
-    );
+            ));
   }
 
-public:
+ public:
   template <typename... ArgTypes>
   rT operator()(DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);
@@ -164,7 +173,7 @@ public:
 #ifdef HAVE_VSX_CPU_DEFINITION
   static FnPtr VSX;
 #endif
-private:
+ private:
   DispatchStubImpl impl;
 };
 
@@ -201,7 +210,8 @@ struct RegisterHIPDispatch {
 #define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
+  template <>                                  \
+  decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
 
 #ifdef HAVE_AVX_CPU_DEFINITION
 #define REGISTER_AVX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX, fn)
@@ -221,17 +231,19 @@ struct RegisterHIPDispatch {
 #define REGISTER_VSX_DISPATCH(name, fn)
 #endif
 
-#define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
-  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
-  REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
+#define REGISTER_NO_CPU_DISPATCH(name, fn_type)                        \
+  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr)) \
+  REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))           \
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
   REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
-#define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
+#define REGISTER_CUDA_DISPATCH(name, fn)                                   \
+  static RegisterCUDADispatch<decltype(fn), struct name> name##__register( \
+      name, fn);
 
-#define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
+#define REGISTER_HIP_DISPATCH(name, fn)                                   \
+  static RegisterHIPDispatch<decltype(fn), struct name> name##__register( \
+      name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
@@ -243,12 +255,12 @@ struct RegisterHIPDispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
-#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define REGISTER_DISPATCH(name, fn) \
+  REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 
-
-}} // namespace at::native
-
+} // namespace native
+} // namespace at
 
 #if defined(__clang__)
 #pragma clang diagnostic pop

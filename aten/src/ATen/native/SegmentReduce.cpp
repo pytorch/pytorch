@@ -140,11 +140,7 @@ Tensor segment_reduce_kernel(
   const auto lengths_contig = lengths_value.contiguous();
 
   return _segment_reduce_stub(
-      data_contig.device().type(),
-      data_contig,
-      lengths_contig,
-      axis,
-      initial);
+      data_contig.device().type(), data_contig, lengths_contig, axis, initial);
 }
 
 REGISTER_ARCH_DISPATCH(

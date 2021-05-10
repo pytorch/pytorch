@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 
 #include <c10/core/Device.h>
@@ -995,3 +996,4 @@ inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_for
   }
 }
 } // namespace at
+// clang-format on

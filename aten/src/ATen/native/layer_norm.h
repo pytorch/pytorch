@@ -14,7 +14,6 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */) {
-
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,

@@ -10,7 +10,6 @@ namespace vec256 {
 
 namespace {
 
-
 template <>
 class Vec256<double> {
  private:
@@ -61,75 +60,77 @@ class Vec256<double> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 0, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 0, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      return a;
+    return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 1, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 1, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      return b;
+    return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 2, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 2, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      return { b._vec0, a._vec1 };
+    return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 3, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 3, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      return { a._vec0, b._vec1 };
+    return {a._vec0, b._vec1};
   }
 
-
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 4, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 4, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      return { (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1 };
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    return {(vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 5, Vec256<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 5, Vec256<double>>
+      C10_ALWAYS_INLINE
       blend(const Vec256<double>& a, const Vec256<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      return { (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1 };
-  }
-
-
-  template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 6,
-      Vec256<double>>
-      C10_ALWAYS_INLINE blend(const Vec256<double>& a, const Vec256<double>& b) {
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      // generated masks
-      return { a._vec0,
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    return {(vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 7,
-      Vec256<double>>
-      C10_ALWAYS_INLINE blend(const Vec256<double>& a, const Vec256<double>& b) {
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      // generated masks
-      return { b._vec0,
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+  static std::enable_if_t<blendChoiceDbl(mask) == 6, Vec256<double>>
+      C10_ALWAYS_INLINE
+      blend(const Vec256<double>& a, const Vec256<double>& b) {
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    // generated masks
+    return {a._vec0, (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
+  }
+
+  template <int64_t mask>
+  static std::enable_if_t<blendChoiceDbl(mask) == 7, Vec256<double>>
+      C10_ALWAYS_INLINE
+      blend(const Vec256<double>& a, const Vec256<double>& b) {
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    // generated masks
+    return {b._vec0, (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
   static std::enable_if_t<blendChoiceDbl(mask) == 8, Vec256<double>>
-      C10_ALWAYS_INLINE blend(const Vec256<double>& a, const Vec256<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      return {
-          (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st),
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+      C10_ALWAYS_INLINE
+      blend(const Vec256<double>& a, const Vec256<double>& b) {
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    return {
+        (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st),
+        (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
-
 
   static Vec256<double> C10_ALWAYS_INLINE blendv(
       const Vec256<double>& a,
@@ -188,15 +189,16 @@ class Vec256<double> {
   const double& operator[](int idx) const = delete;
   double& operator[](int idx) = delete;
   void dump() const {
-      std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << "," << _vec1[1] << std::endl;
+    std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << ","
+              << _vec1[1] << std::endl;
   }
   Vec256<double> map(double (*f)(double)) const {
     Vec256<double> ret;
-    for (int i = 0; i < size()/2; i++) {
-        ret._vec0[i] = f(_vec0[i]);
+    for (int i = 0; i < size() / 2; i++) {
+      ret._vec0[i] = f(_vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
-        ret._vec1[i] = f(_vec1[i]);
+    for (int i = 0; i < size() / 2; i++) {
+      ret._vec1[i] = f(_vec1[i]);
     }
     return ret;
   }
@@ -204,11 +206,11 @@ class Vec256<double> {
   Vec256<double> mapbi(double (*f)(double, double), const Vec256<double>& other)
       const {
     Vec256<double> ret;
-    for (int i = 0; i < size()/2; i++) {
-        ret._vec0[i] = f(_vec0[i], other._vec0[i]);
+    for (int i = 0; i < size() / 2; i++) {
+      ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {
-        ret._vec1[i] = f(_vec1[i], other._vec1[i]);
+    for (int i = 0; i < size() / 2; i++) {
+      ret._vec1[i] = f(_vec1[i], other._vec1[i]);
     }
     return ret;
   }
@@ -217,35 +219,39 @@ class Vec256<double> {
   }
 
   Vec256<double> C10_ALWAYS_INLINE acos() const {
-     return {Sleef_acosd2_u10vsx(_vec0), Sleef_acosd2_u10vsx(_vec1)};
+    return {Sleef_acosd2_u10vsx(_vec0), Sleef_acosd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE asin() const {
-     return {Sleef_asind2_u10vsx(_vec0), Sleef_asind2_u10vsx(_vec1)};
+    return {Sleef_asind2_u10vsx(_vec0), Sleef_asind2_u10vsx(_vec1)};
   }
   Vec256<double> atan() const {
-     return {Sleef_atand2_u10vsx(_vec0), Sleef_atand2_u10vsx(_vec1)};
+    return {Sleef_atand2_u10vsx(_vec0), Sleef_atand2_u10vsx(_vec1)};
   }
   Vec256<double> atan2(const Vec256<double>& b) const {
-     return {Sleef_atan2d2_u10vsx(_vec0, b._vec0), Sleef_atan2d2_u10vsx(_vec1, b._vec1)};
+    return {
+        Sleef_atan2d2_u10vsx(_vec0, b._vec0),
+        Sleef_atan2d2_u10vsx(_vec1, b._vec1)};
   }
-  Vec256<double> copysign(const Vec256<double> &sign) const {
-    return {Sleef_copysignd2_vsx(_vec0, sign._vec0), Sleef_copysignd2_vsx(_vec1, sign._vec1)};
+  Vec256<double> copysign(const Vec256<double>& sign) const {
+    return {
+        Sleef_copysignd2_vsx(_vec0, sign._vec0),
+        Sleef_copysignd2_vsx(_vec1, sign._vec1)};
   }
   Vec256<double> erf() const {
-     return {Sleef_erfd2_u10vsx(_vec0), Sleef_erfd2_u10vsx(_vec1)};
+    return {Sleef_erfd2_u10vsx(_vec0), Sleef_erfd2_u10vsx(_vec1)};
   }
   Vec256<double> erfc() const {
-     return {Sleef_erfcd2_u15vsx(_vec0), Sleef_erfcd2_u15vsx(_vec1)};
+    return {Sleef_erfcd2_u15vsx(_vec0), Sleef_erfcd2_u15vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE exp() const {
-     return {Sleef_expd2_u10vsx(_vec0), Sleef_expd2_u10vsx(_vec1)};
+    return {Sleef_expd2_u10vsx(_vec0), Sleef_expd2_u10vsx(_vec1)};
   }
   Vec256<double> expm1() const {
-     return {Sleef_expm1d2_u10vsx(_vec0), Sleef_expm1d2_u10vsx(_vec1)};
+    return {Sleef_expm1d2_u10vsx(_vec0), Sleef_expm1d2_u10vsx(_vec1)};
   }
 
   Vec256<double> lgamma() const __ubsan_ignore_undefined__ {
-     return {Sleef_lgammad2_u10vsx(_vec0), Sleef_lgammad2_u10vsx(_vec1)};
+    return {Sleef_lgammad2_u10vsx(_vec0), Sleef_lgammad2_u10vsx(_vec1)};
   }
 
   Vec256<double> erfinv() const {
@@ -266,25 +272,25 @@ class Vec256<double> {
   }
 
   Vec256<double> C10_ALWAYS_INLINE log() const {
-     return {Sleef_logd2_u10vsx(_vec0), Sleef_logd2_u10vsx(_vec1)};
+    return {Sleef_logd2_u10vsx(_vec0), Sleef_logd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE log10() const {
-     return {Sleef_log10d2_u10vsx(_vec0), Sleef_log10d2_u10vsx(_vec1)};
+    return {Sleef_log10d2_u10vsx(_vec0), Sleef_log10d2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE log1p() const {
-     return {Sleef_log1pd2_u10vsx(_vec0), Sleef_log1pd2_u10vsx(_vec1)};
+    return {Sleef_log1pd2_u10vsx(_vec0), Sleef_log1pd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE log2() const {
-     return {Sleef_log2d2_u10vsx(_vec0), Sleef_log2d2_u10vsx(_vec1)};
+    return {Sleef_log2d2_u10vsx(_vec0), Sleef_log2d2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE cos() const {
-     return {Sleef_cosd2_u10vsx(_vec0), Sleef_cosd2_u10vsx(_vec1)};
+    return {Sleef_cosd2_u10vsx(_vec0), Sleef_cosd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE cosh() const {
-     return {Sleef_coshd2_u10vsx(_vec0), Sleef_coshd2_u10vsx(_vec1)};
+    return {Sleef_coshd2_u10vsx(_vec0), Sleef_coshd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -296,16 +302,16 @@ class Vec256<double> {
     return {vec_rint(_vec0), vec_rint(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE sin() const {
-     return {Sleef_sind2_u10vsx(_vec0), Sleef_sind2_u10vsx(_vec1)};
+    return {Sleef_sind2_u10vsx(_vec0), Sleef_sind2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE sinh() const {
-     return {Sleef_sinhd2_u10vsx(_vec0), Sleef_sinhd2_u10vsx(_vec1)};
+    return {Sleef_sinhd2_u10vsx(_vec0), Sleef_sinhd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE tan() const {
-     return {Sleef_tand2_u10vsx(_vec0), Sleef_tand2_u10vsx(_vec1)};
+    return {Sleef_tand2_u10vsx(_vec0), Sleef_tand2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE tanh() const {
-     return {Sleef_tanhd2_u10vsx(_vec0), Sleef_tanhd2_u10vsx(_vec1)};
+    return {Sleef_tanhd2_u10vsx(_vec0), Sleef_tanhd2_u10vsx(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE trunc() const {
     return {vec_trunc(_vec0), vec_trunc(_vec1)};
@@ -328,18 +334,23 @@ class Vec256<double> {
   }
 
   Vec256<double> C10_ALWAYS_INLINE pow(const Vec256<double>& b) const {
-     return {Sleef_powd2_u10vsx(_vec0, b._vec0), Sleef_powd2_u10vsx(_vec1, b._vec1)};
+    return {
+        Sleef_powd2_u10vsx(_vec0, b._vec0), Sleef_powd2_u10vsx(_vec1, b._vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE fmod(const Vec256<double>& b) const {
-     return {Sleef_fmodd2_vsx(_vec0, b._vec0),Sleef_fmodd2_vsx(_vec1, b._vec1)};
+    return {Sleef_fmodd2_vsx(_vec0, b._vec0), Sleef_fmodd2_vsx(_vec1, b._vec1)};
   }
 
   Vec256<double> hypot(const Vec256<double>& b) const {
-     return {Sleef_hypotd2_u05vsx(_vec0, b._vec0), Sleef_hypotd2_u05vsx(_vec1, b._vec1)};
+    return {
+        Sleef_hypotd2_u05vsx(_vec0, b._vec0),
+        Sleef_hypotd2_u05vsx(_vec1, b._vec1)};
   }
 
   Vec256<double> nextafter(const Vec256<double>& b) const {
-     return {Sleef_nextafterd2_vsx(_vec0, b._vec0), Sleef_nextafterd2_vsx(_vec1, b._vec1)};
+    return {
+        Sleef_nextafterd2_vsx(_vec0, b._vec0),
+        Sleef_nextafterd2_vsx(_vec1, b._vec1)};
   }
 
   Vec256<double> igamma(const Vec256<double>& x) const {
@@ -349,7 +360,6 @@ class Vec256<double> {
   Vec256<double> igammac(const Vec256<double>& x) const {
     return mapbi(calc_igammac, x);
   }
-
 
   Vec256<double> i0() const {
     return map(calc_i0);

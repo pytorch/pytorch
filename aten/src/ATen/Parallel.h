@@ -36,7 +36,7 @@ inline TORCH_API void lazy_init_num_threads() {
   }
 }
 
-}
+} // namespace internal
 
 /*
 parallel_for

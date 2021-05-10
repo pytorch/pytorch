@@ -113,5 +113,6 @@ TEST(Vitals, APIVitals) {
 
   auto s = buffer.str();
   ASSERT_TRUE(rvalue);
-  ASSERT_TRUE(s.find("TestingSetVital.TestAttr\t\t TestValue") != std::string::npos);
+  ASSERT_TRUE(
+      s.find("TestingSetVital.TestAttr\t\t TestValue") != std::string::npos);
 }

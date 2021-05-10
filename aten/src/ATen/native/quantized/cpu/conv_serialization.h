@@ -43,18 +43,17 @@
 
 // version 2
 using ConvParamsSerializationType = std::tuple<
-  // version, for versions 2 and up
-  std::string,
-  // non-optional tensors
-  std::vector<at::Tensor>,
-  // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
+    // version, for versions 2 and up
+    std::string,
+    // non-optional tensors
+    std::vector<at::Tensor>,
+    // optional tensors
+    std::vector<c10::optional<at::Tensor>>>;
 
 // Parses any historical conv packed params format into
 // the current format.
 template <uint32_t kSpatialDim>
 ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
-
   // determine the version based on IValue contents
   int version = -1;
   if (v.isTuple()) {
@@ -114,10 +113,12 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     // transpose does not exist in v1, so we fill in a default value
     params_vec.push_back(0);
     int64_t vec_size = params_vec.size();
-    at::Tensor params_tensor = at::from_blob(params_vec.data(),
-        {vec_size}, at::TensorOptions().dtype(at::kShort))
-      // clone to retain ownership of the data
-      .clone();
+    at::Tensor params_tensor = at::from_blob(
+                                   params_vec.data(),
+                                   {vec_size},
+                                   at::TensorOptions().dtype(at::kShort))
+                                   // clone to retain ownership of the data
+                                   .clone();
 
     non_optional.emplace_back(std::move(params_tensor));
     non_optional.emplace_back(std::move(weight));
@@ -136,22 +137,22 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
       }
     } else {
       for (const auto& elem : elements[2].toList()) {
-        optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
+        optional.emplace_back(
+            static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
       }
     }
 
     std::string version = "2";
     return std::tie(version, non_optional, optional);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
-        version);
+    TORCH_INTERNAL_ASSERT(
+        false, "Unexpected serialized qconv version: ", version);
   }
 }
 
 template <uint32_t kSpatialDim>
 ConvParamsSerializationType serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
-
   std::string version = "2";
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
@@ -166,16 +167,16 @@ ConvParamsSerializationType serialize_conv(
   auto dilation = params->dilation().vec();
   params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
   auto output_padding = params->output_padding().vec();
-  params_vec.insert(params_vec.end(), output_padding.begin(),
-                    output_padding.end());
+  params_vec.insert(
+      params_vec.end(), output_padding.begin(), output_padding.end());
   params_vec.push_back(params->groups());
   params_vec.push_back(params->transpose());
   int64_t vec_size = params_vec.size();
-  at::Tensor params_tensor = at::from_blob(
-      params_vec.data(), {vec_size},
-      at::TensorOptions().dtype(at::kShort))
-    // clone to retain ownership of the data
-    .clone();
+  at::Tensor params_tensor =
+      at::from_blob(
+          params_vec.data(), {vec_size}, at::TensorOptions().dtype(at::kShort))
+          // clone to retain ownership of the data
+          .clone();
 
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
@@ -191,14 +192,13 @@ ConvParamsSerializationType serialize_conv(
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     ConvParamsSerializationType state) {
-
   std::string version;
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
 
   std::tie(version, non_optional, optional) = state;
-  TORCH_INTERNAL_ASSERT(version == "2", "Unexpected serialized qconv version: ",
-      version);
+  TORCH_INTERNAL_ASSERT(
+      version == "2", "Unexpected serialized qconv version: ", version);
 
   at::Tensor conv_params_packed = non_optional[0];
   at::Tensor weight = non_optional[1];
@@ -228,7 +228,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   bool transpose = conv_params_packed[idx].item<bool>();
   idx++;
-  TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
+  TORCH_INTERNAL_ASSERT(
+      idx == conv_params_packed.numel(),
       "Unexpected length of conv_params_packed, expected ",
       idx,
       " got ",
@@ -239,15 +240,14 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
     return PackedConvWeight<kSpatialDim>::prepack(
-      weight,
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
+        weight,
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose);
   }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
@@ -257,19 +257,18 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         "prepack/__setstate__: QNNPACK only supports Conv2d "
         "now.");
     return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-      weight,
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
+        weight,
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose);
   }
 #endif // USE_PYTORCH_QNNPACK
-TORCH_CHECK(
-  false,
-  "Didn't find engine for when deserializing ConvPackedParams: ",
-  toString(ctx.qEngine()));
+  TORCH_CHECK(
+      false,
+      "Didn't find engine for when deserializing ConvPackedParams: ",
+      toString(ctx.qEngine()));
 }

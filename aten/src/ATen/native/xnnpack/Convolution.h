@@ -12,28 +12,27 @@ namespace xnnpack {
 namespace internal {
 namespace convolution2d {
 
-c10::intrusive_ptr<xnnpack::Conv2dOpContext>
-    createConv2dClampPrePackOpContext(
-        Tensor weight,
-        c10::optional<Tensor> bias,
-        std::vector<int64_t> stride,
-        std::vector<int64_t> padding,
-        std::vector<int64_t> dilation,
-        int64_t groups,
-        const c10::optional<Scalar>& output_min,
-        const c10::optional<Scalar>& output_max);
+c10::intrusive_ptr<xnnpack::Conv2dOpContext> createConv2dClampPrePackOpContext(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation,
+    int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
-    createConv2dTransposeClampPrePackOpContext(
-        Tensor weight,
-        c10::optional<Tensor> bias,
-        std::vector<int64_t> stride,
-        std::vector<int64_t> padding,
-        std::vector<int64_t> output_padding,
-        std::vector<int64_t> dilation,
-        int64_t groups,
-        const c10::optional<Scalar>& output_min,
-        const c10::optional<Scalar>& output_max);
+createConv2dTransposeClampPrePackOpContext(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> output_padding,
+    std::vector<int64_t> dilation,
+    int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 Tensor conv2d_clamp_run(
     const Tensor& input,

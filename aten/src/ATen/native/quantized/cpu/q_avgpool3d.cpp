@@ -34,17 +34,21 @@ inline std::tuple<int, int, int> get_kernel(IntArrayRef kernel_size) {
   return std::make_tuple(kW, kH, kD);
 }
 
-inline std::tuple<int, int, int> get_stride(IntArrayRef stride, int kW, int kH, int kD) {
+inline std::tuple<int, int, int> get_stride(
+    IntArrayRef stride,
+    int kW,
+    int kH,
+    int kD) {
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 3,
       "avg_pool3d: stride must either be omitted, a single int, or a tuple of three ints");
   const int dD = stride.empty() ? kD : safe_downcast<int, int64_t>(stride[0]);
-  const int dH = stride.empty()
-      ? kH
-      : stride.size() == 1 ? dD : safe_downcast<int, int64_t>(stride[1]);
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dD : safe_downcast<int, int64_t>(stride[2]);
+  const int dH = stride.empty() ? kH
+      : stride.size() == 1      ? dD
+                                : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dD
+                                : safe_downcast<int, int64_t>(stride[2]);
   return std::make_tuple(dW, dH, dD);
 }
 
@@ -114,8 +118,8 @@ Tensor q_avg_pool3d(
       !divisor_override.has_value() || divisor_override.value() != 0,
       "divisor must be not zero");
 
-  auto output_shape =
-      get_output_shape(input, kW, kH, kD, dW, dH, dD, padW, padH, padD, ceil_mode);
+  auto output_shape = get_output_shape(
+      input, kW, kH, kD, dW, dH, dD, padW, padH, padD, ceil_mode);
   const int64_t outputDepth = output_shape[output_shape.size() - 3];
   const int64_t outputHeight = output_shape[output_shape.size() - 2];
   const int64_t outputWidth = output_shape[output_shape.size() - 1];
@@ -196,16 +200,17 @@ Tensor avg_pool3d_quantized_cpu(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
-    output = q_avg_pool3d<scalar_t>(
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override);
-  });
+  AT_DISPATCH_QINT_TYPES(
+      input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
+        output = q_avg_pool3d<scalar_t>(
+            input,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override);
+      });
   return output;
 }
 

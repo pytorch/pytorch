@@ -24,11 +24,12 @@
 #include "test_utils.h"
 using namespace qnnpack::testing;
 
-pytorch_qnnp_operator_t create_deconvolution_op(const qnnpack::conv_param_t& conv_p,
+pytorch_qnnp_operator_t create_deconvolution_op(
+    const qnnpack::conv_param_t& conv_p,
     const uint8_t input_zero_point) {
   pytorch_qnnp_operator_t deconvolution = nullptr;
-  deconvolution =
-      static_cast<pytorch_qnnp_operator_t>(calloc(1, sizeof(struct pytorch_qnnp_operator)));
+  deconvolution = static_cast<pytorch_qnnp_operator_t>(
+      calloc(1, sizeof(struct pytorch_qnnp_operator)));
   if (deconvolution == nullptr) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
@@ -69,7 +70,7 @@ pytorch_qnnp_operator_t create_deconvolution_op(const qnnpack::conv_param_t& con
   memset(zero_buffer, input_zero_point, zero_size);
 
   deconvolution->zero_buffer = zero_buffer;
-  deconvolution->zero_pointer = (void*) ((uintptr_t) zero_buffer + zero_offset);
+  deconvolution->zero_pointer = (void*)((uintptr_t)zero_buffer + zero_offset);
 
   return deconvolution;
 }
@@ -466,17 +467,16 @@ class DeconvolutionOperatorTester {
     const uint8_t inputZeroPoint = 127;
     // Make num zero points multiple of 8.
     // This is the least common denominator for SSE/ARM kernels we have.
-    size_t num_zero_points_padded =
-      groups() * groupOutputChannels() + 8;
+    size_t num_zero_points_padded = groups() * groupOutputChannels() + 8;
     std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
-
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       if (per_channel()) {
-        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+        std::generate(
+            kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
       }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
@@ -533,7 +533,8 @@ class DeconvolutionOperatorTester {
                                              kx) *
                                                 groupOutputChannels() +
                                             oc]) -
-                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
+                               int32_t(kernelZeroPoints
+                                           [g * groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -566,19 +567,20 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
-      auto f32rng =
-          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
       if (per_channel()) {
-        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        auto scale_generator = [&]() -> float {
+          return (f32rng() / outputScale);
+        };
         std::generate(
             requantization_scales.begin(),
             requantization_scales.end(),
             std::ref(scale_generator));
       }
-      switch(mode) {
-        case Mode::Static:
-        {
+      switch (mode) {
+        case Mode::Static: {
           pytorch_qnnp_operator_t deconvolution = nullptr;
 
           ASSERT_EQ(
@@ -625,28 +627,27 @@ class DeconvolutionOperatorTester {
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
-              pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
+              pytorch_qnnp_run_operator(
+                  deconvolution, nullptr /* thread pool */));
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_delete_operator(deconvolution));
           deconvolution = nullptr;
-        }
-        break;
+        } break;
 
-        case Mode::Runtime:
-        {
+        case Mode::Runtime: {
           qnnpack::conv_param_t deconv_p(
-            {kernelWidth(), kernelHeight()},
-            {strideWidth(), strideHeight()},
-            {dilationWidth(), dilationHeight()},
-            {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
-            {adjustmentWidth(), adjustmentHeight()},
-            groups(),
-            groupInputChannels() * groups(),
-            groupOutputChannels() * groups(),
-            /*transpose=*/true,
-            per_channel());
+              {kernelWidth(), kernelHeight()},
+              {strideWidth(), strideHeight()},
+              {dilationWidth(), dilationHeight()},
+              {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+              {adjustmentWidth(), adjustmentHeight()},
+              groups(),
+              groupInputChannels() * groups(),
+              groupOutputChannels() * groups(),
+              /*transpose=*/true,
+              per_channel());
           auto deconv_op = create_deconvolution_op(deconv_p, inputZeroPoint);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
@@ -671,8 +672,7 @@ class DeconvolutionOperatorTester {
               output.data(),
               nullptr);
           ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
-        }
-        break;
+        } break;
 
         default:
           ASSERT_TRUE(false);
@@ -690,7 +690,7 @@ class DeconvolutionOperatorTester {
                           g) *
                              groupOutputChannels() +
                          c] *
-                         requantization_scales[g * groupOutputChannels() + c];
+                    requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,

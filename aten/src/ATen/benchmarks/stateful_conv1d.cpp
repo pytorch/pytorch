@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
-#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
 #include <vector>
 
@@ -14,13 +14,25 @@ static void stateful_conv1d(benchmark::State& state) {
   const bool optimized = static_cast<bool>(state.range(5));
 
   torch::jit::Module m("m");
-  m.register_parameter("weight_1", torch::rand({output_channels, input_channels, kernel}), false);
+  m.register_parameter(
+      "weight_1",
+      torch::rand({output_channels, input_channels, kernel}),
+      false);
   m.register_parameter("bias_1", torch::rand({output_channels}), false);
-  m.register_parameter("weight_2", torch::rand({output_channels, output_channels, kernel}), false);
+  m.register_parameter(
+      "weight_2",
+      torch::rand({output_channels, output_channels, kernel}),
+      false);
   m.register_parameter("bias_2", torch::rand({output_channels}), false);
-  m.register_parameter("weight_3", torch::rand({output_channels, output_channels, kernel}), false);
+  m.register_parameter(
+      "weight_3",
+      torch::rand({output_channels, output_channels, kernel}),
+      false);
   m.register_parameter("bias_3", torch::rand({output_channels}), false);
-  m.register_parameter("weight_4", torch::rand({output_channels, output_channels, kernel}), false);
+  m.register_parameter(
+      "weight_4",
+      torch::rand({output_channels, output_channels, kernel}),
+      false);
   m.register_parameter("bias_4", torch::rand({output_channels}), false);
 
   m.define(R"(
@@ -61,20 +73,34 @@ static void stateful_conv1d(benchmark::State& state) {
 }
 
 static void GenerateSizes(benchmark::internal::Benchmark* b) {
-  b->ArgNames({"Input Channels",
-               "Output Channels",
-               "Kernel",
-               "Batch Size",
-               "Width",
-               "Optimized"});
+  b->ArgNames(
+      {"Input Channels",
+       "Output Channels",
+       "Kernel",
+       "Batch Size",
+       "Width",
+       "Optimized"});
 
   for (size_t input_channels = 32; input_channels < 256; input_channels *= 2) {
-    for (size_t output_channels = 32; output_channels < 256; output_channels *= 2) {
+    for (size_t output_channels = 32; output_channels < 256;
+         output_channels *= 2) {
       for (size_t kernel = 3; kernel < 8; ++kernel) {
         for (size_t batch_size = 1; batch_size < 5; ++batch_size) {
           for (size_t width = 32; width < 256; width *= 2) {
-            b->Args({input_channels, output_channels, kernel, batch_size, width, true});
-            b->Args({input_channels, output_channels, kernel, batch_size, width, false});
+            b->Args(
+                {input_channels,
+                 output_channels,
+                 kernel,
+                 batch_size,
+                 width,
+                 true});
+            b->Args(
+                {input_channels,
+                 output_channels,
+                 kernel,
+                 batch_size,
+                 width,
+                 false});
           }
         }
       }

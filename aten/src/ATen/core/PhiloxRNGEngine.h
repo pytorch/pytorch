@@ -60,17 +60,17 @@ typedef at::detail::Array<float, 2> FLOAT2;
  * subsequence: Subsequence is just the cuda thread indexing with:
  *              - blockIdx.x * blockDim.x + threadIdx.x
  * offset:      The offset variable in PhiloxEngine  decides how many 128-bit
- *              random numbers to skip (i.e. how many groups of 4, 32-bit numbers to skip)
- *              and hence really decides the total number of randoms that can be achieved
- *              for the given subsequence.
+ *              random numbers to skip (i.e. how many groups of 4, 32-bit
+ * numbers to skip) and hence really decides the total number of randoms that
+ * can be achieved for the given subsequence.
  */
 
 class philox_engine {
-public:
-
-  C10_HOST_DEVICE inline explicit philox_engine(uint64_t seed = 67280421310721,
-                                 uint64_t subsequence = 0,
-                                 uint64_t offset = 0) {
+ public:
+  C10_HOST_DEVICE inline explicit philox_engine(
+      uint64_t seed = 67280421310721,
+      uint64_t subsequence = 0,
+      uint64_t offset = 0) {
     key[0] = static_cast<uint32_t>(seed);
     key[1] = static_cast<uint32_t>(seed >> 32);
     counter = detail::UINT4(0);
@@ -84,28 +84,37 @@ public:
    * Produces a unique 32-bit pseudo random number on every invocation
    */
   C10_HOST_DEVICE inline uint32_t operator()() {
-    if(STATE == 0) {
+    if (STATE == 0) {
       detail::UINT4 counter_ = counter;
       detail::UINT2 key_ = key;
 
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      key_[0] += (kPhilox10A);
+      key_[1] += (kPhilox10B);
 
       output = single_round(counter_, key_);
       incr();
@@ -129,7 +138,7 @@ public:
       // propagate that overflow to y and exit to increment z
       // otherwise return
       counter[1] += nhi;
-      if(nhi != 0) {
+      if (nhi != 0) {
         if (nhi <= counter[1]) {
           return;
         }
@@ -162,25 +171,29 @@ public:
     ++counter[3];
   }
 
-private:
+ private:
   detail::UINT4 counter;
   detail::UINT4 output;
   detail::UINT2 key;
   uint32_t STATE;
 
-  C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
-                                    uint32_t *result_high) {
-    #ifdef __CUDA_ARCH__
-      *result_high = __umulhi(a, b);
-      return a*b;
-    #else
-      const uint64_t product = static_cast<uint64_t>(a) * b;
-      *result_high = static_cast<uint32_t>(product >> 32);
-      return static_cast<uint32_t>(product);
-    #endif
+  C10_HOST_DEVICE inline uint32_t mulhilo32(
+      uint32_t a,
+      uint32_t b,
+      uint32_t* result_high) {
+#ifdef __CUDA_ARCH__
+    *result_high = __umulhi(a, b);
+    return a * b;
+#else
+    const uint64_t product = static_cast<uint64_t>(a) * b;
+    *result_high = static_cast<uint32_t>(product >> 32);
+    return static_cast<uint32_t>(product);
+#endif
   }
 
-  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
+  C10_HOST_DEVICE inline detail::UINT4 single_round(
+      detail::UINT4 ctr,
+      detail::UINT2 in_key) {
     uint32_t hi0;
     uint32_t hi1;
     uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);

@@ -1,5 +1,5 @@
-// No "#pragma once" because this is a raw definition that can be copied by jit codegen.
-// Eager mode clients should not include this file directly, instead,
+// No "#pragma once" because this is a raw definition that can be copied by jit
+// codegen. Eager mode clients should not include this file directly, instead,
 // they should #include <ATen/CUDAGeneratorImpl.h>, which has a #pragma once.
 
 // Stores RNG state values. Passed as a kernel argument.
@@ -11,15 +11,15 @@ namespace at {
 struct PhiloxCudaState {
   PhiloxCudaState() = default;
   // Called if graph capture is not underway
-  PhiloxCudaState(uint64_t seed,
-                  uint64_t offset) {
+  PhiloxCudaState(uint64_t seed, uint64_t offset) {
     seed_ = seed;
     offset_.val = offset;
   }
   // Called if graph capture is underway
-  PhiloxCudaState(uint64_t seed,
-                  int64_t* offset_extragraph,
-                  uint32_t offset_intragraph) {
+  PhiloxCudaState(
+      uint64_t seed,
+      int64_t* offset_extragraph,
+      uint32_t offset_intragraph) {
     seed_ = seed;
     offset_.ptr = offset_extragraph;
     offset_intragraph_ = offset_intragraph;

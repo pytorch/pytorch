@@ -4,9 +4,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+using at::Dimname;
 using at::NameType;
 using at::Symbol;
-using at::Dimname;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, isValidIdentifier) {

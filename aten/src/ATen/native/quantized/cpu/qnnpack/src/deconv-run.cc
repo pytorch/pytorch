@@ -1,10 +1,10 @@
 #include <conv_utils.h>
 #include <pytorch_qnnpack.h>
-#include <qnnpack_func.h>
 #include <qnnpack/indirection.h>
 #include <qnnpack/log.h>
 #include <qnnpack/math.h>
 #include <qnnpack/params.h>
+#include <qnnpack_func.h>
 
 #include <cstring>
 #include <memory>
@@ -88,7 +88,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
     const uint8_t output_max,
     uint8_t* output,
     pthreadpool_t threadpool) {
-
   if (batch_size == 0) {
     // Doesn't matter what's going on, if no batches, return
     return pytorch_qnnp_status_success;
@@ -108,7 +107,8 @@ enum pytorch_qnnp_status qnnpackDeConv(
 
   // deconvolution->kernel_zero_point = deconv_p.kernel_zero_points;
   // const float kernel_scale = deconv_p.kernel_scale;
-  // const float deconvolution_scale = input_scale * kernel_scale / output_scale;
+  // const float deconvolution_scale = input_scale * kernel_scale /
+  // output_scale;
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
@@ -184,4 +184,4 @@ enum pytorch_qnnp_status qnnpackDeConv(
       nr);
   return pytorch_qnnp_status_success;
 }
-}  // namespace qnnpack
+} // namespace qnnpack

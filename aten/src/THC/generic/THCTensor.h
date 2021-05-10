@@ -4,20 +4,20 @@
 
 #define THCTensor THTensor
 
-// These used to be distinct types; for some measure of backwards compatibility and documentation
-// alias these to the single THCTensor type.
-#define THCudaTensor                THCTensor
-#define THCudaDoubleTensor          THCTensor
-#define THCudaHalfTensor            THCTensor
-#define THCudaByteTensor            THCTensor
-#define THCudaCharTensor            THCTensor
-#define THCudaShortTensor           THCTensor
-#define THCudaIntTensor             THCTensor
-#define THCudaLongTensor            THCTensor
-#define THCudaBoolTensor            THCTensor
-#define THCudaBFloat16Tensor        THCTensor
-#define THCudaComplexFloatTensor    THCTensor
-#define THCudaComplexDoubleTensor   THCTensor
+// These used to be distinct types; for some measure of backwards compatibility
+// and documentation alias these to the single THCTensor type.
+#define THCudaTensor THCTensor
+#define THCudaDoubleTensor THCTensor
+#define THCudaHalfTensor THCTensor
+#define THCudaByteTensor THCTensor
+#define THCudaCharTensor THCTensor
+#define THCudaShortTensor THCTensor
+#define THCudaIntTensor THCTensor
+#define THCudaLongTensor THCTensor
+#define THCudaBoolTensor THCTensor
+#define THCudaBFloat16Tensor THCTensor
+#define THCudaComplexFloatTensor THCTensor
+#define THCudaComplexDoubleTensor THCTensor
 
 /**** access methods ****/
 TORCH_CUDA_CU_API THCStorage* THCTensor_(
@@ -87,9 +87,10 @@ TORCH_CUDA_CU_API THCTensor* THCTensor_(newTranspose)(
 TORCH_CUDA_CU_API THCTensor* THCTensor_(
     newFoldBatchDim)(THCState* state, THCTensor* input);
 
-// resize* methods simply resize the storage. So they may not retain the current data at current indices.
-// This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
-// values, unless you are doing some size and stride tricks, do not use resize*.
+// resize* methods simply resize the storage. So they may not retain the current
+// data at current indices. This is especially likely to happen when the tensor
+// is not contiguous. In general, if you still need the values, unless you are
+// doing some size and stride tricks, do not use resize*.
 TORCH_CUDA_CU_API void THCTensor_(resizeNd)(
     THCState* state,
     THCTensor* tensor,

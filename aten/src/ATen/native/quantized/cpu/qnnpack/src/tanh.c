@@ -69,7 +69,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
 
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  if (output_scale != 0x2.0p-8f) {  // [-1, 1] range in 8 bits = 2.0 / 256
+  if (output_scale != 0x2.0p-8f) { // [-1, 1] range in 8 bits = 2.0 / 256
     pytorch_qnnp_log_error(
         "failed to create TanH operator with %.7g output scale: only output scale of 2/256 is supported",
         output_scale);

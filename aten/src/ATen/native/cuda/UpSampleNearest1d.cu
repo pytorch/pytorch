@@ -31,7 +31,8 @@ __global__ void upsample_nearest1d_out_frame(
   int c = (dst_idx / dst_dim_w) % dim_c;
 
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x =
+      nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
   int src_idx = c * src_dim_w + src_x;
   int src_stride = dim_c * src_dim_w;
@@ -56,7 +57,6 @@ __global__ void upsample_nearest1d_backward_out_frame(
     size_t dst_dim_w,
     scalar_t* grad_i,
     float scale_factor) {
-
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
@@ -66,8 +66,10 @@ __global__ void upsample_nearest1d_backward_out_frame(
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_x = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x+1, src_dim_w);
+  int src_x =
+      nearest_neighbor_bw_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(
+      scale_factor, dst_x + 1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -109,16 +111,28 @@ static void upsample_nearest1d_out_cuda_template(
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::Byte,
+      input.scalar_type(),
+      "upsample_nearest1d_out_frame",
+      [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.data_ptr<scalar_t>();
         auto odata = output.data_ptr<scalar_t>();
 
-        const float scale_factor = compute_scales_value<float>(scales, input_width, output_width);
+        const float scale_factor =
+            compute_scales_value<float>(scales, input_width, output_width);
 
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
-            idata, nbatch, channels, input_width, output_width, odata, scale_factor);
+            idata,
+            nbatch,
+            channels,
+            input_width,
+            output_width,
+            odata,
+            scale_factor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
@@ -156,39 +170,49 @@ static void upsample_nearest1d_backward_out_cuda_template(
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::Byte,
+      grad_output.scalar_type(),
+      "upsample_nearest1d_backward_out_frame",
+      [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.data_ptr<scalar_t>();
         auto odata = grad_output.data_ptr<scalar_t>();
 
-        const float scale_factor = compute_scales_value_backwards<float>(scales, output_width, input_width);
+        const float scale_factor = compute_scales_value_backwards<float>(
+            scales, output_width, input_width);
 
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
-                odata, nbatch, channels, output_width, input_width, idata, scale_factor);
+                odata,
+                nbatch,
+                channels,
+                output_width,
+                input_width,
+                idata,
+                scale_factor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 } // namespace
 
-TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
-    const Tensor& input,
-    IntArrayRef output_size,
-    c10::optional<double> scales,
-    const Tensor& output
-) {
+TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda)
+(const Tensor& input,
+ IntArrayRef output_size,
+ c10::optional<double> scales,
+ const Tensor& output) {
   upsample_nearest1d_out_cuda_template(output, input, output_size, scales);
 }
 
-TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales,
-    const Tensor& grad_input
-) {
+TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ c10::optional<double> scales,
+ const Tensor& grad_input) {
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
 }

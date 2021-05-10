@@ -2,7 +2,8 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/cpu/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec256/vsx/vec256_complex_double_vsx.h>
+#include <ATen/cpu/vec256/vsx/vec256_complex_float_vsx.h>
 #include <ATen/cpu/vec256/vsx/vec256_double_vsx.h>
 #include <ATen/cpu/vec256/vsx/vec256_float_vsx.h>
 #include <ATen/cpu/vec256/vsx/vec256_int16_vsx.h>
@@ -11,8 +12,7 @@
 #include <ATen/cpu/vec256/vsx/vec256_qint32_vsx.h>
 #include <ATen/cpu/vec256/vsx/vec256_qint8_vsx.h>
 #include <ATen/cpu/vec256/vsx/vec256_quint8_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_complex_float_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_complex_double_vsx.h>
+#include <ATen/cpu/vec256/vsx/vsx_helpers.h>
 namespace at {
 namespace vec256 {
 
@@ -76,8 +76,7 @@ convert_to_int_of_same_size<double>(const Vec256<double>& src) {
 
 template <>
 Vec256<int32_t> C10_ALWAYS_INLINE
-convert_to_int_of_same_size<float>(
-    const Vec256<float>& src) {
+convert_to_int_of_same_size<float>(const Vec256<float>& src) {
   return Vec256<int32_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
 }
 
@@ -88,7 +87,8 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
   for (i = 0; i <= (n - Vec256<float>::size()); i += Vec256<float>::size()) {
     const int32_t* src_a = src + i;
     float* dst_a = dst + i;
-    vint32 input_vec0 = vec_vsx_ld(offset0, reinterpret_cast<const vint32*>(src_a));
+    vint32 input_vec0 =
+        vec_vsx_ld(offset0, reinterpret_cast<const vint32*>(src_a));
     vint32 input_vec1 =
         vec_vsx_ld(offset16, reinterpret_cast<const vint32*>(src_a));
     vfloat32 c0 = vec_float(input_vec0);

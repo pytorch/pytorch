@@ -15,16 +15,16 @@
    en template, faudrait que je les instancie toutes!!! oh boy!
    Et comment je sais que c'est pour Cuda? Le type float est le meme dans les <>
 
-   au bout du compte, ca serait sur des pointeurs float/double... etc... = facile.
-   primitives??
+   au bout du compte, ca serait sur des pointeurs float/double... etc... =
+   facile. primitives??
  */
 
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
 
 #define THStorage at::StorageImpl
 
-// These used to be distinct types; for some measure of backwards compatibility and documentation
-// alias these to the single THStorage type.
+// These used to be distinct types; for some measure of backwards compatibility
+// and documentation alias these to the single THStorage type.
 #define THFloatStorage THStorage
 #define THDoubleStorage THStorage
 #define THHalfStorage THStorage
@@ -52,22 +52,25 @@ TH_API scalar_t THStorage_(get)(const THStorage*, ptrdiff_t);
 TH_API THStorage* THStorage_(new)(void);
 TH_API THStorage* THStorage_(newWithSize)(ptrdiff_t size);
 TH_API THStorage* THStorage_(newWithSize1)(scalar_t);
-TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
+TH_API THStorage* THStorage_(
+    newWithMapping)(const char* filename, ptrdiff_t size, int flags);
 
-TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
-                                               c10::Allocator* allocator);
+TH_API THStorage* THStorage_(
+    newWithAllocator)(ptrdiff_t size, c10::Allocator* allocator);
 TH_API THStorage* THStorage_(newWithDataAndAllocator)(
-    at::DataPtr&& data, ptrdiff_t size, at::Allocator* allocator);
+    at::DataPtr&& data,
+    ptrdiff_t size,
+    at::Allocator* allocator);
 
 /* should not differ with API */
-TH_API void THStorage_(setFlag)(THStorage *storage, const char flag);
-TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
-TH_API void THStorage_(retain)(THStorage *storage);
-TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
+TH_API void THStorage_(setFlag)(THStorage* storage, const char flag);
+TH_API void THStorage_(clearFlag)(THStorage* storage, const char flag);
+TH_API void THStorage_(retain)(THStorage* storage);
+TH_API void THStorage_(swap)(THStorage* storage1, THStorage* storage2);
 
 /* might differ with other API (like CUDA) */
-TH_API void THStorage_(free)(THStorage *storage);
+TH_API void THStorage_(free)(THStorage* storage);
 TH_API void THStorage_(resizeBytes)(THStorage* storage, ptrdiff_t size_bytes);
-TH_API void THStorage_(fill)(THStorage *storage, scalar_t value);
+TH_API void THStorage_(fill)(THStorage* storage, scalar_t value);
 
 #endif

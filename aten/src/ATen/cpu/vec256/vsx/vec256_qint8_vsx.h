@@ -239,7 +239,8 @@ struct Vec256<c10::qint8> {
     return {vec0, vec1};
   }
 
-  Vec256<c10::qint8> C10_ALWAYS_INLINE relu(Vec256<c10::qint8> zero_point) const {
+  Vec256<c10::qint8> C10_ALWAYS_INLINE
+  relu(Vec256<c10::qint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 

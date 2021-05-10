@@ -46,8 +46,8 @@ static void upsample_bilinear2d_out_frame(
   const auto rheight = area_pixel_compute_scale<float>(
       input_height, output_height, align_corners, scales_h);
 
-  const auto rwidth =
-      area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
+  const auto rwidth = area_pixel_compute_scale<float>(
+      input_width, output_width, align_corners, scales_w);
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
@@ -77,7 +77,8 @@ static void upsample_bilinear2d_out_frame(
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
+                 w1lambda * pos1[h1p * input_width + w1p]) -
+            input.q_zero_point();
         // requantization
         pos2[0] = at::native::quantize_val<scalar_t>(
                       output_scale, output.q_zero_point(), result)
@@ -171,12 +172,13 @@ using at::native::upsample::get_scale_value;
 Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
-      bool align_corners,
+    bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
+  return upsample_bilinear2d_quantized_cpu(
+      input, osize, align_corners, scale_h, scale_w);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

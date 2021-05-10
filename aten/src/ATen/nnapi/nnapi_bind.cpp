@@ -3,9 +3,8 @@
 #include <ATen/ATen.h>
 #include <torch/custom_class.h>
 
-#include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
-
+#include <ATen/nnapi/nnapi_wrapper.h>
 
 namespace torch {
 namespace nnapi {
@@ -17,7 +16,7 @@ nnapi_wrapper* nnapi;
 nnapi_wrapper* check_nnapi;
 
 void load_platform_library() {
-  static int run_once = [](){
+  static int run_once = []() {
     nnapi_wrapper_load(&nnapi, &check_nnapi);
     CAFFE_ENFORCE(nnapi);
     CAFFE_ENFORCE(nnapi->Model_free);
@@ -28,14 +27,16 @@ void load_platform_library() {
   (void)run_once;
 }
 
-#define MAKE_SMART_PTR(type) \
-  struct type ## Freer { \
-    void operator()(ANeuralNetworks ## type * obj) { \
-      if (!nnapi) { /* obj must be null. */ return; } \
-      nnapi-> type ## _free(obj); \
-    } \
-  }; \
-  typedef std::unique_ptr<ANeuralNetworks ## type, type ## Freer> type ## Ptr;
+#define MAKE_SMART_PTR(type)                      \
+  struct type##Freer {                            \
+    void operator()(ANeuralNetworks##type* obj) { \
+      if (!nnapi) { /* obj must be null. */       \
+        return;                                   \
+      }                                           \
+      nnapi->type##_free(obj);                    \
+    }                                             \
+  };                                              \
+  typedef std::unique_ptr<ANeuralNetworks##type, type##Freer> type##Ptr;
 
 MAKE_SMART_PTR(Model)
 MAKE_SMART_PTR(Compilation)
@@ -52,8 +53,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   }
 
   // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  ~NnapiCompilation() {
-  }
+  ~NnapiCompilation() {}
 
   void init(
       at::Tensor serialized_model_tensor,
@@ -74,13 +74,12 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     // This is currently always int32_t, but support uint8_t for old models
     // and possible future changes to the generator.
     uint8_t* ser_model_ptr =
-      serialized_model_tensor.scalar_type() == at::ScalarType::Byte
+        serialized_model_tensor.scalar_type() == at::ScalarType::Byte
         ? serialized_model_tensor.data_ptr<uint8_t>()
-        : reinterpret_cast<uint8_t*>(serialized_model_tensor.data_ptr<int32_t>());
+        : reinterpret_cast<uint8_t*>(
+              serialized_model_tensor.data_ptr<int32_t>());
     c10::ArrayRef<uint8_t> ser_model = {
-      ser_model_ptr,
-      serialized_model_tensor.nbytes()
-    };
+        ser_model_ptr, serialized_model_tensor.nbytes()};
     TORCH_CHECK(ser_model.size() > 0);
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -111,14 +110,13 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     ANeuralNetworksCompilation* compilation;
     check_nnapi->Compilation_create(model_.get(), &compilation);
     // TODO: Make this configurable.
-    check_nnapi->Compilation_setPreference(compilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
+    check_nnapi->Compilation_setPreference(
+        compilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
     check_nnapi->Compilation_finish(compilation);
     compilation_.reset(compilation);
   }
 
-  void run(
-      std::vector<at::Tensor> inputs,
-      std::vector<at::Tensor> outputs) {
+  void run(std::vector<at::Tensor> inputs, std::vector<at::Tensor> outputs) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ANeuralNetworksExecution* execution;
     check_nnapi->Execution_create(compilation_.get(), &execution);
@@ -134,22 +132,14 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
       std::vector<uint32_t> dim;
       get_operand_type(t, &op_type, &dim);
       check_nnapi->Execution_setInput(
-          execution,
-          i,
-          &op_type,
-          t.data_ptr(),
-          t.nbytes());
+          execution, i, &op_type, t.data_ptr(), t.nbytes());
     }
 
     for (size_t i = 0; i < outputs.size(); i++) {
       auto& t = outputs[i];
       // TODO: Check contiguous and dtype.
       check_nnapi->Execution_setOutput(
-          execution,
-          i,
-          nullptr,
-          t.data_ptr(),
-          t.nbytes());
+          execution, i, nullptr, t.data_ptr(), t.nbytes());
     }
 
     check_nnapi->Execution_compute(execution);
@@ -161,14 +151,18 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
       uint32_t rank;
       check_nnapi->Execution_getOutputOperandRank(execution, i, &rank);
       std::vector<uint32_t> dims(rank);
-      check_nnapi->Execution_getOutputOperandDimensions(execution, i, dims.data());
+      check_nnapi->Execution_getOutputOperandDimensions(
+          execution, i, dims.data());
       std::vector<int64_t> long_dims(dims.begin(), dims.end());
       // TODO: Maybe check that only the batch dimension is changed?
       t.resize_(long_dims);
     }
   }
 
-  static void get_operand_type(const at::Tensor& t, ANeuralNetworksOperandType* operand, std::vector<uint32_t>* dims) {
+  static void get_operand_type(
+      const at::Tensor& t,
+      ANeuralNetworksOperandType* operand,
+      std::vector<uint32_t>* dims) {
     operand->dimensionCount = t.dim();
     TORCH_CHECK(operand->dimensionCount == t.dim()); // Check for overflow.
     dims->resize(t.dim());
@@ -202,13 +196,12 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto register_NnapiCompilation = [](){
+static auto register_NnapiCompilation = []() {
   try {
     return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")
         .def(torch::jit::init<>())
         .def("init", &NnapiCompilation::init)
-        .def("run", &NnapiCompilation::run)
-        ;
+        .def("run", &NnapiCompilation::run);
   } catch (std::exception& exn) {
     LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
     throw;

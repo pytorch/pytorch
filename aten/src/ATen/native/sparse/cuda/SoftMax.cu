@@ -5,8 +5,8 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
-#include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -115,7 +115,8 @@ __global__ void cuda_sparse_coo_softmax_kernel(
         auto out_values_row = output_values_acc[i];
 
         if (LogSoftMax) {
-          out_values_row[j] = values_row[j] - mx_row[j] - c10::cuda::compat::log(exp_sums);
+          out_values_row[j] =
+              values_row[j] - mx_row[j] - c10::cuda::compat::log(exp_sums);
         } else {
           out_values_row[j] *= 1.0 / exp_sums;
         }
@@ -189,13 +190,11 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
             values_row[k] = grad_values_row[k] +
                 c10::cuda::compat::exp(out_values_row[k]) * tmp_row;
           } else {
-            values_row[k] =
-                out_values_row[k] * (grad_values_row[k] + tmp_row);
+            values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row);
           }
         } else {
           if (LogSoftMax) {
-            values_row[k] =
-                c10::cuda::compat::exp(out_values_row[k]) * tmp_row;
+            values_row[k] = c10::cuda::compat::exp(out_values_row[k]) * tmp_row;
           } else {
             values_row[k] = out_values_row[k] * tmp_row;
           }
@@ -225,17 +224,18 @@ Tensor get_offsets(
   std::vector<int64_t> host_strides(ndim, 1);
   if (ndim > 1) {
     for (int64_t i = ndim - 2; i >= 0; i--) {
-      host_strides[i] =
-          host_strides[i + 1] * (i + 1 == dim ? 1 : sizes[i + 1]);
+      host_strides[i] = host_strides[i + 1] * (i + 1 == dim ? 1 : sizes[i + 1]);
     }
   }
   auto strides = at::empty({ndim}, indices.options());
   auto strides_ptr = strides.data_ptr<int64_t>();
 
   AT_CUDA_CHECK(cudaMemcpyAsync(
-          strides_ptr, host_strides.data(), host_strides.size() * sizeof(int64_t),
-          cudaMemcpyHostToDevice,
-          stream));
+      strides_ptr,
+      host_strides.data(),
+      host_strides.size() * sizeof(int64_t),
+      cudaMemcpyHostToDevice,
+      stream));
 
   auto indices_accessor = indices.packed_accessor<int64_t, 2>();
 
@@ -312,8 +312,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   pool_sizes.resize_({new_sz});
 
   auto pool_offsets = pool_sizes.clone();
-  thrust_ptr pool_offsets_thrust_ptr(
-      pool_offsets.data_ptr<int64_t>());
+  thrust_ptr pool_offsets_thrust_ptr(pool_offsets.data_ptr<int64_t>());
   thrust::exclusive_scan(
       policy,
       pool_offsets_thrust_ptr,
@@ -322,11 +321,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
   Tensor mx_buffer;
   if (requireMxRows) {
-
     auto values_accessor =
         values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
 
-    mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
+    mx_buffer = at::full(
+        {new_sz * nvalues},
+        Scalar(-std::numeric_limits<scalar_t>::infinity()),
+        values.options());
 
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
@@ -356,8 +357,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
           }
         });
   }
-  return std::make_tuple(
-      sorted_indices, pool_offsets, pool_sizes, mx_buffer);
+  return std::make_tuple(sorted_indices, pool_offsets, pool_sizes, mx_buffer);
 }
 
 template <typename scalar_t, bool LogSoftMax>
@@ -469,10 +469,12 @@ void cuda_sparse_coo_softmax_backward(
     if (at::native::cuda_equal(out_offsets, grad_offsets) == true) {
       Tensor unused = at::native::empty_like(grad_values);
       if (LogSoftMax) {
-        auto r = log_softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = log_softmax_backward_cuda(
+            grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = softmax_backward_cuda(
+            grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       }
     } else {
@@ -490,10 +492,12 @@ void cuda_sparse_coo_softmax_backward(
             out_offsets_accessor[i]);
         auto j = low - grad_offsets_accessor;
         /*
-          Compute output using dense backward only when limits and pools are valid
-          If this check is false then a sparse tensor with full of zeros is returned
+          Compute output using dense backward only when limits and pools are
+          valid If this check is false then a sparse tensor with full of zeros
+          is returned
         */
-        if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
+        if (j < grad_nnz &&
+            out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
             auto r = log_softmax_backward_cuda(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
@@ -537,8 +541,7 @@ void cuda_sparse_coo_softmax_backward(
   Tensor pool_sizes;
 
   /* Compute independent pools of indices */
-  std::tie(
-      sorted_indices, pool_offsets, pool_sizes, std::ignore) =
+  std::tie(sorted_indices, pool_offsets, pool_sizes, std::ignore) =
       compute_pool_max<scalar_t, false>(
           out_indices, values_2, sizes, nvalues, dim);
 
@@ -571,8 +574,8 @@ Tensor softmax_sparse_cuda(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = softmax_sparse_input_preprocessing(
-      input_, dim, half_to_float, "softmax");
+  std::tie(input, output) =
+      softmax_sparse_input_preprocessing(input_, dim, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
   }

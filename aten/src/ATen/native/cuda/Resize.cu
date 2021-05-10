@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/ResizeCommon.h>
 #include <torch/library.h>
 #include <ATen/native/cuda/Resize.cuh>
-#include <ATen/native/ResizeCommon.h>
 
 namespace at {
 namespace native {
@@ -17,8 +17,7 @@ const Tensor& resize_cuda_(
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
+    auto memory_format = optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",

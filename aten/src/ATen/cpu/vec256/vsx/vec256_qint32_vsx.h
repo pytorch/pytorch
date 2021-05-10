@@ -140,8 +140,8 @@ struct Vec256<c10::qint32> {
     vecf1 = vec_mul(vecf1, inverse_scale_v);
     vecf0 = vec_add(vec_rint(vecf0), vec_zero_point);
     vecf1 = vec_add(vec_rint(vecf1), vec_zero_point);
-    vint32 veci0  = vec_signed(vecf0);
-    vint32 veci1  = vec_signed(vecf1);
+    vint32 veci0 = vec_signed(vecf0);
+    vint32 veci1 = vec_signed(vecf1);
 
     veci0 = vec_max(veci0, vmin);
     veci1 = vec_max(veci1, vmin);
@@ -185,8 +185,8 @@ struct Vec256<c10::qint32> {
     vecf0 = vec_rint(vecf0);
     vecf1 = vec_rint(vecf1);
 
-    vint32 veci0  = vec_add(vec_signed(vecf0),vec_zero_point);
-    vint32 veci1  = vec_add(vec_signed(vecf1),vec_zero_point);
+    vint32 veci0 = vec_add(vec_signed(vecf0), vec_zero_point);
+    vint32 veci1 = vec_add(vec_signed(vecf1), vec_zero_point);
 
     veci0 = vec_max(veci0, vmin);
     veci1 = vec_max(veci1, vmin);

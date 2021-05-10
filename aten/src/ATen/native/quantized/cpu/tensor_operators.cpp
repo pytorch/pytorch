@@ -3,8 +3,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/quantized/Quantizer.h>
-#include <torch/library.h>
 #include <c10/core/QScheme.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -17,43 +17,45 @@ TODO: This is an inefficient implementation that uses `.dequantize`.
       Need a more efficient implementation.
 */
 
-#define DEFINE_COMPARATOR(at_op) \
-Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
-                                const Scalar& other, Tensor& out) { \
-  TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
-              "The 'out' tensor must have dtype 'torch.bool'"); \
-  auto self_dq = self.dequantize(); \
-  return at:: at_op##_out(out, self_dq, other); \
-} \
-Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
-  auto self_dq = self.dequantize(); \
-  return at:: at_op(self_dq, other); \
-} \
-Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
-                                const Tensor& other, Tensor& out) { \
-  /* We infer size to make sure the tensors are compatible. */\
-  infer_size_dimvector(self.sizes(), other.sizes()); \
-  TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
-              "The 'out' tensor must have dtype 'torch.bool'"); \
-  auto self_dq = self.dequantize(); \
-  auto other_dq = other.dequantize(); \
-  return at:: at_op##_out(out, self_dq, other_dq); \
-} \
-Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
-  /* We infer size to make sure the tensors are compatible. */\
-  infer_size_dimvector(self.sizes(), other.sizes()); \
-  auto self_dq = self.dequantize(); \
-  auto other_dq = other.dequantize(); \
-  return at:: at_op(self_dq, other_dq); \
-}
+#define DEFINE_COMPARATOR(at_op)                                          \
+  Tensor& at_op##_out_quantized_cpu(                                      \
+      const Tensor& self, const Scalar& other, Tensor& out) {             \
+    TORCH_CHECK(                                                          \
+        out.dtype() == at::ScalarType::Bool,                              \
+        "The 'out' tensor must have dtype 'torch.bool'");                 \
+    auto self_dq = self.dequantize();                                     \
+    return at::at_op##_out(out, self_dq, other);                          \
+  }                                                                       \
+  Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
+    auto self_dq = self.dequantize();                                     \
+    return at::at_op(self_dq, other);                                     \
+  }                                                                       \
+  Tensor& at_op##_out_quantized_cpu(                                      \
+      const Tensor& self, const Tensor& other, Tensor& out) {             \
+    /* We infer size to make sure the tensors are compatible. */          \
+    infer_size_dimvector(self.sizes(), other.sizes());                    \
+    TORCH_CHECK(                                                          \
+        out.dtype() == at::ScalarType::Bool,                              \
+        "The 'out' tensor must have dtype 'torch.bool'");                 \
+    auto self_dq = self.dequantize();                                     \
+    auto other_dq = other.dequantize();                                   \
+    return at::at_op##_out(out, self_dq, other_dq);                       \
+  }                                                                       \
+  Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
+    /* We infer size to make sure the tensors are compatible. */          \
+    infer_size_dimvector(self.sizes(), other.sizes());                    \
+    auto self_dq = self.dequantize();                                     \
+    auto other_dq = other.dequantize();                                   \
+    return at::at_op(self_dq, other_dq);                                  \
+  }
 
 #define AT_FORALL_OPERATORS(_) \
-_(ne)                          \
-_(eq)                          \
-_(ge)                          \
-_(le)                          \
-_(gt)                          \
-_(lt)                          \
+  _(ne)                        \
+  _(eq)                        \
+  _(ge)                        \
+  _(le)                        \
+  _(gt)                        \
+  _(lt)
 
 AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 
@@ -79,4 +81,5 @@ const Tensor& quantized_resize_cpu_(
   return self;
 }
 
-}}  // at::native
+} // namespace native
+} // namespace at

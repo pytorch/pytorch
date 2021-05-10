@@ -34,12 +34,14 @@ TEST(X8LUT__SCALAR, n_eq_1_inplace) {
 
 TEST(X8LUT__SCALAR, small_n_inplace) {
   for (size_t n = 2; n <= 16; n++) {
-    LUTMicrokernelTester().n(n).inplace(true).test(pytorch_x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).inplace(true).test(
+        pytorch_x8lut_ukernel__scalar);
   }
 }
 
 TEST(X8LUT__SCALAR, large_n_inplace) {
   for (size_t n = 16; n <= 128; n += 2) {
-    LUTMicrokernelTester().n(n).inplace(true).test(pytorch_x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).inplace(true).test(
+        pytorch_x8lut_ukernel__scalar);
   }
 }

@@ -1,7 +1,7 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE_TBB
-#include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
+#include <ATen/Parallel.h>
 
 #include <atomic>
 #include <mutex>
@@ -21,7 +21,8 @@
 namespace at {
 
 namespace {
-static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
+static thread_local tbb::task_scheduler_init tbb_init_(
+    intraop_default_num_threads());
 static thread_local tbb::task_group tg_;
 
 std::mutex global_thread_mutex_;
@@ -41,16 +42,16 @@ void _internal_set_num_threads(int nthreads) {
   }
   tbb_init_.initialize(nthreads);
 }
-}
+} // namespace
 
 void init_num_threads() {
-  #ifdef _OPENMP
+#ifdef _OPENMP
   omp_set_num_threads(1);
-  #endif
+#endif
 
-  #ifdef TH_BLAS_MKL
+#ifdef TH_BLAS_MKL
   mkl_set_num_threads(1);
-  #endif
+#endif
 
   int nthreads = num_intraop_threads_.load();
   if (nthreads < 0) {
@@ -89,12 +90,10 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
   auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   if (get_num_threads() > 1) {
-    tg_.run(
-      [func, future]() {
-        func();
-        future->markCompleted();
-      }
-    );
+    tg_.run([func, future]() {
+      func();
+      future->markCompleted();
+    });
   } else {
     func();
     future->markCompleted();

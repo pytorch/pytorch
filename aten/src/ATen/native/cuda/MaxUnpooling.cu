@@ -98,7 +98,8 @@ __global__ void max_unpooling3d_backward_kernel(
   }
 }
 
-Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
+Tensor& max_unpooling2d_forward_out_cuda(
+    const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     Tensor& output) {
@@ -152,8 +153,11 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
   output.zero_();
 
   auto count = self.numel();
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half,
+      self.scalar_type(),
+      "max_unpooling2d_forward_kernel",
+      ([&] {
         max_unpooling2d_forward_kernel<<<
             GET_BLOCKS(count),
             CUDA_NUM_THREADS,
@@ -181,7 +185,8 @@ Tensor max_unpooling2d_forward_cuda(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling2d_forward_out_cuda(self, indices, output_size, output);
+  at::native::max_unpooling2d_forward_out_cuda(
+      self, indices, output_size, output);
   return output;
 }
 
@@ -260,7 +265,8 @@ static void max_unpooling3d_shape_check(
   }
 }
 
-Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
+Tensor& max_unpooling3d_forward_out_cuda(
+    const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
@@ -308,22 +314,27 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
 
   // Collapse batch and feature dimensions if needed
   if (self.ndimension() == 5) {
-    self = self.reshape({self.size(0) * self.size(1),
-                         self.size(2),
-                         self.size(3),
-                         self.size(4)});
-    indices = indices.reshape({indices.size(0) * indices.size(1),
-                               indices.size(2),
-                               indices.size(3),
-                               indices.size(4)});
+    self = self.reshape(
+        {self.size(0) * self.size(1),
+         self.size(2),
+         self.size(3),
+         self.size(4)});
+    indices = indices.reshape(
+        {indices.size(0) * indices.size(1),
+         indices.size(2),
+         indices.size(3),
+         indices.size(4)});
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.scalar_type(), "max_unpooling3d_forward_kernel", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half,
+      self.scalar_type(),
+      "max_unpooling3d_forward_kernel",
+      ([&] {
         while (totalZ > 0) {
           dim3 grid(
               ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
@@ -361,7 +372,8 @@ Tensor max_unpooling3d_forward_cuda(
   return output;
 }
 
-at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
+at::Tensor& max_unpooling2d_backward_out_cuda(
+    const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
@@ -427,8 +439,11 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
 
   int64_t count = self.numel();
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.scalar_type(), "max_unpooling2d_backward_kernel", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half,
+      self.scalar_type(),
+      "max_unpooling2d_backward_kernel",
+      ([&] {
         max_unpooling2d_backward_kernel<<<
             GET_BLOCKS(count),
             CUDA_NUM_THREADS,
@@ -458,7 +473,8 @@ at::Tensor max_unpooling2d_backward_cuda(
   return grad_input;
 }
 
-at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
+at::Tensor& max_unpooling3d_backward_out_cuda(
+    const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
@@ -510,16 +526,17 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
   // Collapse batch and feature dimensions if needed
   auto grad_input_reshaped = grad_input;
   if (grad_input.ndimension() == 5) {
-    grad_input_reshaped =
-        grad_input.reshape({grad_input.size(0) * grad_input.size(1),
-                            grad_input.size(2),
-                            grad_input.size(3),
-                            grad_input.size(4)});
+    grad_input_reshaped = grad_input.reshape(
+        {grad_input.size(0) * grad_input.size(1),
+         grad_input.size(2),
+         grad_input.size(3),
+         grad_input.size(4)});
 
-    indices = indices.reshape({indices.size(0) * indices.size(1),
-                               indices.size(2),
-                               indices.size(3),
-                               indices.size(4)});
+    indices = indices.reshape(
+        {indices.size(0) * indices.size(1),
+         indices.size(2),
+         indices.size(3),
+         indices.size(4)});
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
@@ -527,8 +544,11 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
 
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.scalar_type(), "max_unpooling3d_backward_kernel", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half,
+      self.scalar_type(),
+      "max_unpooling3d_backward_kernel",
+      ([&] {
         while (totalZ > 0) {
           dim3 grid(
               ceilDiv(inputWidth, static_cast<int64_t>(block.x)),

@@ -253,40 +253,47 @@ void mode_kernel_impl(
   auto indices_transposed = indices.transpose(dim, ndim - 1);
 
   // Call mode
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
-    // Requirements for fused kernel implementation:
-    //
-    // 1. sliceSize <= 2 * max threads per block
-    // 2. uses one block per slice, so number of slices must be less than the
-    // maximum number of blocks for a kernel launch
-    // 3. Can use 32-bit index math for indexing (mainly just for implementation
-    // conciseness, could be changed)
-    //
-    // MAX_BLOCK_SIZE and MAX_GRID_SIZE come from:
-    //     ATen/native/cuda/SortingCommon.cuh
-    if (slice_size <= 2 * MAX_BLOCK_SIZE &&
-        slices <= MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE &&
-        cuda::detail::canUse32BitIndexMath(self)) {
-      fused_mode<scalar_t>(
-          values_transposed,
-          indices_transposed,
-          contiguous,
-          slice_size,
-          slices);
-    } else {
-      // If transposed is already contiguous, it will return a tensor with the
-      // same storage. So, since we do not want to modify self, we clone it.
-      if (transposed.is_contiguous()) {
-        contiguous = contiguous.clone();
-      }
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
+        // Requirements for fused kernel implementation:
+        //
+        // 1. sliceSize <= 2 * max threads per block
+        // 2. uses one block per slice, so number of slices must be less than
+        // the maximum number of blocks for a kernel launch
+        // 3. Can use 32-bit index math for indexing (mainly just for
+        // implementation conciseness, could be changed)
+        //
+        // MAX_BLOCK_SIZE and MAX_GRID_SIZE come from:
+        //     ATen/native/cuda/SortingCommon.cuh
+        if (slice_size <= 2 * MAX_BLOCK_SIZE &&
+            slices <= MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE &&
+            cuda::detail::canUse32BitIndexMath(self)) {
+          fused_mode<scalar_t>(
+              values_transposed,
+              indices_transposed,
+              contiguous,
+              slice_size,
+              slices);
+        } else {
+          // If transposed is already contiguous, it will return a tensor with
+          // the same storage. So, since we do not want to modify self, we clone
+          // it.
+          if (transposed.is_contiguous()) {
+            contiguous = contiguous.clone();
+          }
 
-      // Position will store the dimension values we are processing
-      std::vector<int64_t> position(ndim - 1, 0);
+          // Position will store the dimension values we are processing
+          std::vector<int64_t> position(ndim - 1, 0);
 
-      apply_mode<scalar_t>(
-          values_transposed, indices_transposed, contiguous, position, dim, 0);
-    }
-  });
+          apply_mode<scalar_t>(
+              values_transposed,
+              indices_transposed,
+              contiguous,
+              position,
+              dim,
+              0);
+        }
+      });
 
   if (!keepdim) {
     values.squeeze_(dim);

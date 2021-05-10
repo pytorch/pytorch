@@ -1,8 +1,8 @@
 #ifdef USE_PYTORCH_QNNPACK
 
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <pytorch_qnnpack.h>
 
 namespace at {

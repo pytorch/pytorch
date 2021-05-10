@@ -14,9 +14,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <random>
 #include <vector>
-#include <memory>
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
@@ -24,11 +24,12 @@
 #include "test_utils.h"
 using namespace qnnpack::testing;
 
-pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_p,
+pytorch_qnnp_operator_t create_convolution_op(
+    const qnnpack::conv_param_t& conv_p,
     const uint8_t input_zero_point) {
   pytorch_qnnp_operator_t convolution = nullptr;
-  convolution =
-      static_cast<pytorch_qnnp_operator_t>(calloc(1, sizeof(struct pytorch_qnnp_operator)));
+  convolution = static_cast<pytorch_qnnp_operator_t>(
+      calloc(1, sizeof(struct pytorch_qnnp_operator)));
   if (convolution == nullptr) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
@@ -49,8 +50,8 @@ pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_
   convolution->input_padding_bottom = conv_p.padding[2];
   convolution->input_padding_right = conv_p.padding[3];
 
-  const bool any_padding = (conv_p.padding[0]| conv_p.padding[1]
-      |conv_p.padding[2] | conv_p.padding[3]) != 0;
+  const bool any_padding = (conv_p.padding[0] | conv_p.padding[1] |
+                            conv_p.padding[2] | conv_p.padding[3]) != 0;
 
   if (any_padding) {
     size_t zero_size = 0, zero_offset = 0;
@@ -64,7 +65,8 @@ pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_
         zero_size = sizeof(uint8_t) * group_stride + 8;
         zero_offset = sizeof(uint8_t) * 8;
       }
-    } else if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_conv ||
+    } else if (
+        conv_p.ukernel_type == pytorch_qnnp_ukernel_type_conv ||
         conv_p.ukernel_type == pytorch_qnnp_ukernel_type_gemm) {
       const size_t group_input_channels = conv_p.group_input_channels;
       const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
@@ -80,17 +82,16 @@ pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_
 
     void* zero_buffer = malloc(zero_size);
     if (zero_buffer == nullptr) {
-      pytorch_qnnp_log_error(
-          "failed to allocate bytes for zero padding:");
+      pytorch_qnnp_log_error("failed to allocate bytes for zero padding:");
     }
     // Need to set to input zero point
     memset(zero_buffer, input_zero_point, zero_size);
     convolution->zero_buffer = zero_buffer;
-    convolution->zero_pointer =
-        (void*)((uintptr_t)zero_buffer + zero_offset);
+    convolution->zero_pointer = (void*)((uintptr_t)zero_buffer + zero_offset);
   }
 
-  if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
+  if (conv_p.per_channel &&
+      conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     pytorch_qnnp_log_error(
         "Per channel quantized weights are not supported for XZP kernels");
   }
@@ -451,8 +452,7 @@ class ConvolutionOperatorTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
-    auto f32rng =
-        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+    auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         batchSize() *
@@ -475,8 +475,7 @@ class ConvolutionOperatorTester {
     const uint8_t inputZeroPoint = 127;
     // Make num zero points multiple of 8.
     // This is the least common denominator for SSE/ARM kernels we have.
-    size_t num_zero_points_padded =
-      (groups() * groupOutputChannels() + 8);
+    size_t num_zero_points_padded = (groups() * groupOutputChannels() + 8);
     std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
@@ -484,7 +483,8 @@ class ConvolutionOperatorTester {
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       if (per_channel()) {
-        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+        std::generate(
+            kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
       }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
@@ -541,7 +541,8 @@ class ConvolutionOperatorTester {
                                              kx) *
                                                 groupInputChannels() +
                                             ic]) -
-                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
+                               int32_t(kernelZeroPoints
+                                           [g * groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -574,18 +575,20 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0 * 1.0 / outputScale);
       if (per_channel()) {
-        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        auto scale_generator = [&]() -> float {
+          return (f32rng() / outputScale);
+        };
         std::generate(
             requantization_scales.begin(),
             requantization_scales.end(),
             std::ref(scale_generator));
       }
 
-      switch(mode) {
-        case Mode::Static:
-        {
+      switch (mode) {
+        case Mode::Static: {
           pytorch_qnnp_operator_t convolution = nullptr;
 
           ASSERT_EQ(
@@ -631,35 +634,31 @@ class ConvolutionOperatorTester {
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
-              pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+              pytorch_qnnp_run_operator(
+                  convolution, nullptr /* thread pool */));
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_delete_operator(convolution));
           convolution = nullptr;
-        }
-        break;
+        } break;
 
-        case Mode::Runtime:
-        {
+        case Mode::Runtime: {
           qnnpack::conv_param_t conv_p(
-            {kernelWidth(), kernelHeight()},
-            {subsamplingWidth(), subsamplingHeight()},
-            {dilationWidth(), dilationHeight()},
-            {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
-            /*adjustment_dims=*/{0, 0},
-            groups(),
-            groupInputChannels() * groups(),
-            groupOutputChannels() * groups(),
-            /*transpose=*/false,
-            per_channel());
+              {kernelWidth(), kernelHeight()},
+              {subsamplingWidth(), subsamplingHeight()},
+              {dilationWidth(), dilationHeight()},
+              {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+              /*adjustment_dims=*/{0, 0},
+              groups(),
+              groupInputChannels() * groups(),
+              groupOutputChannels() * groups(),
+              /*transpose=*/false,
+              per_channel());
           auto conv_op = create_convolution_op(conv_p, inputZeroPoint);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
-                  conv_p,
-                  kernelZeroPoints.data(),
-                  kernel.data(),
-                  bias.data()));
+                  conv_p, kernelZeroPoints.data(), kernel.data(), bias.data()));
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
               conv_p,
               conv_op,
@@ -680,8 +679,7 @@ class ConvolutionOperatorTester {
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_delete_operator(conv_op));
-        }
-        break;
+        } break;
 
         default:
           // Undefined!

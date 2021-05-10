@@ -10,7 +10,8 @@ class TORCH_CUDA_CPP_API THCIpcDeleter {
   THCIpcDeleter(std::shared_ptr<void> basePtr);
   ~THCIpcDeleter();
   static at::DataPtr makeDataPtr(std::shared_ptr<void> basePtr, void* data);
-private:
+
+ private:
   std::shared_ptr<void> basePtr_;
 };
 

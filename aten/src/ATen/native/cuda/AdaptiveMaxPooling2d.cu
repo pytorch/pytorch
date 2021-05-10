@@ -1,18 +1,17 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
-
 
 namespace at {
 namespace native {
@@ -31,15 +30,21 @@ __device__ inline int end_index(int a, int b, int c) {
 
 /*
  * Description:
- *    this function adaptively maxpools an input 4D tensor along dimensions 2 and 3
- *    4D input, 4D output, 4D argmax x and y
+ *    this function adaptively maxpools an input 4D tensor along dimensions 2
+ * and 3 4D input, 4D output, 4D argmax x and y
  */
- template <typename T>
-__global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
-                        int isizeH, int isizeW,
-                        int osizeH, int osizeW,
-                        int64_t istrideD, int64_t istrideH, int64_t istrideW)
-{
+template <typename T>
+__global__ void adaptivemaxpool(
+    T* input,
+    T* output,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW) {
   // iterators
   int oh, ow;
 
@@ -51,40 +56,39 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
   int oendW = osizeW;
   const int ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int ostartH = blockDim.y * blockIdx.y + threadIdx.y;
   int oendH = osizeH;
-  const int ostepH = blockDim.y*gridDim.y;
+  const int ostepH = blockDim.y * gridDim.y;
   // select input/output plane
-  output = output + o_plane*osizeH*osizeW;
-  input = input + i_plane*istrideD;
-  indices = indices + o_plane*osizeH*osizeW;
+  output = output + o_plane * osizeH * osizeW;
+  input = input + i_plane * istrideD;
+  indices = indices + o_plane * osizeH * osizeW;
 
   // For all output pixels...
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
     int istartH = start_index(oh, osizeH, isizeH);
-    int iendH   = end_index(oh, osizeH, isizeH);
+    int iendH = end_index(oh, osizeH, isizeH);
     int kH = iendH - istartH;
 
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
       int istartW = start_index(ow, osizeW, isizeW);
-      int iendW   = end_index(ow, osizeW, isizeW);
+      int iendW = end_index(ow, osizeW, isizeW);
 
       int kW = iendW - istartW;
 
       // Compute the mean of the input image...
-      T *ptr_input = input + istartH*istrideH + istartW*istrideW;
-      T *ptr_output = output + oh*osizeW + ow;
-      int64_t *ptr_ind = indices + oh*osizeW + ow;
+      T* ptr_input = input + istartH * istrideH + istartW * istrideW;
+      T* ptr_output = output + oh * osizeW + ow;
+      int64_t* ptr_ind = indices + oh * osizeW + ow;
       int argmax = istartH * isizeW + istartW;
       T max = at::numeric_limits<T>::lower_bound(); // -Infinity
       int ih, iw;
-      for(ih = 0; ih < kH; ih++) {
-        for(iw = 0; iw < kW; iw++) {
-          T val = ptr_input[iw*istrideW];
+      for (ih = 0; ih < kH; ih++) {
+        for (iw = 0; iw < kW; iw++) {
+          T val = ptr_input[iw * istrideW];
           if ((val > max) || THCNumerics<T>::isnan(val)) {
             max = val;
-            argmax = (ih+istartH)*isizeW + iw+istartW;
+            argmax = (ih + istartH) * isizeW + iw + istartW;
           }
         }
         ptr_input += istrideH; // next input line
@@ -100,39 +104,41 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
  * Description:
  *    this function computes the gradInput from weight and gradOutput
  */
- template <typename T>
-__global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, int64_t *indices,
-                             int isizeH, int isizeW,
-                             int osizeH, int osizeW)
-{
+template <typename T>
+__global__ void adaptivemaxgradinput(
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
   // iterators
   int oh, ow;
 
   // compute offsets based on thread/block ID
   int o_plane = blockIdx.x;
   int i_plane = o_plane;
-  //int k = blockIdx.x % sizeD;
+  // int k = blockIdx.x % sizeD;
 
   int ostartW = threadIdx.x;
   int oendW = osizeW;
   int ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int ostartH = blockDim.y * blockIdx.y + threadIdx.y;
   int oendH = osizeH;
-  int ostepH = blockDim.y*gridDim.y;
+  int ostepH = blockDim.y * gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o_plane*osizeH*osizeW;
-  gradInput = gradInput + i_plane*isizeH*isizeW;
-  indices = indices + o_plane*osizeH*osizeW;
+  gradOutput = gradOutput + o_plane * osizeH * osizeW;
+  gradInput = gradInput + i_plane * isizeH * isizeW;
+  indices = indices + o_plane * osizeH * osizeW;
 
   // compute gradInput
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
-
-      T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
-      int64_t *ptr_ind = indices + oh*osizeW + ow;
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
+      T* ptr_gradOutput = gradOutput + oh * osizeW + ow;
+      int64_t* ptr_ind = indices + oh * osizeW + ow;
       T z = *ptr_gradOutput;
 
       int argmax = (*ptr_ind);
@@ -147,12 +153,15 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, int64_t *indic
  *    this function computes the gradInput from weight and gradOutput
  *    when kH != dH or kW != dW (uses atomic add)
  */
- template <typename T>
+template <typename T>
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeH, int isizeW, int osizeH, int osizeW
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
   // iterators
   int oh, ow;
 
@@ -164,22 +173,20 @@ __global__ void atomicadaptivemaxgradinput(
   int oendW = osizeW;
   int ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int ostartH = blockDim.y * blockIdx.y + threadIdx.y;
   int oendH = osizeH;
-  int ostepH = blockDim.y*gridDim.y;
+  int ostepH = blockDim.y * gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o_plane*osizeH*osizeW;
-  gradInput = gradInput + i_plane*isizeH*isizeW;
-  indices = indices + o_plane*osizeH*osizeW;
+  gradOutput = gradOutput + o_plane * osizeH * osizeW;
+  gradInput = gradInput + i_plane * isizeH * isizeW;
+  indices = indices + o_plane * osizeH * osizeW;
 
   // compute gradInput
-  for(oh = ostartH; oh < oendH; oh += ostepH) {
-
-    for(ow = ostartW; ow < oendW; ow += ostepW) {
-
-      T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
-      int64_t *ptr_ind = indices + oh*osizeW + ow;
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
+      T* ptr_gradOutput = gradOutput + oh * osizeW + ow;
+      int64_t* ptr_ind = indices + oh * osizeW + ow;
       T z = *ptr_gradOutput;
 
       int argmax = (*ptr_ind);
@@ -195,9 +202,9 @@ __global__ void atomicadaptivemaxgradinput(
 
 TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cuda)
 (const Tensor& input,
-IntArrayRef output_size,
-const Tensor& output,
-const Tensor& indices) {
+ IntArrayRef output_size,
+ const Tensor& output,
+ const Tensor& indices) {
   TensorArg output_arg{output, "output", 1};
   TensorArg indices_arg{indices, "indices", 2};
   TensorArg input_arg{input, "input", 3};
@@ -300,8 +307,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
  const Tensor& input,
  const Tensor& indices,
  const Tensor& gradInput) {
-  globalContext().alertNotDeterministic(
-      "adaptive_max_pool2d_backward_cuda");
+  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_cuda");
 
   TensorArg grad_input_arg{gradInput, "gradInput", 1};
   TensorArg grad_output_arg{gradOutput, "gradOutput", 2};
@@ -439,6 +445,6 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
           }
         });
   }
- }
-} // at::native
-} // at
+}
+} // namespace native
+} // namespace at

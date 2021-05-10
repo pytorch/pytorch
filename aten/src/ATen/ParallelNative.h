@@ -10,7 +10,9 @@ namespace at {
 namespace internal {
 
 inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
-    int64_t begin, int64_t end, int64_t grain_size) {
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size) {
   if ((end - begin) < grain_size) {
     return std::make_tuple(1, std::max((int64_t)0, end - begin));
   }
@@ -23,10 +25,10 @@ inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
 }
 
 TORCH_API void _parallel_run(
-  const int64_t begin,
-  const int64_t end,
-  const int64_t grain_size,
-  const std::function<void(int64_t, int64_t, size_t)>& f);
+    const int64_t begin,
+    const int64_t end,
+    const int64_t grain_size,
+    const std::function<void(int64_t, int64_t, size_t)>& f);
 
 } // namespace internal
 
@@ -48,10 +50,7 @@ inline void parallel_for(
       begin,
       end,
       grain_size,
-      [f](int64_t start, int64_t end, size_t /* unused */) {
-        f(start, end);
-      }
-  );
+      [f](int64_t start, int64_t end, size_t /* unused */) { f(start, end); });
 }
 
 template <class scalar_t, class F, class SF>
@@ -80,8 +79,7 @@ inline scalar_t parallel_reduce(
       grain_size,
       [f, ident, results_data](int64_t start, int64_t end, size_t task_id) {
         results_data[task_id] = f(start, end, ident);
-      }
-  );
+      });
   scalar_t result = ident;
   for (auto partial_result : results) {
     result = sf(result, partial_result);

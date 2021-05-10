@@ -4,8 +4,9 @@
 #include <TH/THStorageFunctions.h>
 #include <TH/THTensorApply.h>
 
-#define THTensor_(NAME)   TH_CONCAT_4(TH,Real,Tensor_,NAME)
+#define THTensor_(NAME) TH_CONCAT_4(TH, Real, Tensor_, NAME)
 
+// clang-format off
 /* basics */
 #include <TH/generic/THTensor.h>
 #include <TH/THGenerateAllTypes.h>
@@ -41,4 +42,6 @@
 /* lapack support */
 #include <TH/generic/THTensorLapack.h>
 #include <TH/THGenerateFloatTypes.h>
+// clang-format on
+
 #endif

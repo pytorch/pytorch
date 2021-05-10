@@ -1,3 +1,4 @@
+// clang-format off
 // ${generated_comment}
 
 // NB: The implementing C++ file is RegisterDispatchKey.cpp
@@ -12,3 +13,4 @@ ${dispatch_namespaced_declarations}
 
 } // namespace ${dispatch_namespace}
 } // namespace at
+// clang-format on

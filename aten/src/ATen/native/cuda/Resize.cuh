@@ -1,18 +1,21 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <THC/THCTensor.hpp>
 #include <ATen/native/ResizeCommon.h>
+#include <THC/THCTensor.hpp>
 
 #include <c10/cuda/CUDAGuard.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // These functions are called by native::resize_ as well as (legacy) THC resize.
 // They are not in THC/THCTensor.cpp because the at namespace is easier
 // to benchmark than THC; I can't get gbenchmark to call fns from THTensor.cpp
 
-static inline void maybe_resize_storage_cuda(TensorImpl* self, uint64_t new_size) {
+static inline void maybe_resize_storage_cuda(
+    TensorImpl* self,
+    uint64_t new_size) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
@@ -24,13 +27,13 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, uint64_t new_size
   if (!THTensor_getStoragePtr(self)) {
     TORCH_CHECK(false, "Tensor: invalid null storage");
   }
-  uint64_t new_size_bytes = (new_size + self->storage_offset()) * self->dtype().itemsize();
+  uint64_t new_size_bytes =
+      (new_size + self->storage_offset()) * self->dtype().itemsize();
   if (new_size_bytes > self->storage().nbytes()) {
     THCStorage_resizeBytes(
         globalContext().getTHCState(),
         THTensor_getStoragePtr(self),
-        new_size_bytes
-    );
+        new_size_bytes);
   }
 }
 
@@ -63,4 +66,5 @@ inline TensorImpl* resize_impl_cuda_(
   return self;
 }
 
-}}
+} // namespace native
+} // namespace at

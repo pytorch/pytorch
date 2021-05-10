@@ -1,10 +1,10 @@
 #pragma once
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
-#include <map>
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
@@ -46,32 +46,36 @@ struct TORCH_API TorchVital {
 
 // A way to access vitals by string names instead of by global reference.
 // This enables access to vitals from the PythonAPI.
-class TORCH_API APIVitals
-{
-public:
-    // Set any vital sign that was added to the map.
-    bool setVital(const std::string &vital_name, const std::string &attr_name, const std::string &value);
+class TORCH_API APIVitals {
+ public:
+  // Set any vital sign that was added to the map.
+  bool setVital(
+      const std::string& vital_name,
+      const std::string& attr_name,
+      const std::string& value);
 
-    APIVitals(): name_map_() { }
+  APIVitals() : name_map_() {}
 
-    // Ensure this stays a singleton
-    APIVitals(APIVitals const& other) = delete;
-    APIVitals(APIVitals&& other) = delete;
-    APIVitals& operator=(const APIVitals&) = delete;
-    APIVitals& operator=(APIVitals&&) = delete;
+  // Ensure this stays a singleton
+  APIVitals(APIVitals const& other) = delete;
+  APIVitals(APIVitals&& other) = delete;
+  APIVitals& operator=(const APIVitals&) = delete;
+  APIVitals& operator=(APIVitals&&) = delete;
 
-private:
-    std::unordered_map<std::string, TorchVital> name_map_;
+ private:
+  std::unordered_map<std::string, TorchVital> name_map_;
 };
 
 extern TORCH_API APIVitals VitalsAPI;
 
-} // namespace at
 } // namespace vitals
+} // namespace at
 
-#define TORCH_VITAL_DECLARE(name) TORCH_API at::vitals::TorchVital TorchVital_##name;
+#define TORCH_VITAL_DECLARE(name) \
+  TORCH_API at::vitals::TorchVital TorchVital_##name;
 
-#define TORCH_VITAL_DEFINE(name) TORCH_API at::vitals::TorchVital TorchVital_##name(#name);
+#define TORCH_VITAL_DEFINE(name) \
+  TORCH_API at::vitals::TorchVital TorchVital_##name(#name);
 
 #define TORCH_VITAL_BASE(name) TorchVital_##name
 

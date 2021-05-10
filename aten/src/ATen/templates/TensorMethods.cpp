@@ -1,3 +1,4 @@
+// clang-format off
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
@@ -83,3 +84,4 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
 
 } //namespace at
+// clang-format on

@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
@@ -18,14 +18,14 @@ namespace at {
 
 namespace {
 
-  void checkPerChannelParamDims(const Tensor& scales, const Tensor& zero_points) {
-    TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
-    TORCH_CHECK(
-        zero_points.dim() == 1, "zero_points tensor must have dimension 1");
-    TORCH_CHECK(
-        scales.numel() == zero_points.numel(),
-        "number of elements in scales and zero_points must match");
-  }
+void checkPerChannelParamDims(const Tensor& scales, const Tensor& zero_points) {
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(
+      zero_points.dim() == 1, "zero_points tensor must have dimension 1");
+  TORCH_CHECK(
+      scales.numel() == zero_points.numel(),
+      "number of elements in scales and zero_points must match");
+}
 } // anonymous namespace
 
 // Note: this is not a native function as Quantizer is not exposed to python yet
@@ -39,8 +39,8 @@ QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
     ScalarType scalar_type) {
-  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
-      scale, zero_point);
+  return c10::make_intrusive<PerTensorAffineQuantizer>(
+      scalar_type, scale, zero_point);
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
@@ -56,33 +56,28 @@ QuantizerPtr make_per_channel_affine_quantizer(
   if (isFloatingType(zero_points.scalar_type())) {
     Tensor scales_float = scales.to(kFloat).contiguous();
     Tensor zero_points_float = zero_points.to(kFloat).contiguous();
-    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(scalar_type,
-                                                                      scales_float,
-                                                                      zero_points_float,
-                                                                      axis);
-  }
-  else {
+    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(
+        scalar_type, scales_float, zero_points_float, axis);
+  } else {
     Tensor scales_double = scales.to(kDouble).contiguous();
     Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
-    return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
-                                                          scales_double,
-                                                          zero_points_int64,
-                                                          axis);
+    return c10::make_intrusive<PerChannelAffineQuantizer>(
+        scalar_type, scales_double, zero_points_int64, axis);
   }
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
   TORCH_CHECK(
-      !self.requires_grad(),
-      "quantized tensors do not support autograd");
-  TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
+      !self.requires_grad(), "quantized tensors do not support autograd");
+  TORCH_INTERNAL_ASSERT(
+      self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
 int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t new_size_bytes;
-  switch(t) {
+  switch (t) {
     case at::ScalarType::QUInt4x2:
       new_size_bytes = std::ceil(size_bytes * 0.5);
       break;
@@ -96,10 +91,11 @@ inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
+  auto memory_format =
+      options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   at::Allocator* allocator = options.device().is_cuda()
-    ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
-    : at::getCPUAllocator();
+      ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
+      : at::getCPUAllocator();
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
@@ -115,7 +111,8 @@ inline Tensor new_qtensor(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
-  int64_t size_bytes = get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
+  int64_t size_bytes =
+      get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
@@ -188,30 +185,33 @@ Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(Tensor rtensor) {
- TORCH_CHECK(
+  TORCH_CHECK(
       rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
- Tensor qtensor = new_qtensor(
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
- rtensor = rtensor.contiguous();
- native::quantize_tensor_per_channel_float_qparams(
-   rtensor, qtensor, scales_, zero_points_, axis_);
+  rtensor = rtensor.contiguous();
+  native::quantize_tensor_per_channel_float_qparams(
+      rtensor, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+  Tensor rtensor =
+      at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
   native::dequantize_tensor_per_channel_float_qparams(
-    qtensor, rtensor, scales_, zero_points_, axis_);
+      qtensor, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
 Quantizer::~Quantizer() {}
 
-C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
+C10_EXPORT void set_quantizer_(
+    const Tensor& self,
+    ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);
 }
 

@@ -157,7 +157,7 @@ class HardswishOperatorTester {
               (int32_t(input[i * inputStride() + c]) -
                int32_t(inputZeroPoint()));
           const float hardswishX =
-            x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+              x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
           const float scaledHardswishX = hardswishX / outputScale();
           float y = scaledHardswishX;
           y = std::min<float>(y, int32_t(qmax()) - int32_t(outputZeroPoint()));
@@ -199,7 +199,8 @@ class HardswishOperatorTester {
           pytorch_qnnp_run_operator(hardswishOp, nullptr /* thread pool */));
 
       ASSERT_EQ(
-          pytorch_qnnp_status_success, pytorch_qnnp_delete_operator(hardswishOp));
+          pytorch_qnnp_status_success,
+          pytorch_qnnp_delete_operator(hardswishOp));
       hardswishOp = nullptr;
 
       /* Verify results */

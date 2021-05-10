@@ -1,3 +1,4 @@
+// clang-format off
 #include <ATen/TypeDefault.h>
 
 // ${generated_comment}
@@ -58,3 +59,4 @@ TORCH_LIBRARY(aten, m) {
   m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
 }
 }  // namespace at
+// clang-format on

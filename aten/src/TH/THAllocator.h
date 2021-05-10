@@ -23,14 +23,16 @@ enum WithFd { WITH_FD };
 
 class TORCH_API THMapAllocator {
  public:
-  THMapAllocator(const char *filename, int flags, size_t size);
-  THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  THMapAllocator(const char* filename, int flags, size_t size);
+  THMapAllocator(WithFd, const char* filename, int fd, int flags, size_t size);
   THMapAllocator(const THMapAllocator&) = delete;
   THMapAllocator& operator=(const THMapAllocator&) = delete;
   THMapAllocator(THMapAllocator&&) = delete;
   THMapAllocator& operator=(THMapAllocator&&) = delete;
 
-  const char* filename() const { return filename_.c_str(); }
+  const char* filename() const {
+    return filename_.c_str();
+  }
   int fd() const {
 #ifdef _WIN32
     AT_ERROR("THMapAllocator::fd() is unsupported on Windows");
@@ -38,15 +40,29 @@ class TORCH_API THMapAllocator {
     return fd_;
 #endif
   }
-  ptrdiff_t size() const { return size_; }
+  ptrdiff_t size() const {
+    return size_;
+  }
   // Return a pointer to the actual data for this allocator
   // (in the case of the refcounted allocator, this is offset
   // from the base pointer.)
-  virtual void* data() const { return base_ptr_; }
+  virtual void* data() const {
+    return base_ptr_;
+  }
 
   static THMapAllocator* fromDataPtr(const at::DataPtr&);
-  static at::DataPtr makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
-  static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(
+      const char* filename,
+      int flags,
+      size_t size,
+      size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(
+      WithFd,
+      const char* filename,
+      int fd,
+      int flags,
+      size_t size,
+      size_t* actual_size_out);
 
   // Closes the data.  Helps us avoid destructor shenanigans
   virtual void close();
@@ -55,7 +71,7 @@ class TORCH_API THMapAllocator {
   // subclass
   virtual ~THMapAllocator();
 
-protected:
+ protected:
   bool closed_ = false;
   std::string filename_;
   int flags_ = 0;
@@ -67,7 +83,7 @@ protected:
 #else
   int fd_ = -1;
 #endif
-  void *base_ptr_ = nullptr;
+  void* base_ptr_ = nullptr;
 };
 
 // Base-from-member idiom
@@ -79,12 +95,27 @@ class TORCH_API THRefcountedMapAllocator
     : private THRefcountedMapAllocatorArgCheck,
       public THMapAllocator {
  public:
-  THRefcountedMapAllocator(const char *filename, int flags, size_t size);
-  THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  THRefcountedMapAllocator(const char* filename, int flags, size_t size);
+  THRefcountedMapAllocator(
+      WithFd,
+      const char* filename,
+      int fd,
+      int flags,
+      size_t size);
 
   static THRefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
-  static at::DataPtr makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
-  static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(
+      const char* filename,
+      int flags,
+      size_t size,
+      size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(
+      WithFd,
+      const char* filename,
+      int fd,
+      int flags,
+      size_t size,
+      size_t* actual_size_out);
 
   void* data() const override;
 
@@ -92,9 +123,11 @@ class TORCH_API THRefcountedMapAllocator
   int decref();
   void close() override;
 
-  virtual ~THRefcountedMapAllocator() { close(); }
+  virtual ~THRefcountedMapAllocator() {
+    close();
+  }
 
-protected:
+ protected:
   void checkFlags();
   void initializeAlloc();
 };

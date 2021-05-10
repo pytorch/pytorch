@@ -5,12 +5,18 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-// NOTE: functions exist here only to support dispatch via Declarations.cwrap.  You probably don't want to put
-// new functions in here, they should probably be un-genericized.
+// NOTE: functions exist here only to support dispatch via Declarations.cwrap.
+// You probably don't want to put new functions in here, they should probably be
+// un-genericized.
 
-TH_CPP_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                      at::IntArrayRef size_, at::IntArrayRef stride_);
+TH_CPP_API void THTensor_(setStorage)(
+    THTensor* self,
+    THStorage* storage_,
+    ptrdiff_t storageOffset_,
+    at::IntArrayRef size_,
+    at::IntArrayRef stride_);
 
-TH_CPP_API void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+TH_CPP_API void THTensor_(
+    resize)(THTensor* self, at::IntArrayRef size, at::IntArrayRef stride);
 
 #endif

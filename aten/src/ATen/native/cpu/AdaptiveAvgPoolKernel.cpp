@@ -1,12 +1,13 @@
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/native/AdaptivePooling.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <ATen/native/AdaptivePooling.h>
 #include <ATen/native/cpu/utils.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -84,65 +85,70 @@ void cpu_adaptive_avg_pool_channels_last(
 
   using Vec = vec256::Vec256<scalar_t>;
   // parallel on dim N, H, W
-  at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
-    int64_t n = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
+  at::parallel_for(
+      0,
+      nbatch * output_height * output_width,
+      0,
+      [&](int64_t begin, int64_t end) {
+        int64_t n = 0;
+        int64_t oh = 0;
+        int64_t ow = 0;
+        data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
 
-    for (int64_t i = begin; i < end; i++) {
-      int64_t ih0 = start_index(oh, output_height, input_height);
-      int64_t ih1 = end_index(oh, output_height, input_height);
-      int64_t kh = ih1 - ih0;
+        for (int64_t i = begin; i < end; i++) {
+          int64_t ih0 = start_index(oh, output_height, input_height);
+          int64_t ih1 = end_index(oh, output_height, input_height);
+          int64_t kh = ih1 - ih0;
 
-      int64_t iw0 = start_index(ow, output_width, input_width);
-      int64_t iw1 = end_index(ow, output_width, input_width);
-      int64_t kw = iw1 - iw0;
+          int64_t iw0 = start_index(ow, output_width, input_width);
+          int64_t iw1 = end_index(ow, output_width, input_width);
+          int64_t kw = iw1 - iw0;
 
-      scalar_t* out = output_data + i * channels;
-      int64_t size = channels;
+          scalar_t* out = output_data + i * channels;
+          int64_t size = channels;
 
-      // Note: For oridinary usage scenario, each out lane should
-      //   fit in L1 cache; otherwise consider block dim C.
-      // Pass I: zero the out lane
-      int64_t d1 = 0;
-      for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
-        Vec out_vec = Vec(scalar_t(0));
-        out_vec.store(out + d1);
-      }
-      for (; d1 < size; d1++) {
-        out[d1] = scalar_t(0);
-      }
-      // Pass II: compute local sum
-      for (int64_t ih = ih0; ih < ih1; ih++) {
-        for (int64_t iw = iw0; iw < iw1; iw++) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
-              ih * input_width * channels + iw * channels;
-
-          int64_t d2 = 0;
-          for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
-            Vec out_vec = Vec::loadu(out + d2) + Vec::loadu(in + d2);
-            out_vec.store(out + d2);
+          // Note: For oridinary usage scenario, each out lane should
+          //   fit in L1 cache; otherwise consider block dim C.
+          // Pass I: zero the out lane
+          int64_t d1 = 0;
+          for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
+            Vec out_vec = Vec(scalar_t(0));
+            out_vec.store(out + d1);
           }
-          for (; d2 < size; d2++) {
-            out[d2] += in[d2];
+          for (; d1 < size; d1++) {
+            out[d1] = scalar_t(0);
           }
+          // Pass II: compute local sum
+          for (int64_t ih = ih0; ih < ih1; ih++) {
+            for (int64_t iw = iw0; iw < iw1; iw++) {
+              scalar_t* in = input_data +
+                  n * input_height * input_width * channels +
+                  ih * input_width * channels + iw * channels;
+
+              int64_t d2 = 0;
+              for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
+                Vec out_vec = Vec::loadu(out + d2) + Vec::loadu(in + d2);
+                out_vec.store(out + d2);
+              }
+              for (; d2 < size; d2++) {
+                out[d2] += in[d2];
+              }
+            }
+          }
+          // Pass III: compute local average
+          int64_t d3 = 0;
+          for (; d3 < size - (size % Vec::size()); d3 += Vec::size()) {
+            Vec out_vec = Vec::loadu(out + d3) / Vec(scalar_t(kh * kw));
+            out_vec.store(out + d3);
+          }
+          for (; d3 < size; d3++) {
+            out[d3] = out[d3] / kh / kw;
+          }
+
+          // move on to next output index
+          data_index_step(n, nbatch, oh, output_height, ow, output_width);
         }
-      }
-      // Pass III: compute local average
-      int64_t d3 = 0;
-      for (; d3 < size - (size % Vec::size()); d3 += Vec::size()) {
-        Vec out_vec = Vec::loadu(out + d3) / Vec(scalar_t(kh * kw));
-        out_vec.store(out + d3);
-      }
-      for (; d3 < size; d3++) {
-        out[d3] = out[d3] / kh / kw;
-      }
-
-      // move on to next output index
-      data_index_step(n, nbatch, oh, output_height, ow, output_width);
-    }
-  });
+      });
 
   if (!output_.is_contiguous(memory_format)) {
     output_.copy_(output);
@@ -161,7 +167,8 @@ void cpu_adaptive_avg_pool_backward(
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
-  int64_t channels = ndim == 3 ? grad_output.size(0) : grad_output.size(0) * grad_output.size(1);
+  int64_t channels = ndim == 3 ? grad_output.size(0)
+                               : grad_output.size(0) * grad_output.size(1);
   int64_t input_height = grad_input.size(-2);
   int64_t input_width = grad_input.size(-1);
   int64_t output_height = grad_output.size(-2);
@@ -170,8 +177,10 @@ void cpu_adaptive_avg_pool_backward(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (int64_t c = begin; c < end; c++) {
-      scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      scalar_t* grad_input_ptr =
+          grad_input_data + c * input_height * input_width;
+      scalar_t* grad_output_ptr =
+          grad_output_data + c * output_height * output_width;
 
       for (int64_t oh = 0; oh < output_height; oh++) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -183,7 +192,8 @@ void cpu_adaptive_avg_pool_backward(
           int64_t iw1 = end_index(ow, output_width, input_width);
           int64_t kw = iw1 - iw0;
 
-          scalar_t grad_delta = grad_output_ptr[oh * output_width + ow] / kh / kw;
+          scalar_t grad_delta =
+              grad_output_ptr[oh * output_width + ow] / kh / kw;
           for (int64_t ih = ih0; ih < ih1; ih++) {
             for (int64_t iw = iw0; iw < iw1; iw++) {
               grad_input_ptr[ih * input_width + iw] += grad_delta;
@@ -221,8 +231,10 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   // parallel on dim N
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (int64_t n = begin; n < end; n++) {
-      scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      scalar_t* grad_input_ptr =
+          grad_input_data + n * input_height * input_width * channels;
+      scalar_t* grad_output_ptr =
+          grad_output_data + n * output_height * output_width * channels;
 
       for (int64_t oh = 0; oh < output_height; oh++) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -234,15 +246,18 @@ void cpu_adaptive_avg_pool_backward_channels_last(
           int64_t iw1 = end_index(ow, output_width, input_width);
           int64_t kw = iw1 - iw0;
 
-          scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
+          scalar_t* gout =
+              grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t size = channels;
           for (int64_t ih = ih0; ih < ih1; ih++) {
             for (int64_t iw = iw0; iw < iw1; iw++) {
-              scalar_t* gin = grad_input_ptr + ih * input_width * channels + iw * channels;
+              scalar_t* gin =
+                  grad_input_ptr + ih * input_width * channels + iw * channels;
 
               int64_t d = 0;
               for (; d < size - (size % Vec::size()); d += Vec::size()) {
-                Vec gin_vec = Vec::loadu(gin + d) + Vec::loadu(gout + d) / Vec(scalar_t(kh * kw));
+                Vec gin_vec = Vec::loadu(gin + d) +
+                    Vec::loadu(gout + d) / Vec(scalar_t(kh * kw));
                 gin_vec.store(gin + d);
               }
               for (; d < size; d++) {
@@ -266,19 +281,24 @@ void adaptive_avg_pool2d_kernel_impl(
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d", [&] {
-        cpu_adaptive_avg_pool<scalar_t>(output, input, output_size);
-      });
+      AT_DISPATCH_FLOATING_TYPES(
+          input.scalar_type(), "adaptive_avg_pool2d", [&] {
+            cpu_adaptive_avg_pool<scalar_t>(output, input, output_size);
+          });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
-        cpu_adaptive_avg_pool_channels_last<scalar_t>(output, input, output_size);
-      });
+      AT_DISPATCH_FLOATING_TYPES(
+          input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&] {
+            cpu_adaptive_avg_pool_channels_last<scalar_t>(
+                output, input, output_size);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -287,19 +307,26 @@ void adapative_avg_pool2d_backward_kernel_impl(
     const Tensor& grad_output) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "adaptive_avg_pool2d_backward", [&] {
-        cpu_adaptive_avg_pool_backward<scalar_t>(grad_input, grad_output);
-      });
+      AT_DISPATCH_FLOATING_TYPES(
+          grad_output.scalar_type(), "adaptive_avg_pool2d_backward", [&] {
+            cpu_adaptive_avg_pool_backward<scalar_t>(grad_input, grad_output);
+          });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "adaptive_avg_pool2d_backward_channels_last", [&]{
-        cpu_adaptive_avg_pool_backward_channels_last<scalar_t>(grad_input, grad_output);
-      });
+      AT_DISPATCH_FLOATING_TYPES(
+          grad_output.scalar_type(),
+          "adaptive_avg_pool2d_backward_channels_last",
+          [&] {
+            cpu_adaptive_avg_pool_backward_channels_last<scalar_t>(
+                grad_input, grad_output);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -308,6 +335,9 @@ void adapative_avg_pool2d_backward_kernel_impl(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(adaptive_avg_pool2d_kernel, &adaptive_avg_pool2d_kernel_impl);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(adaptive_avg_pool2d_backward_kernel, &adapative_avg_pool2d_backward_kernel_impl);
+REGISTER_DISPATCH(
+    adaptive_avg_pool2d_backward_kernel,
+    &adapative_avg_pool2d_backward_kernel_impl);
 
-}} // at::native
+} // namespace native
+} // namespace at

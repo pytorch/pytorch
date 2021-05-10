@@ -245,7 +245,8 @@ static void compute_dwconv_multiipass(
   const size_t output_height = context->output_height;
   PYTORCH_QNNP_ALIGN(16)
 #ifdef _MSC_VER
-  int32_t* multipass_acc = (int32_t*)_malloca(sizeof(int32_t) * context->group_stride);
+  int32_t* multipass_acc =
+      (int32_t*)_malloca(sizeof(int32_t) * context->group_stride);
 #else
   int32_t multipass_acc[context->group_stride];
 #endif
@@ -328,8 +329,7 @@ enum pytorch_qnnp_status qnnpackConv(
   // We need to check if the corresponding values on this
   // invocation is same as cached values.
   // If so we can skip setup step.
-  if (convolution->input != input ||
-      convolution->batch_size != batch_size ||
+  if (convolution->input != input || convolution->batch_size != batch_size ||
       convolution->input_height != input_height ||
       convolution->input_width != input_width ||
       convolution->input_pixel_stride != input_pixel_stride) {
@@ -350,7 +350,8 @@ enum pytorch_qnnp_status qnnpackConv(
     }
   }
 
-  const size_t output_size = convolution->output_height * convolution->output_width;
+  const size_t output_size =
+      convolution->output_height * convolution->output_width;
 
   switch (conv_p.ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
@@ -365,9 +366,8 @@ enum pytorch_qnnp_status qnnpackConv(
               .groups = groups,
               .group_stride = group_stride,
               .indirection_buffer =
-                (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size +
+                  (const uint8_t**)convolution->indirection_buffer,
+              .indirection_buffer_row_stride = kernel_size +
                   (convolution->output_width * width_step - 1) * kernel_height,
               .indirection_buffer_col_stride =
                   kernel_height * width_step * sizeof(void*),
@@ -375,18 +375,17 @@ enum pytorch_qnnp_status qnnpackConv(
               .output = output,
               .output_height = convolution->output_height,
               .output_width = convolution->output_width,
-              .output_row_stride = convolution->output_width * output_pixel_stride,
+              .output_row_stride =
+                  convolution->output_width * output_pixel_stride,
               .output_col_increment =
                   (output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = conv_quantization_params,
-              .unipass_ukernel =
-                  conv_p.per_channel ?
-                      pytorch_qnnp_params.q8dw9.updw_per_channel :
-                      pytorch_qnnp_params.q8dw9.updw,
-              .multipass_ukernel =
-                  conv_p.per_channel ?
-                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
-                      pytorch_qnnp_params.q8dw25.mpdw,
+              .unipass_ukernel = conv_p.per_channel
+                  ? pytorch_qnnp_params.q8dw9.updw_per_channel
+                  : pytorch_qnnp_params.q8dw9.updw,
+              .multipass_ukernel = conv_p.per_channel
+                  ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
+                  : pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -402,8 +401,7 @@ enum pytorch_qnnp_status qnnpackConv(
               .group_stride = group_stride,
               .indirection_buffer =
                   (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size +
+              .indirection_buffer_row_stride = kernel_size +
                   (convolution->output_width * width_step - 1) * kernel_height,
               .indirection_buffer_col_stride =
                   kernel_height * width_step * sizeof(void*),
@@ -411,18 +409,17 @@ enum pytorch_qnnp_status qnnpackConv(
               .output = output,
               .output_height = convolution->output_height,
               .output_width = convolution->output_width,
-              .output_row_stride = convolution->output_width * output_pixel_stride,
+              .output_row_stride =
+                  convolution->output_width * output_pixel_stride,
               .output_col_increment =
                   (output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = conv_quantization_params,
-              .unipass_ukernel =
-                  conv_p.per_channel ?
-                      pytorch_qnnp_params.q8dw9.updw_per_channel :
-                      pytorch_qnnp_params.q8dw9.updw,
-              .multipass_ukernel =
-                  conv_p.per_channel ?
-                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
-                      pytorch_qnnp_params.q8dw25.mpdw,
+              .unipass_ukernel = conv_p.per_channel
+                  ? pytorch_qnnp_params.q8dw9.updw_per_channel
+                  : pytorch_qnnp_params.q8dw9.updw,
+              .multipass_ukernel = conv_p.per_channel
+                  ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
+                  : pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -593,7 +590,8 @@ enum pytorch_qnnp_status qnnpackConv(
       break;
     }
     default: {
-      pytorch_qnnp_log_error("Invalid kernel type. QNNPACK convolution run failed.");
+      pytorch_qnnp_log_error(
+          "Invalid kernel type. QNNPACK convolution run failed.");
       PYTORCH_QNNP_UNREACHABLE;
     }
   }

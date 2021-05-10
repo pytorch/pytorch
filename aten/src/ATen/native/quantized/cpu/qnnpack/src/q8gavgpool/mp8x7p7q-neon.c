@@ -117,8 +117,7 @@ void pytorch_q8gavgpool_ukernel_mp8x7p7q__neon(
     }
   }
 
-  const float32x4_t vscale =
-      vdupq_n_f32(quantization_params->neon.scale);
+  const float32x4_t vscale = vdupq_n_f32(quantization_params->neon.scale);
 #if defined(__aarch64__)
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);

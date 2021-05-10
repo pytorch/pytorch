@@ -31,7 +31,8 @@ TEST(TestParallel, TestParallel) {
 TEST(TestParallel, NestedParallel) {
   Tensor a = ones({1024, 1024});
   auto expected = a.sum();
-  // check that calling sum() from within a parallel block computes the same result
+  // check that calling sum() from within a parallel block computes the same
+  // result
   at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
     if (begin == 0) {
       ASSERT_TRUE(a.sum().equal(expected));
@@ -44,18 +45,26 @@ TEST(TestParallel, Exceptions) {
   // parallel case
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
-    at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
-      throw std::runtime_error("exception");
-    }),
-    std::runtime_error);
+      at::parallel_for(
+          0,
+          10,
+          1,
+          [&](int64_t begin, int64_t end) {
+            throw std::runtime_error("exception");
+          }),
+      std::runtime_error);
 
   // non-parallel case
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
-    at::parallel_for(0, 1, 1000, [&](int64_t begin, int64_t end) {
-      throw std::runtime_error("exception");
-    }),
-    std::runtime_error);
+      at::parallel_for(
+          0,
+          1,
+          1000,
+          [&](int64_t begin, int64_t end) {
+            throw std::runtime_error("exception");
+          }),
+      std::runtime_error);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -63,13 +72,9 @@ TEST(TestParallel, IntraOpLaunchFuture) {
   int v1 = 0;
   int v2 = 0;
 
-  auto fut1 = at::intraop_launch_future([&v1](){
-    v1 = 1;
-  });
+  auto fut1 = at::intraop_launch_future([&v1]() { v1 = 1; });
 
-  auto fut2 = at::intraop_launch_future([&v2](){
-    v2 = 2;
-  });
+  auto fut2 = at::intraop_launch_future([&v2]() { v2 = 2; });
 
   fut1->wait();
   fut2->wait();

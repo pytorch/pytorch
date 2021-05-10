@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 
 // ${generated_comment}
@@ -213,3 +214,4 @@ inline bool is_signed(const Tensor& tensor) {
 }
 
 }
+// clang-format on

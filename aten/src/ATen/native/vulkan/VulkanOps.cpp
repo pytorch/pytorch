@@ -1,8 +1,8 @@
 #include <ATen/InferSize.h>
 #include <ATen/Utils.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
@@ -35,8 +35,7 @@ void upsample_nearest2d(
     float scaleX;
     float scaleY;
   };
-  ConstBlock cb{scaleW,
-                scaleH};
+  ConstBlock cb{scaleW, scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};

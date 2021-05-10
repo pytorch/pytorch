@@ -1,10 +1,10 @@
-#include <THCUNN/THCUNN.h>
-#include <THC/THCTensor.hpp>
-#include <THCUNN/common.h>
-#include <THC/THCReduceApplyUtils.cuh>
 #include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
 #include <c10/macros/Macros.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
 
 #include <thrust/functional.h>
 
@@ -12,23 +12,23 @@
 
 template <typename Dtype, typename Acctype>
 C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
-__global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output,
-                                                                   Dtype *input,
-                                                                   THCIndex_t *target,
-                                                                   Dtype *istarget,
-                                                                   int nframe,
-                                                                   int dim,
-                                                                   int sizeaverage)
-{
+__global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(
+    Dtype* output,
+    Dtype* input,
+    THCIndex_t* target,
+    Dtype* istarget,
+    int nframe,
+    int dim,
+    int sizeaverage) {
   // Temporary sums (for mapreduce)
   __shared__ Acctype sums[MULTILABELMARGIN_THREADS];
 
   // vectors:
   int k = blockIdx.x;
-  Dtype *input_k = input + k*dim;
-  THCIndex_t *target_k = target + k*dim;
-  Dtype *output_k = output + k;
-  Dtype *istarget_k = istarget + k*dim;
+  Dtype* input_k = input + k * dim;
+  THCIndex_t* target_k = target + k * dim;
+  Dtype* output_k = output + k;
+  Dtype* istarget_k = istarget + k * dim;
 
   // zero istarget
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
@@ -40,7 +40,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
       int target_idx = target_k[dt];
-      if (target_idx < 0) break;
+      if (target_idx < 0)
+        break;
       istarget_k[target_idx] = ScalarConvert<int, Dtype>::to(1);
     }
   }
@@ -51,7 +52,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   for (int dt = 0; dt < dim; dt++) {
     // next target:
     int target_idx = target_k[dt];
-    if (target_idx < 0) break;
+    if (target_idx < 0)
+      break;
 
     // current value for target
     Dtype input_target_k = input_k[target_idx];
@@ -68,7 +70,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   }
 
   // reduce
-  Acctype totalSum = reduceBlock(sums, blockDim.x, sum, thrust::plus<Acctype>(), (Acctype)0);
+  Acctype totalSum =
+      reduceBlock(sums, blockDim.x, sum, thrust::plus<Acctype>(), (Acctype)0);
   if (threadIdx.x == 0) {
     if (sizeaverage) {
       *output_k = ScalarConvert<Acctype, Dtype>::to((totalSum / dim) / nframe);
@@ -80,33 +83,35 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
 
 template <typename Dtype, typename Acctype>
 C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
-__global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gradInput,
-                                                                      Dtype *gradOutput,
-                                                                      Dtype *input,
-                                                                      THCIndex_t *target,
-                                                                      Dtype *istarget,
-                                                                      int nframe,
-                                                                      int dim,
-                                                                      int sizeaverage,
-                                                                      int reduce)
-{
+__global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(
+    Dtype* gradInput,
+    Dtype* gradOutput,
+    Dtype* input,
+    THCIndex_t* target,
+    Dtype* istarget,
+    int nframe,
+    int dim,
+    int sizeaverage,
+    int reduce) {
   // Temporary sums (for mapreduce)
   __shared__ Acctype sums[MULTILABELMARGIN_THREADS];
 
   // vectors:
   int k = blockIdx.x;
-  Dtype *input_k = input + k*dim;
-  Dtype *gradInput_k = gradInput + k*dim;
-  THCIndex_t *target_k = target + k*dim;
-  Dtype *istarget_k = istarget + k*dim;
+  Dtype* input_k = input + k * dim;
+  Dtype* gradInput_k = gradInput + k * dim;
+  THCIndex_t* target_k = target + k * dim;
+  Dtype* istarget_k = istarget + k * dim;
 
-  Dtype *gradOutput_k = gradOutput;
+  Dtype* gradOutput_k = gradOutput;
   if (!reduce) {
     gradOutput_k += k;
   }
 
   // gain:
-  Dtype g = ScalarConvert<Acctype, Dtype>::to( sizeaverage && reduce ? 1./((Acctype)(nframe*dim)) : 1./((Acctype)dim) );
+  Dtype g = ScalarConvert<Acctype, Dtype>::to(
+      sizeaverage && reduce ? 1. / ((Acctype)(nframe * dim))
+                            : 1. / ((Acctype)dim));
 
   // zero gradients:
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
@@ -118,7 +123,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   for (int dt = 0; dt < dim; dt++) {
     // next target:
     int target_idx = (int)target_k[dt];
-    if (target_idx < 0) break;
+    if (target_idx < 0)
+      break;
 
     // current value for target
     Dtype input_target_k = input_k[target_idx];
@@ -138,7 +144,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
     __syncthreads();
 
     // reduce sum
-    Acctype totalSum = reduceBlock(sums, blockDim.x, sum, thrust::plus<Acctype>(), (Acctype)0);
+    Acctype totalSum =
+        reduceBlock(sums, blockDim.x, sum, thrust::plus<Acctype>(), (Acctype)0);
     if (threadIdx.x == 0) {
       gradInput_k[target_idx] += ScalarConvert<Acctype, Dtype>::to(totalSum);
     }
@@ -149,10 +156,10 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   }
 }
 
-#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
-
 #include <THCUNN/generic/MultiLabelMarginCriterion.cu>
+
 #include <THC/THCGenerateBFloat16Type.h>
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 
 #undef MULTILABELMARGIN_THREADS

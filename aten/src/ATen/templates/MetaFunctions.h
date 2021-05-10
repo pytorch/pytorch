@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 
 // ${generated_comment}
@@ -13,3 +14,4 @@ ${declarations}
 
 } // namespace meta
 } // namespace at
+// clang-format on

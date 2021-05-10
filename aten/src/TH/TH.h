@@ -8,10 +8,10 @@
 #include <TH/THLapack.h>
 #endif
 
-#include <TH/THVector.h>
 #include <TH/THStorageFunctions.h>
 #include <TH/THTensor.h>
 #include <TH/THTensorApply.h>
 #include <TH/THTensorDimApply.h>
+#include <TH/THVector.h>
 
 #endif

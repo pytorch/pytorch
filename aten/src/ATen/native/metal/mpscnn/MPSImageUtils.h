@@ -55,8 +55,8 @@ tensor it’s converted from.
 2) 2D tensors (H, W) are always stored as MPSImage(N=1, C=1, H=H, W=W).
 3) 3D tensors (C, H, W) are always stored as MPSImage(N=1, C=C, H=H, W=W).
 4) 4D tensors (N, C, H, W) are always stored as MPSImage(N=N, C=C, H=H, W=W).
-5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H, W=W).
-6) ...
+5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H,
+W=W). 6) ...
  */
 static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
   std::vector<int64_t> imageSize(4, 1);
@@ -64,7 +64,7 @@ static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
   int64_t batch = 1;
   for (int i = sizes.size() - 1; i >= 0; i--) {
     if (index != 0) {
-        imageSize[index] = sizes[i];
+      imageSize[index] = sizes[i];
       index--;
       continue;
     }

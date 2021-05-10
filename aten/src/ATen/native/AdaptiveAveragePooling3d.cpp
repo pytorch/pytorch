@@ -81,7 +81,8 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
-  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK(
+      output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
     TORCH_CHECK(
@@ -98,8 +99,12 @@ void adaptive_avg_pool3d_out_cpu_template(
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input");
-  TORCH_CHECK(input.dtype() == output.dtype(),
-      "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
+  TORCH_CHECK(
+      input.dtype() == output.dtype(),
+      "expected dtype ",
+      input.dtype(),
+      " for `output` but got dtype ",
+      output.dtype());
 
   /* sizes */
   int64_t sizeD = input.size(-4);
@@ -164,7 +169,7 @@ void adaptive_avg_pool3d_out_cpu_template(
                   istrideW);
             }
           });
-    });
+        });
   }
 }
 
@@ -277,14 +282,15 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
                   osizeW);
             }
           });
-    });
+        });
   }
   return gradInput;
 }
 
 } // namespace
 
-Tensor& adaptive_avg_pool3d_out_cpu(const Tensor& input,
+Tensor& adaptive_avg_pool3d_out_cpu(
+    const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
   adaptive_avg_pool3d_out_cpu_template(output, input, output_size);
@@ -298,7 +304,8 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
 }
 
 Tensor adaptive_avg_pool3d(at::Tensor const& input, IntArrayRef output_size) {
-  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK(
+      output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
 
   if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
     // in this case, adaptive pooling is just computing mean over hw
@@ -310,7 +317,8 @@ Tensor adaptive_avg_pool3d(at::Tensor const& input, IntArrayRef output_size) {
   }
 }
 
-Tensor& adaptive_avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
+Tensor& adaptive_avg_pool3d_backward_out_cpu(
+    const Tensor& gradOutput_,
     const Tensor& input,
     Tensor& gradInput) {
   gradInput.resize_as_(input).zero_();
@@ -318,7 +326,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
   return gradInput;
 }
 
-Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
+Tensor adaptive_avg_pool3d_backward_cpu(
+    const Tensor& gradOutput_,
     const Tensor& input) {
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);

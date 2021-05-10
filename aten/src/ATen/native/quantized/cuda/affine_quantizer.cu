@@ -19,11 +19,11 @@ void quantize_tensor_per_tensor_affine_cuda(
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
         auto iter = TensorIteratorConfig()
-          .check_all_same_dtype(false)
-          .add_output(qtensor)
-          .add_input(rtensor)
-          .add_input(qtensor)
-          .build();
+                        .check_all_same_dtype(false)
+                        .add_output(qtensor)
+                        .add_input(rtensor)
+                        .add_input(qtensor)
+                        .build();
 
         gpu_kernel(
             iter,
@@ -46,10 +46,10 @@ void dequantize_tensor_per_tensor_affine_cuda(
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cuda", [&]() {
         auto iter = TensorIteratorConfig()
-          .check_all_same_dtype(false)
-          .add_output(rtensor)
-          .add_input(qtensor)
-          .build();
+                        .check_all_same_dtype(false)
+                        .add_output(rtensor)
+                        .add_input(qtensor)
+                        .build();
         gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value) -> float {
           return (static_cast<float>(value.val_) - zero_point) * scale;
         });

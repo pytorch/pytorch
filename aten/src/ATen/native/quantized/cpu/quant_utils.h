@@ -6,19 +6,19 @@
 
 namespace quant_utils {
 namespace {
-  float RawUint16ToFp16(unsigned short value) {
-    // Convert raw 16 bits half precision floating point number
-    // to single precision floating point number.
-    const unsigned short sign_bits = value >> 15;
-    const unsigned short exponent_bits = value >> 10 & 0x1f;
-    const unsigned short significand_bits = value & 0x3ff;
+float RawUint16ToFp16(unsigned short value) {
+  // Convert raw 16 bits half precision floating point number
+  // to single precision floating point number.
+  const unsigned short sign_bits = value >> 15;
+  const unsigned short exponent_bits = value >> 10 & 0x1f;
+  const unsigned short significand_bits = value & 0x3ff;
 
-    const float sign = sign_bits ? -1 : 1;
-    const float significand =
-        1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
-    const float exponent = exponent_bits - 0xf;
+  const float sign = sign_bits ? -1 : 1;
+  const float significand =
+      1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
+  const float exponent = exponent_bits - 0xf;
 
-    return sign * std::ldexp(significand, exponent);
+  return sign * std::ldexp(significand, exponent);
 }
 
 template <typename T>
@@ -33,7 +33,7 @@ bool CheckAndSaturate(T max_val, T* element) {
   }
   return false;
 }
-}
+} // namespace
 using namespace std;
 // A structure to hold quantization parameters 'scale' and 'zero_point'.
 // The meaning of these values is as the constants in the quantization equation
@@ -62,8 +62,8 @@ inline TensorQuantizationParams ChooseQuantizationParams(
       "In ChooseQuantizationParams, min should be less than or equal to max");
 
   if (reduce_range) {
-    qmin = qmin/2;
-    qmax = qmax/2;
+    qmin = qmin / 2;
+    qmax = qmax / 2;
   }
   if (min < 0 && max > 0 && preserve_sparsity) {
     int symmetric_qmin = -((qmax - qmin) / 2 + 1);
@@ -127,7 +127,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // to be a middle value between qmin and qmax.
   // If either min or max is 0, then we just use 0 as zero_point.
   if (min < 0 && max > 0 && preserve_sparsity) {
-    const auto midpoint = qmin + (qmax - qmin) / 2;  // Overflow-safe midpoint
+    const auto midpoint = qmin + (qmax - qmin) / 2; // Overflow-safe midpoint
     initial_zero_point = midpoint + 1;
   }
 
@@ -153,8 +153,9 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
 // This function helps to convert the Conv1D dimensions usable by the Conv2d op.
 constexpr int64_t kConv1dSqueezeDim = 0;
-static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
-                                             int64_t base_value) {
+static torch::List<int64_t> MakeArgForConv1d(
+    const torch::List<int64_t>& arg,
+    int64_t base_value) {
   TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
   torch::List<int64_t> result({arg.get(0), base_value});
   if (arg.size() == 1) {

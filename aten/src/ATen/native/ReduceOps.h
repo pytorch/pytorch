@@ -5,12 +5,13 @@
 #include <c10/util/Optional.h>
 
 namespace at {
-  struct TensorIterator;
+struct TensorIterator;
 }
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-using reduce_fn = void(*)(TensorIterator &);
+using reduce_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(reduce_fn, sum_stub);
 DECLARE_DISPATCH(reduce_fn, nansum_stub);
@@ -31,7 +32,7 @@ using reduce_norm_fn =
     void (*)(Tensor&, const Tensor&, const Scalar&, c10::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
-using reduce_fn_flag = void(*)(TensorIterator &, const Scalar&);
+using reduce_fn_flag = void (*)(TensorIterator&, const Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
@@ -40,8 +41,13 @@ DECLARE_DISPATCH(cum_fn, cumprod_stub);
 DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
 
 // Used in cuda/Normalization.cu
-TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
-    Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
-    int64_t correction, bool keepdim);
+TORCH_API std::tuple<Tensor&, Tensor&> var_mean_out(
+    Tensor& result1,
+    Tensor& result2,
+    const Tensor& self,
+    IntArrayRef dim,
+    int64_t correction,
+    bool keepdim);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -19,11 +19,11 @@ extern "C" {
 #endif
 
 #define DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(fn_name) \
-  PYTORCH_QNNP_INTERNAL void fn_name(            \
-      size_t n,                                  \
-      const uint8_t* a,                          \
-      const uint8_t* b,                          \
-      uint8_t* y,                                \
+  PYTORCH_QNNP_INTERNAL void fn_name(                    \
+      size_t n,                                          \
+      const uint8_t* a,                                  \
+      const uint8_t* b,                                  \
+      uint8_t* y,                                        \
       const union pytorch_qnnp_add_quantization_params* quantization_params);
 
 DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__neon)

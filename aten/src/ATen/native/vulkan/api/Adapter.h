@@ -33,7 +33,11 @@ struct Adapter final {
   }
 
   inline Shader::WorkGroup local_work_group_size() const {
-    return { 4u, 4u, 4u, };
+    return {
+        4u,
+        4u,
+        4u,
+    };
   }
 };
 

@@ -108,8 +108,14 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   std::vector<int64_t> output_size = input.sizes().vec();
   output_size.back() = N;
-  Tensor output = at::empty(output_size, input.options().dtype(at::kFloat), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor buffer = at::empty(output_size, input.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = at::empty(
+      output_size,
+      input.options().dtype(at::kFloat),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor buffer = at::empty(
+      output_size,
+      input.options().dtype(at::kInt),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // Pull out the PackBMatrix instance from the owning tensor
   auto& pack_b =

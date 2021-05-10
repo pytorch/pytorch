@@ -31,7 +31,8 @@
    */
 // Verifies streams are live through copying and moving
 TEST(TestStream, CopyAndMoveTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   int32_t device = -1;
   cudaStream_t cuda_stream;
 
@@ -70,7 +71,8 @@ TEST(TestStream, CopyAndMoveTest) {
 
 // Verifies streams are set properly
 TEST(TestStream, GetAndSetTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
 
   // Sets and gets
@@ -97,7 +99,8 @@ void thread_fun(at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
 
 // Ensures streams are thread local
 TEST(TestStream, MultithreadGetAndSetTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   at::optional<at::cuda::CUDAStream> s0, s1;
 
   std::thread t0{thread_fun, std::ref(s0)};
@@ -116,7 +119,8 @@ TEST(TestStream, MultithreadGetAndSetTest) {
 
 // CUDA Guard
 TEST(TestStream, CUDAGuardTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   if (at::cuda::getNumGPUs() < 2) {
     return;
   }
@@ -170,7 +174,8 @@ TEST(TestStream, CUDAGuardTest) {
 
 // Streampool Round Robin
 TEST(TestStream, StreamPoolTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   std::vector<at::cuda::CUDAStream> streams{};
   for (const auto i : c10::irange(200)) {
     streams.emplace_back(at::cuda::getStreamFromPool());
@@ -178,7 +183,7 @@ TEST(TestStream, StreamPoolTest) {
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (const auto i: c10::irange(streams.size())) {
+  for (const auto i : c10::irange(streams.size())) {
     cudaStream_t cuda_stream = streams[i];
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)
@@ -190,7 +195,8 @@ TEST(TestStream, StreamPoolTest) {
 
 // Multi-GPU
 TEST(TestStream, MultiGPUTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   if (at::cuda::getNumGPUs() < 2)
     return;
 
@@ -208,7 +214,8 @@ TEST(TestStream, MultiGPUTest) {
 
 // CUDAEvent Syncs
 TEST(TestStream, CUDAEventSyncTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   const auto stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event;
 
@@ -228,7 +235,8 @@ TEST(TestStream, CUDAEventSyncTest) {
 
 // Cross-Device Events
 TEST(TestStream, CrossDeviceTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   if (at::cuda::getNumGPUs() < 2)
     return;
 
@@ -254,9 +262,11 @@ TEST(TestStream, CrossDeviceTest) {
 
 // Generic Events
 TEST(TestStream, GenericInlineCUDAEventTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
 
-  c10::impl::InlineEvent<c10::cuda::impl::CUDAGuardImpl> event{c10::DeviceType::CUDA};
+  c10::impl::InlineEvent<c10::cuda::impl::CUDAGuardImpl> event{
+      c10::DeviceType::CUDA};
   c10::Stream stream = at::cuda::getStreamFromPool();
 
   event.record(stream);
@@ -274,7 +284,8 @@ TEST(TestStream, GenericInlineCUDAEventTest) {
 }
 
 TEST(TestStream, GenericVirtualCUDAEventTest) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
 
   c10::Event event{c10::DeviceType::CUDA};
   c10::Stream stream = at::cuda::getStreamFromPool();

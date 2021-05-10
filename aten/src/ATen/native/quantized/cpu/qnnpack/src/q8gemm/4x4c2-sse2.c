@@ -46,27 +46,27 @@ void pytorch_q8gemm_ukernel_4x4c2__sse2(
   const __m128i va_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
   const int16_t vb_zero_point_0 =
-    (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
-    output_channel_index];
+      (int16_t)(uint16_t)
+          quantization_params->sse2.kernel_zero_points[output_channel_index];
   const int16_t vb_zero_point_1 =
-      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
-        output_channel_index + 1];
+      (int16_t)(uint16_t)quantization_params->sse2
+          .kernel_zero_points[output_channel_index + 1];
   const int16_t vb_zero_point_2 =
-      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
-        output_channel_index + 2];
+      (int16_t)(uint16_t)quantization_params->sse2
+          .kernel_zero_points[output_channel_index + 2];
   const int16_t vb_zero_point_3 =
-      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
-        output_channel_index + 3];
+      (int16_t)(uint16_t)quantization_params->sse2
+          .kernel_zero_points[output_channel_index + 3];
 
-  __m128i vb_zero_point = _mm_set_epi16(vb_zero_point_3,
-                                        vb_zero_point_3,
-                                        vb_zero_point_2,
-                                        vb_zero_point_2,
-                                        vb_zero_point_1,
-                                        vb_zero_point_1,
-                                        vb_zero_point_0,
-                                        vb_zero_point_0
-                                        );
+  __m128i vb_zero_point = _mm_set_epi16(
+      vb_zero_point_3,
+      vb_zero_point_3,
+      vb_zero_point_2,
+      vb_zero_point_2,
+      vb_zero_point_1,
+      vb_zero_point_1,
+      vb_zero_point_0,
+      vb_zero_point_0);
   const __m128i vzero = _mm_setzero_si128();
   for (; k >= 8; k -= 8) {
     const __m128i va0 = _mm_loadl_epi64((const __m128i*)a0);
@@ -265,33 +265,17 @@ void pytorch_q8gemm_ukernel_4x4c2__sse2(
     }
   }
 
-  const __m128 vmultiplier =
-      _mm_loadu_ps(&quantization_params->sse2.requantization_scales[output_channel_index]);
+  const __m128 vmultiplier = _mm_loadu_ps(
+      &quantization_params->sse2.requantization_scales[output_channel_index]);
 
-  vacc0x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc0x0123),
-                  vmultiplier
-                  )
-                );
-  vacc1x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc1x0123),
-                  vmultiplier
-                  )
-                );
-  vacc2x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc2x0123),
-                  vmultiplier
-                  )
-                );
-  vacc3x0123 = _mm_cvtps_epi32(
-                _mm_mul_ps(
-                  _mm_cvtepi32_ps(vacc3x0123),
-                  vmultiplier
-                  )
-                );
+  vacc0x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc0x0123), vmultiplier));
+  vacc1x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc1x0123), vmultiplier));
+  vacc2x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc2x0123), vmultiplier));
+  vacc3x0123 =
+      _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc3x0123), vmultiplier));
 
   const __m128i voutput_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.output_zero_point);

@@ -1,5 +1,6 @@
 #ifndef TH_GENERIC_FILE
-#error "You must define TH_GENERIC_FILE before including THGenerateBFloat16Type.h"
+#error \
+    "You must define TH_GENERIC_FILE before including THGenerateBFloat16Type.h"
 #endif
 
 #include <c10/util/BFloat16.h>

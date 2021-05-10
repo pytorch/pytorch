@@ -2,8 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/hash.h>
 
@@ -24,12 +24,12 @@ namespace api {
 // function prototype declaring the number and type of its arguments.
 //
 // Furthermore, shader layouts, or as Vulkan calls them descriptor set layouts,
-// define the blueprint out of which descriptor sets are instantiated.  Descriptor
-// sets themselves, bundle the input to and output from a shader and contain
-// pointers to GPU, and GPU accessible system, memory locations where the actual
-// resources reside.  Shader layouts are also used in creation of Vulkan pipeline
-// layouts, while multiple shaders are bundled together to form a portion of the
-// the monolithic state objects that are Vulkan pipelines.
+// define the blueprint out of which descriptor sets are instantiated.
+// Descriptor sets themselves, bundle the input to and output from a shader and
+// contain pointers to GPU, and GPU accessible system, memory locations where
+// the actual resources reside.  Shader layouts are also used in creation of
+// Vulkan pipeline layouts, while multiple shaders are bundled together to form
+// a portion of the the monolithic state objects that are Vulkan pipelines.
 //
 // This struct defines the facilities required to create, compile, reuse,
 // and destruct the aforementioned Vulkan objects.
@@ -104,9 +104,7 @@ struct Shader final {
       api::Cache<Factory> cache_;
     } cache;
 
-    explicit Layout(const GPU& gpu)
-      : cache(Factory(gpu)) {
-    }
+    explicit Layout(const GPU& gpu) : cache(Factory(gpu)) {}
   } layout;
 
   //
@@ -128,12 +126,12 @@ struct Shader final {
     union {
       struct {
         const char* glsl; // Null-terminated
-        uint32_t unused;  // Padding
+        uint32_t unused; // Padding
       } source;
 
       struct {
         const uint32_t* spirv;
-        uint32_t size;    // Bytes
+        uint32_t size; // Bytes
       } binary;
     } shader;
 
@@ -177,10 +175,7 @@ struct Shader final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Shader(const GPU& gpu)
-    : layout(gpu),
-      cache(Factory(gpu)) {
-  }
+  explicit Shader(const GPU& gpu) : layout(gpu), cache(Factory(gpu)) {}
 };
 
 //
@@ -198,9 +193,7 @@ inline size_t Shader::Layout::Factory::Hasher::operator()(
   size_t hash = 0u;
 
   for (const VkDescriptorType type : descriptor.signature) {
-    hash = c10::hash_combine(
-        hash,
-        c10::get_hash(type));
+    hash = c10::hash_combine(hash, c10::get_hash(type));
   }
 
   return hash;
@@ -213,8 +206,8 @@ inline Shader::Layout::Object::operator bool() const {
 inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
     const Descriptor& descriptor) {
   return {
-    cache_.retrieve(descriptor),
-    descriptor.signature,
+      cache_.retrieve(descriptor),
+      descriptor.signature,
   };
 }
 
@@ -229,31 +222,30 @@ inline bool operator==(
 }
 
 inline Shader::Descriptor::Descriptor(const char* const glsl)
- : type(Type::Source),
-   shader{
-    .source = {
-      glsl,
-      0u,
-    },
-   } {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      glsl,
-      "Invalid shader source code!");
+    : type(Type::Source),
+      shader{
+          .source =
+              {
+                  glsl,
+                  0u,
+              },
+      } {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(glsl, "Invalid shader source code!");
 }
 
 inline Shader::Descriptor::Descriptor(
     const uint32_t* const code,
     const uint32_t size)
- : type(Type::Binary),
-   shader{
-    .binary = {
-      code,
-      size,
-    },
-   } {
+    : type(Type::Binary),
+      shader{
+          .binary =
+              {
+                  code,
+                  size,
+              },
+      } {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      code && (0u != size),
-      "Invalid shader binary!");
+      code && (0u != size), "Invalid shader binary!");
 }
 
 inline bool operator==(

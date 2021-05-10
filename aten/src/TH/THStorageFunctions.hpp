@@ -3,9 +3,9 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
+#include <TH/THStorageFunctions.h>
 #include <c10/core/Storage.h>
 #include <c10/core/StorageImpl.h>
-#include <TH/THStorageFunctions.h>
 
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
@@ -34,5 +34,5 @@
 
 TH_CPP_API THStorage* THStorage_new();
 
-TH_API void THStorage_retain(THStorage *storage);
+TH_API void THStorage_retain(THStorage* storage);
 TH_API void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes);

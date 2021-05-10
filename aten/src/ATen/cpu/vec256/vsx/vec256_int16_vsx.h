@@ -89,7 +89,8 @@ class Vec256<int16_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask & 65535) == 65535, Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
     return b;
   }
 
@@ -101,7 +102,8 @@ class Vec256<int16_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask > 0 && mask < 255), Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
     constexpr int16_t g0 = (mask & 1) * 0xffff;
     constexpr int16_t g1 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2 = ((mask & 4) >> 2) * 0xffff;
@@ -119,7 +121,8 @@ class Vec256<int16_t> {
   static std::enable_if_t<
       (mask > 255 && (mask & 65535) != 65535 && ((mask & 255) == 255)),
       Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
     constexpr int16_t g0_2 = (mask & 1) * 0xffff;
     constexpr int16_t g1_2 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2_2 = ((mask & 4) >> 2) * 0xffff;
@@ -139,7 +142,8 @@ class Vec256<int16_t> {
   static std::enable_if_t<
       (mask > 255 && ((mask & 65535) != 65535) && ((mask & 255) == 0)),
       Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
     constexpr int16_t mask2 = (mask & 65535) >> 16;
     constexpr int16_t g0_2 = (mask & 1) * 0xffff;
     constexpr int16_t g1_2 = ((mask & 2) >> 1) * 0xffff;
@@ -161,7 +165,8 @@ class Vec256<int16_t> {
       (mask > 255 && ((mask & 65535) != 65535) && ((mask & 255) != 0) &&
        ((mask & 255) != 255)),
       Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
     constexpr int16_t g0 = (mask & 1) * 0xffff;
     constexpr int16_t g1 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2 = ((mask & 4) >> 2) * 0xffff;
@@ -281,7 +286,8 @@ class Vec256<int16_t> {
       __at_align32__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, tmp_values);
       vec_vsx_st(_vec1, offset16, tmp_values);
-      std::memcpy(ptr, tmp_values, std::min(count, size()) * sizeof(value_type));
+      std::memcpy(
+          ptr, tmp_values, std::min(count, size()) * sizeof(value_type));
     }
   }
   const int16_t& operator[](int idx) const = delete;
@@ -345,7 +351,6 @@ Vec256<int16_t> inline minimum(
     const Vec256<int16_t>& b) {
   return a.minimum(b);
 }
-
 
 } // namespace
 } // namespace vec256

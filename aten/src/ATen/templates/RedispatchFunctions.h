@@ -1,3 +1,4 @@
+// clang-format off
 #pragma once
 
 // ${generated_comment}
@@ -22,3 +23,4 @@ namespace redispatch {
 } // namespace redispatch
 
 }
+// clang-format on

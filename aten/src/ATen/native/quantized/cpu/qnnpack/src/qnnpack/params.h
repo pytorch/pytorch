@@ -315,7 +315,8 @@ typedef void (*pytorch_q8gemm_dq_ukernel_function)(
     float* c,
     size_t c_stride,
     size_t output_channel_index,
-    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+    const struct pytorch_qnnp_conv_dynamic_quantization_params*
+        quantization_params);
 
 typedef void (*pytorch_q8gemm_dq_sparse_ukernel_function)(
     size_t mr,
@@ -329,7 +330,8 @@ typedef void (*pytorch_q8gemm_dq_sparse_ukernel_function)(
     float* c,
     size_t c_stride,
     size_t output_channel_index,
-    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+    const struct pytorch_qnnp_conv_dynamic_quantization_params*
+        quantization_params);
 
 typedef void (*pytorch_q8gemm_dq_sparse_packedA_ukernel_function)(
     size_t mr,
@@ -342,7 +344,8 @@ typedef void (*pytorch_q8gemm_dq_sparse_packedA_ukernel_function)(
     float* c,
     size_t c_stride,
     size_t output_channel_index,
-    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+    const struct pytorch_qnnp_conv_dynamic_quantization_params*
+        quantization_params);
 
 typedef void (*pytorch_q8gemm_sparse_packA_ukernel_function)(
     const size_t mr,
@@ -383,10 +386,14 @@ typedef void (*pytorch_q8sum_rows_ukernel_function)(
     int32_t multiplier,
     int32_t* sums);
 
-typedef void (*pytorch_xzipc_ukernel_function)(size_t n, const void* x, void* y);
-
 typedef void (
-    *pytorch_xzipv_ukernel_function)(size_t n, size_t m, const void* x, void* y);
+    *pytorch_xzipc_ukernel_function)(size_t n, const void* x, void* y);
+
+typedef void (*pytorch_xzipv_ukernel_function)(
+    size_t n,
+    size_t m,
+    const void* x,
+    void* y);
 
 typedef void (*pytorch_x8lut_ukernel_function)(
     size_t n,

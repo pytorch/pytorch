@@ -1,16 +1,16 @@
 #ifndef THC_SCAN_UTILS_INC
 #define THC_SCAN_UTILS_INC
 
+#include <c10/macros/Macros.h>
 #include <THC/THCAsmUtils.cuh>
 #include <THC/THCDeviceUtils.cuh>
-#include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
 
-
-// Extends the above Inclusive Scan to support segments. It has the same properties
-// but also takes a flag array that indicates the starts of "segments", i.e. individual
-// units to scan. For example, consider the following (+)-scan that is segmented:
+// Extends the above Inclusive Scan to support segments. It has the same
+// properties but also takes a flag array that indicates the starts of
+// "segments", i.e. individual units to scan. For example, consider the
+// following (+)-scan that is segmented:
 //
 // Input:  [1, 3, 2, 4, 1, 2, 3, 2, 1, 4]
 // Flags:  [1, 0, 0, 1, 0, 1, 1, 0, 1, 0]
@@ -18,13 +18,17 @@
 //
 // So we see that each "flag" resets the scan to that index.
 template <typename T, class BinaryOp, int Power2ScanSize>
-__device__ void segmentedInclusivePrefixScan(T *smem, bool *bmem, BinaryOp binop) {
+__device__ void segmentedInclusivePrefixScan(
+    T* smem,
+    bool* bmem,
+    BinaryOp binop) {
   // Reduce step ("upsweep")
 #pragma unroll
   for (int stride = 1; stride < Power2ScanSize; stride <<= 1) {
     int index = (threadIdx.x + 1) * stride * 2 - 1;
     if (index < Power2ScanSize) {
-      smem[index] = bmem[index] ? smem[index] : binop(smem[index], smem[index - stride]);
+      smem[index] =
+          bmem[index] ? smem[index] : binop(smem[index], smem[index - stride]);
       bmem[index] = bmem[index] | bmem[index - stride];
     }
     __syncthreads();
@@ -35,7 +39,9 @@ __device__ void segmentedInclusivePrefixScan(T *smem, bool *bmem, BinaryOp binop
   for (int stride = Power2ScanSize / 4; stride > 0; stride >>= 1) {
     int index = (threadIdx.x + 1) * stride * 2 - 1;
     if ((index + stride) < Power2ScanSize) {
-      smem[index + stride] = bmem[index + stride] ? smem[index + stride] : binop(smem[index + stride], smem[index]);
+      smem[index + stride] = bmem[index + stride]
+          ? smem[index + stride]
+          : binop(smem[index + stride], smem[index]);
       bmem[index + stride] = bmem[index + stride] | bmem[index];
     }
     __syncthreads();
@@ -44,7 +50,11 @@ __device__ void segmentedInclusivePrefixScan(T *smem, bool *bmem, BinaryOp binop
 
 // Inclusive prefix sum using shared memory
 template <typename T, bool KillWARDependency, class BinaryFunction>
-__device__ void inclusivePrefixScan(T* smem, T in, T* out, BinaryFunction binop) {
+__device__ void inclusivePrefixScan(
+    T* smem,
+    T in,
+    T* out,
+    BinaryFunction binop) {
   // FIXME: this is a slow, simple implementation; need up/down sweep,
   // prevent smem conflicts
   smem[threadIdx.x] = in;
@@ -76,7 +86,12 @@ __device__ void inclusivePrefixScan(T* smem, T in, T* out, BinaryFunction binop)
 
 // Exclusive prefix sum using shared memory
 template <typename T, bool KillWARDependency, class BinaryFunction>
-__device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunction binop) {
+__device__ void exclusivePrefixScan(
+    T* smem,
+    T in,
+    T* out,
+    T* carry,
+    BinaryFunction binop) {
   // FIXME: crappy implementation
   // We kill write-after-read dependencies separately below, hence the `false`
   inclusivePrefixScan<T, false, BinaryFunction>(smem, in, out, binop);
@@ -93,9 +108,13 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 // Inclusive prefix sum for binary vars using intra-warp voting +
 // shared memory
 template <typename T, bool KillWARDependency, class BinaryFunction>
-__device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
+__device__ void inclusiveBinaryPrefixScan(
+    T* smem,
+    bool in,
+    T* out,
+    BinaryFunction binop) {
   // Within-warp, we use warp voting.
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__)
   unsigned long long int vote = WARP_BALLOT(in);
   T index = __popcll(getLaneMaskLe() & vote);
   T carry = __popcll(vote);
@@ -142,11 +161,16 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
 // Exclusive prefix sum for binary vars using intra-warp voting +
 // shared memory
 template <typename T, bool KillWARDependency, class BinaryFunction>
-__device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, BinaryFunction binop) {
+__device__ void exclusiveBinaryPrefixScan(
+    T* smem,
+    bool in,
+    T* out,
+    T* carry,
+    BinaryFunction binop) {
   inclusiveBinaryPrefixScan<T, false, BinaryFunction>(smem, in, out, binop);
 
   // Inclusive to exclusive
-  *out -= (T) in;
+  *out -= (T)in;
 
   // The outgoing carry for all threads is the last warp's sum
   *carry = smem[THCCeilDiv<int>(blockDim.x, C10_WARP_SIZE) - 1];

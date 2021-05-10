@@ -9,9 +9,9 @@
 
 #include <TH/THGenerateByteType.h>
 #include <TH/THGenerateCharType.h>
-#include <TH/THGenerateShortType.h>
 #include <TH/THGenerateIntType.h>
 #include <TH/THGenerateLongType.h>
+#include <TH/THGenerateShortType.h>
 
 #ifdef THIntLocalGenerateManyTypes
 #undef THIntLocalGenerateManyTypes

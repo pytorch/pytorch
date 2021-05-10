@@ -13,7 +13,7 @@
 
 using std::vector;
 
-template<typename Value>
+template <typename Value>
 struct TestCase {
   Value dividend;
   int divisor_idx;
@@ -56,7 +56,7 @@ enum {
 };
 
 // Test the magic division algorithm.
-template<typename Value>
+template <typename Value>
 class IntDividerTester {
  public:
   IntDividerTester() {
@@ -137,8 +137,7 @@ class IntDividerTester {
   TestCase<Value>* testCasesBuf_;
 };
 
-static void testUint32Divider()
-{
+static void testUint32Divider() {
   fprintf(stderr, "Testing 32-bit integer division ...");
 
   IntDividerTester<uint32_t> tester;
@@ -174,8 +173,7 @@ static void testUint32Divider()
 }
 
 // uint64_t divider uses plain division, so we just check a few random cases.
-static void testUint64Divider()
-{
+static void testUint64Divider() {
   IntDividerTester<uint64_t> tester;
 
   uint64_t dividend = 0x123456789ULL;
@@ -200,7 +198,8 @@ static void testUint64Divider()
 }
 
 TEST(TestCUDAIntegerDivider, IntegerDivider) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   testUint64Divider();
   testUint32Divider();
 

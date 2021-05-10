@@ -62,12 +62,10 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
       } block{
           v_output.extents(),
           0u,
-          {
-            safe_downcast<uint32_t>(pad_left),
-            safe_downcast<uint32_t>(pad_right),
-            safe_downcast<uint32_t>(pad_top),
-            safe_downcast<uint32_t>(pad_bottom)
-          },
+          {safe_downcast<uint32_t>(pad_left),
+           safe_downcast<uint32_t>(pad_right),
+           safe_downcast<uint32_t>(pad_top),
+           safe_downcast<uint32_t>(pad_bottom)},
       };
 
       context->dispatch(

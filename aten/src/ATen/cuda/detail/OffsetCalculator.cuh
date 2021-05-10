@@ -1,11 +1,11 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/macros/Macros.h>
 #include <THC/THCIntegerDivider.cuh>
+#include <array>
+#include <cstdint>
 
 // If element_sizes is nullptr, then the strides will be in bytes, otherwise
 // the strides will be in # of elements.
@@ -28,12 +28,18 @@ struct OffsetCalculator {
 
   // if element_sizes is nullptr, then the strides will be in bytes, otherwise
   // the strides will be in # of elements.
-  OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
+  OffsetCalculator(
+      int dims,
+      const int64_t* sizes,
+      const int64_t* const* strides,
+      const int64_t* element_sizes = nullptr)
+      : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
-    for (int i=0; i < dims; i++){
+    for (int i = 0; i < dims; i++) {
       sizes_[i] = IntDivider<index_t>(sizes[i]);
       for (int arg = 0; arg < NARGS; arg++) {
-        int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
+        int64_t element_size =
+            (element_sizes == nullptr ? 1LL : element_sizes[arg]);
         strides_[i][arg] = strides[arg][i] / element_size;
       }
     }
@@ -41,12 +47,12 @@ struct OffsetCalculator {
 
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     offset_type offsets;
-    #pragma unroll
+#pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {
       offsets[arg] = 0;
     }
 
-    #pragma unroll
+#pragma unroll
     for (int dim = 0; dim < MAX_DIMS; ++dim) {
       if (dim == dims) {
         break;
@@ -54,11 +60,10 @@ struct OffsetCalculator {
       auto divmod = sizes_[dim].divmod(linear_idx);
       linear_idx = divmod.div;
 
-      #pragma unroll
+#pragma unroll
       for (int arg = 0; arg < NARGS; arg++) {
         offsets[arg] += divmod.mod * strides_[dim][arg];
       }
-
     }
     return offsets;
   }
@@ -79,7 +84,7 @@ struct TrivialOffsetCalculator {
 
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     offset_type offsets;
-    #pragma unroll
+#pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {
       offsets[arg] = linear_idx;
     }
@@ -87,8 +92,9 @@ struct TrivialOffsetCalculator {
   }
 };
 
-template<int N>
-static OffsetCalculator<N> make_offset_calculator(const at::TensorIteratorBase& iter) {
+template <int N>
+static OffsetCalculator<N> make_offset_calculator(
+    const at::TensorIteratorBase& iter) {
   AT_ASSERT(N <= iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {

@@ -2,8 +2,8 @@
 
 #include <ATen/Context.h>
 
-#include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/TensorOptions.h>
 
 #include <mutex>
 #include <sstream>
@@ -66,8 +66,9 @@ bool Context::deterministicAlgorithms() const {
 
 void Context::setDeterministicAlgorithms(bool b) {
   if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
+    TORCH_WARN_ONCE(
+        "torch.use_deterministic_algorithms is in beta, and its design and"
+        " functionality may change in the future.");
   }
 
   _deterministic_algorithms = b;
@@ -75,12 +76,14 @@ void Context::setDeterministicAlgorithms(bool b) {
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    TORCH_CHECK(
+        false,
+        caller,
+        " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
+        "just for this operation if that's acceptable for your application. You "
+        "can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
   }
 }
 
@@ -95,7 +98,7 @@ void Context::setAllowTF32CuDNN(bool b) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+static const char* const cublas_deterministic_configs[] = {":4096:8", ":16:8"};
 
 bool Context::checkCuBLASConfigDeterministic() {
   bool cublas_config_deterministic = true;
@@ -103,25 +106,30 @@ bool Context::checkCuBLASConfigDeterministic() {
   // is set to deterministic setting
   if (hasCUDART() && (versionCUDART() >= 10020)) {
     char* workspace_config = std::getenv(cublas_config_var_name);
-    cublas_config_deterministic = (workspace_config != nullptr) && (
-      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
-      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
-    );
+    cublas_config_deterministic = (workspace_config != nullptr) &&
+        ((strcmp(workspace_config, cublas_deterministic_configs[0]) == 0) ||
+         (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0));
   }
   return cublas_config_deterministic;
 }
 
 void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
-    "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
-    "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
-    "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
-    "case, you must set an environment variable before running your PyTorch application: ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
-  );
+  TORCH_CHECK(
+      !deterministicAlgorithms() || cublas_config_deterministic,
+      "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
+      "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
+      "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
+      "case, you must set an environment variable before running your PyTorch application: ",
+      cublas_config_var_name,
+      "=",
+      cublas_deterministic_configs[0],
+      " or ",
+      cublas_config_var_name,
+      "=",
+      cublas_deterministic_configs[1],
+      ". For more information, go to ",
+      "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility");
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -197,7 +205,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 #ifdef USE_PYTORCH_QNNPACK
     engines.push_back(at::kQNNPACK);
 #endif
-#else  // C10_MOBILE
+#else // C10_MOBILE
 #ifdef USE_PYTORCH_QNNPACK
     engines.push_back(at::kQNNPACK);
 #endif
@@ -271,20 +279,24 @@ void Context::setDisplayVmapFallbackWarnings(bool enabled) {
 }
 
 void Context::setDefaultMobileCPUAllocator() {
-  TORCH_CHECK(prev_allocator_ptr_ == nullptr,
+  TORCH_CHECK(
+      prev_allocator_ptr_ == nullptr,
       "Already within the scope of another non-default cpu allocator."
       "Cannot set another allocator.");
-  // Setting the priority high to make sure no other allocator gets used instead of this.
+  // Setting the priority high to make sure no other allocator gets used instead
+  // of this.
   prev_allocator_ptr_ = c10::GetCPUAllocator();
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
 }
 
 void Context::unsetDefaultMobileCPUAllocator() {
-  TORCH_CHECK(prev_allocator_ptr_ != nullptr,
+  TORCH_CHECK(
+      prev_allocator_ptr_ != nullptr,
       "setDefaultMobileCPUAllocator must have been called "
       "before unsetDefaultMobileCPUAllocator.");
-  // Setting the priority high to make sure no other allocator gets used instead of this.
-  c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
+  // Setting the priority high to make sure no other allocator gets used instead
+  // of this.
+  c10::SetCPUAllocator(prev_allocator_ptr_, /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }
 } // namespace at

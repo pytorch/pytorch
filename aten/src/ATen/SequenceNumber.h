@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <cstdint>
 
 namespace at {
 

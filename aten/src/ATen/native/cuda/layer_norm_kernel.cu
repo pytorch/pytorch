@@ -294,8 +294,12 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormKernelImpl",
+      [&]() {
         LayerNormKernelImplInternal<scalar_t>(
             X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
@@ -328,7 +332,10 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
+    const auto kAccType =
+        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
+        ? kFloat
+        : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -413,8 +420,12 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormBackwardKernelImpl",
+      [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
             dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
@@ -424,15 +435,18 @@ void LayerNormBackwardKernelImpl(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
-
-  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto inputs =
+      _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = std::get<0>(inputs);
   auto gamma = std::get<1>(inputs);
   auto beta = std::get<2>(inputs);
@@ -473,72 +487,74 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& mean,
-    const Tensor& rstd, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& rstd,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
+  auto inputs =
+      _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
 
-    auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
-    auto X = std::get<0>(inputs);
-    auto gamma = std::get<1>(inputs);
-    auto beta = std::get<2>(inputs);
-    auto M = std::get<3>(inputs);
-    auto N = std::get<4>(inputs);
-
-    Tensor dX;
-    Tensor dgamma;
-    Tensor dbeta;
-    if (grad_input_mask[0]) {
-      dX = at::native::empty_like(
-          X,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (grad_input_mask[1]) {
-      dgamma = M > 0 ? at::native::empty_like(
-                           gamma,
-                           c10::nullopt /* dtype */,
-                           c10::nullopt /* layout */,
-                           c10::nullopt /* device */,
-                           c10::nullopt /* pin_memory */,
-                           LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-                     : at::native::zeros_like(
-                           gamma,
-                           c10::nullopt /* dtype */,
-                           c10::nullopt /* layout */,
-                           c10::nullopt /* device */,
-                           c10::nullopt /* pin_memory */,
-                           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (grad_input_mask[2]) {
-      dbeta = M > 0 ? at::native::empty_like(
-                          beta,
-                          c10::nullopt /* dtype */,
-                          c10::nullopt /* layout */,
-                          c10::nullopt /* device */,
-                          c10::nullopt /* pin_memory */,
-                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-                    : at::native::zeros_like(
-                          beta,
-                          c10::nullopt /* dtype */,
-                          c10::nullopt /* layout */,
-                          c10::nullopt /* device */,
-                          c10::nullopt /* pin_memory */,
-                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (M > 0) {
-      LayerNormBackwardKernelImpl(
-          dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-    }
-    return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(
+        X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = M > 0 ? at::native::empty_like(
+                         gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                   : at::native::zeros_like(
+                         gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = M > 0 ? at::native::empty_like(
+                        beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                  : at::native::zeros_like(
+                        beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (M > 0) {
+    LayerNormBackwardKernelImpl(
+        dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  }
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
-
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);

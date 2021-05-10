@@ -1,40 +1,36 @@
-#include <THC/THCCachingHostAllocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-
+#include <THC/THCCachingHostAllocator.h>
 
 #include <cuda_runtime_api.h>
+#include <stdint.h>
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <stdint.h>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
 #include <utility>
 
 namespace {
 
-struct BlockSize
-{
-  size_t  size; // allocation size
-  void*   ptr;  // host memory pointer
+struct BlockSize {
+  size_t size; // allocation size
+  void* ptr; // host memory pointer
 
-  BlockSize(size_t size, void* ptr=NULL) : size(size), ptr(ptr) {}
+  BlockSize(size_t size, void* ptr = NULL) : size(size), ptr(ptr) {}
 };
 
-struct Block : public BlockSize
-{
-  bool  allocated;    // true if the block is currently allocated
-  int   event_count;  // number of outstanding cuda events
+struct Block : public BlockSize {
+  bool allocated; // true if the block is currently allocated
+  int event_count; // number of outstanding cuda events
   std::unordered_set<at::cuda::CUDAStream> streams;
 
-  Block(size_t size, void* ptr, bool allocated) :
-      BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
+  Block(size_t size, void* ptr, bool allocated)
+      : BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
 };
 
-static bool BlockComparator(const BlockSize& a, const BlockSize& b)
-{
+static bool BlockComparator(const BlockSize& a, const BlockSize& b) {
   // sort by size, break ties with pointer
   if (a.size != b.size) {
     return a.size < b.size;
@@ -42,8 +38,7 @@ static bool BlockComparator(const BlockSize& a, const BlockSize& b)
   return (uintptr_t)a.ptr < (uintptr_t)b.ptr;
 }
 
-struct HostAllocator
-{
+struct HostAllocator {
   typedef bool (*Comparison)(const BlockSize&, const BlockSize&);
 
   // lock around all operations
@@ -60,8 +55,7 @@ struct HostAllocator
 
   HostAllocator() : available(BlockComparator) {}
 
-  cudaError_t malloc(void** ptr, size_t size)
-  {
+  cudaError_t malloc(void** ptr, size_t size) {
     std::lock_guard<std::mutex> lock(mutex);
 
     // process outstanding cuda events which may have occurred
@@ -82,15 +76,16 @@ struct HostAllocator
       return cudaSuccess;
     }
 
-    // Pinned memory pointers allocated by any device can be directly used by any
-    // other device, regardless of the current device at the time of allocation,
-    // since we assume unified addressing.
-    // So we grab any existing primary context, if available.
-    // See pytorch/pytorch#21081.
+    // Pinned memory pointers allocated by any device can be directly used by
+    // any other device, regardless of the current device at the time of
+    // allocation, since we assume unified addressing. So we grab any existing
+    // primary context, if available. See pytorch/pytorch#21081.
     at::OptionalDeviceGuard device_guard;
-    auto primary_ctx_device_index = at::detail::getCUDAHooks().getDevceIndexWithPrimaryContext();
+    auto primary_ctx_device_index =
+        at::detail::getCUDAHooks().getDevceIndexWithPrimaryContext();
     if (primary_ctx_device_index.has_value()) {
-      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
     // note that cudaHostAlloc may not touch pointer if size is 0
@@ -106,8 +101,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t free(void* ptr)
-  {
+  cudaError_t free(void* ptr) {
     std::lock_guard<std::mutex> lock(mutex);
 
     if (!ptr) {
@@ -143,8 +137,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t recordEvent(void* ptr, at::cuda::CUDAStream stream)
-  {
+  cudaError_t recordEvent(void* ptr, at::cuda::CUDAStream stream) {
     std::lock_guard<std::mutex> lock(mutex);
 
     auto it = blocks.find(ptr);
@@ -160,8 +153,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t processEvents()
-  {
+  cudaError_t processEvents() {
     // Process outstanding cudaEvents. Events that are completed are removed
     // from the queue, and the 'event_count' for the corresponding allocation
     // is decremented. Stops at the first event which has not been completed.
@@ -192,8 +184,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  void emptyCache()
-  {
+  void emptyCache() {
     std::lock_guard<std::mutex> lock(mutex);
 
     // remove events for freed blocks
@@ -224,25 +215,28 @@ struct HostAllocator
     }
   }
 
-  cudaError_t insertEvents(Block& block)
-  {
+  cudaError_t insertEvents(Block& block) {
     cudaError_t err;
 
     int prev_device;
     err = cudaGetDevice(&prev_device);
-    if (err != cudaSuccess) return err;
+    if (err != cudaSuccess)
+      return err;
 
     std::unordered_set<at::cuda::CUDAStream> streams(std::move(block.streams));
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       err = cudaSetDevice(it->device_index());
-      if (err != cudaSuccess) break;
+      if (err != cudaSuccess)
+        break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-      if (err != cudaSuccess) break;
+      if (err != cudaSuccess)
+        break;
 
       err = cudaEventRecord(event, it->stream());
-      if (err != cudaSuccess) break;
+      if (err != cudaSuccess)
+        break;
 
       block.event_count++;
       cuda_events.emplace_back(event, block.ptr);
@@ -253,17 +247,17 @@ struct HostAllocator
   }
 };
 
-}  // namespace
+} // namespace
 
 static HostAllocator allocator;
 
-cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
-{
+cudaError_t THCCachingHostAllocator_recordEvent(
+    void* ptr,
+    at::cuda::CUDAStream stream) {
   return allocator.recordEvent(ptr, stream);
 }
 
-void THCCachingHostAllocator_emptyCache()
-{
+void THCCachingHostAllocator_emptyCache() {
   allocator.emptyCache();
 }
 
@@ -274,7 +268,7 @@ static void THCCachingHostDeleter(void* ptr) {
 struct THCCachingHostAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
     THAssert(size >= 0);
-    void *ptr;
+    void* ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
     return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};
   }

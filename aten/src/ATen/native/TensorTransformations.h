@@ -9,13 +9,19 @@
 namespace at {
 namespace native {
 
-static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
-  if (flip_dims_size==0) {
+static inline void flip_check_errors(
+    int64_t total_dims,
+    int64_t flip_dims_size,
+    IntArrayRef dims) {
+  if (flip_dims_size == 0) {
     return;
   }
   // check if number of axis in dim is valid
   if (flip_dims_size < 0 || flip_dims_size > total_dims) {
-    TORCH_CHECK_INDEX(false, "flip dims size out of range, got flip dims size=", flip_dims_size);
+    TORCH_CHECK_INDEX(
+        false,
+        "flip dims size out of range, got flip dims size=",
+        flip_dims_size);
   }
 
   auto flip_dims_v = dims.vec();
@@ -24,31 +30,46 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
   auto min_max_d = std::minmax_element(flip_dims_v.begin(), flip_dims_v.end());
 
   if (*min_max_d.first >= total_dims || *min_max_d.first < -total_dims) {
-    TORCH_CHECK_INDEX(false, "The min flip dims out of range, got min flip dims=", *min_max_d.first);
+    TORCH_CHECK_INDEX(
+        false,
+        "The min flip dims out of range, got min flip dims=",
+        *min_max_d.first);
   }
 
   if (*min_max_d.second >= total_dims || *min_max_d.second < -total_dims) {
-    TORCH_CHECK_INDEX(false, "The max flip dims out of range, got max flip dims=", *min_max_d.second);
+    TORCH_CHECK_INDEX(
+        false,
+        "The max flip dims out of range, got max flip dims=",
+        *min_max_d.second);
   }
 
   // check duplicates in dims
   wrap_all_dims(flip_dims_v, total_dims);
-  flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
-  TORCH_CHECK((int64_t)flip_dims_v.size() == flip_dims_size,
-    "dims has duplicates, original flip dims size=", flip_dims_size,
-    ", but unique flip dims size=", flip_dims_v.size());
+  flip_dims_v.erase(
+      std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
+  TORCH_CHECK(
+      (int64_t)flip_dims_v.size() == flip_dims_size,
+      "dims has duplicates, original flip dims size=",
+      flip_dims_size,
+      ", but unique flip dims size=",
+      flip_dims_v.size());
 }
 
-static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
+static inline Tensor roll_common(
+    const Tensor& self,
+    IntArrayRef shifts,
+    IntArrayRef dims) {
   TORCH_CHECK(shifts.size() > 0, "`shifts` required");
   if (dims.size() == 0 && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());
     return roll(flattened, shifts[0], 0).view(self.sizes());
   }
   TORCH_CHECK(
-    shifts.size() == dims.size(),
-    "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
-  );
+      shifts.size() == dims.size(),
+      "shifts and dimensions must align. shifts: ",
+      shifts.size(),
+      ", dims:",
+      dims.size());
   AT_ASSERT(dims.size() > 1);
   auto tail_shifts = shifts.slice(1);
   auto tail_dims = dims.slice(1);
@@ -56,4 +77,5 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
   return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

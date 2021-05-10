@@ -1,13 +1,17 @@
+#include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/ReduceOps.h>
+#include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/SharedReduceOps.h>
-#include <ATen/Dispatch.h>
-#include <ATen/native/ReduceOps.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
+template <
+    typename scalar_t,
+    typename acc_t = scalar_t,
+    typename out_t = scalar_t>
 struct sum_functor {
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<scalar_t, out_t>(
@@ -17,32 +21,40 @@ struct sum_functor {
   }
 };
 
-template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
+template <
+    typename scalar_t,
+    typename acc_t = scalar_t,
+    typename out_t = scalar_t>
 struct nansum_functor {
   void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<scalar_t, out_t>(
-        iter, NanSumOps<acc_t, out_t>{});
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NanSumOps<acc_t, out_t>{});
   }
 };
 
-template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
+template <
+    typename scalar_t,
+    typename acc_t = scalar_t,
+    typename out_t = scalar_t>
 struct prod_functor {
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<scalar_t, out_t>(
-        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
-          return a * b;
-        }), 1);
+        iter,
+        func_wrapper<out_t>(
+            [] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a * b; }),
+        1);
   }
 };
 
-// Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+// Workaround for the error: '*' in boolean context, suggest '&&' instead
+// [-Werror=int-in-bool-context]
 template <>
 struct prod_functor<bool> {
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<bool, bool>(
-        iter, func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
-          return a && b;
-        }), 1);
+        iter,
+        func_wrapper<bool>(
+            [] GPU_LAMBDA(bool a, bool b) -> bool { return a && b; }),
+        1);
   }
 };
 
@@ -76,7 +88,7 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
   op(iter);
 }
 
-static void sum_kernel_cuda(TensorIterator& iter){
+static void sum_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
         ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
@@ -99,9 +111,10 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
-      prod_functor<scalar_t>{}(iter);
-    });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
+        ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
+          prod_functor<scalar_t>{}(iter);
+        });
   };
 
   reduce_dispatch<prod_functor>(iter, general_dispatcher);
@@ -111,4 +124,5 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

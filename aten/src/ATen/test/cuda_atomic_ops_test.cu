@@ -1,6 +1,6 @@
+#include <c10/test/util/Macros.h>
 #include <gtest/gtest.h>
 #include <THC/THCAtomics.cuh>
-#include <c10/test/util/Macros.h>
 
 #include <cmath>
 
@@ -9,7 +9,7 @@ constexpr int factor = 4;
 constexpr int arraysize = blocksize / factor;
 
 template <typename T>
-__global__ void addition_test_kernel(T * a, T * sum) {
+__global__ void addition_test_kernel(T* a, T* sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
 
@@ -17,7 +17,7 @@ __global__ void addition_test_kernel(T * a, T * sum) {
 }
 
 template <typename T>
-__global__ void mul_test_kernel(T * a, T * sum) {
+__global__ void mul_test_kernel(T* a, T* sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
 
@@ -107,8 +107,8 @@ TEST(TestAtomicOps, TestAtomicAdd) {
   test_atomic_add<at::Half>();
   test_atomic_add<float>();
   test_atomic_add<double>();
-  test_atomic_add<c10::complex<float> >();
-  test_atomic_add<c10::complex<double> >();
+  test_atomic_add<c10::complex<float>>();
+  test_atomic_add<c10::complex<double>>();
 }
 
 TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicMul)) {

@@ -56,15 +56,19 @@ void pytorch_q8gemm_ukernel_6x4__neon(
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   uint8x8_t vb_zero_point =
-      vld1_u8((const uint8_t*)&quantization_params->neon.kernel_zero_points
-          [output_channel_index]);
+      vld1_u8((const uint8_t*)&quantization_params->neon
+                  .kernel_zero_points[output_channel_index]);
   // Since only lower 4 values are used in this kernel. We replicate lower 4
   // values in upper 4 values. Still we end up loading 8 values assuming
   // zero point array is always multiple of 8.
-  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 0), vb_zero_point, 4);
-  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 1), vb_zero_point, 5);
-  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 2), vb_zero_point, 6);
-  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 3), vb_zero_point, 7);
+  vb_zero_point =
+      vset_lane_u8(vget_lane_u8(vb_zero_point, 0), vb_zero_point, 4);
+  vb_zero_point =
+      vset_lane_u8(vget_lane_u8(vb_zero_point, 1), vb_zero_point, 5);
+  vb_zero_point =
+      vset_lane_u8(vget_lane_u8(vb_zero_point, 2), vb_zero_point, 6);
+  vb_zero_point =
+      vset_lane_u8(vget_lane_u8(vb_zero_point, 3), vb_zero_point, 7);
   for (; k >= 8; k -= 8) {
     const uint8x8_t va0 = vld1_u8(a0);
     a0 += 8;
@@ -399,23 +403,21 @@ void pytorch_q8gemm_ukernel_6x4__neon(
     }
   }
 
-  const float32x4_t requantization_scale_v =
-      vld1q_f32(
-          &quantization_params->neon.requantization_scales[
-              output_channel_index]);
+  const float32x4_t requantization_scale_v = vld1q_f32(
+      &quantization_params->neon.requantization_scales[output_channel_index]);
 
   const float32x4_t vacc0x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_v);
   const float32x4_t vacc1x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_v);
   const float32x4_t vacc2x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_v);
   const float32x4_t vacc3x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_v);
   const float32x4_t vacc4x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc4x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc4x0123), requantization_scale_v);
   const float32x4_t vacc5x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc5x0123), requantization_scale_v);
+      vmulq_f32(vcvtq_f32_s32(vacc5x0123), requantization_scale_v);
 
 #ifdef __aarch64__
   const int16x8_t voutput_zero_point =

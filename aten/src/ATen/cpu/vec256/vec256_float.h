@@ -5,7 +5,8 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && \
+    !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -14,12 +15,15 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && \
+    !defined(_MSC_VER)
 
-template <> class Vec256<float> {
-private:
+template <>
+class Vec256<float> {
+ private:
   __m256 values;
-public:
+
+ public:
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
@@ -30,8 +34,15 @@ public:
   Vec256(float val) {
     values = _mm256_set1_ps(val);
   }
-  Vec256(float val1, float val2, float val3, float val4,
-         float val5, float val6, float val7, float val8) {
+  Vec256(
+      float val1,
+      float val2,
+      float val3,
+      float val4,
+      float val5,
+      float val6,
+      float val7,
+      float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
   operator __m256() const {
@@ -41,18 +52,30 @@ public:
   static Vec256<float> blend(const Vec256<float>& a, const Vec256<float>& b) {
     return _mm256_blend_ps(a.values, b.values, mask);
   }
-  static Vec256<float> blendv(const Vec256<float>& a, const Vec256<float>& b,
-                              const Vec256<float>& mask) {
+  static Vec256<float> blendv(
+      const Vec256<float>& a,
+      const Vec256<float>& b,
+      const Vec256<float>& mask) {
     return _mm256_blendv_ps(a.values, b.values, mask.values);
   }
-  template<typename step_t>
-  static Vec256<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vec256<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vec256<float>(
-      base,            base +     step, base + 2 * step, base + 3 * step,
-      base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
+        base,
+        base + step,
+        base + 2 * step,
+        base + 3 * step,
+        base + 4 * step,
+        base + 5 * step,
+        base + 6 * step,
+        base + 7 * step);
   }
-  static Vec256<float> set(const Vec256<float>& a, const Vec256<float>& b,
-                           int64_t count = size()) {
+  static Vec256<float> set(
+      const Vec256<float>& a,
+      const Vec256<float>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -77,9 +100,10 @@ public:
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
     __at_align32__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0.0;
     }
@@ -96,10 +120,11 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
-  const float& operator[](int idx) const  = delete;
+  const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
   int zero_mask() const {
-    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    // returns an integer mask where all zero elements are translated to 1-bit
+    // and others are translated to 0-bit
     __m256 cmp = _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_EQ_OQ);
     return _mm256_movemask_ps(cmp);
   }
@@ -148,10 +173,10 @@ public:
   Vec256<float> atan() const {
     return Vec256<float>(Sleef_atanf8_u10(values));
   }
-  Vec256<float> atan2(const Vec256<float> &b) const {
+  Vec256<float> atan2(const Vec256<float>& b) const {
     return Vec256<float>(Sleef_atan2f8_u10(values, b));
   }
-  Vec256<float> copysign(const Vec256<float> &sign) const {
+  Vec256<float> copysign(const Vec256<float>& sign) const {
     return Vec256<float>(Sleef_copysignf8(values, sign));
   }
   Vec256<float> erf() const {
@@ -203,7 +228,7 @@ public:
   Vec256<float> floor() const {
     return _mm256_floor_ps(values);
   }
-  Vec256<float> hypot(const Vec256<float> &b) const {
+  Vec256<float> hypot(const Vec256<float>& b) const {
     return Vec256<float>(Sleef_hypotf8_u05(values, b));
   }
   Vec256<float> i0() const {
@@ -212,7 +237,7 @@ public:
   Vec256<float> i0e() const {
     return map(calc_i0e);
   }
-  Vec256<float> igamma(const Vec256<float> &x) const {
+  Vec256<float> igamma(const Vec256<float>& x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -222,7 +247,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vec256<float> igammac(const Vec256<float> &x) const {
+  Vec256<float> igammac(const Vec256<float>& x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -235,11 +260,12 @@ public:
   Vec256<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }
-  Vec256<float> nextafter(const Vec256<float> &b) const {
+  Vec256<float> nextafter(const Vec256<float>& b) const {
     return Vec256<float>(Sleef_nextafterf8(values, b));
   }
   Vec256<float> round() const {
-    return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    return _mm256_round_ps(
+        values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vec256<float> tan() const {
     return Vec256<float>(Sleef_tanf8_u10(values));
@@ -262,7 +288,7 @@ public:
   Vec256<float> rsqrt() const {
     return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
   }
-  Vec256<float> pow(const Vec256<float> &b) const {
+  Vec256<float> pow(const Vec256<float>& b) const {
     return Vec256<float>(Sleef_powf8_u10(values, b));
   }
   // Comparison using the _CMP_**_OQ predicate.
@@ -346,17 +372,24 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
-Vec256<float> inline clamp(const Vec256<float>& a, const Vec256<float>& min, const Vec256<float>& max) {
+Vec256<float> inline clamp(
+    const Vec256<float>& a,
+    const Vec256<float>& min,
+    const Vec256<float>& max) {
   return _mm256_min_ps(max, _mm256_max_ps(min, a));
 }
 
 template <>
-Vec256<float> inline clamp_max(const Vec256<float>& a, const Vec256<float>& max) {
+Vec256<float> inline clamp_max(
+    const Vec256<float>& a,
+    const Vec256<float>& max) {
   return _mm256_min_ps(max, a);
 }
 
 template <>
-Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min) {
+Vec256<float> inline clamp_min(
+    const Vec256<float>& a,
+    const Vec256<float>& min) {
   return _mm256_max_ps(min, a);
 }
 
@@ -414,11 +447,16 @@ inline void convert(const float* src, float* dst, int64_t n) {
 
 #ifdef CPU_CAPABILITY_AVX2
 template <>
-Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const Vec256<float>& c) {
+Vec256<float> inline fmadd(
+    const Vec256<float>& a,
+    const Vec256<float>& b,
+    const Vec256<float>& c) {
   return _mm256_fmadd_ps(a, b, c);
 }
 #endif
 
 #endif
 
-}}}
+} // namespace
+} // namespace vec256
+} // namespace at

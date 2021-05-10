@@ -1,5 +1,5 @@
-#include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/VariableHooksInterface.h>
 
 #include <iostream>
@@ -39,7 +39,8 @@ std::string Tensor::toString() const {
   if (scalar_type() == ScalarType::Undefined) {
     base_str = "UndefinedType";
   } else {
-    base_str = std::string(at::toString(options().computeDispatchKey())) + at::toString(scalar_type()) + "Type";
+    base_str = std::string(at::toString(options().computeDispatchKey())) +
+        at::toString(scalar_type()) + "Type";
   }
   return base_str;
 }
@@ -60,7 +61,7 @@ int64_t Tensor::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }
 
-void Tensor::set_data(const Tensor & new_data) const {
+void Tensor::set_data(const Tensor& new_data) const {
   impl::GetVariableHooks()->set_data(*this, new_data);
 }
 
@@ -76,11 +77,13 @@ void Tensor::retain_grad() const {
   impl::GetVariableHooks()->retain_grad(*this);
 }
 
-void Tensor::_backward(TensorList inputs,
-        const c10::optional<Tensor>& gradient,
-        c10::optional<bool> keep_graph,
-        bool create_graph) const {
-  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+void Tensor::_backward(
+    TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) const {
+  return impl::GetVariableHooks()->_backward(
+      *this, inputs, gradient, keep_graph, create_graph);
 }
 
 const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
@@ -111,7 +114,8 @@ void Tensor::remove_hook(unsigned pos) const {
   impl::GetVariableHooks()->remove_hook(*this, pos);
 }
 
-unsigned Tensor::_register_hook(std::function<Tensor(const Tensor&)> hook) const {
+unsigned Tensor::_register_hook(
+    std::function<Tensor(const Tensor&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
 }
 

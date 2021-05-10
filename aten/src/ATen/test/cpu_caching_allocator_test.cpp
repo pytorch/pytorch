@@ -1,15 +1,14 @@
 #include <gtest/gtest.h>
 
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/ATen.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUCachingAllocatorTest, check_alloc_free) {
   c10::CPUCachingAllocator caching_allocator;
-  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
-      &caching_allocator);
+  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(&caching_allocator);
   at::Tensor a = at::rand({23, 23});
   float* data_ptr = a.data_ptr<float>();
   a.reset();

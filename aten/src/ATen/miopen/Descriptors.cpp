@@ -1,7 +1,8 @@
-#include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
+#include <ATen/miopen/Descriptors.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -14,25 +15,30 @@ inline miopenDataType_t getDataType(const at::Tensor& t) {
   } else if (scalar_type == at::kBFloat16) {
     return miopenBFloat16;
   } else {
-  throw std::runtime_error("TensorDescriptor only supports float, half and bfloat16 tensors");
+    throw std::runtime_error(
+        "TensorDescriptor only supports float, half and bfloat16 tensors");
   }
 }
 
 } // anonymous namespace
 
-
-void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
+void TensorDescriptor::set(const at::Tensor& t, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad);
 }
 
 static int MIOPEN_DIM_MAX = 5;
 
-void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
+void TensorDescriptor::set(
+    miopenDataType_t datatype,
+    IntArrayRef t_sizes,
+    IntArrayRef t_strides,
+    size_t pad) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X
 #define STR(X) _STR(X)
-    throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
+    throw std::runtime_error(
+        "MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
   int size[MIOPEN_DIM_MAX];
@@ -63,7 +69,7 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
   }
 }
 
-std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
+std::ostream& operator<<(std::ostream& out, const TensorDescriptor& d) {
   out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
   int nbDims = 4;
   int dimA[MIOPEN_DIM_MAX];
@@ -86,32 +92,37 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   return out;
 }
 
-void TensorDescriptor::print() { std::cout << *this; }
+void TensorDescriptor::print() {
+  std::cout << *this;
+}
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor& t, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X
 #define STR(X) _STR(X)
-    throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
+    throw std::runtime_error(
+        "MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
   if (!t.is_contiguous()) {
-    throw std::runtime_error("MIOpen filters (a.k.a. weights) must be contiguous");
+    throw std::runtime_error(
+        "MIOpen filters (a.k.a. weights) must be contiguous");
   }
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
-    size[i] = (int) t.size(i);
+    size[i] = (int)t.size(i);
   }
   for (int i = dim; i < pad; ++i) {
-    size[i] = (int) 1;
+    size[i] = (int)1;
   }
-  for (int i = dim - 1; i >=0; --i) {
-    stride[i] = (i == dim - 1) ? 1 : stride[i+1] * size[i+1];
+  for (int i = dim - 1; i >= 0; --i) {
+    stride[i] = (i == dim - 1) ? 1 : stride[i + 1] * size[i + 1];
   }
   dim = std::max(dim, pad);
-  set(getDataType(t), (int) dim, size, stride);
+  set(getDataType(t), (int)dim, size, stride);
 }
 
-}}
+} // namespace native
+} // namespace at

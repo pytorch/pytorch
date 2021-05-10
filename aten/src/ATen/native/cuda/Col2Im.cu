@@ -8,8 +8,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/im2col_shape_check.h>
+#include <ATen/native/cuda/im2col.cuh>
 
 namespace at {
 namespace native {
@@ -93,49 +93,49 @@ void col2im_out_cuda_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
-      input.scalar_type(), "col2im_out_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kHalf, input.scalar_type(), "col2im_out_cuda", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
 
-    Tensor input_n;
-    Tensor output_n;
+        Tensor input_n;
+        Tensor output_n;
 
-    int64_t height_col = (output_height + 2 * pad_height -
-                          (dilation_height * (kernel_height - 1) + 1)) /
-            stride_height +
-        1;
-    int64_t width_col = (output_width + 2 * pad_width -
-                         (dilation_width * (kernel_width - 1) + 1)) /
-            stride_width +
-        1;
+        int64_t height_col = (output_height + 2 * pad_height -
+                              (dilation_height * (kernel_height - 1) + 1)) /
+                stride_height +
+            1;
+        int64_t width_col = (output_width + 2 * pad_width -
+                             (dilation_width * (kernel_width - 1) + 1)) /
+                stride_width +
+            1;
 
-    for (int64_t elt = 0; elt < batch_size; elt++) {
-      input_n = input.select(0, elt);
-      output_n = output.select(0, elt);
+        for (int64_t elt = 0; elt < batch_size; elt++) {
+          input_n = input.select(0, elt);
+          output_n = output.select(0, elt);
 
-      col2im<scalar_t, accscalar_t>(
-          at::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
-          n_output_plane,
-          output_height,
-          output_width,
-          height_col,
-          width_col,
-          kernel_height,
-          kernel_width,
-          pad_height,
-          pad_width,
-          stride_height,
-          stride_width,
-          dilation_height,
-          dilation_width,
-          output_n.data_ptr<scalar_t>());
-    }
+          col2im<scalar_t, accscalar_t>(
+              at::cuda::getCurrentCUDAStream(),
+              input_n.data_ptr<scalar_t>(),
+              n_output_plane,
+              output_height,
+              output_width,
+              height_col,
+              width_col,
+              kernel_height,
+              kernel_width,
+              pad_height,
+              pad_width,
+              stride_height,
+              stride_width,
+              dilation_height,
+              dilation_width,
+              output_n.data_ptr<scalar_t>());
+        }
 
-    if (!batched_input) {
-      output.resize_({n_output_plane, output_height, output_width});
-    }
-  });
+        if (!batched_input) {
+          output.resize_({n_output_plane, output_height, output_width});
+        }
+      });
 }
 
 void col2im_backward_out_cuda_template(
@@ -152,7 +152,8 @@ void col2im_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& col2im_out_cuda(const Tensor& input,
+Tensor& col2im_out_cuda(
+    const Tensor& input,
     IntArrayRef output_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
@@ -178,7 +179,8 @@ Tensor col2im_cuda(
   return output;
 }
 
-Tensor& col2im_backward_out_cuda(const Tensor& grad_output,
+Tensor& col2im_backward_out_cuda(
+    const Tensor& grad_output,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
@@ -195,7 +197,8 @@ Tensor col2im_backward_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor grad_input =
+      at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   col2im_backward_out_cuda_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);

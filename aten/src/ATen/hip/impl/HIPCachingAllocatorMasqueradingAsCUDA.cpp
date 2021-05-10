@@ -1,7 +1,8 @@
-#include <c10/core/Allocator.h>
 #include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
+#include <c10/core/Allocator.h>
 
-namespace c10 { namespace hip {
+namespace c10 {
+namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
 Allocator* get() {
@@ -9,9 +10,12 @@ Allocator* get() {
   return &allocator;
 }
 
-void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream) {
+void recordStreamMasqueradingAsCUDA(
+    const DataPtr& ptr,
+    HIPStreamMasqueradingAsCUDA stream) {
   HIPCachingAllocator::recordStream(ptr, stream.hip_stream());
 }
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA
-}} // namespace c10::hip
+} // namespace hip
+} // namespace c10

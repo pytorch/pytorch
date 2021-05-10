@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/native/cuda/Resize.cuh>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
-#include <c10/util/accumulate.h>
-#include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/TensorFactories.h>
 #include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
+#include <c10/util/accumulate.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/Resize.cuh>
 
 #include <algorithm>
 #include <cmath>
@@ -36,9 +36,17 @@ Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor empty_cuda(
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
   AT_ASSERT(device_or_default(device_opt).is_cuda());
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
+  TORCH_CHECK(
+      !pin_memory_opt.has_value() || !*pin_memory_opt,
+      "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
@@ -53,8 +61,8 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
       allocator,
       /*resizeable=*/true);
 
-  auto tensor =
-      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype_meta);
+  auto tensor = detail::make_tensor<TensorImpl>(
+      storage_impl, DispatchKey::CUDA, dtype_meta);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -65,8 +73,15 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
   return tensor;
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+Tensor empty_strided_cuda(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  auto t = at::native::empty_cuda(
+      {0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -84,18 +99,20 @@ namespace {
 //
 // The following solution uses sqrt directly for most cases, and would only
 // special handle it if there is indeed precision loss.
-__device__
-inline int64_t resolve_root_int(
-    int64_t b, int64_t cX4, int64_t x, int32_t sign) {
-  int64_t bXb_cX4 = b*b - cX4;
+__device__ inline int64_t resolve_root_int(
+    int64_t b,
+    int64_t cX4,
+    int64_t x,
+    int32_t sign) {
+  int64_t bXb_cX4 = b * b - cX4;
   // potential precision loss could occur here when casting int64_t (63 bits
   // precision) to double (52 bits precision)
   double sr = ::sqrt((double)bXb_cX4);
-  int64_t res = ::__double2ll_rd((-b + sign * sr)/2);
+  int64_t res = ::__double2ll_rd((-b + sign * sr) / 2);
 
   // have to cast double to int64_t, otherwise it would only compare up to the
   // precision of a double variable, ignoring the precision loss
-  if (bXb_cX4 != (int64_t) (sr * sr)) {
+  if (bXb_cX4 != (int64_t)(sr * sr)) {
     // handle precision loss by using binary search
     int64_t llsr = ::__double2ll_rd(sr);
     // Use the following math to reduce search space.
@@ -108,7 +125,7 @@ inline int64_t resolve_root_int(
     //            [res - sqrt(d), res + sqrt(d) + 1)
     // as the denominator would only reduce the precision penalty.
     int64_t diff =
-      ::__double2ll_ru(::sqrt(::fabs((double)(bXb_cX4 - llsr * llsr))));
+        ::__double2ll_ru(::sqrt(::fabs((double)(bXb_cX4 - llsr * llsr))));
     // l never exceeds (could equal to) the target row index
     auto l = res > diff ? res - diff : 0;
     // r is always larger than the target row index
@@ -166,12 +183,14 @@ inline int64_t resolve_root_int(
 //
 //                   row = floor((-b + sqrt(b^2 - 4c)) / 2)
 //                   col = x - (f + f + row - 1) * row / 2
-__device__
-inline void get_coordinate_in_tril_trapezoid(
-    int64_t f, int64_t x, int64_t & row, int64_t & col) {
+__device__ inline void get_coordinate_in_tril_trapezoid(
+    int64_t f,
+    int64_t x,
+    int64_t& row,
+    int64_t& col) {
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = f - 1;
-  auto cX4 = - (x << 3); // 4 * c = 4 * (-2x) = -8x;
+  auto cX4 = -(x << 3); // 4 * c = 4 * (-2x) = -8x;
   row = resolve_root_int(b, cX4, x, 1);
   col = x - ((f + row - 1) * row >> 1);
 }
@@ -210,9 +229,11 @@ inline void get_coordinate_in_tril_trapezoid(
 //
 //                   row = floor((-b - sqrt(b^2 - 4c)) / 2)
 //                   col = x - (f + f - row + 1) * row / 2
-__device__
-inline void get_coordinate_in_triu_trapezoid(
-    int64_t f, int64_t x, int64_t & row, int64_t & col) {
+__device__ inline void get_coordinate_in_triu_trapezoid(
+    int64_t f,
+    int64_t x,
+    int64_t& row,
+    int64_t& col) {
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = -1 - f;
   auto cX4 = x << 3; // 4 * c = 4 * (2x) = 8x;
@@ -227,12 +248,13 @@ __global__
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(512)
 #endif
-void tril_indices_kernel(scalar_t * tensor,
-                         int64_t row_offset,
-                         int64_t m_first_row,
-                         int64_t col,
-                         int64_t trapezoid_size,
-                         int64_t tril_size) {
+    void tril_indices_kernel(
+        scalar_t* tensor,
+        int64_t row_offset,
+        int64_t m_first_row,
+        int64_t col,
+        int64_t trapezoid_size,
+        int64_t tril_size) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (linear_index < tril_size) {
@@ -259,17 +281,23 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    int64_t row,
+    int64_t col,
+    int64_t offset,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
-  auto tensor = empty_cuda({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  auto tensor = empty_cuda(
+      {2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (tril_size > 0) {
-    auto m_first_row = offset > 0 ?
-      std::min<int64_t>(col, 1 + offset) : // upper bounded by col
-      row + offset > 0; // either 0 or 1
+    auto m_first_row = offset > 0 ? std::min<int64_t>(col, 1 + offset)
+                                  : // upper bounded by col
+        row + offset > 0; // either 0 or 1
     auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
     auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
     int64_t rectangle_size = 0;
@@ -282,33 +310,37 @@ Tensor tril_indices_cuda(
     // using tril_size instead of tensor.numel(), as each thread takes care of
     // two elements in the tensor.
     TORCH_CHECK(
-      cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
-      "unable to get dim grid");
+        cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
+        "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
-      tril_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
-        trapezoid_row_offset,
-        m_first_row,
-        col,
-        tril_size - rectangle_size,
-        tril_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    });
+    AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
+          tril_indices_kernel<<<
+              dim_grid,
+              dim_block,
+              0,
+              at::cuda::getCurrentCUDAStream()>>>(
+              tensor.data_ptr<scalar_t>(),
+              trapezoid_row_offset,
+              m_first_row,
+              col,
+              tril_size - rectangle_size,
+              tril_size);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
   }
 
   return tensor;
 }
 
 template <typename scalar_t>
-__global__
-void triu_indices_kernel(scalar_t * tensor,
-                         int64_t col_offset,
-                         int64_t m_first_row,
-                         int64_t col,
-                         int64_t rectangle_size,
-                         int64_t triu_size) {
+__global__ void triu_indices_kernel(
+    scalar_t* tensor,
+    int64_t col_offset,
+    int64_t m_first_row,
+    int64_t col,
+    int64_t rectangle_size,
+    int64_t triu_size) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (linear_index < triu_size) {
@@ -320,7 +352,7 @@ void triu_indices_kernel(scalar_t * tensor,
     } else {
       // the coordinate falls in the bottom trapezoid
       get_coordinate_in_triu_trapezoid(
-        m_first_row, linear_index - rectangle_size, r, c);
+          m_first_row, linear_index - rectangle_size, r, c);
       r += rectangle_size / col;
     }
 
@@ -335,18 +367,24 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    int64_t row,
+    int64_t col,
+    int64_t offset,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
-  auto tensor = empty_cuda({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  auto tensor = empty_cuda(
+      {2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (triu_size > 0) {
     // # of triu elements in the first row
-    auto m_first_row = offset > 0 ?
-      std::max<int64_t>(col - offset, 0) : // upper bounded by col
-      col;
+    auto m_first_row = offset > 0 ? std::max<int64_t>(col - offset, 0)
+                                  : // upper bounded by col
+        col;
 
     // size of the top rectangle
     int64_t rectangle_size = 0;
@@ -360,23 +398,28 @@ Tensor triu_indices_cuda(
     // using triu_size instead of tensor.numel(), as each thread takes care of
     // two elements in the tensor.
     TORCH_CHECK(
-      cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
-      "unable to get dim grid");
+        cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
+        "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
-      triu_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
-        std::max<int64_t>(0, offset),
-        m_first_row,
-        col,
-        rectangle_size,
-        triu_size);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    });
+    AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
+          triu_indices_kernel<<<
+              dim_grid,
+              dim_block,
+              0,
+              at::cuda::getCurrentCUDAStream()>>>(
+              tensor.data_ptr<scalar_t>(),
+              std::max<int64_t>(0, offset),
+              m_first_row,
+              col,
+              rectangle_size,
+              triu_size);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
   }
 
   return tensor;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

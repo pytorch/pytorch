@@ -2,8 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
@@ -14,14 +14,15 @@ namespace vulkan {
 namespace api {
 
 //
-// This struct defines pipeline, and pipeline layout, caches intended to minimize
-// redundant object reconstructions at the cost of extra memory consumption.
+// This struct defines pipeline, and pipeline layout, caches intended to
+// minimize redundant object reconstructions at the cost of extra memory
+// consumption.
 //
 // A Vulkan pipeline contains the entirety of states, as one coherent monolithic
 // bundle, required to configure the GPU's execution pipeline.  This usage
 // pattern minimizes driver overhead, promotes pipeline state reuse, and is a
-// departure from, and in direct contrast with, OpenGL's individually confiurable
-// state machine.
+// departure from, and in direct contrast with, OpenGL's individually
+// confiurable state machine.
 //
 // A Vulkan pipeline layout represents a sequence of Vulkan descriptor sets each
 // having a specific layout, and deterimines the interface between all shader
@@ -91,9 +92,7 @@ struct Pipeline final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Layout(const GPU& gpu)
-      : cache(Factory(gpu)) {
-    }
+    explicit Layout(const GPU& gpu) : cache(Factory(gpu)) {}
   } layout;
 
   //
@@ -176,10 +175,7 @@ struct Pipeline final {
     api::Cache<Factory> cache_;
   } cache;
 
-  explicit Pipeline(const GPU& gpu)
-    : layout(gpu),
-      cache(Factory(gpu)) {
-  }
+  explicit Pipeline(const GPU& gpu) : layout(gpu), cache(Factory(gpu)) {}
 };
 
 //
@@ -187,10 +183,8 @@ struct Pipeline final {
 //
 
 inline Pipeline::Barrier::operator bool() const {
-  return (0u != stage.src) ||
-         (0u != stage.dst) ||
-         !buffers.empty() ||
-         !images.empty();
+  return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||
+      !images.empty();
 }
 
 inline bool operator==(
@@ -229,16 +223,15 @@ inline size_t Pipeline::Factory::Hasher::operator()(
 }
 
 inline Pipeline::Object::operator bool() const {
-  return (VK_NULL_HANDLE != handle) &&
-         (VK_NULL_HANDLE != layout);
+  return (VK_NULL_HANDLE != handle) && (VK_NULL_HANDLE != layout);
 }
 
 inline Pipeline::Object Pipeline::Cache::retrieve(
     const Descriptor& descriptor) {
   return {
-    cache_.retrieve(descriptor),
-    descriptor.pipeline_layout,
-    descriptor.local_work_group,
+      cache_.retrieve(descriptor),
+      descriptor.pipeline_layout,
+      descriptor.local_work_group,
   };
 }
 

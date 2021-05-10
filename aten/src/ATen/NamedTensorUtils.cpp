@@ -6,7 +6,8 @@
 
 namespace at {
 
-// Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
+// Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H',
+// 'W').
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
   os << "Tensor" << tensor.names();
@@ -14,20 +15,33 @@ static std::string toDimnameRepr(const Tensor& tensor) {
 }
 
 int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
-  TORCH_CHECK(dim.type() != NameType::WILDCARD,
+  TORCH_CHECK(
+      dim.type() != NameType::WILDCARD,
       "Please look up dimensions by name, got: name = None.");
-  TORCH_CHECK(tensor.has_names(),
-      "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
+  TORCH_CHECK(
+      tensor.has_names(),
+      "Name ",
+      dim,
+      " not found in ",
+      toDimnameRepr(tensor),
+      ".");
   const auto names = tensor.names();
 
   const auto it = std::find(names.begin(), names.end(), dim);
-  TORCH_CHECK(it != names.end(),
-      "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
+  TORCH_CHECK(
+      it != names.end(),
+      "Name ",
+      dim,
+      " not found in ",
+      toDimnameRepr(tensor),
+      ".");
 
   return std::distance(names.begin(), it);
 }
 
-std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dims) {
+std::vector<int64_t> dimnames_to_positions(
+    const Tensor& tensor,
+    DimnameList dims) {
   std::vector<int64_t> result;
   result.reserve(dims.size());
   for (const auto& name : dims) {
@@ -42,10 +56,21 @@ static void report_positional_error(
     DimnameList names,
     DimnameList other_names,
     const char* action) {
-  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
-  TORCH_CHECK(false,
-      "Error when attempting to ", action, " dims ", names, " and dims ",
-      other_names, ": dim ", name, " and dim ", other_name, " are at the same position "
+  // TODO(zou3519): Can improve message by checking if names are alignable and
+  // suggesting workarounds
+  TORCH_CHECK(
+      false,
+      "Error when attempting to ",
+      action,
+      " dims ",
+      names,
+      " and dims ",
+      other_names,
+      ": dim ",
+      name,
+      " and dim ",
+      other_name,
+      " are at the same position "
       "from the right but do not match.")
 }
 
@@ -58,10 +83,19 @@ static void check_for_misalignment(
     return;
   }
   auto it = std::find(other_names.begin(), other_names.end(), name);
-  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
-  TORCH_CHECK(it == other_names.end(),
-      "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
-      other_names, ": dim ", name, " appears in a different position from the right "
+  // TODO(zou3519): Can improve message by checking if names are alignable and
+  // suggesting workarounds
+  TORCH_CHECK(
+      it == other_names.end(),
+      "Misaligned dims when attempting to ",
+      action,
+      " dims ",
+      names,
+      " and dims ",
+      other_names,
+      ": dim ",
+      name,
+      " appears in a different position from the right "
       "across both lists.");
 }
 
@@ -80,7 +114,8 @@ std::vector<Dimname> unify_from_right(
   auto result_it = result.rbegin();
   while (names_it != names.rend() || other_it != other_names.rend()) {
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
-    const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
+    const auto& other_name =
+        other_it == other_names.rend() ? wildcard : *other_it;
 
     // Step 1: Check that the names match
     const auto maybeName = name.unify(other_name);
@@ -93,7 +128,8 @@ std::vector<Dimname> unify_from_right(
     if (!name.isBasic() || !other_name.isBasic()) {
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
-      // This search (including the outer loop) is O(N*K) but typically # of dims is small.
+      // This search (including the outer loop) is O(N*K) but typically # of
+      // dims is small.
       check_for_misalignment(name, names, other_names, action);
       check_for_misalignment(other_name, other_names, names, action);
     }
@@ -111,28 +147,35 @@ std::vector<Dimname> unify_from_right(
 
 namespace namedinference {
 
-static std::bitset<dim_bitset_size>
-compute_included_idxs(IntArrayRef excluded_idxs, int64_t ndims) {
+static std::bitset<dim_bitset_size> compute_included_idxs(
+    IntArrayRef excluded_idxs,
+    int64_t ndims) {
   auto result = dim_list_to_bitset(excluded_idxs, ndims);
   result.flip();
   return result;
 }
 
 static void assert_names_equal(DimnameList a, DimnameList b) {
-  TORCH_CHECK(a == b,
-      "Name mismatch: specified out tensor with names ", a,
-      " are not the same as the computed output names ", b,
+  TORCH_CHECK(
+      a == b,
+      "Name mismatch: specified out tensor with names ",
+      a,
+      " are not the same as the computed output names ",
+      b,
       ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
-const Tensor& propagate_names_if_nonempty(const Tensor& result,
+const Tensor& propagate_names_if_nonempty(
+    const Tensor& result,
     DimnameList maybe_names,
     bool validate_names) {
-  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_names, validate_names);
+  propagate_names_if_nonempty(
+      result.unsafeGetTensorImpl(), maybe_names, validate_names);
   return result;
 }
 
-TensorImpl* propagate_names_if_nonempty(TensorImpl* result,
+TensorImpl* propagate_names_if_nonempty(
+    TensorImpl* result,
     DimnameList maybe_names,
     bool validate_names) {
   if (maybe_names.empty()) {
@@ -141,17 +184,25 @@ TensorImpl* propagate_names_if_nonempty(TensorImpl* result,
   return propagate_names(result, maybe_names, validate_names);
 }
 
-const Tensor& propagate_names(const Tensor& result, DimnameList names, bool validate_names) {
+const Tensor& propagate_names(
+    const Tensor& result,
+    DimnameList names,
+    bool validate_names) {
   propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
   return result;
 }
 
-TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate_names) {
+TensorImpl* propagate_names(
+    TensorImpl* result,
+    DimnameList names,
+    bool validate_names) {
   if (result->dim() > 0) {
     TORCH_INTERNAL_ASSERT(
         !names.empty(),
         "propagate_names: passed in empty names to propagate to result with",
-        " shape ", result->sizes(), ". Empty names means that name inference did",
+        " shape ",
+        result->sizes(),
+        ". Empty names means that name inference did",
         "not occur; use `propagate_names_if_nonempty` instead of `propagate_names`.");
   }
   if (!impl::has_names(result)) {
@@ -162,7 +213,10 @@ TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate
   return result;
 }
 
-void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
+void propagate_names_except(
+    const Tensor& result,
+    const Tensor& src,
+    IntArrayRef excluded_idxs) {
   if (!result.has_names() && !src.has_names()) {
     return;
   }
@@ -175,7 +229,8 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   // fast path
   if (excluded_idxs.size() == 1) {
     std::vector<Dimname> outnames = src_names.vec();
-    outnames.erase(outnames.begin() + maybe_wrap_dim(excluded_idxs[0], src_dim));
+    outnames.erase(
+        outnames.begin() + maybe_wrap_dim(excluded_idxs[0], src_dim));
     propagate_names(result, outnames);
     return;
   }
@@ -191,7 +246,11 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   propagate_names(result, outnames);
 }
 
-void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
+void propagate_names_for_reduction(
+    const Tensor& result,
+    const Tensor& src,
+    IntArrayRef reduced_dims,
+    bool keepdim) {
   if (keepdim) {
     propagate_names(result, src);
     return;
@@ -268,12 +327,14 @@ static std::vector<Dimname> compute_dot_product_outnames(
   int64_t index = 0;
   for (size_t j = 0; j < tensor_names.size(); ++j) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (j == tensor_dotted_dim) continue;
+    if (j == tensor_dotted_dim)
+      continue;
     outnames[index++] = tensor_names[j];
   }
   for (size_t j = 0; j < other_names.size(); ++j) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (j == other_dotted_dim) continue;
+    if (j == other_dotted_dim)
+      continue;
     outnames[index++] = other_names[j];
   }
   return outnames;
@@ -284,18 +345,21 @@ static void check_feature_names_are_distinct(
     DimnameList other_names,
     DimnameList outnames) {
   if (self_names.size() < 2 || other_names.size() < 2) {
-    // There are less than 2 feature dims in outnames so there is nothing to check
+    // There are less than 2 feature dims in outnames so there is nothing to
+    // check
     return;
   }
   auto feature0 = outnames[outnames.size() - 2];
   auto feature1 = outnames[outnames.size() - 1];
   TORCH_CHECK(
-    feature0 == Dimname::wildcard() || feature0 != feature1,
-    "Matrix multiplying Tensor", self_names,
-    " with Tensor", other_names,
-    " would produce output tensor with duplicate names ",
-    outnames,
-    ". Please rename the input tensors with `Tensor.rename` to prevent this.");
+      feature0 == Dimname::wildcard() || feature0 != feature1,
+      "Matrix multiplying Tensor",
+      self_names,
+      " with Tensor",
+      other_names,
+      " would produce output tensor with duplicate names ",
+      outnames,
+      ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function)
@@ -320,8 +384,10 @@ static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
     if (target.isWildcard()) {
       continue;
     }
-    if (std::any_of(batch_dims.begin(), batch_dims.end(),
-          [&](const Dimname& dim) { return target == dim; })) {
+    if (std::any_of(
+            batch_dims.begin(), batch_dims.end(), [&](const Dimname& dim) {
+              return target == dim;
+            })) {
       return false;
     }
   }
@@ -338,12 +404,16 @@ static int64_t num_batch_dims(DimnameList names) {
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
-  TORCH_CHECK(self_names.size() >= 1 && other_names.size() >= 1,
+  TORCH_CHECK(
+      self_names.size() >= 1 && other_names.size() >= 1,
       "both arguments to matmul need to be at least 1D, but they are ",
-      self_names.size(), "D and ", other_names.size(), "D");
+      self_names.size(),
+      "D and ",
+      other_names.size(),
+      "D");
 
-  // matmul performs a batch matrix multiply between self and other, each of which
-  // can either be:
+  // matmul performs a batch matrix multiply between self and other, each of
+  // which can either be:
   // - a batches of matrices (if dim > 2)
   // - a matrix (if dim == 2)
   // - a vector (if dim == 1)
@@ -354,16 +424,21 @@ static std::vector<Dimname> compute_matmul_outnames(
   // After that, we append some names that are equal to the result of the matmul
   // without batch dimensions. Those names are computed by removing the names
   // of the dimensions that were contracted away. We always contract the
-  // last dim of the first tensor with the first feature dimension of the second.
+  // last dim of the first tensor with the first feature dimension of the
+  // second.
 
   // Get the output's batch dimension names
-  auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
-  const auto wrapped_other_names = TensorNames(other_names, 0, num_batch_dims(other_names));
-  auto& working_names = wrapped_self_names.unifyFromRightInplace(wrapped_other_names, "matmul");
+  auto wrapped_self_names =
+      TensorNames(self_names, 0, num_batch_dims(self_names));
+  const auto wrapped_other_names =
+      TensorNames(other_names, 0, num_batch_dims(other_names));
+  auto& working_names =
+      wrapped_self_names.unifyFromRightInplace(wrapped_other_names, "matmul");
 
   // Append the result of each individual (non-batched) matmul.
-  // If either of self or other have dim 1, that means they are a vector. Vectors get
-  // completely contracted away during matmul so we don't take any names from them.
+  // If either of self or other have dim 1, that means they are a vector.
+  // Vectors get completely contracted away during matmul so we don't take any
+  // names from them.
   if (self_names.size() >= 2) {
     working_names.append(TensorName(self_names, -2));
   }
@@ -381,8 +456,7 @@ std::vector<Dimname> propagate_names_for_addmv(
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias) {
-  if (!mat.has_names() &&
-      !vec.has_names() && !bias.has_names()) {
+  if (!mat.has_names() && !vec.has_names() && !bias.has_names()) {
     return std::vector<Dimname>{};
   }
   auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
@@ -394,8 +468,8 @@ void propagate_names_for_addmm(
     const Tensor& m1,
     const Tensor& m2,
     const Tensor& bias) {
-  if (!m1.has_names() && !m2.has_names() &&
-      !bias.has_names() && !result.has_names()) {
+  if (!m1.has_names() && !m2.has_names() && !bias.has_names() &&
+      !result.has_names()) {
     return;
   }
 
@@ -404,9 +478,7 @@ void propagate_names_for_addmm(
   propagate_names(result, add_outnames);
 }
 
-void check_names_for_dot(
-    TensorImpl* vec1,
-    TensorImpl* vec2) {
+void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2) {
   if (!impl::has_names(vec1) && !impl::has_names(vec2)) {
     return;
   }
@@ -454,10 +526,16 @@ std::vector<Dimname> broadcast_to_outnames(
   auto tensor_names = tensor.names();
   TORCH_CHECK(
       reference_names.size() >= tensor_names.size(),
-      op_name, ": attempted to broadcast Tensor", tensor_names, " to Tensor",
-      reference_names, " but the number of dims (", tensor_names.size(),
+      op_name,
+      ": attempted to broadcast Tensor",
+      tensor_names,
+      " to Tensor",
+      reference_names,
+      " but the number of dims (",
+      tensor_names.size(),
       ") must be less than or equal to the number of dims in the tensor (",
-      reference_names.size(), ")");
+      reference_names.size(),
+      ")");
   return unify_from_right(reference_names, tensor_names);
 }
 
@@ -468,10 +546,15 @@ std::vector<Dimname> compute_cat_outnames(TensorList tensors) {
   std::vector<Dimname> result;
   for (const auto& tensor : tensors) {
     const auto tensor_names = tensor.names();
-    TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
-    TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),
-        "Tensors must have same number of dimensions: got ", result.size(),
-        " and ", tensor_names.size());
+    TORCH_CHECK(
+        tensor_names.size() > 0,
+        "zero-dimensional tensor cannot be concatenated");
+    TORCH_CHECK(
+        result.empty() || tensor_names.size() == result.size(),
+        "Tensors must have same number of dimensions: got ",
+        result.size(),
+        " and ",
+        tensor_names.size());
     result = unify_from_right(result, tensor_names, "cat");
   }
   return result;
@@ -496,15 +579,17 @@ std::vector<Dimname> compute_cdist_outnames(
   const auto other_names = other.names();
 
   auto self_batch = TensorNames(self_names, 0, num_batch_dims(self_names));
-  const auto other_batch = TensorNames(other_names, 0, num_batch_dims(other_names));
+  const auto other_batch =
+      TensorNames(other_names, 0, num_batch_dims(other_names));
 
   auto& result = self_batch.unifyFromRightInplace(other_batch, "cdist");
 
-  // cdist treats self and other like batches of M x D and N X D tensors, respectively.
-  // It computes the pairwise distance between each of the M vectors (of size D)
-  // in `self` and each of the N vectors in `other`, returning a batch of M x N
-  // distance values. We propagate the names of the dimension of size M (in self)
-  // and the dimension of size N (in other), both of which are second-from-last.
+  // cdist treats self and other like batches of M x D and N X D tensors,
+  // respectively. It computes the pairwise distance between each of the M
+  // vectors (of size D) in `self` and each of the N vectors in `other`,
+  // returning a batch of M x N distance values. We propagate the names of the
+  // dimension of size M (in self) and the dimension of size N (in other), both
+  // of which are second-from-last.
   result.append(TensorName(self_names, -2));
   result.append(TensorName(other_names, -2));
   result.checkUnique("cdist");
@@ -527,8 +612,8 @@ std::vector<Dimname> compute_baddbmm_outnames(
     const Tensor& self,
     const Tensor& other,
     const Tensor& bias) {
-  if (!result.has_names() && !self.has_names()
-    && !other.has_names() && !bias.has_names()) {
+  if (!result.has_names() && !self.has_names() && !other.has_names() &&
+      !bias.has_names()) {
     return {};
   }
   auto bmm_names = compute_matmul_outnames(self.names(), other.names());

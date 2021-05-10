@@ -14,4 +14,5 @@ inline Device getDeviceFromPtr(void* ptr) {
   return {DeviceType::CUDA, static_cast<DeviceIndex>(attr.device)};
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at

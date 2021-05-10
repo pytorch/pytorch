@@ -23,8 +23,8 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         quantization_params[RESTRICT_STATIC 1]) {
   const __m128i vinput_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
-  const __m128i vkernel_zero_point = _mm_set1_epi16(
-      quantization_params->sse2.kernel_zero_points[0]);
+  const __m128i vkernel_zero_point =
+      _mm_set1_epi16(quantization_params->sse2.kernel_zero_points[0]);
   const __m128i vzero = _mm_setzero_si128();
 
   do {
@@ -811,18 +811,10 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128 vmultiplier =
             _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
 
-        vacc_lo = _mm_cvtps_epi32(
-                      _mm_mul_ps(
-                        _mm_cvtepi32_ps(vacc_lo),
-                        vmultiplier
-                        )
-                      );
-        vacc_hi = _mm_cvtps_epi32(
-                      _mm_mul_ps(
-                        _mm_cvtepi32_ps(vacc_hi),
-                        vmultiplier
-                        )
-                      );
+        vacc_lo =
+            _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc_lo), vmultiplier));
+        vacc_hi =
+            _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc_hi), vmultiplier));
 
         const __m128i voutput_zero_point = _mm_load_si128(
             (const __m128i*)quantization_params->sse2.output_zero_point);
@@ -930,18 +922,10 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128 vmultiplier =
             _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
 
-        vacc_lo = _mm_cvtps_epi32(
-                      _mm_mul_ps(
-                        _mm_cvtepi32_ps(vacc_lo),
-                        vmultiplier
-                        )
-                      );
-        vacc_hi = _mm_cvtps_epi32(
-                      _mm_mul_ps(
-                        _mm_cvtepi32_ps(vacc_hi),
-                        vmultiplier
-                        )
-                      );
+        vacc_lo =
+            _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc_lo), vmultiplier));
+        vacc_hi =
+            _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(vacc_hi), vmultiplier));
 
         const __m128i voutput_zero_point = _mm_load_si128(
             (const __m128i*)quantization_params->sse2.output_zero_point);

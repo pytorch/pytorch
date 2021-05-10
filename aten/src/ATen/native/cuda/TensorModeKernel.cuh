@@ -201,7 +201,8 @@ __global__ void compute_mode(
     int64_t sliceSize,
     int64_t slices) {
   int tidx = threadIdx.x;
-  int stidx = blockDim.x + threadIdx.x; // Second index this thread responsible for
+  int stidx =
+      blockDim.x + threadIdx.x; // Second index this thread responsible for
 
   // First, we need to calculate the offset into the sorted Tensor that
   // represents the start of the slice for this block to calculate the mode for.
@@ -211,7 +212,7 @@ __global__ void compute_mode(
   unsigned int linearOffset = blockId * sliceSize;
 
   if (blockId >= slices) {
-      return;
+    return;
   }
 
   // shmem is a dynamically sized buffer we will use throughout the kernel to

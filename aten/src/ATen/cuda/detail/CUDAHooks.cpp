@@ -34,10 +34,10 @@
 
 #include <cuda.h>
 
-#include <sstream>
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <sstream>
 
 namespace at {
 namespace cuda {
@@ -61,7 +61,8 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
       });
 }
 
-const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultCUDAGenerator(
+    DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
@@ -80,7 +81,8 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
   at::OptionalDeviceGuard device_guard;
   auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
   if (primary_ctx_device_index.has_value()) {
-    device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    device_guard.reset_device(
+        at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
@@ -121,15 +123,18 @@ bool CUDAHooks::hasCuDNN() const {
 }
 
 #if defined(USE_DIRECT_NVRTC)
-static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*>
+load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
 }
 #elif !defined(USE_ROCM)
-static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*>
+load_nvrtc() {
   return std::make_pair(nullptr, &at::cuda::detail::lazyNVRTC);
 }
 #else
-static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*>
+load_nvrtc() {
 #if defined(_WIN32)
   std::string libcaffe2_nvrtc = "caffe2_nvrtc.dll";
 #elif defined(__APPLE__)
@@ -160,13 +165,17 @@ int64_t CUDAHooks::current_device() const {
 }
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+  TORCH_CHECK(
+      device_index >= 0 && device_index < at::cuda::device_count(),
+      "hasPrimaryContext expects a valid device index, but got device_index=",
+      device_index);
   unsigned int ctx_flags;
-  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
-  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active"
+  // argument end up with weird (garbage-looking nonzero) values when the
+  // context is not active, unless I initialize it to zero.
   int ctx_is_active = 0;
-  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(
+      device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
 }
 
@@ -178,8 +187,10 @@ c10::optional<int64_t> CUDAHooks::getDevceIndexWithPrimaryContext() const {
       return current_device_index;
     }
   }
-  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs(); device_index++) {
-    if (device_index == current_device_index) continue;
+  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs();
+       device_index++) {
+    if (device_index == current_device_index)
+      continue;
     if (CUDAHooks::hasPrimaryContext(device_index)) {
       return device_index;
     }
@@ -241,8 +252,7 @@ long CUDAHooks::versionCUDART() const {
   return CUDART_VERSION;
 #else
   TORCH_CHECK(
-    false,
-    "Cannot query CUDART version because CUDART is not available");
+      false, "Cannot query CUDART version because CUDART is not available");
 #endif
 }
 
@@ -288,7 +298,6 @@ std::string CUDAHooks::showConfig() const {
 #ifndef __HIP_PLATFORM_HCC__
 #if AT_CUDNN_ENABLED()
 
-
   auto printCudnnStyleVersion = [&](int v) {
     oss << (v / 1000) << "." << (v / 100 % 10);
     if (v % 100 != 0) {
@@ -314,11 +323,13 @@ std::string CUDAHooks::showConfig() const {
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR
+      << "." << MIOPEN_VERSION_PATCH << "\n";
 #endif
 
 #ifdef USE_MAGMA
-  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR
+      << "." << MAGMA_VERSION_MICRO << "\n";
 #endif
 
   return oss.str();
@@ -341,9 +352,11 @@ int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
 #endif
 }
 
-void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size)
+    const {
 #ifndef __HIP_PLATFORM_HCC__
-  at::native::detail::cufft_set_plan_cache_max_size_impl(device_index, max_size);
+  at::native::detail::cufft_set_plan_cache_max_size_impl(
+      device_index, max_size);
 #else
   AT_ERROR("cuFFT with HIP is not supported");
 #endif

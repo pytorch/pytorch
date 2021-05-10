@@ -37,7 +37,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     const Scalar& alpha,
     Tensor& out) {
   AT_ASSERT(op1.is_sparse_csr());
-  Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
+  Tensor expand_self =
+      *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(
@@ -213,14 +214,20 @@ Tensor _sparse_csr_addmm(
 }
 
 // Functions for element-wise addition.
-Tensor add_sparse_csr(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor add_sparse_csr(
+    const Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
-Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor& add_sparse_csr_(
+    Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha) {
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 

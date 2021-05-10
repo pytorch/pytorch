@@ -4,11 +4,13 @@
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
 
-// WARNING: THCNumerics is being deprecated. Read the comments and function usage
+// WARNING: THCNumerics is being deprecated. Read the comments and function
+// usage
 //          in THCNumerics to learn about the deprecation
 //
 // Half numerics functions defined as free functions, so cunn code can be
-// written generically, i.e. without excessive calling of THCNumerics<THHalf> functions.
+// written generically, i.e. without excessive calling of THCNumerics<THHalf>
+// functions.
 
 // these functions should move to THCNumerics
 
@@ -27,7 +29,6 @@ inline __host__ __device__ float fmaxType(float x, float y) {
 inline __host__ __device__ double fmaxType(double x, double y) {
   return fmax(x, y);
 }
-
 
 // arithmetic functions
 

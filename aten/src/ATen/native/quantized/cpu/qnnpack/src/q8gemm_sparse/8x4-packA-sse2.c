@@ -22,17 +22,16 @@ void pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2(
     const uint8_t* a,
     const size_t a_stride,
     uint8_t* a_packed) {
-
   // Packed A format.
-  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
-  // Original A
+  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous
+  // memory. Original A
   // --------- K -----------          -- (K + 4 - 1) / 4 --
   // |                     |          |                   |
   // |                     |        (M + 8 - 1)/8         |
   // |                     | Packed   |                   |
   // M                     |  =>      |-------------------|
-  // |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8 -1)/8 blocks
-  // |                     |
+  // |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8
+  // -1)/8 blocks |                     |
   // |---------------------|
   //
   // Each 8 x 4 blocks is transposed and stored.
@@ -55,20 +54,19 @@ void pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2(
   // in 4x8 blocks are also random. this is also ok because the packed
   // weights will be packed with zeros such that multiplication will result
   // in zero.
-  uint32_t num_k_blocks = (K + COL_BLOCK_SIZE -1) / COL_BLOCK_SIZE;
+  uint32_t num_k_blocks = (K + COL_BLOCK_SIZE - 1) / COL_BLOCK_SIZE;
   for (uint32_t k_block = 0; k_block < num_k_blocks - 1; k_block++) {
     for (uint32_t k = 0; k < COL_BLOCK_SIZE; k++) {
       for (uint32_t m = 0; m < mr; m++) {
         *(a_packed + k_block * PACKED_A_BLOCK_SIZE + k * 8 + m) =
-          *(a + m * a_stride + k_block * COL_BLOCK_SIZE + k);
+            *(a + m * a_stride + k_block * COL_BLOCK_SIZE + k);
       }
     }
   }
   for (uint32_t k = 0; k < (K - ((num_k_blocks - 1) * COL_BLOCK_SIZE)); k++) {
     for (uint32_t m = 0; m < mr; m++) {
       *(a_packed + (num_k_blocks - 1) * PACKED_A_BLOCK_SIZE + k * 8 + m) =
-        *(a + m * a_stride + (num_k_blocks - 1) * COL_BLOCK_SIZE + k);
+          *(a + m * a_stride + (num_k_blocks - 1) * COL_BLOCK_SIZE + k);
     }
   }
-
 }

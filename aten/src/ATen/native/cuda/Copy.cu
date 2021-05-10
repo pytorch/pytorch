@@ -3,11 +3,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
+#include <c10/cuda/CUDAStream.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 #ifdef __HIP_PLATFORM_HCC__
 #include <hip/hip_version.h>
@@ -54,15 +54,13 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   }
 
   if (memcpy_eligible) {
-    void *dst = iter.data_ptr(0);
-    void *src = iter.data_ptr(1);
+    void* dst = iter.data_ptr(0);
+    void* src = iter.data_ptr(1);
     size_t size = numel * iter.element_size(0);
     if (src != dst || src_device != dst_device) {
       // Perform the copy
       AT_CUDA_CHECK(cudaMemcpyAsync(
-          dst, src, size,
-          cudaMemcpyDeviceToDevice,
-          copy_stream));
+          dst, src, size, cudaMemcpyDeviceToDevice, copy_stream));
     }
   } else {
     auto dtype = iter.dtype(0);
@@ -122,7 +120,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
     return false;
   }
   return THCState_getPeerToPeerAccess(
-        globalContext().getTHCState(), src_device.index(), dst_device.index());
+      globalContext().getTHCState(), src_device.index(), dst_device.index());
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
@@ -144,11 +142,15 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // Type conversions are performed on the CPU for CPU-GPU copies and on
     // the src device for GPU-GPU copies.
     if (iter.device_type(0) == kCUDA) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      dst_contig = dst.is_contiguous()
+          ? dst
+          : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      dst_contig = (dst.is_contiguous() && same_type)
+          ? dst
+          : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 

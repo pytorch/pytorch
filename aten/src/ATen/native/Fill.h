@@ -6,8 +6,10 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&), fill_stub);
+DECLARE_DISPATCH(void (*)(TensorIterator&, const Scalar&), fill_stub);
 
-}} // namespace at::native
+}
+} // namespace at

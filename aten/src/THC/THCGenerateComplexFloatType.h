@@ -1,5 +1,6 @@
 #ifndef THC_GENERIC_FILE
-#error "You must define THC_GENERIC_FILE before including THGenerateComplexFloatType.h"
+#error \
+    "You must define THC_GENERIC_FILE before including THGenerateComplexFloatType.h"
 #endif
 
 #define scalar_t c10::complex<float>

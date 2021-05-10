@@ -1,7 +1,7 @@
-#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 
 #include <c10/util/Exception.h>
 

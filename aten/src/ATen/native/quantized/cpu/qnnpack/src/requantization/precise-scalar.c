@@ -91,8 +91,8 @@ void pytorch_qnnp_requantize_precise__scalar_unsigned32(
      *
      * To avoid full 64-bit shift, we leverage the fact that shift >= 32, and do
      * it in two steps:
-     * - Shift by 32, which can be implemented by extracting the high 32-bit word
-     * on 32-bit systems.
+     * - Shift by 32, which can be implemented by extracting the high 32-bit
+     * word on 32-bit systems.
      * - Shift by (shift - 32), which can be implemented as a 32-bit shift of
      * high word of addition result.
      */
@@ -129,14 +129,18 @@ void pytorch_qnnp_requantize_precise__scalar_unsigned32(
      * Clamp scaled value with zero point between (qmin - zero point) and (qmax
      * - zero point).
      */
-    const int32_t x_clamped =
-        x_scaled < smin ? smin : x_scaled > smax ? smax : x_scaled;
-    const int32_t y_clamped =
-        y_scaled < smin ? smin : y_scaled > smax ? smax : y_scaled;
-    const int32_t z_clamped =
-        z_scaled < smin ? smin : z_scaled > smax ? smax : z_scaled;
-    const int32_t w_clamped =
-        w_scaled < smin ? smin : w_scaled > smax ? smax : w_scaled;
+    const int32_t x_clamped = x_scaled < smin ? smin
+        : x_scaled > smax                     ? smax
+                                              : x_scaled;
+    const int32_t y_clamped = y_scaled < smin ? smin
+        : y_scaled > smax                     ? smax
+                                              : y_scaled;
+    const int32_t z_clamped = z_scaled < smin ? smin
+        : z_scaled > smax                     ? smax
+                                              : z_scaled;
+    const int32_t w_clamped = w_scaled < smin ? smin
+        : w_scaled > smax                     ? smax
+                                              : w_scaled;
 
     /*
      * Add zero point to clamped value.
@@ -234,14 +238,18 @@ void pytorch_qnnp_requantize_precise__scalar_unsigned64(
      * Clamp scaled value with zero point between (qmin - zero point) and (qmax
      * - zero point).
      */
-    const int32_t x_clamped =
-        x_scaled < smin ? smin : x_scaled > smax ? smax : x_scaled;
-    const int32_t y_clamped =
-        y_scaled < smin ? smin : y_scaled > smax ? smax : y_scaled;
-    const int32_t z_clamped =
-        z_scaled < smin ? smin : z_scaled > smax ? smax : z_scaled;
-    const int32_t w_clamped =
-        w_scaled < smin ? smin : w_scaled > smax ? smax : w_scaled;
+    const int32_t x_clamped = x_scaled < smin ? smin
+        : x_scaled > smax                     ? smax
+                                              : x_scaled;
+    const int32_t y_clamped = y_scaled < smin ? smin
+        : y_scaled > smax                     ? smax
+                                              : y_scaled;
+    const int32_t z_clamped = z_scaled < smin ? smin
+        : z_scaled > smax                     ? smax
+                                              : z_scaled;
+    const int32_t w_clamped = w_scaled < smin ? smin
+        : w_scaled > smax                     ? smax
+                                              : w_scaled;
 
     /*
      * Add zero point to clamped value.
@@ -334,14 +342,18 @@ void pytorch_qnnp_requantize_precise__scalar_signed64(
      * Clamp scaled value with zero point between (qmin - zero point) and (qmax
      * - zero point).
      */
-    const int32_t x_clamped =
-        x_scaled < smin ? smin : x_scaled > smax ? smax : x_scaled;
-    const int32_t y_clamped =
-        y_scaled < smin ? smin : y_scaled > smax ? smax : y_scaled;
-    const int32_t z_clamped =
-        z_scaled < smin ? smin : z_scaled > smax ? smax : z_scaled;
-    const int32_t w_clamped =
-        w_scaled < smin ? smin : w_scaled > smax ? smax : w_scaled;
+    const int32_t x_clamped = x_scaled < smin ? smin
+        : x_scaled > smax                     ? smax
+                                              : x_scaled;
+    const int32_t y_clamped = y_scaled < smin ? smin
+        : y_scaled > smax                     ? smax
+                                              : y_scaled;
+    const int32_t z_clamped = z_scaled < smin ? smin
+        : z_scaled > smax                     ? smax
+                                              : z_scaled;
+    const int32_t w_clamped = w_scaled < smin ? smin
+        : w_scaled > smax                     ? smax
+                                              : w_scaled;
 
     /*
      * Add zero point to clamped value.

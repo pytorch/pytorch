@@ -53,16 +53,16 @@ struct PyObjectHolder;
 struct EnumHolder;
 // We need a ComplexHolder because currently the payloads in the Union
 // only take 64 bits. Since ComplexDouble takes up 128 bits, and is too big
-// to fit in the IValue directly, we indirect complex numbers through an intrusive
-// pointer to ComplexHolder (which contains a c10::complex).
+// to fit in the IValue directly, we indirect complex numbers through an
+// intrusive pointer to ComplexHolder (which contains a c10::complex).
 struct ComplexHolder : c10::intrusive_ptr_target {
-  public:
-    template <typename T>
-    ComplexHolder(c10::complex<T> c) {
-      val = convert<decltype(val), c10::complex<T>>(c);
-    }
-    ComplexHolder() {}
-    c10::complex<double> val;
+ public:
+  template <typename T>
+  ComplexHolder(c10::complex<T> c) {
+    val = convert<decltype(val), c10::complex<T>>(c);
+  }
+  ComplexHolder() {}
+  c10::complex<double> val;
 };
 } // namespace ivalue
 
@@ -75,7 +75,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray() {}
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -180,12 +180,14 @@ struct Capsule {
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+    if (is_intrusive_ptr &&
+        payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
       c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
     }
   }
 
-  IValue(IValue&& rhs) noexcept : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
+  IValue(IValue&& rhs) noexcept
+      : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
     moveFrom(std::move(rhs));
   }
 
@@ -248,7 +250,7 @@ struct TORCH_API IValue final {
    */
   bool is(const IValue& rhs) const;
 
-   /**
+  /**
    * Hashing for IValues. Returns an IValue-boxed int.
    *
    * Some notes:
@@ -379,13 +381,15 @@ struct TORCH_API IValue final {
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
-  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
+  IValue(at::Storage s)
+      : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
     // Note: the undefined tensor is not refcounted, so while it
     // is tagged as a tensor, is_intrusive_ptr is set to false.
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined tensor.
-    payload.u.as_intrusive_ptr = null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
+    payload.u.as_intrusive_ptr =
+        null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
   }
   bool isStorage() const {
     return Tag::Storage == tag;
@@ -482,7 +486,9 @@ struct TORCH_API IValue final {
   // ComplexDouble
   template <typename T>
   IValue(c10::complex<T> c);
-  bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
+  bool isComplexDouble() const {
+    return Tag::ComplexDouble == tag;
+  }
   c10::complex<double> toComplexDouble() const;
 
   // Future
@@ -725,14 +731,15 @@ struct TORCH_API IValue final {
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
-  //Stream
-  IValue(c10::Stream stream)
-    : tag(Tag::Stream), is_intrusive_ptr(false) {
+  // Stream
+  IValue(c10::Stream stream) : tag(Tag::Stream), is_intrusive_ptr(false) {
     payload.u.as_int = stream.pack();
   }
   c10::Stream toStream() &&;
-  c10::Stream toStream() const &;
-  bool isStream() const { return Tag::Stream == tag; }
+  c10::Stream toStream() const&;
+  bool isStream() const {
+    return Tag::Stream == tag;
+  }
 
   // ScalarType
   IValue(ScalarType t)
@@ -778,7 +785,8 @@ struct TORCH_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined generator.
-    payload.u.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
+    payload.u.as_intrusive_ptr =
+        null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
     return Tag::Generator == tag;
@@ -811,7 +819,8 @@ struct TORCH_API IValue final {
   template <typename T>
   T to() &&;
   template <typename T>
-  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to() const&;
+  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to()
+      const&;
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
@@ -844,9 +853,7 @@ struct TORCH_API IValue final {
   // This is different from `repr()` in that there is no expectation that we can
   // exactly reconstruct an IValue from the output; feel free to use a
   // concise/pretty form
-  TORCH_API friend std::ostream& operator<<(
-      std::ostream& out,
-      const IValue& v);
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const IValue& v);
 
   bool isPtrType() const {
     return (isTensor() && payload.as_tensor.defined()) || is_intrusive_ptr;
@@ -860,7 +867,8 @@ struct TORCH_API IValue final {
       return payload.as_tensor.unsafeGetTensorImpl();
     } else {
       return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()
-        ? payload.u.as_intrusive_ptr : nullptr;
+          ? payload.u.as_intrusive_ptr
+          : nullptr;
     }
   }
 
@@ -912,8 +920,11 @@ struct TORCH_API IValue final {
   IValue deepcopy(HashAliasedIValueMap& memo) const;
 
  private:
-  static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {
-    return p ? p : static_cast<c10::intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  static c10::intrusive_ptr_target* null_to_undefined_tensor(
+      c10::intrusive_ptr_target* p) {
+    return p ? p
+             : static_cast<c10::intrusive_ptr_target*>(
+                   c10::UndefinedTensorImpl::singleton());
   }
 
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
@@ -944,8 +955,11 @@ struct TORCH_API IValue final {
     // the compiler to generate the same code for each case. It is
     // surprisingly difficult to get this right.
     if (isTensor() || is_intrusive_ptr) {
-      c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.u.as_intrusive_ptr;
-      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
+      c10::intrusive_ptr_target* p = isTensor()
+          ? payload.as_tensor.unsafeGetTensorImpl()
+          : payload.u.as_intrusive_ptr;
+      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::
+          reclaim(p);
       // No need to make this destructor call!
       // payload.as_tensor.~Tensor();
     }
@@ -1023,13 +1037,13 @@ struct TORCH_API WeakIValue final {
       : payload(rhs.payload),
         tag(rhs.tag),
         is_intrusive_ptr(rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr && payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+    if (is_intrusive_ptr &&
+        payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
       c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
     }
   }
   WeakIValue(const IValue& rhs)
-      : tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+      : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
     if (rhs.isTensor()) {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
       is_intrusive_ptr = true;
@@ -1046,7 +1060,8 @@ struct TORCH_API WeakIValue final {
     swap(rhs);
   }
   ~WeakIValue() {
-    if (is_intrusive_ptr && payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+    if (is_intrusive_ptr &&
+        payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
       c10::raw::weak_intrusive_ptr::decref(payload.as_intrusive_ptr);
     }
   }
@@ -1076,9 +1091,11 @@ struct TORCH_API WeakIValue final {
       return IValue(newPayload, tag, false);
     }
     if (IValue::Tag::Tensor == tag) {
-      auto temp = c10::weak_intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl>::reclaim(
-          static_cast<at::TensorImpl*>(payload.as_intrusive_ptr));
-      c10::intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl> ip(temp.lock());
+      auto temp =
+          c10::weak_intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl>::
+              reclaim(static_cast<at::TensorImpl*>(payload.as_intrusive_ptr));
+      c10::intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl> ip(
+          temp.lock());
       temp.release();
       if (!ip) {
         return IValue();
@@ -1088,8 +1105,8 @@ struct TORCH_API WeakIValue final {
     } else {
       auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
           payload.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-          ? nullptr
-          : payload.as_intrusive_ptr);
+              ? nullptr
+              : payload.as_intrusive_ptr);
       IValue::Payload pl;
       pl.u.as_intrusive_ptr = temp.lock().release();
       temp.release();
@@ -1105,8 +1122,9 @@ struct TORCH_API WeakIValue final {
     if (!is_intrusive_ptr) {
       return 1;
     }
-    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(
-        payload.as_intrusive_ptr);
+    auto temp = c10::weak_intrusive_ptr<
+        c10::intrusive_ptr_target,
+        c10::UndefinedTensorImpl>::reclaim(payload.as_intrusive_ptr);
     size_t result = temp.use_count();
     temp.release();
     return result;
@@ -1116,8 +1134,9 @@ struct TORCH_API WeakIValue final {
     if (!is_intrusive_ptr) {
       return 1;
     }
-    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(
-        payload.as_intrusive_ptr);
+    auto temp = c10::weak_intrusive_ptr<
+        c10::intrusive_ptr_target,
+        c10::UndefinedTensorImpl>::reclaim(payload.as_intrusive_ptr);
     size_t result = temp.weak_use_count();
     temp.release();
     return result;

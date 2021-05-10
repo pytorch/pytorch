@@ -23,30 +23,28 @@
   }
 
 #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Byte,Byte)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Char,Char)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Short,Short)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Int,Int)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Long,Long)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Double,Double)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Half,Half)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Bool,Bool)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16,BFloat16)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Byte, Byte)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Char, Char)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Short, Short)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Int, Int)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Long, Long)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Float, ) // i.e. float
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Double, Double)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Half, Half)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Bool, Bool)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16, BFloat16)
 #else
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexFloat,ComplexFloat)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexDouble,ComplexDouble)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexFloat, ComplexFloat)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexDouble, ComplexDouble)
 #endif
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 
-void THCStorage_(copyCuda)(THCState *state, THCStorage *self, THCStorage *src)
-{
+void THCStorage_(copyCuda)(THCState* state, THCStorage* self, THCStorage* src) {
   THCStorage_(TH_CONCAT_2(copyCuda, Real))(state, self, src);
 }
 
-void THCStorage_(copy)(THCState *state, THCStorage *self, THCStorage *src)
-{
+void THCStorage_(copy)(THCState* state, THCStorage* self, THCStorage* src) {
   THCStorage_(copyCuda)(state, self, src);
 }
 

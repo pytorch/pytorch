@@ -4,27 +4,33 @@
 using namespace c10;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
-    List<string> list;
-    EXPECT_TRUE(list.empty());
+TEST(
+    ListTest_IValueBasedList,
+    givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
+  List<string> list;
+  EXPECT_TRUE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenNonemptyList_whenCallingEmpty_thenReturnsFalse) {
-    List<string> list({"3"});
-    EXPECT_FALSE(list.empty());
+TEST(
+    ListTest_IValueBasedList,
+    givenNonemptyList_whenCallingEmpty_thenReturnsFalse) {
+  List<string> list({"3"});
+  EXPECT_FALSE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingSize_thenReturnsZero) {
-    List<string> list;
-    EXPECT_EQ(0, list.size());
+  List<string> list;
+  EXPECT_EQ(0, list.size());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenNonemptyList_whenCallingSize_thenReturnsNumberOfElements) {
-    List<string> list({"3", "4"});
-    EXPECT_EQ(2, list.size());
+TEST(
+    ListTest_IValueBasedList,
+    givenNonemptyList_whenCallingSize_thenReturnsNumberOfElements) {
+  List<string> list({"3", "4"});
+  EXPECT_EQ(2, list.size());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -35,42 +41,54 @@ TEST(ListTest_IValueBasedList, givenNonemptyList_whenCallingClear_thenIsEmpty) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingGetWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingGetWithExistingPosition_thenReturnsElement) {
   List<string> list({"3", "4"});
   EXPECT_EQ("3", list.get(0));
   EXPECT_EQ("4", list.get(1));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingGetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingGetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.get(2), std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingExtractWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingExtractWithExistingPosition_thenReturnsElement) {
   List<string> list({"3", "4"});
   EXPECT_EQ("3", list.extract(0));
   EXPECT_EQ("4", list.extract(1));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingExtractWithExistingPosition_thenListElementBecomesInvalid) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingExtractWithExistingPosition_thenListElementBecomesInvalid) {
   List<string> list({"3", "4"});
   list.extract(0);
   EXPECT_EQ("", list.get(0));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingExtractWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingExtractWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.extract(2), std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingCopyingSetWithExistingPosition_thenChangesElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingCopyingSetWithExistingPosition_thenChangesElement) {
   List<string> list({"3", "4"});
   string value = "5";
   list.set(1, value);
@@ -79,7 +97,9 @@ TEST(ListTest_IValueBasedList, whenCallingCopyingSetWithExistingPosition_thenCha
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingMovingSetWithExistingPosition_thenChangesElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingMovingSetWithExistingPosition_thenChangesElement) {
   List<string> list({"3", "4"});
   string value = "5";
   list.set(1, std::move(value));
@@ -88,7 +108,9 @@ TEST(ListTest_IValueBasedList, whenCallingMovingSetWithExistingPosition_thenChan
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   string value = "5";
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -96,7 +118,9 @@ TEST(ListTest_IValueBasedList, whenCallingCopyingSetWithNonExistingPosition_then
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   string value = "5";
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -104,14 +128,18 @@ TEST(ListTest_IValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenT
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingAccessOperatorWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingAccessOperatorWithExistingPosition_thenReturnsElement) {
   List<string> list({"3", "4"});
   EXPECT_EQ("3", static_cast<string>(list[0]));
   EXPECT_EQ("4", static_cast<string>(list[1]));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenAssigningToAccessOperatorWithExistingPosition_thenSetsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenAssigningToAccessOperatorWithExistingPosition_thenSetsElement) {
   List<string> list({"3", "4", "5"});
   list[1] = "6";
   EXPECT_EQ("3", list.get(0));
@@ -120,7 +148,9 @@ TEST(ListTest_IValueBasedList, whenAssigningToAccessOperatorWithExistingPosition
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenAssigningToAccessOperatorFromAccessOperator_thenSetsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenAssigningToAccessOperatorFromAccessOperator_thenSetsElement) {
   List<string> list({"3", "4", "5"});
   list[1] = list[2];
   EXPECT_EQ("3", list.get(0));
@@ -129,7 +159,9 @@ TEST(ListTest_IValueBasedList, whenAssigningToAccessOperatorFromAccessOperator_t
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenSwappingFromAccessOperator_thenSwapsElements) {
+TEST(
+    ListTest_IValueBasedList,
+    whenSwappingFromAccessOperator_thenSwapsElements) {
   List<string> list({"3", "4", "5"});
   swap(list[1], list[2]);
   EXPECT_EQ("3", list.get(0));
@@ -138,14 +170,18 @@ TEST(ListTest_IValueBasedList, whenSwappingFromAccessOperator_thenSwapsElements)
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list[2], std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingInsertOnIteratorWithLValue_thenInsertsElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   list.insert(list.begin() + 2, v);
@@ -154,7 +190,9 @@ TEST(ListTest_IValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInserts
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingInsertOnIteratorWithRValue_thenInsertsElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   list.insert(list.begin() + 2, std::move(v));
@@ -163,7 +201,9 @@ TEST(ListTest_IValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInserts
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingInsertWithLValue_thenReturnsIteratorToNewElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingInsertWithLValue_thenReturnsIteratorToNewElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   List<string>::iterator result = list.insert(list.begin() + 2, v);
@@ -171,7 +211,9 @@ TEST(ListTest_IValueBasedList, whenCallingInsertWithLValue_thenReturnsIteratorTo
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingInsertWithRValue_thenReturnsIteratorToNewElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingInsertWithRValue_thenReturnsIteratorToNewElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   List<string>::iterator result = list.insert(list.begin() + 2, std::move(v));
@@ -179,7 +221,9 @@ TEST(ListTest_IValueBasedList, whenCallingInsertWithRValue_thenReturnsIteratorTo
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceWithLValue_thenInsertsElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   list.emplace(list.begin() + 2, v);
@@ -188,7 +232,9 @@ TEST(ListTest_IValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElement) 
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceWithRValue_thenInsertsElement) {
   List<string> list({"3", "4", "6"});
   string v = "5";
   list.emplace(list.begin() + 2, std::move(v));
@@ -197,15 +243,20 @@ TEST(ListTest_IValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElement) 
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceWithConstructorArg_thenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceWithConstructorArg_thenInsertsElement) {
   List<string> list({"3", "4", "6"});
-  list.emplace(list.begin() + 2, "5"); // const char* is a constructor arg to std::string
+  list.emplace(
+      list.begin() + 2, "5"); // const char* is a constructor arg to std::string
   EXPECT_EQ(4, list.size());
   EXPECT_EQ("5", list.get(2));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingPushBackWithLValue_ThenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingPushBackWithLValue_ThenInsertsElement) {
   List<string> list;
   string v = "5";
   list.push_back(v);
@@ -214,7 +265,9 @@ TEST(ListTest_IValueBasedList, whenCallingPushBackWithLValue_ThenInsertsElement)
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingPushBackWithRValue_ThenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingPushBackWithRValue_ThenInsertsElement) {
   List<string> list;
   string v = "5";
   list.push_back(std::move(v));
@@ -223,7 +276,9 @@ TEST(ListTest_IValueBasedList, whenCallingPushBackWithRValue_ThenInsertsElement)
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
   List<string> list;
   string v = "5";
   list.emplace_back(v);
@@ -232,7 +287,9 @@ TEST(ListTest_IValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsEleme
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
   List<string> list;
   string v = "5";
   list.emplace_back(std::move(v));
@@ -241,9 +298,11 @@ TEST(ListTest_IValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsEleme
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
+TEST(
+    ListTest_IValueBasedList,
+    whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
   List<string> list;
-  list.emplace_back("5");  // const char* is a constructor arg to std::string
+  list.emplace_back("5"); // const char* is a constructor arg to std::string
   EXPECT_EQ(1, list.size());
   EXPECT_EQ("5", list.get(0));
 }
@@ -301,7 +360,9 @@ TEST(ListTest_IValueBasedList, whenIteratingWithForeach_thenFindsElements) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenOneElementList_whenErasing_thenListIsEmpty) {
+TEST(
+    ListTest_IValueBasedList,
+    givenOneElementList_whenErasing_thenListIsEmpty) {
   List<string> list({"3"});
   list.erase(list.begin());
   EXPECT_TRUE(list.empty());
@@ -405,7 +466,9 @@ TEST(ListTest_IValueBasedList, whenMoveAssigningList_thenOldIsEmpty) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter1 = list.begin();
@@ -415,7 +478,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenPostfixIncrementing_thenMovesTo
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter1 = list.begin();
@@ -425,7 +490,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenPrefixIncrementing_thenMovesToN
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenPostfixDecrementing_thenMovesToNextAndReturnsOldPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenPostfixDecrementing_thenMovesToNextAndReturnsOldPosition) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter1 = list.end() - 1;
@@ -435,7 +502,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenPostfixDecrementing_thenMovesTo
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenPrefixDecrementing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenPrefixDecrementing_thenMovesToNextAndReturnsNewPosition) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter1 = list.end() - 1;
@@ -445,7 +514,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenPrefixDecrementing_thenMovesToN
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenIncreasing_thenMovesToNextAndReturnsNewPosition) {
   List<string> list({"3", "4", "5"});
 
   List<string>::iterator iter1 = list.begin();
@@ -455,7 +526,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAndRe
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenDecreasing_thenMovesToNextAndReturnsNewPosition) {
   List<string> list({"3", "4", "5"});
 
   List<string>::iterator iter1 = list.end();
@@ -465,7 +538,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAndRe
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenAdding_thenReturnsNewIterator) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenAdding_thenReturnsNewIterator) {
   List<string> list({"3", "4", "5"});
 
   List<string>::iterator iter1 = list.begin();
@@ -475,7 +550,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenAdding_thenReturnsNewIterator) 
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenSubtracting_thenReturnsNewIterator) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenSubtracting_thenReturnsNewIterator) {
   List<string> list({"3", "4", "5"});
 
   List<string>::iterator iter1 = list.end() - 1;
@@ -485,7 +562,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenSubtracting_thenReturnsNewItera
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenCalculatingDifference_thenReturnsCorrectNumber) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenCalculatingDifference_thenReturnsCorrectNumber) {
   List<string> list({"3", "4"});
   EXPECT_EQ(2, list.end() - list.begin());
 }
@@ -513,7 +592,9 @@ TEST(ListTest_IValueBasedList, givenDifferentIterators_thenAreNotEqual) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenDereferencing_thenPointsToCorrectElement) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenDereferencing_thenPointsToCorrectElement) {
   List<string> list({"3"});
 
   List<string>::iterator iter = list.begin();
@@ -521,7 +602,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenDereferencing_thenPointsToCorre
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenAssigningNewValue_thenChangesValue) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenAssigningNewValue_thenChangesValue) {
   List<string> list({"3"});
 
   List<string>::iterator iter = list.begin();
@@ -530,7 +613,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenAssigningNewValue_thenChangesVa
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenAssigningNewValueFromIterator_thenChangesValue) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenAssigningNewValueFromIterator_thenChangesValue) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter = list.begin();
@@ -540,7 +625,9 @@ TEST(ListTest_IValueBasedList, givenIterator_whenAssigningNewValueFromIterator_t
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenIterator_whenSwappingValuesFromIterator_thenChangesValue) {
+TEST(
+    ListTest_IValueBasedList,
+    givenIterator_whenSwappingValuesFromIterator_thenChangesValue) {
   List<string> list({"3", "4"});
 
   List<string>::iterator iter = list.begin();
@@ -550,14 +637,18 @@ TEST(ListTest_IValueBasedList, givenIterator_whenSwappingValuesFromIterator_then
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenOneElementList_whenCallingPopBack_thenIsEmpty) {
+TEST(
+    ListTest_IValueBasedList,
+    givenOneElementList_whenCallingPopBack_thenIsEmpty) {
   List<string> list({"3"});
   list.pop_back();
   EXPECT_TRUE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingResize_thenResizesAndSetsEmptyValue) {
+TEST(
+    ListTest_IValueBasedList,
+    givenEmptyList_whenCallingResize_thenResizesAndSetsEmptyValue) {
   List<string> list;
   list.resize(2);
   EXPECT_EQ(2, list.size());
@@ -566,7 +657,9 @@ TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingResize_thenResizesAndSe
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
+TEST(
+    ListTest_IValueBasedList,
+    givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
   List<string> list;
   list.resize(2, "value");
   EXPECT_EQ(2, list.size());
@@ -618,66 +711,86 @@ TEST(ListTest_IValueBasedList, givenDifferentLists_thenIsNotEqual) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
-    List<int64_t> list;
-    EXPECT_TRUE(list.empty());
+TEST(
+    ListTest_NonIValueBasedList,
+    givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
+  List<int64_t> list;
+  EXPECT_TRUE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenNonemptyList_whenCallingEmpty_thenReturnsFalse) {
-    List<int64_t> list({3});
-    EXPECT_FALSE(list.empty());
+TEST(
+    ListTest_NonIValueBasedList,
+    givenNonemptyList_whenCallingEmpty_thenReturnsFalse) {
+  List<int64_t> list({3});
+  EXPECT_FALSE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingSize_thenReturnsZero) {
-    List<int64_t> list;
-    EXPECT_EQ(0, list.size());
+TEST(
+    ListTest_NonIValueBasedList,
+    givenEmptyList_whenCallingSize_thenReturnsZero) {
+  List<int64_t> list;
+  EXPECT_EQ(0, list.size());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenNonemptyList_whenCallingSize_thenReturnsNumberOfElements) {
-    List<int64_t> list({3, 4});
-    EXPECT_EQ(2, list.size());
+TEST(
+    ListTest_NonIValueBasedList,
+    givenNonemptyList_whenCallingSize_thenReturnsNumberOfElements) {
+  List<int64_t> list({3, 4});
+  EXPECT_EQ(2, list.size());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenNonemptyList_whenCallingClear_thenIsEmpty) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenNonemptyList_whenCallingClear_thenIsEmpty) {
   List<int64_t> list({3, 4});
   list.clear();
   EXPECT_TRUE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingGetWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingGetWithExistingPosition_thenReturnsElement) {
   List<int64_t> list({3, 4});
   EXPECT_EQ(3, list.get(0));
   EXPECT_EQ(4, list.get(1));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingGetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingGetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.get(2), std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingExtractWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingExtractWithExistingPosition_thenReturnsElement) {
   List<int64_t> list({3, 4});
   EXPECT_EQ(3, list.extract(0));
   EXPECT_EQ(4, list.extract(1));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingExtractWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingExtractWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.extract(2), std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithExistingPosition_thenChangesElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingCopyingSetWithExistingPosition_thenChangesElement) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
   list.set(1, value);
@@ -686,7 +799,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithExistingPosition_then
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithExistingPosition_thenChangesElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingMovingSetWithExistingPosition_thenChangesElement) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -696,7 +811,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithExistingPosition_thenC
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -704,7 +821,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_t
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,performance-move-const-arg,hicpp-avoid-goto)
@@ -712,14 +831,18 @@ TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithNonExistingPosition_th
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingAccessOperatorWithExistingPosition_thenReturnsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingAccessOperatorWithExistingPosition_thenReturnsElement) {
   List<int64_t> list({3, 4});
   EXPECT_EQ(3, static_cast<int64_t>(list[0]));
   EXPECT_EQ(4, static_cast<int64_t>(list[1]));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorWithExistingPosition_thenSetsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenAssigningToAccessOperatorWithExistingPosition_thenSetsElement) {
   List<int64_t> list({3, 4, 5});
   list[1] = 6;
   EXPECT_EQ(3, list.get(0));
@@ -728,7 +851,9 @@ TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorWithExistingPosit
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorFromAccessOperator_thenSetsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenAssigningToAccessOperatorFromAccessOperator_thenSetsElement) {
   List<int64_t> list({3, 4, 5});
   list[1] = list[2];
   EXPECT_EQ(3, list.get(0));
@@ -737,7 +862,9 @@ TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorFromAccessOperato
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenSwappingFromAccessOperator_thenSwapsElements) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenSwappingFromAccessOperator_thenSwapsElements) {
   List<int64_t> list({3, 4, 5});
   swap(list[1], list[2]);
   EXPECT_EQ(3, list.get(0));
@@ -746,14 +873,18 @@ TEST(ListTest_NonIValueBasedList, whenSwappingFromAccessOperator_thenSwapsElemen
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list[2], std::out_of_range);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingInsertOnIteratorWithLValue_thenInsertsElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   list.insert(list.begin() + 2, v);
@@ -762,7 +893,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInse
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingInsertOnIteratorWithRValue_thenInsertsElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -772,7 +905,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInse
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingInsertWithLValue_thenReturnsIteratorToNewElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingInsertWithLValue_thenReturnsIteratorToNewElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   List<int64_t>::iterator result = list.insert(list.begin() + 2, v);
@@ -780,7 +915,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertWithLValue_thenReturnsIterato
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingInsertWithRValue_thenReturnsIteratorToNewElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingInsertWithRValue_thenReturnsIteratorToNewElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -789,7 +926,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertWithRValue_thenReturnsIterato
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceWithLValue_thenInsertsElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   list.emplace(list.begin() + 2, v);
@@ -798,7 +937,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElemen
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceWithRValue_thenInsertsElement) {
   List<int64_t> list({3, 4, 6});
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -808,15 +949,20 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElemen
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithConstructorArg_thenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceWithConstructorArg_thenInsertsElement) {
   List<int64_t> list({3, 4, 6});
-  list.emplace(list.begin() + 2, 5); // const char* is a constructor arg to std::int64_t
+  list.emplace(
+      list.begin() + 2, 5); // const char* is a constructor arg to std::int64_t
   EXPECT_EQ(4, list.size());
   EXPECT_EQ(5, list.get(2));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingPushBackWithLValue_ThenInsertsElement) {
   List<int64_t> list;
   int64_t v = 5;
   list.push_back(v);
@@ -825,7 +971,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsEleme
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingPushBackWithRValue_ThenInsertsElement) {
   List<int64_t> list;
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -835,7 +983,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsEleme
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
   List<int64_t> list;
   int64_t v = 5;
   list.emplace_back(v);
@@ -844,7 +994,9 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsEl
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
   List<int64_t> list;
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
@@ -854,9 +1006,11 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsEl
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
   List<int64_t> list;
-  list.emplace_back(5);  // const char* is a constructor arg to std::int64_t
+  list.emplace_back(5); // const char* is a constructor arg to std::int64_t
   EXPECT_EQ(1, list.size());
   EXPECT_EQ(5, list.get(0));
 }
@@ -877,7 +1031,8 @@ TEST(ListTest_NonIValueBasedList, whenIterating_thenFindsElements) {
   bool found_first = false;
   bool found_second = false;
   // NOLINTNEXTLINE(modernize-loop-convert)
-  for (List<int64_t>::iterator iter = list.begin(); iter != list.end(); ++iter) {
+  for (List<int64_t>::iterator iter = list.begin(); iter != list.end();
+       ++iter) {
     if (static_cast<int64_t>(*iter) == 3) {
       EXPECT_FALSE(found_first);
       found_first = true;
@@ -914,7 +1069,9 @@ TEST(ListTest_NonIValueBasedList, whenIteratingWithForeach_thenFindsElements) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenOneElementList_whenErasing_thenListIsEmpty) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenOneElementList_whenErasing_thenListIsEmpty) {
   List<int64_t> list({3});
   list.erase(list.begin());
   EXPECT_TRUE(list.empty());
@@ -1018,7 +1175,9 @@ TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenOldIsEmpty) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1028,7 +1187,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenPostfixIncrementing_thenMove
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1038,7 +1199,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenPrefixIncrementing_thenMoves
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenPostfixDecrementing_thenMovesToNextAndReturnsOldPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenPostfixDecrementing_thenMovesToNextAndReturnsOldPosition) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter1 = list.end() - 1;
@@ -1048,7 +1211,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenPostfixDecrementing_thenMove
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenPrefixDecrementing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenPrefixDecrementing_thenMovesToNextAndReturnsNewPosition) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter1 = list.end() - 1;
@@ -1058,7 +1223,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenPrefixDecrementing_thenMoves
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenIncreasing_thenMovesToNextAndReturnsNewPosition) {
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1068,7 +1235,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAn
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAndReturnsNewPosition) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenDecreasing_thenMovesToNextAndReturnsNewPosition) {
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.end();
@@ -1078,7 +1247,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAn
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenAdding_thenReturnsNewIterator) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenAdding_thenReturnsNewIterator) {
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1088,7 +1259,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenAdding_thenReturnsNewIterato
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenSubtracting_thenReturnsNewIterator) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenSubtracting_thenReturnsNewIterator) {
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.end() - 1;
@@ -1098,7 +1271,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenSubtracting_thenReturnsNewIt
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenCalculatingDifference_thenReturnsCorrectNumber) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenCalculatingDifference_thenReturnsCorrectNumber) {
   List<int64_t> list({3, 4});
   EXPECT_EQ(2, list.end() - list.begin());
 }
@@ -1126,7 +1301,9 @@ TEST(ListTest_NonIValueBasedList, givenDifferentIterators_thenAreNotEqual) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenDereferencing_thenPointsToCorrectElement) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenDereferencing_thenPointsToCorrectElement) {
   List<int64_t> list({3});
 
   List<int64_t>::iterator iter = list.begin();
@@ -1134,7 +1311,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenDereferencing_thenPointsToCo
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenAssigningNewValue_thenChangesValue) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenAssigningNewValue_thenChangesValue) {
   List<int64_t> list({3});
 
   List<int64_t>::iterator iter = list.begin();
@@ -1143,7 +1322,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenAssigningNewValue_thenChange
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenAssigningNewValueFromIterator_thenChangesValue) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenAssigningNewValueFromIterator_thenChangesValue) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter = list.begin();
@@ -1153,7 +1334,9 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenAssigningNewValueFromIterato
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenIterator_whenSwappingValuesFromIterator_thenChangesValue) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenIterator_whenSwappingValuesFromIterator_thenChangesValue) {
   List<int64_t> list({3, 4});
 
   List<int64_t>::iterator iter = list.begin();
@@ -1163,14 +1346,18 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenSwappingValuesFromIterator_t
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenOneElementList_whenCallingPopBack_thenIsEmpty) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenOneElementList_whenCallingPopBack_thenIsEmpty) {
   List<int64_t> list({3});
   list.pop_back();
   EXPECT_TRUE(list.empty());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResize_thenResizesAndSetsEmptyValue) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenEmptyList_whenCallingResize_thenResizesAndSetsEmptyValue) {
   List<int64_t> list;
   list.resize(2);
   EXPECT_EQ(2, list.size());
@@ -1179,7 +1366,9 @@ TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResize_thenResizesAn
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
+TEST(
+    ListTest_NonIValueBasedList,
+    givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
   List<int64_t> list;
   list.resize(2, 5);
   EXPECT_EQ(2, list.size());
@@ -1240,7 +1429,9 @@ TEST(ListTest_NonIValueBasedList, isChecksIdentity) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(ListTest_NonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) {
+TEST(
+    ListTest_NonIValueBasedList,
+    sameValueDifferentStorage_thenIsReturnsFalse) {
   List<int64_t> list1({1, 3});
   const auto list2 = list1.copy();
 
@@ -1251,8 +1442,9 @@ TEST(ListTest_NonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) 
 TEST(ListTest, canAccessStringByReference) {
   List<std::string> list({"one", "two"});
   const auto& listRef = list;
-  static_assert(std::is_same<decltype(listRef[1]), const std::string&>::value,
-                "const List<std::string> acccess should be by const reference");
+  static_assert(
+      std::is_same<decltype(listRef[1]), const std::string&>::value,
+      "const List<std::string> acccess should be by const reference");
   std::string str = list[1];
   const std::string& strRef = listRef[1];
   EXPECT_EQ("two", str);
@@ -1264,7 +1456,9 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   List<c10::optional<std::string>> list({"one", "two", c10::nullopt});
   const auto& listRef = list;
   static_assert(
-      std::is_same<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>::value,
+      std::is_same<
+          decltype(listRef[1]),
+          c10::optional<std::reference_wrapper<const std::string>>>::value,
       "List<c10::optional<std::string>> acccess should be by const reference");
   c10::optional<std::string> str1 = list[1];
   c10::optional<std::string> str2 = list[2];

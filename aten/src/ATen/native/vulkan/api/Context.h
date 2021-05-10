@@ -2,9 +2,9 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
@@ -41,7 +41,7 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-  template<typename... Arguments>
+  template <typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
@@ -82,9 +82,9 @@ Context* context();
 inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
   return {
-    &adapter_,
-    device(),
-    queue(),
+      &adapter_,
+      device(),
+      queue(),
   };
 }
 
@@ -120,22 +120,20 @@ inline VkQueue Context::queue() {
 
 namespace detail {
 
-template<
-    size_t...Indices,
-    typename ...Arguments>
+template <size_t... Indices, typename... Arguments>
 inline void bind(
     Descriptor::Set& descriptor_set,
     const std::index_sequence<Indices...>,
-    Arguments&&...arguments) {
+    Arguments&&... arguments) {
   C10_UNUSED const int _[]{
-    0,
-    (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
+      0,
+      (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
 }
 
 } // namespace detail
 
-template<typename... Arguments>
+template <typename... Arguments>
 inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
@@ -164,15 +162,10 @@ inline void Context::dispatch(
 
   // Forward declaration
   void dispatch_epilogue(
-      Command::Buffer&,
-      const Descriptor::Set&,
-      const Shader::WorkGroup&);
+      Command::Buffer&, const Descriptor::Set&, const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
-  dispatch_epilogue(
-      command_buffer,
-      descriptor_set,
-      global_work_group);
+  dispatch_epilogue(command_buffer, descriptor_set, global_work_group);
 }
 
 } // namespace api

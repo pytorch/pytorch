@@ -7,16 +7,16 @@
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
 namespace {
 
-__device__ __forceinline__ size_t
-idx_3d(const size_t nc,
+__device__ __forceinline__ size_t idx_3d(
+    const size_t nc,
     const size_t depth,
     const size_t height,
     const size_t width,
@@ -179,53 +179,53 @@ __global__ void upsample_trilinear3d_backward_out_frame(
         const scalar_t d2val = odata[n][c][t2][h2][w2];
         const size_t nc = n * channels + c;
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1, h1, w1),
-          i_numel,
-          static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1, h1, w1),
+            i_numel,
+            static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1, h1, w1 + w1p),
-          i_numel,
-          static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1, h1, w1 + w1p),
+            i_numel,
+            static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1),
-          i_numel,
-          static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1),
+            i_numel,
+            static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1 + w1p),
-          i_numel,
-          static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1, h1 + h1p, w1 + w1p),
+            i_numel,
+            static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1),
-          i_numel,
-          static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1),
+            i_numel,
+            static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1 + w1p),
-          i_numel,
-          static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1 + t1p, h1, w1 + w1p),
+            i_numel,
+            static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1),
-          i_numel,
-          static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1),
+            i_numel,
+            static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val),
+            true);
         fastAtomicAdd(
-          idata_ptr,
-          idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1 + w1p),
-          i_numel,
-          static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val),
-          true);
+            idata_ptr,
+            idx_3d(nc, depth1, height1, width1, t1 + t1p, h1 + h1p, w1 + w1p),
+            i_numel,
+            static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val),
+            true);
       }
     }
   }
@@ -361,31 +361,40 @@ static void upsample_trilinear3d_backward_out_cuda_template(
 
 } // namespace
 
-TORCH_IMPL_FUNC(upsample_trilinear3d_out_cuda) (
-    const Tensor& input,
-    IntArrayRef output_size,
-    bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& output) {
-  upsample_trilinear3d_out_cuda_template(output, input, output_size, align_corners, scales_d, scales_h, scales_w);
+TORCH_IMPL_FUNC(upsample_trilinear3d_out_cuda)
+(const Tensor& input,
+ IntArrayRef output_size,
+ bool align_corners,
+ c10::optional<double> scales_d,
+ c10::optional<double> scales_h,
+ c10::optional<double> scales_w,
+ const Tensor& output) {
+  upsample_trilinear3d_out_cuda_template(
+      output, input, output_size, align_corners, scales_d, scales_h, scales_w);
 }
 
-TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda) (
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
-    const Tensor& grad_input) {
+TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ c10::optional<double> scales_d,
+ c10::optional<double> scales_h,
+ c10::optional<double> scales_w,
+ const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_trilinear3d_backward_out_cuda");
+  globalContext().alertNotDeterministic(
+      "upsample_trilinear3d_backward_out_cuda");
   upsample_trilinear3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
+      grad_input,
+      grad_output,
+      output_size,
+      input_size,
+      align_corners,
+      scales_d,
+      scales_h,
+      scales_w);
 }
 
 } // namespace native

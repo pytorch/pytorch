@@ -31,13 +31,15 @@ DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 namespace {
 
 void checkRoundingMode(const std::string& fn_name) {
-// Disabling this warning message for now as it is printed incorrectly. Need to fix
+  // Disabling this warning message for now as it is printed incorrectly. Need
+  // to fix
 
-/*  TORCH_WARN_ONCE(
-      std::fegetround() != FE_TONEAREST,
-      fn_name,
-      " current rounding mode is not set to round-to-nearest-ties-to-even (FE_TONEAREST). This will cause accuracy issues in quantized models.");
-*/
+  /*  TORCH_WARN_ONCE(
+        std::fegetround() != FE_TONEAREST,
+        fn_name,
+        " current rounding mode is not set to round-to-nearest-ties-to-even
+     (FE_TONEAREST). This will cause accuracy issues in quantized models.");
+  */
   return;
 }
 
@@ -125,11 +127,10 @@ Tensor quantize_tensor_per_tensor_affine(
   // Can move this into the fbgemm::Quantize op.
   if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
     quantize_tensor_per_tensor_affine_sub_byte_stub(
-      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
-  }
-  else {
+        rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  } else {
     quantize_tensor_per_tensor_affine_stub(
-      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+        rtensor.device().type(), rtensor, qtensor, scale, zero_point);
   }
   return qtensor;
 }
@@ -156,7 +157,10 @@ Tensor quantize_tensor_per_channel_affine(
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
       "Channel axis out of range in per channel affine quantization. Got: ",
-      axis, "Expected: [0, ", rtensor.dim(), ")");
+      axis,
+      "Expected: [0, ",
+      rtensor.dim(),
+      ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -192,7 +196,10 @@ Tensor quantize_tensor_per_channel_float_qparams(
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
       "Channel axis out of range in per channel float qparams quantization. Got: ",
-      axis, "Expected: [0, ", rtensor.dim(), ")");
+      axis,
+      "Expected: [0, ",
+      rtensor.dim(),
+      ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -204,7 +211,6 @@ Tensor quantize_tensor_per_channel_float_qparams(
   quantize_tensor_per_channel_float_qparams_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
   return qtensor;
-
 }
 
 Tensor dequantize_tensor_per_tensor_affine(
@@ -254,7 +260,10 @@ Tensor dequantize_tensor_per_channel_affine(
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
       "Channel axis out of range in per channel affine dequantization. Got:",
-      axis, " Expected: [0, ", qtensor.dim(), ")");
+      axis,
+      " Expected: [0, ",
+      qtensor.dim(),
+      ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -289,7 +298,10 @@ Tensor dequantize_tensor_per_channel_float_qparams(
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
       "Channel axis out of range in per channel float qparams dequantization. Got:",
-      axis, " Expected: [0, ", qtensor.dim(), ")");
+      axis,
+      " Expected: [0, ",
+      qtensor.dim(),
+      ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),

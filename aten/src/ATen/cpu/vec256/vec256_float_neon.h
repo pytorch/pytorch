@@ -30,32 +30,40 @@ namespace {
 #error "Big endian is not supported."
 #endif
 
-template<int index, bool mask_val>
+template <int index, bool mask_val>
 struct BlendRegs {
   static float32x4_t impl(
-    const float32x4_t& a, const float32x4_t& b, float32x4_t& res);
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res);
 };
 
-template<int index>
-struct BlendRegs<index, true>{
+template <int index>
+struct BlendRegs<index, true> {
   static float32x4_t impl(
-      const float32x4_t& a, const float32x4_t& b, float32x4_t& res) {
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res) {
     return vsetq_lane_f32(vgetq_lane_f32(b, index), res, index);
   }
 };
 
-template<int index>
-struct BlendRegs<index, false>{
+template <int index>
+struct BlendRegs<index, false> {
   static float32x4_t impl(
-      const float32x4_t& a, const float32x4_t& b, float32x4_t& res) {
+      const float32x4_t& a,
+      const float32x4_t& b,
+      float32x4_t& res) {
     return vsetq_lane_f32(vgetq_lane_f32(a, index), res, index);
   }
 };
 
-template <> class Vec256<float> {
-private:
+template <>
+class Vec256<float> {
+ private:
   float32x4x2_t values;
-public:
+
+ public:
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
@@ -63,10 +71,17 @@ public:
   }
   Vec256() {}
   Vec256(float32x4x2_t v) : values(v) {}
-  Vec256(float val) : values{vdupq_n_f32(val), vdupq_n_f32(val) } {}
-  Vec256(float val0, float val1, float val2, float val3,
-         float val4, float val5, float val6, float val7) :
-         values{val0, val1, val2, val3, val4, val5, val6, val7} {}
+  Vec256(float val) : values{vdupq_n_f32(val), vdupq_n_f32(val)} {}
+  Vec256(
+      float val0,
+      float val1,
+      float val2,
+      float val3,
+      float val4,
+      float val5,
+      float val6,
+      float val7)
+      : values{val0, val1, val2, val3, val4, val5, val6, val7} {}
   Vec256(float32x4_t val0, float32x4_t val1) : values{val0, val1} {}
   operator float32x4x2_t() const {
     return values;
@@ -75,35 +90,29 @@ public:
   static Vec256<float> blend(const Vec256<float>& a, const Vec256<float>& b) {
     Vec256<float> vec;
     // 0.
-    vec.values.val[0] =
-      BlendRegs<0, (mask & 0x01)!=0>::impl(
-          a.values.val[0], b.values.val[0], vec.values.val[0]);
-    vec.values.val[0] =
-      BlendRegs<1, (mask & 0x02)!=0>::impl(
-          a.values.val[0], b.values.val[0], vec.values.val[0]);
-    vec.values.val[0] =
-      BlendRegs<2, (mask & 0x04)!=0>::impl(
-          a.values.val[0], b.values.val[0], vec.values.val[0]);
-    vec.values.val[0] =
-      BlendRegs<3, (mask & 0x08)!=0>::impl(
-          a.values.val[0], b.values.val[0], vec.values.val[0]);
+    vec.values.val[0] = BlendRegs<0, (mask & 0x01) != 0>::impl(
+        a.values.val[0], b.values.val[0], vec.values.val[0]);
+    vec.values.val[0] = BlendRegs<1, (mask & 0x02) != 0>::impl(
+        a.values.val[0], b.values.val[0], vec.values.val[0]);
+    vec.values.val[0] = BlendRegs<2, (mask & 0x04) != 0>::impl(
+        a.values.val[0], b.values.val[0], vec.values.val[0]);
+    vec.values.val[0] = BlendRegs<3, (mask & 0x08) != 0>::impl(
+        a.values.val[0], b.values.val[0], vec.values.val[0]);
     // 1.
-    vec.values.val[1] =
-      BlendRegs<0, (mask & 0x10)!=0>::impl(
-          a.values.val[1], b.values.val[1], vec.values.val[1]);
-    vec.values.val[1] =
-      BlendRegs<1, (mask & 0x20)!=0>::impl(
-          a.values.val[1], b.values.val[1], vec.values.val[1]);
-    vec.values.val[1] =
-      BlendRegs<2, (mask & 0x40)!=0>::impl(
-          a.values.val[1], b.values.val[1], vec.values.val[1]);
-    vec.values.val[1] =
-      BlendRegs<3, (mask & 0x80)!=0>::impl(
-          a.values.val[1], b.values.val[1], vec.values.val[1]);
+    vec.values.val[1] = BlendRegs<0, (mask & 0x10) != 0>::impl(
+        a.values.val[1], b.values.val[1], vec.values.val[1]);
+    vec.values.val[1] = BlendRegs<1, (mask & 0x20) != 0>::impl(
+        a.values.val[1], b.values.val[1], vec.values.val[1]);
+    vec.values.val[1] = BlendRegs<2, (mask & 0x40) != 0>::impl(
+        a.values.val[1], b.values.val[1], vec.values.val[1]);
+    vec.values.val[1] = BlendRegs<3, (mask & 0x80) != 0>::impl(
+        a.values.val[1], b.values.val[1], vec.values.val[1]);
     return vec;
   }
-  static Vec256<float> blendv(const Vec256<float>& a, const Vec256<float>& b,
-                              const Vec256<float>& mask) {
+  static Vec256<float> blendv(
+      const Vec256<float>& a,
+      const Vec256<float>& b,
+      const Vec256<float>& mask) {
     // TODO
     // NB: This requires that each value, i.e., each uint value,
     // of the mask either all be zeros or all be 1s.
@@ -120,106 +129,102 @@ public:
         a.values.val[1]);
     return vec;
   }
-  template<typename step_t>
-  static Vec256<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vec256<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     const Vec256<float> base_vec(base);
     const Vec256<float> step_vec(step);
     const Vec256<float> step_sizes(0, 1, 2, 3, 4, 5, 6, 7);
     return fmadd(step_sizes, step_vec, base_vec);
   }
-  static Vec256<float> set(const Vec256<float>& a, const Vec256<float>& b,
-                           int64_t count = size()) {
+  static Vec256<float> set(
+      const Vec256<float>& a,
+      const Vec256<float>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
-      case 1:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
-          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
-          vec.values.val[1] = a.values.val[1];
-          vec.values.val[0] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[0]),
-              b.values.val[0],
-              a.values.val[0]);
-          return vec;
-        }
-      case 2:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
-          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
-          vec.values.val[1] = a.values.val[1];
-          vec.values.val[0] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[0]),
-              b.values.val[0],
-              a.values.val[0]);
-          return vec;
-        }
-      case 3:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
-          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
-          vec.values.val[1] = a.values.val[1];
-          vec.values.val[0] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[0]),
-              b.values.val[0],
-              a.values.val[0]);
-          return vec;
-        }
+      case 1: {
+        Vec256<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
+        vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+        vec.values.val[1] = a.values.val[1];
+        vec.values.val[0] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[0]),
+            b.values.val[0],
+            a.values.val[0]);
+        return vec;
+      }
+      case 2: {
+        Vec256<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
+        vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+        vec.values.val[1] = a.values.val[1];
+        vec.values.val[0] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[0]),
+            b.values.val[0],
+            a.values.val[0]);
+        return vec;
+      }
+      case 3: {
+        Vec256<float> vec;
+        static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
+        vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+        vec.values.val[1] = a.values.val[1];
+        vec.values.val[0] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[0]),
+            b.values.val[0],
+            a.values.val[0]);
+        return vec;
+      }
       case 4:
         return Vec256<float>(b.values.val[0], a.values.val[1]);
-      case 5:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_high = {0xFFFFFFFF, 0x0, 0x0, 0x0};
-          vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
-          vec.values.val[1] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[1]),
-              b.values.val[1],
-              a.values.val[1]);
-          return vec;
-        }
-      case 6:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
-          vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
-          vec.values.val[1] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[1]),
-              b.values.val[1],
-              a.values.val[1]);
-          return vec;
-        }
-      case 7:
-        {
-          Vec256<float> vec;
-          static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
-          vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
-          vec.values.val[1] = vbslq_f32(
-              vreinterpretq_u32_f32(vec.values.val[1]),
-              b.values.val[1],
-              a.values.val[1]);
-          return vec;
-        }
+      case 5: {
+        Vec256<float> vec;
+        static uint32x4_t mask_high = {0xFFFFFFFF, 0x0, 0x0, 0x0};
+        vec.values.val[0] = b.values.val[0];
+        vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+        vec.values.val[1] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[1]),
+            b.values.val[1],
+            a.values.val[1]);
+        return vec;
+      }
+      case 6: {
+        Vec256<float> vec;
+        static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
+        vec.values.val[0] = b.values.val[0];
+        vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+        vec.values.val[1] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[1]),
+            b.values.val[1],
+            a.values.val[1]);
+        return vec;
+      }
+      case 7: {
+        Vec256<float> vec;
+        static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
+        vec.values.val[0] = b.values.val[0];
+        vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+        vec.values.val[1] = vbslq_f32(
+            vreinterpretq_u32_f32(vec.values.val[1]),
+            b.values.val[1],
+            a.values.val[1]);
+        return vec;
+      }
     }
     return b;
   }
   static Vec256<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size()) {
       return vld1q_f32_x2(reinterpret_cast<const float*>(ptr));
-    }
-    else if (count == (size() >> 1)) {
+    } else if (count == (size() >> 1)) {
       Vec256<float> res;
       res.values.val[0] = vld1q_f32(reinterpret_cast<const float*>(ptr));
       res.values.val[1] = vdupq_n_f32(0.f);
       return res;
-    }
-    else {
+    } else {
       __at_align32__ float tmp_values[size()];
       for (auto i = 0; i < size(); ++i) {
         tmp_values[i] = 0.0;
@@ -234,11 +239,9 @@ public:
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       vst1q_f32_x2(reinterpret_cast<float*>(ptr), values);
-    }
-    else if (count == (size() >> 1)) {
+    } else if (count == (size() >> 1)) {
       vst1q_f32(reinterpret_cast<float*>(ptr), values.val[0]);
-    }
-    else {
+    } else {
       float tmp_values[size()];
       vst1q_f32_x2(reinterpret_cast<float*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(float));
@@ -276,7 +279,7 @@ public:
     __at_align32__ float tmp[size()];
     store(tmp);
     int mask = 0;
-    for (int i = 0; i < size(); ++ i) {
+    for (int i = 0; i < size(); ++i) {
       if (tmp[i] == 0.f) {
         mask |= (1 << i);
       }
@@ -328,7 +331,7 @@ public:
   Vec256<float> atan() const {
     return map(std::atan);
   }
-  Vec256<float> atan2(const Vec256<float> &exp) const {
+  Vec256<float> atan2(const Vec256<float>& exp) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_exp[size()];
     store(tmp);
@@ -338,7 +341,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vec256<float> copysign(const Vec256<float> &sign) const {
+  Vec256<float> copysign(const Vec256<float>& sign) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_sign[size()];
     store(tmp);
@@ -373,7 +376,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vec256<float> hypot(const Vec256<float> &b) const {
+  Vec256<float> hypot(const Vec256<float>& b) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_b[size()];
     store(tmp);
@@ -389,7 +392,7 @@ public:
   Vec256<float> i0e() const {
     return map(calc_i0e);
   }
-  Vec256<float> igamma(const Vec256<float> &x) const {
+  Vec256<float> igamma(const Vec256<float>& x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -399,7 +402,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vec256<float> igammac(const Vec256<float> &x) const {
+  Vec256<float> igammac(const Vec256<float>& x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -421,7 +424,7 @@ public:
   Vec256<float> log2() const {
     return map(std::log2);
   }
-  Vec256<float> nextafter(const Vec256<float> &b) const {
+  Vec256<float> nextafter(const Vec256<float>& b) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_b[size()];
     store(tmp);
@@ -451,12 +454,11 @@ public:
     return map(at::native::floor_impl);
   }
   Vec256<float> neg() const {
-    return Vec256<float>(
-        vnegq_f32(values.val[0]),
-        vnegq_f32(values.val[1]));
+    return Vec256<float>(vnegq_f32(values.val[0]), vnegq_f32(values.val[1]));
   }
   Vec256<float> round() const {
-    // We do not use std::round because we would like to round midway numbers to the nearest even integer.
+    // We do not use std::round because we would like to round midway numbers to
+    // the nearest even integer.
     return map(at::native::round_impl);
   }
   Vec256<float> tan() const {
@@ -474,9 +476,7 @@ public:
     return map(std::lgamma);
   }
   Vec256<float> sqrt() const {
-    return Vec256<float>(
-        vsqrtq_f32(values.val[0]),
-        vsqrtq_f32(values.val[1]));
+    return Vec256<float>(vsqrtq_f32(values.val[0]), vsqrtq_f32(values.val[1]));
   }
   Vec256<float> reciprocal() const {
     float32x4_t r0 = vrecpeq_f32(values.val[0]);
@@ -489,15 +489,15 @@ public:
     return Vec256<float>(r0, r1);
   }
   Vec256<float> rsqrt() const {
-    float32x4_t r0 =  vrsqrteq_f32(values.val[0]);
-    float32x4_t r1 =  vrsqrteq_f32(values.val[1]);
+    float32x4_t r0 = vrsqrteq_f32(values.val[0]);
+    float32x4_t r1 = vrsqrteq_f32(values.val[1]);
     r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
     r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
     r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
     r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
     return Vec256<float>(r0, r1);
   }
-  Vec256<float> pow(const Vec256<float> &exp) const {
+  Vec256<float> pow(const Vec256<float>& exp) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_exp[size()];
     store(tmp);
@@ -509,9 +509,9 @@ public:
   }
   Vec256<float> operator==(const Vec256<float>& other) const {
     float32x4_t r0 =
-      vreinterpretq_f32_u32(vceqq_f32(values.val[0], other.values.val[0]));
+        vreinterpretq_f32_u32(vceqq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
-      vreinterpretq_f32_u32(vceqq_f32(values.val[1], other.values.val[1]));
+        vreinterpretq_f32_u32(vceqq_f32(values.val[1], other.values.val[1]));
     return Vec256<float>(r0, r1);
   }
 
@@ -525,33 +525,33 @@ public:
 
   Vec256<float> operator<(const Vec256<float>& other) const {
     float32x4_t r0 =
-      vreinterpretq_f32_u32(vcltq_f32(values.val[0], other.values.val[0]));
+        vreinterpretq_f32_u32(vcltq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
-      vreinterpretq_f32_u32(vcltq_f32(values.val[1], other.values.val[1]));
+        vreinterpretq_f32_u32(vcltq_f32(values.val[1], other.values.val[1]));
     return Vec256<float>(r0, r1);
   }
 
   Vec256<float> operator<=(const Vec256<float>& other) const {
     float32x4_t r0 =
-      vreinterpretq_f32_u32(vcleq_f32(values.val[0], other.values.val[0]));
+        vreinterpretq_f32_u32(vcleq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
-      vreinterpretq_f32_u32(vcleq_f32(values.val[1], other.values.val[1]));
+        vreinterpretq_f32_u32(vcleq_f32(values.val[1], other.values.val[1]));
     return Vec256<float>(r0, r1);
   }
 
   Vec256<float> operator>(const Vec256<float>& other) const {
     float32x4_t r0 =
-      vreinterpretq_f32_u32(vcgtq_f32(values.val[0], other.values.val[0]));
+        vreinterpretq_f32_u32(vcgtq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
-      vreinterpretq_f32_u32(vcgtq_f32(values.val[1], other.values.val[1]));
+        vreinterpretq_f32_u32(vcgtq_f32(values.val[1], other.values.val[1]));
     return Vec256<float>(r0, r1);
   }
 
   Vec256<float> operator>=(const Vec256<float>& other) const {
     float32x4_t r0 =
-      vreinterpretq_f32_u32(vcgeq_f32(values.val[0], other.values.val[0]));
+        vreinterpretq_f32_u32(vcgeq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
-      vreinterpretq_f32_u32(vcgeq_f32(values.val[1], other.values.val[1]));
+        vreinterpretq_f32_u32(vcgeq_f32(values.val[1], other.values.val[1]));
     return Vec256<float>(r0, r1);
   }
 
@@ -615,25 +615,31 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
-Vec256<float> inline clamp(const Vec256<float>& a, const Vec256<float>& min, const Vec256<float>& max) {
+Vec256<float> inline clamp(
+    const Vec256<float>& a,
+    const Vec256<float>& min,
+    const Vec256<float>& max) {
   return minimum(max, maximum(min, a));
 }
 
 template <>
-Vec256<float> inline clamp_max(const Vec256<float>& a, const Vec256<float>& max) {
+Vec256<float> inline clamp_max(
+    const Vec256<float>& a,
+    const Vec256<float>& max) {
   return minimum(max, a);
 }
 
 template <>
-Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min) {
+Vec256<float> inline clamp_min(
+    const Vec256<float>& a,
+    const Vec256<float>& min) {
   return maximum(min, a);
 }
 
 template <>
 Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(vandq_u32(
-      vreinterpretq_u32_f32(a.get_low()),
-      vreinterpretq_u32_f32(b.get_low())));
+      vreinterpretq_u32_f32(a.get_low()), vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(vandq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
@@ -643,8 +649,7 @@ Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
 template <>
 Vec256<float> inline operator|(const Vec256<float>& a, const Vec256<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(vorrq_u32(
-      vreinterpretq_u32_f32(a.get_low()),
-      vreinterpretq_u32_f32(b.get_low())));
+      vreinterpretq_u32_f32(a.get_low()), vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(vorrq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
@@ -654,8 +659,7 @@ Vec256<float> inline operator|(const Vec256<float>& a, const Vec256<float>& b) {
 template <>
 Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(veorq_u32(
-      vreinterpretq_u32_f32(a.get_low()),
-      vreinterpretq_u32_f32(b.get_low())));
+      vreinterpretq_u32_f32(a.get_low()), vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(veorq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
@@ -715,7 +719,10 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 }
 
 template <>
-Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const Vec256<float>& c) {
+Vec256<float> inline fmadd(
+    const Vec256<float>& a,
+    const Vec256<float>& b,
+    const Vec256<float>& c) {
   float32x4_t r0 = vfmaq_f32(c.get_low(), a.get_low(), b.get_low());
   float32x4_t r1 = vfmaq_f32(c.get_high(), a.get_high(), b.get_high());
   return Vec256<float>(r0, r1);
@@ -723,4 +730,6 @@ Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const
 
 #endif /* defined(aarch64) */
 
-}}}
+} // namespace
+} // namespace vec256
+} // namespace at

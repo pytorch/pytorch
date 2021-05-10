@@ -42,7 +42,8 @@ Tensor quantize_per_channel_cpu(
     const Tensor& zero_points,
     int64_t axis,
     ScalarType dtype) {
-  auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
+  auto quantizer =
+      make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
 Tensor dequantize_cpu(const Tensor& self) {
@@ -76,19 +77,26 @@ int64_t q_zero_point_quant(const Tensor& self) {
 
 Tensor q_per_channel_scales(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
+  TORCH_CHECK(
+      quantizer->qscheme() == kPerChannelAffine ||
+      quantizer->qscheme() == kPerChannelAffineFloatQParams);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->scales();
 }
 
 Tensor q_per_channel_zero_points(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->zero_points();
+  TORCH_CHECK(
+      quantizer->qscheme() == kPerChannelAffine ||
+      quantizer->qscheme() == kPerChannelAffineFloatQParams);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
+      ->zero_points();
 }
 
 int64_t q_per_channel_axis(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
+  TORCH_CHECK(
+      quantizer->qscheme() == kPerChannelAffine ||
+      quantizer->qscheme() == kPerChannelAffineFloatQParams);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
 }
 
@@ -166,7 +174,9 @@ Tensor quantized_clone(
         self.options().memory_format(memory_format),
         c10::nullopt);
   } else {
-    TORCH_CHECK(false, "clone for quantized Tensor only works for \
+    TORCH_CHECK(
+        false,
+        "clone for quantized Tensor only works for \
       PerTensorAffine and PerChannelAffine qscheme right now");
   }
 
@@ -260,7 +270,8 @@ float calculate_quant_loss(
   // remainder loop
   for (; i < numel; i++) {
     q_input[i] = std::max(
-        0.0f, std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
+        0.0f,
+        std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
     q_input[i] = q_input[i] * scale + xmin;
     norm += (input[i] - q_input[i]) * (input[i] - q_input[i]);
   }
@@ -270,8 +281,9 @@ float calculate_quant_loss(
 /*
   Helper function to find the best min/max for a tensor to calculate qparams.
   It uses a greedy approach to nudge the min and max and calculate the l2 norm
-  and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
-  Returns the optimized xmax and xmin value of the tensor.
+  and tries to minimize the quant error by doing
+  `torch.norm(x-fake_quant(x,s,z))` Returns the optimized xmax and xmin value of
+  the tensor.
 */
 std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const at::Tensor& input_tensor,
@@ -279,14 +291,13 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const int64_t n_bins,
     const double ratio,
     int64_t bit_width) {
-
   const float* input_row = input_tensor.data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
 
   float stepsize = (xmax - xmin) / n_bins;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  int min_bins = n_bins * (1.0 - (float) ratio);
+  int min_bins = n_bins * (1.0 - (float)ratio);
   const float* input = input_tensor.contiguous().data_ptr<float>();
   std::vector<float> q_input(numel);
 

@@ -7,7 +7,8 @@ namespace at {
 namespace native {
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the the cpu implementation located
+ * in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
@@ -32,20 +33,19 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
 
   int i = 0;
   accscalar_t a, b, k, s, t, w;
-  if( x == 1.0 ) {
+  if (x == 1.0) {
     return static_cast<scalar_t>(INFINITY);
   }
 
-  if( x < 1.0 ){
+  if (x < 1.0) {
     std::numeric_limits<scalar_t>::quiet_NaN();
   }
   bool q_is_integer = q == ::floor(q);
 
-  if(q <= 0.0) {
-    if(q_is_integer) {
+  if (q <= 0.0) {
+    if (q_is_integer) {
       return static_cast<scalar_t>(INFINITY);
-    }
-    else {
+    } else {
       std::numeric_limits<scalar_t>::quiet_NaN();
     }
   }
@@ -57,7 +57,7 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
   while ((i < 9) || (a <= 9.0)) {
     i += 1;
     a += 1.0;
-    b = ::pow( a, -x );
+    b = ::pow(a, -x);
     s += b;
     if ((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
       return static_cast<scalar_t>(s);
@@ -68,16 +68,16 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
   s -= 0.5 * b;
   a = 1.0;
   k = 0.0;
-  for (int i=0; i < 12; i++) {
+  for (int i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
     s = s + t;
     t = t / s;
-    if (t < 0){
+    if (t < 0) {
       t = -t;
     }
-    if ((-MACHEP <t) && (t < MACHEP)){
+    if ((-MACHEP < t) && (t < MACHEP)) {
       return static_cast<scalar_t>(s);
     }
     k += 1.0;
@@ -89,11 +89,13 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
 }
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the the cpu implementation located
+ * in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
-  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
+  // [C++ Standard Reference: Gamma Function]
+  // https://en.cppreference.com/w/cpp/numeric/math/tgamma
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   static const double PI_f64 = 3.14159265358979323846;
   const accscalar_t PSI_10 = 2.25175258906672110764;
@@ -122,13 +124,14 @@ static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
       // If the argument is a negative integer, NaN is returned
       return static_cast<scalar_t>(NAN);
     }
-    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
-    // accurate than tan(pi * x). While these operations are mathematically equivalent
-    // since both x and r are in radians and tan() has a periodicity of pi, in practice
-    // the computation of pi * x is a source of error (when |x| > 1).
+    // Extracts the fractional part of x as r, since tan(pi * r) is more
+    // numerically accurate than tan(pi * x). While these operations are
+    // mathematically equivalent since both x and r are in radians and tan() has
+    // a periodicity of pi, in practice the computation of pi * x is a source of
+    // error (when |x| > 1).
     double q, r;
     r = ::modf(static_cast<double>(x), &q);
-    result = static_cast<accscalar_t>(- PI_f64 / ::tan(PI_f64 * r));
+    result = static_cast<accscalar_t>(-PI_f64 / ::tan(PI_f64 * r));
     x = 1 - x;
   }
 
@@ -151,7 +154,8 @@ static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
     y = z * polevl_result;
   }
 
-  return static_cast<scalar_t>(::log(x) - (static_cast<accscalar_t>(0.5) / x) - y + result);
+  return static_cast<scalar_t>(
+      ::log(x) - (static_cast<accscalar_t>(0.5) / x) - y + result);
 }
 
 template <typename scalar_t>
@@ -172,15 +176,19 @@ static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
     x += 1;
   }
   const accscalar_t one = static_cast<scalar_t>(1);
-  const accscalar_t ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
+  const accscalar_t ixx = 1 / (x * x);
+  result += (1 + 1 / (2 * x) +
+             ixx * (one / 6 - ixx * (one / 30 - ixx * (one / 42)))) /
+      x;
   return static_cast<scalar_t>(sign * result);
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
   // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) * ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) * zeta(static_cast<scalar_t>(n + 1), x);
+  return ((n % 2) ? 1.0 : -1.0) *
+      ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
+      zeta(static_cast<scalar_t>(n + 1), x);
 }
 
 template <typename scalar_t>
@@ -196,10 +204,12 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the the cpu
+ * implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[], size_t len) {
+static inline C10_HOST_DEVICE scalar_t
+chbevl(scalar_t _x, const scalar_t array[], size_t len) {
   using accscalar_t = at::acc_type<scalar_t, true>;
 
   accscalar_t x = static_cast<accscalar_t>(_x);
@@ -208,7 +218,7 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
   b0 = static_cast<accscalar_t>(array[0]);
   b1 = 0;
 
-  for (size_t i = 1; i < len; ++i)  {
+  for (size_t i = 1; i < len; ++i) {
     b2 = b1;
     b1 = b0;
     b0 = x * b1 - b2 + static_cast<accscalar_t>(array[i]);
@@ -218,7 +228,8 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the the cpu
+ * implementation located in "ATen/native/Math.h".
  */
 template <typename T>
 C10_HOST_DEVICE inline const T* chebyshev_coefficients_A() {
@@ -287,7 +298,9 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   }
 
   const auto B = chebyshev_coefficients_B<accscalar_t>();
-  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
+  return static_cast<scalar_t>(
+      ::exp(x) * chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, 25) /
+      ::sqrt(x));
 }
 
 template <typename scalar_t>
@@ -305,7 +318,8 @@ static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
   }
 
   const auto B = chebyshev_coefficients_B<accscalar_t>();
-  return static_cast<scalar_t>(chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
+  return static_cast<scalar_t>(
+      chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
 }
 
 } // namespace native

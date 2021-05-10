@@ -1,15 +1,16 @@
 #include <ATen/ATen.h>
 
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <tuple>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 static void check1d(
     const char* function_name,
@@ -17,29 +18,32 @@ static void check1d(
     IntArrayRef x) {
   TORCH_CHECK(
       x.size() == 1,
-      function_name, "() argument '", argument_name,
-      "' should contain one int (got ", x.size(), ")");
+      function_name,
+      "() argument '",
+      argument_name,
+      "' should contain one int (got ",
+      x.size(),
+      ")");
 }
 
-Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
+Tensor adaptive_avg_pool1d(const Tensor& self, IntArrayRef output_size) {
   checkDim("adaptive_avg_pool1d", TensorArg(self, "self", 1), 3);
   check1d("adaptive_avg_pool1d", "output_size", output_size);
 
-  auto output = at::adaptive_avg_pool2d(
-      self.unsqueeze(2),
-      {1, output_size[0]});
+  auto output = at::adaptive_avg_pool2d(self.unsqueeze(2), {1, output_size[0]});
 
   return output.squeeze(2);
 }
 
-std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef output_size) {
+std::tuple<Tensor, Tensor> adaptive_max_pool1d(
+    const Tensor& self,
+    IntArrayRef output_size) {
   checkDim("adaptive_max_pool1d", TensorArg(self, "self", 1), 3);
   check1d("adaptive_max_pool1d", "output_size", output_size);
 
   Tensor output, indices;
-  std::tie(output, indices) = at::adaptive_max_pool2d(
-      self.unsqueeze(2),
-      {1, output_size[0]});
+  std::tie(output, indices) =
+      at::adaptive_max_pool2d(self.unsqueeze(2), {1, output_size[0]});
 
   return std::make_tuple(output.squeeze(2), indices.squeeze(2));
 }
@@ -71,7 +75,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
       {1, dilation[0]},
       ceil_mode);
 
-  output  = output.squeeze(2);
+  output = output.squeeze(2);
   indices = indices.squeeze(2);
 
   guard.reset();
@@ -115,8 +119,8 @@ Tensor max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   if (self.is_quantized()) {
-    return at::quantized_max_pool2d(self, kernel_size, stride, padding,
-                                    dilation, ceil_mode);
+    return at::quantized_max_pool2d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool2d(
@@ -124,8 +128,8 @@ Tensor max_pool2d(
   }
 
 #if defined(C10_MOBILE)
-  if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
-                             dilation, ceil_mode)) {
+  if (xnnpack::use_max_pool2d(
+          self, kernel_size, padding, stride, dilation, ceil_mode)) {
     return xnnpack::max_pool2d(
         self, kernel_size, padding, stride, dilation, ceil_mode);
   }

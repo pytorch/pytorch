@@ -26,94 +26,115 @@
 //
 //
 
-#include <stdint.h>
-#include <c10/util/C++17.h>
+#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/detail/FunctionTraits.h>
-#include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/native/cpu/IsContiguous.h>
+#include <c10/util/C++17.h>
+#include <stdint.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
 #endif
 
-namespace at { namespace native { namespace {
+namespace at {
+namespace native {
+namespace {
 
 using namespace vec256;
 
 template <typename traits, std::size_t... INDEX>
-typename traits::ArgsTuple
-dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 std::index_sequence<INDEX...>) {
-  return std::make_tuple(
-      *(typename traits::template arg<INDEX>::type*)
-        (data[INDEX] + i * strides[INDEX])...);
+typename traits::ArgsTuple dereference_impl(
+    char* C10_RESTRICT data[],
+    const int64_t* strides,
+    int64_t i,
+    std::index_sequence<INDEX...>) {
+  return std::make_tuple(*(typename traits::template arg<
+                           INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
-typename traits::ArgsTuple
-dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
+typename traits::ArgsTuple dereference(
+    char* C10_RESTRICT data[],
+    const int64_t* strides,
+    int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_impl<traits>(data, strides, i, Indices{});
 }
 
 template <typename traits, std::size_t... INDEX>
-typename traits::ArgsTuple
-dereference_vec_impl(char* C10_RESTRICT data[],
-                     const typename traits::result_type& opt_scalar,
-                     size_t S,
-                     int64_t i,
-                     std::index_sequence<INDEX...>) {
+typename traits::ArgsTuple dereference_vec_impl(
+    char* C10_RESTRICT data[],
+    const typename traits::result_type& opt_scalar,
+    size_t S,
+    int64_t i,
+    std::index_sequence<INDEX...>) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
-      S == INDEX + 1 ?
-      opt_scalar :
-      Vec::loadu(data[INDEX] + i * sizeof(scalar_t))...);
+      S == INDEX + 1 ? opt_scalar
+                     : Vec::loadu(data[INDEX] + i * sizeof(scalar_t))...);
 }
 
 template <typename traits>
-typename traits::ArgsTuple
-dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
+typename traits::ArgsTuple dereference_vec(
+    char* C10_RESTRICT data[],
+    const typename traits::result_type& opt_scalar,
+    size_t S,
+    int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
-template <typename func_t,
-    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
-execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
+template <
+    typename func_t,
+    typename std::enable_if<!std::is_void<
+        typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void execute_op(
+    char* C10_RESTRICT data[],
+    const int64_t* strides,
+    int64_t i,
+    int64_t n,
+    func_t&& op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
-        &data[1],
-        &strides[1],
-        i));
+    *out_ptr = c10::guts::apply(
+        std::forward<func_t>(op),
+        dereference<traits>(&data[1], &strides[1], i));
   }
 }
 
-template <typename func_t,
-    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
-execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
+template <
+    typename func_t,
+    typename std::enable_if<std::is_void<
+        typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void execute_op(
+    char* C10_RESTRICT data[],
+    const int64_t* strides,
+    int64_t i,
+    int64_t n,
+    func_t&& op) {
   using traits = function_traits<func_t>;
   for (; i < n; i++) {
-    c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
-        &data[0],
-        &strides[0],
-        i));
+    c10::guts::apply(
+        std::forward<func_t>(op),
+        dereference<traits>(&data[0], &strides[0], i));
   }
 }
 
 // Basic loop operation (one output, N inputs). May be auto-vectorized
 // by the compiler. Supports inputs and outputs of different types.
 template <typename func_t>
-static inline void
-basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
+static inline void basic_loop(
+    char* C10_RESTRICT data[],
+    const int64_t* strides_,
+    int64_t i,
+    int64_t n,
+    func_t&& op) {
   using traits = function_traits<func_t>;
   constexpr int ntensors = traits::arity + 1;
 
@@ -128,37 +149,45 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
 }
 
 // the recursive variadic template for iterating over the returned tuple
-template<class T, size_t N>
+template <class T, size_t N>
 struct TupleOutput {
-  static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
-                     const T &tuple) {
+  static void handle(
+      char* C10_RESTRICT data[],
+      const int64_t* strides,
+      int64_t i,
+      const T& tuple) {
     TupleOutput<T, N - 1>::handle(data, strides, i, tuple);
 
     auto output = std::get<N - 1>(tuple);
     using output_type = decltype(output);
-    output_type * out_ptr = (output_type *)(data[N - 1] + i * strides[N - 1]);
+    output_type* out_ptr = (output_type*)(data[N - 1] + i * strides[N - 1]);
     *out_ptr = output;
   }
 };
 
 // Base case for the above recursive template
-template<class T>
+template <class T>
 struct TupleOutput<T, 1> {
-  static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
-                     const T &tuple) {
+  static void handle(
+      char* C10_RESTRICT data[],
+      const int64_t* strides,
+      int64_t i,
+      const T& tuple) {
     auto output = std::get<0>(tuple);
     using output_type = decltype(output);
-    output_type* out_ptr = (output_type *)(data[0] + i * strides[0]);
+    output_type* out_ptr = (output_type*)(data[0] + i * strides[0]);
     *out_ptr = output;
   }
 };
 
-template<class... Args>
-void handle_tuple_outputs(char* C10_RESTRICT data[],
-                          const int64_t* strides,
-                          int64_t i,
-                          const std::tuple<Args...> &tuple) {
-  TupleOutput<decltype(tuple), sizeof...(Args)>::handle(data, strides, i, tuple);
+template <class... Args>
+void handle_tuple_outputs(
+    char* C10_RESTRICT data[],
+    const int64_t* strides,
+    int64_t i,
+    const std::tuple<Args...>& tuple) {
+  TupleOutput<decltype(tuple), sizeof...(Args)>::handle(
+      data, strides, i, tuple);
 }
 
 // Loop operation for `cpu_kernel_multiple_outputs`.
@@ -167,8 +196,12 @@ void handle_tuple_outputs(char* C10_RESTRICT data[],
 // 2. Iterate over the members of the returned tuple, set the corresponding
 //    output tensor by the tuple member in `handle_tuple_outputs` function.
 template <typename func_t>
-static inline void
-multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
+static inline void multiple_outputs_loop(
+    char* C10_RESTRICT data[],
+    const int64_t* strides_,
+    int64_t i,
+    int64_t n,
+    func_t&& op) {
   using traits = function_traits<func_t>;
 
   using result_type = typename traits::result_type;
@@ -183,10 +216,8 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   }
 
   for (; i < n; i++) {
-    auto output = c10::guts::apply(op, dereference<traits>(
-      &data[num_outputs],
-      &strides[num_outputs],
-      i));
+    auto output = c10::guts::apply(
+        op, dereference<traits>(&data[num_outputs], &strides[num_outputs], i));
     handle_tuple_outputs(data, strides, i, output);
   }
 }
@@ -196,8 +227,12 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
 // is 0, then there are no scalar inputs.
 template <typename func_t, typename vec_func_t>
-static inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+static inline void vectorized_loop(
+    char** C10_RESTRICT data_,
+    int64_t n,
+    int64_t S,
+    func_t&& op,
+    vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vec256<scalar_t>;
@@ -212,9 +247,12 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   int64_t i = 0;
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
-    auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
-    auto out1 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args1));
-    auto out2 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args2));
+    auto args2 =
+        dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
+    auto out1 =
+        c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args1));
+    auto out2 =
+        c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args2));
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
@@ -227,7 +265,6 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   }
 }
 
-
 template <typename traits, typename cb_t>
 static inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
@@ -236,7 +273,7 @@ static inline void unroll_contiguous_scalar_checks(
   cb(0);
 }
 
-template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
+template <typename traits, typename cb_t, size_t INDEX0, size_t... INDEX>
 static inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
     std::index_sequence<INDEX0, INDEX...>,
@@ -244,7 +281,8 @@ static inline void unroll_contiguous_scalar_checks(
   if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
     cb(INDEX0 + 1);
   } else {
-    unroll_contiguous_scalar_checks<traits>(strides, std::index_sequence<INDEX...>{}, std::forward<cb_t>(cb));
+    unroll_contiguous_scalar_checks<traits>(
+        strides, std::index_sequence<INDEX...>{}, std::forward<cb_t>(cb));
   }
 }
 
@@ -262,9 +300,10 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
       basic_loop(data, strides, 0, n, std::forward<func_t>(op));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
+      unroll_contiguous_scalar_checks<traits>(
+          strides, Indices{}, [&](size_t _idx) {
+            basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+          });
     }
   });
   iter.cast_outputs();
@@ -274,11 +313,11 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
 // It follows the similar structure of cpu_kernel.
 // Instead of `basic_loop` function, a new `multiple_outputs_loop` function is
 // manipulated to handle multiple return values.
-// For now `needs_dynamic_casting` check is not added as the passed lambda (`func_t`)
-// of `multiple_outputs_loop` returns `std::tuple` instead of `scalar_t`.
-// The `gpu_kernel_multiple_outputs` is also implemented without this check,
-// We could extend `needs_dynamic_casting` to support both `std::tuple` and
-// `thrust::tuple` in the future.
+// For now `needs_dynamic_casting` check is not added as the passed lambda
+// (`func_t`) of `multiple_outputs_loop` returns `std::tuple` instead of
+// `scalar_t`. The `gpu_kernel_multiple_outputs` is also implemented without
+// this check, We could extend `needs_dynamic_casting` to support both
+// `std::tuple` and `thrust::tuple` in the future.
 template <typename func_t>
 void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
   using traits = function_traits<func_t>;
@@ -289,62 +328,80 @@ void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
       multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
+      unroll_contiguous_scalar_checks<traits>(
+          strides, Indices{}, [&](size_t _idx) {
+            multiple_outputs_loop(
+                data, strides, 0, n, std::forward<func_t>(op));
+          });
     }
   });
   iter.cast_outputs();
 }
 
-template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
+template <bool check_dynamic_cast = true, typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  // dynamic casting not currently supported on CPU, but some kernels (like Fill)
-  // explicitly dynamic_cast, so we give the opt-out of checking.
+  // dynamic casting not currently supported on CPU, but some kernels (like
+  // Fill) explicitly dynamic_cast, so we give the opt-out of checking.
   c10::guts::if_constexpr<check_dynamic_cast>([&] {
     TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   });
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      vectorized_loop(
+          data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
-        if (idx) {
-          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-        } else {
-          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-        }
-      });
+      unroll_contiguous_scalar_checks<traits>(
+          strides, Indices{}, [&](size_t idx) {
+            if (idx) {
+              vectorized_loop(
+                  data,
+                  n,
+                  idx,
+                  std::forward<func_t>(op),
+                  std::forward<vec_func_t>(vop));
+            } else {
+              basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+            }
+          });
     }
   });
   iter.cast_outputs();
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range) {
+void cpu_serial_kernel(
+    TensorIteratorBase& iter,
+    func_t&& op,
+    const Range& range) {
   using traits = function_traits<func_t>;
-  constexpr bool result_void = std::is_void<typename traits::result_type>::value;
-  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
-                        ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
+  constexpr bool result_void =
+      std::is_void<typename traits::result_type>::value;
+  TORCH_INTERNAL_ASSERT(
+      iter.ninputs() == traits::arity &&
+      ((result_void && iter.noutputs() == 0) ||
+       (!result_void && iter.noutputs() == 1)));
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
-  }, range);
+  iter.serial_for_each(
+      [&](char** data, const int64_t* strides, int64_t n) {
+        if (is_contiguous<traits>(strides)) {
+          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+        } else {
+          using Indices = std::make_index_sequence<traits::arity>;
+          unroll_contiguous_scalar_checks<traits>(
+              strides, Indices{}, [&](size_t _idx) {
+                basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+              });
+        }
+      },
+      range);
   iter.cast_outputs();
 }
 
@@ -354,7 +411,11 @@ void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op) {
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
+void cpu_serial_kernel_vec(
+    TensorIteratorBase& iter,
+    func_t&& op,
+    vec_func_t&& vop,
+    const Range& range) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -362,29 +423,47 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
-        if (idx) {
-          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+  iter.serial_for_each(
+      [&](char** data, const int64_t* strides, int64_t n) {
+        if (is_contiguous<traits>(strides)) {
+          vectorized_loop(
+              data,
+              n,
+              0,
+              std::forward<func_t>(op),
+              std::forward<vec_func_t>(vop));
         } else {
-          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+          using Indices = std::make_index_sequence<traits::arity>;
+          unroll_contiguous_scalar_checks<traits>(
+              strides, Indices{}, [&](size_t idx) {
+                if (idx) {
+                  vectorized_loop(
+                      data,
+                      n,
+                      idx,
+                      std::forward<func_t>(op),
+                      std::forward<vec_func_t>(vop));
+                } else {
+                  basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+                }
+              });
         }
-      });
-    }
-  }, range);
+      },
+      range);
   iter.cast_outputs();
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_serial_kernel_vec(
+    TensorIteratorBase& iter,
+    func_t&& op,
+    vec_func_t&& vop) {
   cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 
-}}}  // namespace at::native::<anonymous>
+} // namespace
+} // namespace native
+} // namespace at
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

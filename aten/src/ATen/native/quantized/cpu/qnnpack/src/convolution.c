@@ -460,7 +460,10 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
   if (ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     convolution->requantization_params =
         pytorch_qnnp_compute_requantization_params(
-            requantization_scales[0], output_zero_point, output_min, output_max);
+            requantization_scales[0],
+            output_zero_point,
+            output_min,
+            output_max);
   } else {
     convolution->conv_quantization_params =
         pytorch_qnnp_compute_conv_quantization_params(

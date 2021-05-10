@@ -90,14 +90,15 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->kernel_zero_point = kernel_zero_points[0];
 
   fully_connected->dynamic_conv_quantization_params.input_zero_point =
-    input_zero_point;
+      input_zero_point;
   fully_connected->dynamic_conv_quantization_params.kernel_zero_points =
-    kernel_zero_points;
+      kernel_zero_points;
   fully_connected->dynamic_conv_quantization_params.multipliers =
-    requantization_scales;
+      requantization_scales;
 
   // Always use prepacking based kernel
-  fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
+  fully_connected->ukernel_type =
+      pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
   fully_connected->format = pytorch_qnnp_format_quint8;
 
   *fully_connected_out = fully_connected;

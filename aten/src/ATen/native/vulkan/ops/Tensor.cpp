@@ -16,16 +16,14 @@ bool requires_staging(const api::Adapter*);
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
-    #ifdef USE_VULKAN_FP16_INFERENCE
+#ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;
-    #else
+#else
       return VK_FORMAT_R32G32B32A32_SFLOAT;
-    #endif /* USE_VULKAN_FP16_INFERENCE */
+#endif /* USE_VULKAN_FP16_INFERENCE */
 
     default:
-      TORCH_CHECK(
-          false,
-          "Vulkan tensor format not supported!");
+      TORCH_CHECK(false, "Vulkan tensor format not supported!");
   }
 
   return VK_FORMAT_UNDEFINED;
@@ -33,27 +31,21 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
 
 VkExtent3D vk_extent(const uvec3& extent) {
   return {
-    extent.data[0u],
-    extent.data[1u],
-    extent.data[2u],
+      extent.data[0u],
+      extent.data[1u],
+      extent.data[2u],
   };
 }
 
-vTensor::Access::Flags access(
-    const VkAccessFlags vk_access) {
+vTensor::Access::Flags access(const VkAccessFlags vk_access) {
   vTensor::Access::Flags access = 0u;
 
-  constexpr VkAccessFlags kRead =
-      VK_ACCESS_HOST_READ_BIT |
-      VK_ACCESS_MEMORY_READ_BIT |
-      VK_ACCESS_SHADER_READ_BIT |
-      VK_ACCESS_TRANSFER_READ_BIT |
-      VK_ACCESS_UNIFORM_READ_BIT;
+  constexpr VkAccessFlags kRead = VK_ACCESS_HOST_READ_BIT |
+      VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_SHADER_READ_BIT |
+      VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
 
-  constexpr VkAccessFlags kWrite =
-      VK_ACCESS_HOST_WRITE_BIT |
-      VK_ACCESS_MEMORY_WRITE_BIT |
-      VK_ACCESS_SHADER_WRITE_BIT |
+  constexpr VkAccessFlags kWrite = VK_ACCESS_HOST_WRITE_BIT |
+      VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT |
       VK_ACCESS_TRANSFER_WRITE_BIT;
 
   if (vk_access & kRead) {
@@ -114,7 +106,8 @@ VkImageLayout vk_layout(
 
         default:
           return VK_IMAGE_LAYOUT_GENERAL;
-      } break;
+      }
+      break;
 
     case vTensor::Stage::Transfer:
       switch (access) {
@@ -126,7 +119,8 @@ VkImageLayout vk_layout(
 
         default:
           TORCH_INTERNAL_ASSERT(false, "Invalid!");
-      } break;
+      }
+      break;
 
     default:
       TORCH_INTERNAL_ASSERT(false, "Invalid!");
@@ -135,8 +129,7 @@ VkImageLayout vk_layout(
   return VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
-VkPipelineStageFlags vk_stage(
-    const vTensor::Stage::Flags stage) {
+VkPipelineStageFlags vk_stage(const vTensor::Stage::Flags stage) {
   VkPipelineStageFlags vk_stage = 0u;
 
   if (stage & vTensor::Stage::Compute) {
@@ -162,8 +155,7 @@ VkDeviceSize buffer_bytes(
   if (requires_image(sizes)) {
     const uvec3 extents = image_extents(sizes);
     size *= extents.data[0u] * extents.data[1u] * (4u * extents.data[2u]);
-  }
-  else {
+  } else {
     size *= c10::multiply_integers(sizes);
   }
 
@@ -175,35 +167,29 @@ vTensor::Buffer allocate_buffer(
     api::Resource::Pool* const pool,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(adapter, "Invalid Vulkan adapter!");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pool, "Invalid Vulkan resource pool!");
 
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  const VkFlags usage =
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  const VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
   const auto memory = [adapter]() -> api::Resource::Memory::Descriptor {
     if (requires_staging(adapter)) {
       return {
-        VMA_MEMORY_USAGE_GPU_ONLY,
-        0u,
-        0u,
+          VMA_MEMORY_USAGE_GPU_ONLY,
+          0u,
+          0u,
       };
     }
 
     return {
-      VMA_MEMORY_USAGE_GPU_TO_CPU,
-      0u,
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        VMA_MEMORY_USAGE_GPU_TO_CPU,
+        0u,
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
     };
   }();
 
@@ -211,10 +197,10 @@ vTensor::Buffer allocate_buffer(
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
-        usage,
-        memory,
+          usage,
+          memory,
       },
-    });
+  });
 }
 
 bool requires_image(const IntArrayRef sizes) {
@@ -255,9 +241,9 @@ uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    safe_downcast<uint32_t>(width),
-    safe_downcast<uint32_t>(height),
-    safe_downcast<uint32_t>(div_up(depth, INT64_C(4))),
+      safe_downcast<uint32_t>(width),
+      safe_downcast<uint32_t>(height),
+      safe_downcast<uint32_t>(div_up(depth, INT64_C(4))),
   };
 }
 
@@ -265,9 +251,7 @@ vTensor::Image allocate_image(
     api::Resource::Pool* const pool,
     const VkExtent3D& extents,
     const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pool, "Invalid Vulkan resource pool!");
 
   verify(options);
 
@@ -277,33 +261,30 @@ vTensor::Image allocate_image(
       extents,
       // Usage
       {
-        VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT,
-        {
-          VMA_MEMORY_USAGE_GPU_ONLY,
-          0u,
-          0u,
-        },
+          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+          {
+              VMA_MEMORY_USAGE_GPU_ONLY,
+              0u,
+              0u,
+          },
       },
       // View
       {
-        VK_IMAGE_VIEW_TYPE_3D,
-        vk_format(options.dtype()),
+          VK_IMAGE_VIEW_TYPE_3D,
+          vk_format(options.dtype()),
       },
       // Sampler
       {
-        VK_FILTER_NEAREST,
-        VK_SAMPLER_MIPMAP_MODE_NEAREST,
-        VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+          VK_FILTER_NEAREST,
+          VK_SAMPLER_MIPMAP_MODE_NEAREST,
+          VK_SAMPLER_ADDRESS_MODE_REPEAT,
+          VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
       },
-    });
+  });
 }
 
 bool requires_staging(const api::Adapter* const adapter) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(adapter, "Invalid Vulkan adapter!");
 
   return !adapter->has_unified_memory();
 }
@@ -313,13 +294,9 @@ vTensor::Buffer allocate_staging(
     api::Resource::Pool* const pool,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(adapter, "Invalid Vulkan adapter!");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pool, "Invalid Vulkan resource pool!");
 
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
@@ -328,21 +305,18 @@ vTensor::Buffer allocate_staging(
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        {
-          VMA_MEMORY_USAGE_CPU_COPY,
-          0u,
-          0u,
-        },
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          {
+              VMA_MEMORY_USAGE_CPU_COPY,
+              0u,
+              0u,
+          },
       },
-    });
+  });
 }
 
 vTensor::Fence allocate_fence(api::Resource::Pool* const pool) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pool, "Invalid Vulkan resource pool!");
 
   return pool->fence();
 }
@@ -395,28 +369,21 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : vTensor(
-      context,
-      &context->resource().pool,
-      sizes,
-      options) {
-}
+    : vTensor(context, &context->resource().pool, sizes, options) {}
 
 vTensor::vTensor(
     api::Context* const context,
     api::Resource::Pool* const pool,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : view_(new View{
-      context,
-      pool,
-      sizes,
-      options,
-    }) {
-}
+    : view_(new View{
+          context,
+          pool,
+          sizes,
+          options,
+      }) {}
 
-const vTensor* vTensor::host(
-    api::Command::Buffer& command_buffer) const {
+const vTensor* vTensor::host(api::Command::Buffer& command_buffer) const {
   view_->staging(command_buffer, Stage::Host, Access::Read);
   return this;
 }
@@ -430,56 +397,43 @@ vTensor* vTensor::host(
 
 vTensor::Buffer::Object vTensor::buffer(
     api::Command::Buffer& command_buffer,
-    const Stage::Flags stage) const & {
-  return view_->buffer(
-      command_buffer,
-      stage,
-      Access::Read).object;
+    const Stage::Flags stage) const& {
+  return view_->buffer(command_buffer, stage, Access::Read).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) & {
-  return view_->buffer(
-      command_buffer,
-      stage,
-      access).object;
+  return view_->buffer(command_buffer, stage, access).object;
 }
 
 vTensor::Image::Object vTensor::image(
     api::Command::Buffer& command_buffer,
-    const Stage::Flags stage) const & {
-  return view_->image(
-      command_buffer,
-      stage,
-      Access::Read).object;
+    const Stage::Flags stage) const& {
+  return view_->image(command_buffer, stage, Access::Read).object;
 }
 
 vTensor::Image::Object vTensor::image(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) & {
-  return view_->image(
-      command_buffer,
-      stage,
-      access).object;
+  return view_->image(command_buffer, stage, access).object;
 }
 
 vTensor::View::View()
     // Resources
-  : buffer_{},
-    image_{},
-    staging_{},
-    fence_{},
-    // Context
-    context_(nullptr),
-    pool_(nullptr),
-    // State
-    state_{},
-    // Metadata
-    extents_{} {
-}
+    : buffer_{},
+      image_{},
+      staging_{},
+      fence_{},
+      // Context
+      context_(nullptr),
+      pool_(nullptr),
+      // State
+      state_{},
+      // Metadata
+      extents_{} {}
 
 vTensor::View::View(
     api::Context* const context,
@@ -487,20 +441,20 @@ vTensor::View::View(
     const IntArrayRef sizes,
     const TensorOptions& options)
     // Resources
-  : buffer_{},
-    image_{},
-    staging_{},
-    fence_{},
-    // Context
-    context_(context),
-    pool_(pool),
-    // State
-    state_(context->gpu().adapter, sizes),
-    // Metadata
-    extents_(image_extents(sizes)),
-    options_(options),
-    sizes_(sizes),
-    strides_(sizes.size()) {
+    : buffer_{},
+      image_{},
+      staging_{},
+      fence_{},
+      // Context
+      context_(context),
+      pool_(pool),
+      // State
+      state_(context->gpu().adapter, sizes),
+      // Metadata
+      extents_(image_extents(sizes)),
+      options_(options),
+      sizes_(sizes),
+      strides_(sizes.size()) {
   ops::verify(options);
 }
 
@@ -546,12 +500,8 @@ class vTensor::View::CMD final {
   api::Command::Buffer& command_buffer_;
 };
 
-vTensor::View::CMD::CMD(
-    const View& view,
-    api::Command::Buffer& command_buffer)
-  : view_(view),
-    command_buffer_(command_buffer) {
-}
+vTensor::View::CMD::CMD(const View& view, api::Command::Buffer& command_buffer)
+    : view_(view), command_buffer_(command_buffer) {}
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
   // Buffer and Staging are just an alias for the same memory region on UMA.
@@ -566,17 +516,18 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
     transition.second.staging = {};
   }
 
-  // Filter out host dependencies out of source, per Vulkan spec host write ordering guarantees:
+  // Filter out host dependencies out of source, per Vulkan spec host write
+  // ordering guarantees:
   // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
 
-  const auto filter_stage =[](VkPipelineStageFlags& stage) {
+  const auto filter_stage = [](VkPipelineStageFlags& stage) {
     stage &= ~VK_PIPELINE_STAGE_HOST_BIT;
   };
 
   filter_stage(transition.first.buffer.stage);
   filter_stage(transition.first.staging.stage);
 
-  const auto filter_access =[](VkAccessFlags& access) {
+  const auto filter_access = [](VkAccessFlags& access) {
     access &= ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT);
   };
 
@@ -589,9 +540,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
     const State::Bundle::Buffer from = transition.first.staging;
     const State::Bundle::Buffer to = transition.second.staging;
 
-    const Barrier category = categorize(
-        from.access,
-        to.access);
+    const Barrier category = categorize(from.access, to.access);
 
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
@@ -599,11 +548,11 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
 
       if (Barrier::Memory == category) {
         barrier.buffers.push_back({
-          view_.staging().object,
-          {
-            from.access,
-            to.access,
-          },
+            view_.staging().object,
+            {
+                from.access,
+                to.access,
+            },
         });
       }
     }
@@ -613,9 +562,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
     const State::Bundle::Buffer from = transition.first.buffer;
     const State::Bundle::Buffer to = transition.second.buffer;
 
-    const Barrier category = categorize(
-        from.access,
-        to.access);
+    const Barrier category = categorize(from.access, to.access);
 
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
@@ -623,11 +570,11 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
 
       if (Barrier::Memory == category) {
         barrier.buffers.push_back({
-          view_.buffer().object,
-          {
-            from.access,
-            to.access,
-          },
+            view_.buffer().object,
+            {
+                from.access,
+                to.access,
+            },
         });
       }
     }
@@ -637,11 +584,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
     const State::Bundle::Image from = transition.first.image;
     const State::Bundle::Image to = transition.second.image;
 
-    const Barrier category = categorize(
-        from.access,
-        to.access,
-        from.layout,
-        to.layout);
+    const Barrier category =
+        categorize(from.access, to.access, from.layout, to.layout);
 
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
@@ -653,15 +597,15 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
             "Invalid image layout!");
 
         barrier.images.push_back({
-          view_.image().object,
-          {
-            from.access,
-            to.access,
-          },
-          {
-            from.layout,
-            to.layout,
-          },
+            view_.image().object,
+            {
+                from.access,
+                to.access,
+            },
+            {
+                from.layout,
+                to.layout,
+            },
         });
 
         view_.image().object.layout = to.layout;
@@ -692,21 +636,20 @@ void vTensor::View::CMD::copy_buffer_to_staging(
     return;
   }
 
-  barrier(
-      state.transition({
-          // Staging
-          {
-            vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Write),
-          },
-          // Buffer
-          {
-            vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Read),
-          },
-          // Image
-          {},
-        }));
+  barrier(state.transition({
+      // Staging
+      {
+          vk_stage(Stage::Transfer),
+          vk_access(Stage::Transfer, Access::Write),
+      },
+      // Buffer
+      {
+          vk_stage(Stage::Transfer),
+          vk_access(Stage::Transfer, Access::Read),
+      },
+      // Image
+      {},
+  }));
 
   command_buffer_.copy(buffer, staging);
 }
@@ -719,21 +662,20 @@ void vTensor::View::CMD::copy_staging_to_buffer(
     return;
   }
 
-  barrier(
-      state.transition({
-          // Staging
-          {
-            vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Read),
-          },
-          // Buffer
-          {
-            vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Write),
-          },
-          // Image
-          {},
-        }));
+  barrier(state.transition({
+      // Staging
+      {
+          vk_stage(Stage::Transfer),
+          vk_access(Stage::Transfer, Access::Read),
+      },
+      // Buffer
+      {
+          vk_stage(Stage::Transfer),
+          vk_access(Stage::Transfer, Access::Write),
+      },
+      // Image
+      {},
+  }));
 
   command_buffer_.copy(staging, buffer);
 }
@@ -746,22 +688,21 @@ void vTensor::View::CMD::copy_buffer_to_image(
     return;
   }
 
-  barrier(
-      state.transition({
-          // Staging
-          {},
-          // Buffer
-          {
-            vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Read),
-          },
-          // Image
-          {
-            vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Write),
-            vk_layout(Stage::Compute, Access::Write),
-          },
-        }));
+  barrier(state.transition({
+      // Staging
+      {},
+      // Buffer
+      {
+          vk_stage(Stage::Compute),
+          vk_access(Stage::Compute, Access::Read),
+      },
+      // Image
+      {
+          vk_stage(Stage::Compute),
+          vk_access(Stage::Compute, Access::Write),
+          vk_layout(Stage::Compute, Access::Write),
+      },
+  }));
 
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
@@ -770,23 +711,23 @@ void vTensor::View::CMD::copy_buffer_to_image(
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
-  } block {
-    extents,
-    4u * plane,
-    {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    },
+  } block{
+      extents,
+      4u * plane,
+      {
+          0u * plane,
+          1u * plane,
+          2u * plane,
+          3u * plane,
+      },
   };
 
   view_.context_->dispatch(
       command_buffer_,
       {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(nchw_to_image),
       extents,
@@ -804,22 +745,21 @@ void vTensor::View::CMD::copy_image_to_buffer(
     return;
   }
 
-  barrier(
-      state.transition({
-          // Staging
-          {},
-          // Buffer
-          {
-            vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Write),
-          },
-          // Image
-          {
-            vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Read),
-            vk_layout(Stage::Compute, Access::Read),
-          },
-        }));
+  barrier(state.transition({
+      // Staging
+      {},
+      // Buffer
+      {
+          vk_stage(Stage::Compute),
+          vk_access(Stage::Compute, Access::Write),
+      },
+      // Image
+      {
+          vk_stage(Stage::Compute),
+          vk_access(Stage::Compute, Access::Read),
+          vk_layout(Stage::Compute, Access::Read),
+      },
+  }));
 
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
@@ -828,23 +768,23 @@ void vTensor::View::CMD::copy_image_to_buffer(
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
-  } block {
-    extents,
-    4u * plane,
-    {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    },
+  } block{
+      extents,
+      4u * plane,
+      {
+          0u * plane,
+          1u * plane,
+          2u * plane,
+          3u * plane,
+      },
   };
 
   view_.context_->dispatch(
       command_buffer_,
       {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
@@ -856,18 +796,13 @@ void vTensor::View::CMD::copy_image_to_buffer(
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
   view_.context_->command().pool.submit(
-      view_.context_->gpu().queue,
-      command_buffer_,
-      fence);
+      view_.context_->gpu().queue, command_buffer_, fence);
 }
 
 vTensor::Buffer& vTensor::View::buffer() const {
   if (!buffer_) {
-    buffer_ = allocate_buffer(
-        context_->gpu().adapter,
-        pool_,
-        sizes(),
-        options());
+    buffer_ =
+        allocate_buffer(context_->gpu().adapter, pool_, sizes(), options());
   }
 
   return buffer_;
@@ -891,32 +826,27 @@ vTensor::Buffer& vTensor::View::buffer(
           state_,
           staging(cmd, Stage::Transfer, Access::Read).object,
           buffer().object);
-    }
-    else if (state_.is_clean(Component::Image)) {
+    } else if (state_.is_clean(Component::Image)) {
       cmd.copy_image_to_buffer(
           state_,
           image(cmd, Stage::Compute, Access::Read).object,
           buffer().object);
-    }
-    else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Invalid state!");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid state!");
     }
   }
 
-  cmd.barrier(
-      state_.transition({
-          // Staging
-          {},
-          // Buffer
-          {
-            vk_stage(stage),
-            vk_access(stage, access),
-          },
-          // Image
-          {},
-        }));
+  cmd.barrier(state_.transition({
+      // Staging
+      {},
+      // Buffer
+      {
+          vk_stage(stage),
+          vk_access(stage, access),
+      },
+      // Image
+      {},
+  }));
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -929,10 +859,7 @@ vTensor::Buffer& vTensor::View::buffer(
 
 vTensor::Image& vTensor::View::image() const {
   if (!image_ && state_.is_available(Component::Image)) {
-    image_ = allocate_image(
-        pool_,
-        vk_extent(extents()),
-        options());
+    image_ = allocate_image(pool_, vk_extent(extents()), options());
   }
 
   return image_;
@@ -952,24 +879,21 @@ vTensor::Image& vTensor::View::image(
     const Access::Flags access) const {
   if ((access & Access::Read) && state_.is_dirty(Component::Image)) {
     cmd.copy_buffer_to_image(
-        state_,
-        buffer(cmd, stage, Access::Read).object,
-        image().object);
+        state_, buffer(cmd, stage, Access::Read).object, image().object);
   }
 
-  cmd.barrier(
-      state_.transition({
-          // Staging
-          {},
-          // Buffer
-          {},
-          // Image
-          {
-            vk_stage(stage),
-            vk_access(stage, access),
-            vk_layout(stage, access),
-          },
-        }));
+  cmd.barrier(state_.transition({
+      // Staging
+      {},
+      // Buffer
+      {},
+      // Image
+      {
+          vk_stage(stage),
+          vk_access(stage, access),
+          vk_layout(stage, access),
+      },
+  }));
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -986,11 +910,8 @@ vTensor::Buffer& vTensor::View::staging() const {
   }
 
   if (!staging_) {
-    staging_ = allocate_staging(
-        context_->gpu().adapter,
-        pool_,
-        sizes(),
-        options());
+    staging_ =
+        allocate_staging(context_->gpu().adapter, pool_, sizes(), options());
   }
 
   return staging_;
@@ -1018,18 +939,17 @@ vTensor::Buffer& vTensor::View::staging(
         staging().object);
   }
 
-  cmd.barrier(
-      state_.transition({
-          // Staging
-          {
-            vk_stage(stage),
-            vk_access(stage, access),
-          },
-          // Buffer
-          {},
-          // Image
-          {},
-        }));
+  cmd.barrier(state_.transition({
+      // Staging
+      {
+          vk_stage(stage),
+          vk_access(stage, access),
+      },
+      // Buffer
+      {},
+      // Image
+      {},
+  }));
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -1061,21 +981,13 @@ void vTensor::View::verify() const {
   TORCH_INTERNAL_ASSERT(!staging_ || state_.is_discrete());
 }
 
-vTensor::View::State::State()
-  : available_{},
-    dirty_{},
-    bundle_{} {
-}
+vTensor::View::State::State() : available_{}, dirty_{}, bundle_{} {}
 
 vTensor::View::State::State(
     const api::Adapter* const adapter,
     const IntArrayRef sizes)
-  : available_{},
-    dirty_{},
-    bundle_{} {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
+    : available_{}, dirty_{}, bundle_{} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(adapter, "Invalid Vulkan adapter!");
 
   available_ |= Component::Buffer;
 
@@ -1089,13 +1001,11 @@ vTensor::View::State::State(
 }
 
 #ifdef VULKAN_TENSOR_DEBUG
-std::ostream& operator<<(
-    std::ostream&,
-    const vTensor::View::State::Bundle&);
+std::ostream& operator<<(std::ostream&, const vTensor::View::State::Bundle&);
 #endif /* VULKAN_TENSOR_DEBUG */
 
-vTensor::View::State::Transition
-vTensor::View::State::transition(const Bundle bundle) {
+vTensor::View::State::Transition vTensor::View::State::transition(
+    const Bundle bundle) {
   const Bundle from = bundle_;
   Bundle& to = bundle_;
 
@@ -1117,8 +1027,8 @@ vTensor::View::State::transition(const Bundle bundle) {
 #endif /* VULKAN_TENSOR_DEBUG */
 
   return Transition{
-    from,
-    to,
+      from,
+      to,
   };
 }
 
@@ -1157,9 +1067,7 @@ struct Access final {
   VkAccessFlags value;
 };
 
-std::ostream& operator<<(
-    std::ostream& stream,
-    const Access& access) {
+std::ostream& operator<<(std::ostream& stream, const Access& access) {
   stream << "Access: ";
 
   if (0u == access.value) {
@@ -1211,9 +1119,7 @@ struct Image final {
   };
 };
 
-std::ostream& operator<<(
-    std::ostream& stream,
-    const Image::Layout& layout) {
+std::ostream& operator<<(std::ostream& stream, const Image::Layout& layout) {
   stream << "Layout: ";
 
   switch (layout.value) {
@@ -1238,16 +1144,14 @@ std::ostream& operator<<(
 }
 
 // Considering that VkPipelineStageFlags is a weak typedef of a built-in data
-// type, we need to introduce a new type to allow overload resolution distinguish
-// between the two.
+// type, we need to introduce a new type to allow overload resolution
+// distinguish between the two.
 
 struct Stage final {
   VkPipelineStageFlags value;
 };
 
-std::ostream& operator<<(
-    std::ostream& stream,
-    const Stage& stage) {
+std::ostream& operator<<(std::ostream& stream, const Stage& stage) {
   stream << "Stage: ";
 
   if (0u == stage.value) {

@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Dict.h>
+#include <c10/util/intrusive_ptr.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Dict.h>
 
 // Snippets for checking assembly.
 c10::IValue inspectTupleConstruction() {
@@ -81,13 +81,17 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(bar1.isNone());
   auto foo3 = IValue(c10::complex<double>(3, 4));
   ASSERT_TRUE(foo3.isComplexDouble());
-  ASSERT_EQ(foo3.toComplexDouble(), c10::complex<double>(3,4));
+  ASSERT_EQ(foo3.toComplexDouble(), c10::complex<double>(3, 4));
 
-  ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({elem1, elem2, elem3}));
-  IValue complex_tuple(
-      at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
+  ASSERT_TRUE(
+      baz1.toComplexDoubleVector() ==
+      std::vector<c10::complex<double>>({elem1, elem2, elem3}));
+  IValue complex_tuple(at::ivalue::Tuple::create(
+      {IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
   ASSERT_TRUE(complex_tuple.isTuple());
-  ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
+  ASSERT_EQ(
+      complex_tuple.toTuple()->elements()[0].toComplexDouble(),
+      c10::complex<double>(3.4, 4.7));
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
@@ -105,20 +109,20 @@ TEST(IValueTest, ComplexDict) {
   ASSERT_EQ(m_.at(num2), 2 * num2);
 }
 static std::array<IValue, 5> makeSampleIValues() {
-  return { at::rand({3, 4}), "hello", 42, true, 1.5 };
+  return {at::rand({3, 4}), "hello", 42, true, 1.5};
 }
 
 static std::array<IValue, 5> makeMoreSampleIValues() {
-  return { at::rand({3, 4}), "goodbye", 23, false, 0.5 };
+  return {at::rand({3, 4}), "goodbye", 23, false, 0.5};
 }
 
 // IValue::operator== doesn't seem to work on Tensors.
-#define EXPECT_IVALUE_EQ(a, b)                          \
-  EXPECT_EQ((a).isTensor(), (b).isTensor());            \
-  if ((a).isTensor()) {                                 \
-    EXPECT_TRUE(a.toTensor().equal(b.toTensor()));      \
-  } else {                                              \
-    EXPECT_EQ(a, b);                                    \
+#define EXPECT_IVALUE_EQ(a, b)                     \
+  EXPECT_EQ((a).isTensor(), (b).isTensor());       \
+  if ((a).isTensor()) {                            \
+    EXPECT_TRUE(a.toTensor().equal(b.toTensor())); \
+  } else {                                         \
+    EXPECT_EQ(a, b);                               \
   }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -128,8 +132,8 @@ TEST(IValueTest, Swap) {
 
   auto sampleInputs = makeSampleIValues();
   auto sampleTargets = makeMoreSampleIValues();
-  for (const auto& input: sampleInputs) {
-    for (const auto& target: sampleTargets) {
+  for (const auto& input : sampleInputs) {
+    for (const auto& target : sampleTargets) {
       IValue a(input);
       IValue b(target);
       EXPECT_IVALUE_EQ(a, input);
@@ -144,7 +148,7 @@ TEST(IValueTest, Swap) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, CopyConstruct) {
   auto sampleInputs = makeSampleIValues();
-  for (const IValue& v: sampleInputs) {
+  for (const IValue& v : sampleInputs) {
     IValue copy(v);
     EXPECT_IVALUE_EQ(copy, v);
   }
@@ -153,7 +157,7 @@ TEST(IValueTest, CopyConstruct) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, MoveConstruct) {
   auto sampleInputs = makeSampleIValues();
-  for (const IValue& v: sampleInputs) {
+  for (const IValue& v : sampleInputs) {
     IValue source(v);
     IValue target(std::move(source));
     EXPECT_IVALUE_EQ(target, v);
@@ -167,8 +171,8 @@ TEST(IValueTest, CopyAssign) {
   auto sampleInputs = makeSampleIValues();
   auto sampleTargets = makeMoreSampleIValues();
 
-  for (const IValue& input: sampleInputs) {
-    for (const IValue& target: sampleTargets) {
+  for (const IValue& input : sampleInputs) {
+    for (const IValue& target : sampleTargets) {
       IValue copyTo(target);
       IValue copyFrom(input);
       copyTo = copyFrom;
@@ -184,8 +188,8 @@ TEST(IValueTest, MoveAssign) {
   auto sampleInputs = makeSampleIValues();
   auto sampleTargets = makeMoreSampleIValues();
 
-  for (const IValue& input: sampleInputs) {
-    for (const IValue& target: sampleTargets) {
+  for (const IValue& input : sampleInputs) {
+    for (const IValue& target : sampleTargets) {
       IValue moveTo(target);
       IValue moveFrom(input);
       moveTo = std::move(moveFrom);
@@ -351,7 +355,6 @@ TEST(IValueTest, FutureSetError) {
   }
 }
 
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
@@ -476,7 +479,7 @@ TEST(IValueTest, ListNestedEquality) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, StreamEquality) {
-  at::Device device1 =  at::Device(kCUDA, 0);
+  at::Device device1 = at::Device(kCUDA, 0);
   at::Device device2 = at::Device(kCUDA, 1);
   c10::Stream stream1 = c10::Stream(c10::Stream::Default::DEFAULT, device1);
   c10::Stream stream2 = c10::Stream(c10::Stream::Default::DEFAULT, device2);
@@ -510,29 +513,25 @@ TEST(IValueTest, EnumEquality) {
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
           int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          int_enum_type1, "enum_name_1", int_ivalue_1))
-  );
+          int_enum_type1, "enum_name_1", int_ivalue_1)));
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
           int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          int_enum_type2, "enum_name_1", int_ivalue_1))
-  );
+          int_enum_type2, "enum_name_1", int_ivalue_1)));
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
           int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          int_enum_type1, "enum_name_2", int_ivalue_2))
-  );
+          int_enum_type1, "enum_name_2", int_ivalue_2)));
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
           int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          string_enum_type, "enum_name_1", str_ivalue_1))
-  );
+          string_enum_type, "enum_name_1", str_ivalue_1)));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -551,8 +550,8 @@ TEST(IValueTest, isPtrType) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, isAliasOf) {
   auto sampleIValues = makeSampleIValues();
-  for (auto& iv: sampleIValues) {
-    for (auto& iv2: sampleIValues) {
+  for (auto& iv : sampleIValues) {
+    for (auto& iv2 : sampleIValues) {
       if (&iv == &iv2 && iv.isPtrType()) {
         EXPECT_TRUE(iv.isAliasOf(iv2));
       } else {
@@ -666,7 +665,7 @@ TEST(IValueTest, getSubValues) {
 
   subvalues.clear();
 
-  for (auto& container: {list, tuple, dict, object}) {
+  for (auto& container : {list, tuple, dict, object}) {
     container.getSubValues(subvalues);
     EXPECT_EQ(subvalues.size(), 3);
     EXPECT_EQ(subvalues.count(container), 1);

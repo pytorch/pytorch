@@ -26,7 +26,7 @@ Tensor& _sparse_mm_mkl_(
 #endif
   return self; // for stopping compiler warnings.
 }
-} // namespace native
+} // namespace sparse_csr
 } // namespace at
 
 #else // AT_MKL_ENABLED
@@ -230,7 +230,7 @@ Tensor& _sparse_mm_mkl_(
   return self;
 }
 
-} // namespace native
+} // namespace sparse_csr
 } // namespace at
 
 #endif // AT_MKL_ENABLED

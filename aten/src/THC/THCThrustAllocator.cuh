@@ -9,12 +9,9 @@ class THCThrustAllocator {
  public:
   typedef char value_type;
 
-  THCThrustAllocator(THCState* state)
-      : state_(state) {
-  }
+  THCThrustAllocator(THCState* state) : state_(state) {}
 
-  ~THCThrustAllocator() {
-  }
+  ~THCThrustAllocator() {}
 
   char* allocate(std::ptrdiff_t size) {
     return static_cast<char*>(THCudaMalloc(state_, size));

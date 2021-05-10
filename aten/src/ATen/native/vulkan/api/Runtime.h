@@ -35,7 +35,7 @@ class Runtime final {
 
   VkInstance instance() const;
 
-  typedef std::function<bool (const Adapter&)> Selector;
+  typedef std::function<bool(const Adapter&)> Selector;
   Adapter select(const Selector& selector);
 
  private:

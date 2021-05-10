@@ -1,3 +1,4 @@
+// clang-format off
 // ${generated_comment}
 
 #include <ATen/RedispatchFunctions.h>
@@ -15,3 +16,4 @@ namespace redispatch {
 } // namespace redispatch
 
 } // namespace at
+// clang-format on

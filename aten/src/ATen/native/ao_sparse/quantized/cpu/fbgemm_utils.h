@@ -4,26 +4,16 @@
 #include <c10/core/QScheme.h>
 
 #ifdef USE_FBGEMM
+#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmSparse.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
 namespace ao {
 namespace sparse {
 
-struct TORCH_API PackedLinearWeight
-    : public LinearPackedParamsBase {
-  PackedLinearWeight(std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w,
-                     c10::optional<at::Tensor> bias,
-                     std::vector<int32_t> col_offsets,
-                     std::vector<float> w_scale,
-                     std::vector<int32_t> w_zp,
-                     c10::QScheme q_scheme,
-                     const int64_t out_features_block_size /* block sparsity size across output_features */,
-                     const int64_t in_features_block_size /* block sparsity size across input_features */)
-      : LinearPackedParamsBase(
-            out_features_block_size,
-            in_features_block_size),
+struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
+  PackedLinearWeight(std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w, c10::optional<at::Tensor> bias, std::vector<int32_t> col_offsets, std::vector<float> w_scale, std::vector<int32_t> w_zp, c10::QScheme q_scheme, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */)
+      : LinearPackedParamsBase(out_features_block_size, in_features_block_size),
         w(std::move(w)),
         bias_(std::move(bias)),
         col_offsets(std::move(col_offsets)),
@@ -81,6 +71,7 @@ struct TORCH_API PackedLinearWeight
       int64_t output_zero_point);
 };
 
-}}  // namespace ao::sparse
+} // namespace sparse
+} // namespace ao
 
 #endif // USE_FBGEMM

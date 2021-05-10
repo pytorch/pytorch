@@ -1,7 +1,7 @@
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace at {
 namespace native {

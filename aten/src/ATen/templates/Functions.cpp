@@ -1,3 +1,4 @@
+// clang-format off
 // ${generated_comment}
 
 #include <array>
@@ -85,11 +86,9 @@ Tensor TensorMaker::make_tensor() {
   }
 
   if (opts_.device().has_index()) {
-    // clang-format off
     TORCH_CHECK_VALUE(
         opts_.device() == *device_,
         "Specified device ", opts_.device(), " does not match device of data ", *device_);
-    // clang-format on
   }
 
   std::size_t size_bytes = computeStorageSize();
@@ -158,3 +157,4 @@ IntArrayRef TensorMaker::makeTempSizes() const noexcept {
 ${function_definitions}
 
 } // namespace at
+// clang-format on

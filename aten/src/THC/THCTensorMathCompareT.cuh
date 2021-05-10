@@ -1,9 +1,9 @@
 #ifndef THC_TENSORMATH_COMPARET_CUH
 #define THC_TENSORMATH_COMPARET_CUH
 
-#include <THC/THCTensorMath.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>

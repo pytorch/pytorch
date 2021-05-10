@@ -6,32 +6,28 @@ namespace vulkan {
 namespace ops {
 
 Persistent* persistent() {
-  static const std::unique_ptr<Persistent> persistent(
-    []() -> Persistent* {
-      try {
-        return new Persistent{
+  static const std::unique_ptr<Persistent> persistent([]() -> Persistent* {
+    try {
+      return new Persistent{
           api::Resource::Pool{
-            api::context()->gpu(),
+              api::context()->gpu(),
           },
-        };
-      }
-      catch (const std::exception& e) {
-        TORCH_WARN(
-            "Vulkan: Failed to initialize persistent resource pool! Error: ",
-            e.what());
-      }
-      catch (...) {
-        TORCH_WARN(
-            "Vulkan: Failed to initialize persistent resource pool! "
-            "Error: Unknown");
-      }
+      };
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Vulkan: Failed to initialize persistent resource pool! Error: ",
+          e.what());
+    } catch (...) {
+      TORCH_WARN(
+          "Vulkan: Failed to initialize persistent resource pool! "
+          "Error: Unknown");
+    }
 
-      return nullptr;
-    }());
+    return nullptr;
+  }());
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      persistent,
-      "Vulkan: Invalid persistent pool!");
+      persistent, "Vulkan: Invalid persistent pool!");
 
   return persistent.get();
 }

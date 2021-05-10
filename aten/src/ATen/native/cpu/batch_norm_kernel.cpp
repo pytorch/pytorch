@@ -6,19 +6,26 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 namespace {
 
 using namespace vec256;
 
-template<typename scalar_t>
+template <typename scalar_t>
 void batch_norm_cpu_inference_collect_linear_and_constant_terms(
-    TensorAccessor<scalar_t, 1> alpha, TensorAccessor<scalar_t, 1> beta, int64_t n_channel,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& mean, const Tensor& variance, double eps) {
-
-  const scalar_t* weight_data = weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
-  const scalar_t* bias_data = bias.defined() ? bias.data_ptr<scalar_t>() : nullptr;
+    TensorAccessor<scalar_t, 1> alpha,
+    TensorAccessor<scalar_t, 1> beta,
+    int64_t n_channel,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
+    const Tensor& mean,
+    const Tensor& variance,
+    double eps) {
+  const scalar_t* weight_data =
+      weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
+  const scalar_t* bias_data =
+      bias.defined() ? bias.data_ptr<scalar_t>() : nullptr;
   auto mean_data = mean.accessor<scalar_t, 1>();
   auto var_data = variance.accessor<scalar_t, 1>();
 
@@ -43,11 +50,15 @@ void batch_norm_cpu_inference_collect_linear_and_constant_terms(
 }
 
 /// A fast path for CPU inference when all tensors are contiguous.
-template<typename scalar_t>
-void batch_norm_cpu_inference_contiguous_impl(Tensor& output,
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    const Tensor& mean, const Tensor& variance, double eps) {
-
+template <typename scalar_t>
+void batch_norm_cpu_inference_contiguous_impl(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& mean,
+    const Tensor& variance,
+    double eps) {
   using Vec = Vec256<scalar_t>;
   int64_t n_batch = input.size(0);
   int64_t n_channel = input.size(1);
@@ -59,7 +70,7 @@ void batch_norm_cpu_inference_contiguous_impl(Tensor& output,
   auto beta_data = beta.accessor<scalar_t, 1>();
 
   batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
-     alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
+      alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
@@ -100,16 +111,27 @@ void batch_norm_cpu_inference_contiguous_impl(Tensor& output,
   }
 }
 
-void batch_norm_cpu_inference_contiguous_kernel(Tensor& output, const Tensor& input,
-    const Tensor& weight, const Tensor& bias, const Tensor& mean, const Tensor& variance, double eps) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_inference_contiguous", [&] {
-    batch_norm_cpu_inference_contiguous_impl<scalar_t>(output, input, weight, bias, mean, variance, eps);
-  });
+void batch_norm_cpu_inference_contiguous_kernel(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& mean,
+    const Tensor& variance,
+    double eps) {
+  AT_DISPATCH_FLOATING_TYPES(
+      input.scalar_type(), "batch_norm_cpu_inference_contiguous", [&] {
+        batch_norm_cpu_inference_contiguous_impl<scalar_t>(
+            output, input, weight, bias, mean, variance, eps);
+      });
 }
 
-}// anonymous namespace
+} // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(batch_norm_cpu_inference_contiguous_stub, &batch_norm_cpu_inference_contiguous_kernel);
+REGISTER_DISPATCH(
+    batch_norm_cpu_inference_contiguous_stub,
+    &batch_norm_cpu_inference_contiguous_kernel);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

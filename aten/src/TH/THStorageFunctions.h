@@ -1,10 +1,11 @@
 #pragma once
 
-#include <TH/THGeneral.h>
 #include <TH/THAllocator.h>
+#include <TH/THGeneral.h>
 
-#define THStorage_(NAME) TH_CONCAT_4(TH,Real,Storage_,NAME)
+#define THStorage_(NAME) TH_CONCAT_4(TH, Real, Storage_, NAME)
 
+// clang-format off
 #include <TH/generic/THStorage.h>
 #include <TH/THGenerateAllTypes.h>
 
@@ -40,6 +41,8 @@
 
 #include <TH/generic/THStorageCopy.h>
 #include <TH/THGenerateBFloat16Type.h>
+// clang-format on
 
-// This exists to have a data-type independent way of freeing (necessary for THPPointer).
-TH_API void THStorage_free(THStorage *storage);
+// This exists to have a data-type independent way of freeing (necessary for
+// THPPointer).
+TH_API void THStorage_free(THStorage* storage);

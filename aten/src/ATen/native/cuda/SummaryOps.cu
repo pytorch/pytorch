@@ -19,17 +19,23 @@ namespace cuda {
  */
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
-  template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
-    IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-    // (only applicable for histc)
-    // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
-    // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
-    // therefore when bin == nbins, adjust bin to the last bin
-    if (bin == nbins) bin -= 1;
-    return bin;
-  }
+template <typename input_t, typename IndexType>
+__device__ static IndexType getBin(
+    input_t bVal,
+    input_t minvalue,
+    input_t maxvalue,
+    int64_t nbins) {
+  IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
+  // (only applicable for histc)
+  // while each bin is inclusive at the lower end and exclusive at the higher,
+  // i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
+  // order to include maxvalue if exists therefore when bin == nbins, adjust bin
+  // to the last bin
+  if (bin == nbins)
+    bin -= 1;
+  return bin;
 }
+} // namespace
 
 /*
   Kernel for computing the histogram of the input.
@@ -72,7 +78,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         gpuAtomicAdd(&smem[bin], getOp(linearIndex));
       }
     }
@@ -98,7 +105,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `p`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
@@ -129,7 +137,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
-        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
         gpuAtomicAdd(&a.data[aOffset], getOp(linearIndex));
@@ -138,25 +147,29 @@ __global__ void kernelHistogram1D(
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                              \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>              \
-      <<<grid,                                                                        \
-         block,                                                                       \
-         SHARED_MEM,                                                                  \
-         getCurrentCUDAStream()>>>(                                                   \
-          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP); \
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                 \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE> \
+      <<<grid, block, SHARED_MEM, getCurrentCUDAStream()>>>(             \
+          aInfo,                                                         \
+          pInfo,                                                         \
+          bInfo,                                                         \
+          nbins,                                                         \
+          minvalue,                                                      \
+          maxvalue,                                                      \
+          totalElements,                                                 \
+          WEIGHTS_OP);                                                   \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-#define HANDLE_SWITCH_CASE(mType, getOp)                                   \
-  switch (mType) {                                                         \
-    case CUDAHistogramMemoryType::SHARED:                                  \
-      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp, sharedMem);      \
-      break;                                                               \
-    case CUDAHistogramMemoryType::MULTI_BLOCK:                             \
-      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp, 0);         \
-      break;                                                               \
-    default:                                                               \
-      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp, 0);              \
+#define HANDLE_SWITCH_CASE(mType, getOp)                              \
+  switch (mType) {                                                    \
+    case CUDAHistogramMemoryType::SHARED:                             \
+      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp, sharedMem); \
+      break;                                                          \
+    case CUDAHistogramMemoryType::MULTI_BLOCK:                        \
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp, 0);    \
+      break;                                                          \
+    default:                                                          \
+      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp, 0);         \
   }
 
 inline int64_t getFreeGlobalMemory() {
@@ -299,7 +312,8 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  const int64_t nbins = std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
+  const int64_t nbins =
+      std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
   const input_t minvalue = 0;
   const input_t maxvalue = nbins;
   // alloc output counter on GPU
@@ -377,17 +391,19 @@ Tensor _histc_cuda_template(
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
   auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
-    output, self, Tensor(), nbins, minvalue, maxvalue);
+      output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
 } // namespace
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self, const c10::optional<Tensor>& weights_opt,
+    const Tensor& self,
+    const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  c10::MaybeOwned<Tensor> weights_maybe_owned =
+      at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
 
   // See Note [Writing Nondeterministic Operations]
@@ -414,11 +430,17 @@ Tensor _histc_cuda(
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
-    return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
+    return _histc_cuda_template<scalar_t>(
+        self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
   });
 }
 
-Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
+Tensor& _histc_out_cuda(
+    const Tensor& self,
+    int64_t bins,
+    const Scalar& min,
+    const Scalar& max,
+    Tensor& result) {
   auto ret = _histc_cuda(self, bins, min, max);
   result.resize_as_(ret);
   result.copy_(ret);

@@ -61,62 +61,62 @@ class Vec256<float> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 0, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 0, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 1, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 1, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 2, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 2, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 3, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 3, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     return {a._vec0, b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 4, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 4, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 5, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 5, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 6, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 6, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {a._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 7, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 7, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {b._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 8, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 8, Vec256<float>>
+      C10_ALWAYS_INLINE blend(const Vec256<float>& a, const Vec256<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     const vbool32 mask_2nd = VsxMask2(mask);
     return {
@@ -255,29 +255,33 @@ class Vec256<float> {
   }
 
   Vec256<float> C10_ALWAYS_INLINE acos() const {
-     return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
+    return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
   }
   Vec256<float> C10_ALWAYS_INLINE asin() const {
-     return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
+    return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
   }
   Vec256<float> atan() const {
-     return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
+    return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
   }
   Vec256<float> atan2(const Vec256<float>& b) const {
-     return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
+    return {
+        Sleef_atan2f4_u10vsx(_vec0, b._vec0),
+        Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
-  Vec256<float> copysign(const Vec256<float> &sign) const {
-    return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
+  Vec256<float> copysign(const Vec256<float>& sign) const {
+    return {
+        Sleef_copysignf4_vsx(_vec0, sign._vec0),
+        Sleef_copysignf4_vsx(_vec1, sign._vec1)};
   }
   Vec256<float> lgamma() const {
-     return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
+    return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
   Vec256<float> erf() const {
-     return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
+    return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
   }
 
   Vec256<float> erfc() const {
-     return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
+    return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
   }
 
   Vec256<float> erfinv() const {
@@ -549,7 +553,7 @@ class Vec256<float> {
     return result | sign_bit;
   }
   Vec256<float> C10_ALWAYS_INLINE tan() const {
-     return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
+    return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
   }
   Vec256<float> C10_ALWAYS_INLINE tanh() const {
     auto x = *this;
@@ -617,15 +621,19 @@ class Vec256<float> {
   }
 
   Vec256<float> fmod(const Vec256<float>& b) const {
-     return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
+    return {Sleef_fmodf4_vsx(_vec0, b._vec0), Sleef_fmodf4_vsx(_vec1, b._vec1)};
   }
 
   Vec256<float> hypot(const Vec256<float>& b) const {
-     return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
+    return {
+        Sleef_hypotf4_u05vsx(_vec0, b._vec0),
+        Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
   }
 
   Vec256<float> nextafter(const Vec256<float>& b) const {
-     return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
+    return {
+        Sleef_nextafterf4_vsx(_vec0, b._vec0),
+        Sleef_nextafterf4_vsx(_vec1, b._vec1)};
   }
 
   Vec256<float> igamma(const Vec256<float>& x) const {

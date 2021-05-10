@@ -1,3 +1,4 @@
+// clang-format off
 #include <ATen/core/ATenOpList.h>
 
 #include <string>
@@ -34,3 +35,4 @@ bool is_custom_op(const c10::OperatorName& opName) {
              opName.name.c_str(), opName.overload_name.c_str())) == 0;
 }
 }
+// clang-format on

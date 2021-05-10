@@ -1,6 +1,13 @@
 #pragma once
 
-namespace at { namespace native {
+#include <vector>
+
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/Tensor.h>
+#include <c10/util/ArrayRef.h>
+
+namespace at {
+namespace native {
 
 // ---------------------------------------------------------------------
 //
@@ -8,9 +15,9 @@ namespace at { namespace native {
 //
 // ---------------------------------------------------------------------
 
-constexpr int input_batch_size_dim = 0;  // also grad_input
+constexpr int input_batch_size_dim = 0; // also grad_input
 constexpr int input_channels_dim = 1;
-constexpr int output_batch_size_dim = 0;  // also grad_output
+constexpr int output_batch_size_dim = 0; // also grad_output
 constexpr int output_channels_dim = 1;
 constexpr int weight_output_channels_dim = 0;
 constexpr int weight_input_channels_dim = 1;
@@ -23,9 +30,11 @@ constexpr int max_dim = 3;
 // takes an extra output_padding argument to resolve the ambiguity.
 
 static inline std::vector<int64_t> conv_output_size(
-    IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
-) {
+    IntArrayRef input_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation = IntArrayRef()) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
   bool has_dilation = dilation.size() > 0;
@@ -36,15 +45,20 @@ static inline std::vector<int64_t> conv_output_size(
   for (size_t d = 2; d < dim; ++d) {
     auto dilation_ = has_dilation ? dilation[d - 2] : 1;
     auto kernel = dilation_ * (weight_size[d] - 1) + 1;
-    output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    output_size[d] =
+        (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
   }
   return output_size;
 }
 
 static inline std::vector<int64_t> conv_input_size(
-    IntArrayRef output_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
-) {
+    IntArrayRef output_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
   auto dim = output_size.size();
@@ -53,23 +67,27 @@ static inline std::vector<int64_t> conv_input_size(
   input_size[1] = weight_size[weight_input_channels_dim] * groups;
   for (size_t d = 2; d < dim; ++d) {
     int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
-                     kernel + output_padding[d - 2];
+    input_size[d] = (output_size[d] - 1) * stride[d - 2] -
+        (2 * padding[d - 2]) + kernel + output_padding[d - 2];
   }
   return input_size;
 }
 
 static inline std::vector<int64_t> conv_weight_size(
-    IntArrayRef input_size, IntArrayRef output_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
-) {
+    IntArrayRef input_size,
+    IntArrayRef output_size,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
   auto dim = input_size.size();
   std::vector<int64_t> weight_size(dim);
   weight_size[0] = output_size[1];
   weight_size[1] = input_size[1] / groups;
   for (size_t d = 2; d < dim; ++d) {
-    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
-               + 2 * padding[d - 2] - output_padding[d - 2];
+    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2] +
+        2 * padding[d - 2] - output_padding[d - 2];
     weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
   }
   return weight_size;
@@ -81,7 +99,9 @@ static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline bool cudnn_conv_use_channels_last(
+    const at::Tensor& input,
+    const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
@@ -92,17 +112,16 @@ static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const a
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) &&
+      ((input_memory_format == at::MemoryFormat::ChannelsLast) ||
+       (weight_memory_format == at::MemoryFormat::ChannelsLast));
 
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) &&
+      ((input_memory_format == at::MemoryFormat::ChannelsLast3d) ||
+       (weight_memory_format == at::MemoryFormat::ChannelsLast3d));
 
   return can_use_cudnn_channels_last_2d || can_use_cudnn_channels_last_3d;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

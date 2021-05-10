@@ -10,7 +10,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Scalar.h>
@@ -18,8 +17,9 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/hash.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace torch {
 namespace jit {
@@ -54,8 +54,8 @@ template <class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
   auto t = c10::intrusive_ptr<T, NullType>::reclaim(
       payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-      ? NullType::singleton()
-      : static_cast<T*>(payload.u.as_intrusive_ptr));
+          ? NullType::singleton()
+          : static_cast<T*>(payload.u.as_intrusive_ptr));
   clearToNone();
   return t;
 }
@@ -138,7 +138,8 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const& {
   return toIntrusivePtr<ivalue::EnumHolder>();
 }
 inline c10::complex<double> IValue::toComplexDouble() const {
-  TORCH_INTERNAL_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(
+      isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
   auto ptr = toIntrusivePtr<ivalue::ComplexHolder>();
   return (*ptr).val;
 }
@@ -173,8 +174,7 @@ inline const at::Tensor& IValue::toTensor() const& {
 }
 inline c10::Storage IValue::toStorage() && {
   AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
-  return c10::Storage(
-      moveToIntrusivePtr<at::StorageImpl>());
+  return c10::Storage(moveToIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Storage IValue::toStorage() const& {
   AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
@@ -307,7 +307,7 @@ struct EnumHolder;
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  public:
-  explicit Future(TypePtr type, std::vector<c10::Device> devices={})
+  explicit Future(TypePtr type, std::vector<c10::Device> devices = {})
       : type_(std::move(type)),
         impl_(getTypeOfDevices(devices)),
         devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
@@ -376,8 +376,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // might worsen perf in CPU-only cases, we should only do so after careful
       // benchmarks.
       if (impl_.type() != c10::kCPU) {
-        actualDataPtrs =
-            data_ptrs.has_value() ? std::move(*data_ptrs) : extractDataPtrs(value);
+        actualDataPtrs = data_ptrs.has_value() ? std::move(*data_ptrs)
+                                               : extractDataPtrs(value);
         usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
@@ -426,7 +426,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -460,7 +461,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs()
+      const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -492,14 +494,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::function<IValue(Future&)> callback,
       TypePtr type) {
     auto childFut = createInstance(std::move(type));
-    addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) {
-          try {
-            childFut->markCompleted(cb(parentFut));
-          } catch (std::exception&) {
-            childFut->setError(std::current_exception());
-          }
-        });
+    addCallback([childFut, cb = std::move(callback)](Future& parentFut) {
+      try {
+        childFut->markCompleted(cb(parentFut));
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
     return childFut;
   }
 
@@ -530,9 +531,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return eptr_;
   }
 
-  TORCH_API friend std::ostream& operator<<(
-      std::ostream& out,
-      const Future& v);
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const Future& v);
 
   TypePtr elementType() const {
     return type_;
@@ -549,7 +548,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-
   // This method should always be used when invoking a callback (regardless of
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
@@ -686,15 +684,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       const c10::impl::VirtualGuardImpl& impl,
       std::vector<c10::Device> devices) {
     std::sort(
-      devices.begin(), devices.end(),
-      [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+        devices.begin(),
+        devices.end(),
+        [](const c10::Device& a, const c10::Device& b) {
+          return a.index() < b.index();
+        });
     // Deduplicate by compacting.
     size_t targetIdx = 0;
     for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
       TORCH_CHECK_VALUE(
           devices[sourceIdx].has_index(),
-          "Expected devices to have indices, got ", devices[sourceIdx]);
-      if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
+          "Expected devices to have indices, got ",
+          devices[sourceIdx]);
+      if (targetIdx > 0 &&
+          devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
         // It's a duplicate, skip it.
         continue;
       }
@@ -723,7 +726,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         superset.begin(),
         superset.end(),
         std::back_inserter(excessDevices),
-        [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+        [](const c10::Device& a, const c10::Device& b) {
+          return a.index() < b.index();
+        });
     TORCH_CHECK_VALUE(
         excessDevices.empty(),
         "The result contained tensors residing on device(s) ",
@@ -873,7 +878,9 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual c10::InferredType tryToInferType() = 0;
-  virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
+  virtual IValue toIValue(
+      const TypePtr& type,
+      c10::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
@@ -938,7 +945,9 @@ using _guarded_unsigned_long = std::conditional_t<
 
 inline const ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "Attempted to create null reference");
   return *static_cast<const c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
@@ -946,14 +955,15 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(T, method_name)          \
-  template <>                              \
-  inline T IValue::to<T>()&& {             \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
-  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
-    return this->method_name();            \
+#define DEFINE_TO(T, method_name)                                  \
+  template <>                                                      \
+  inline T IValue::to<T>()&& {                                     \
+    return std::move(*this).method_name();                         \
+  }                                                                \
+  template <>                                                      \
+  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type \
+  IValue::to<T>() const& {                                         \
+    return this->method_name();                                    \
   }
 
 DEFINE_TO(at::Tensor, toTensor)
@@ -1037,7 +1047,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const Type* expected_type =
+      c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1055,7 +1066,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const Type* expected_type =
+      c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1103,9 +1115,7 @@ OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
   if (ivalue.isNone()) {
     return {};
   }
-  return createVectorFromList<T>(
-    std::move(ivalue).to<c10::List<T>>()
-  );
+  return createVectorFromList<T>(std::move(ivalue).to<c10::List<T>>());
 }
 
 namespace detail {
@@ -1195,7 +1205,8 @@ inline T IValue::to() && {
 }
 
 template <typename T>
-inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
+inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type
+IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
 }
 
@@ -1232,15 +1243,20 @@ inline std::vector<double> IValue::toDoubleVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
-  return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+  AT_ASSERT(
+      isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(
+      moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const& {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
-  return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
+  AT_ASSERT(
+      isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(
+      toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  AT_ASSERT(
+      isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toComplexDoubleVector on null intrusive_ptr IValue");
@@ -1316,9 +1332,8 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
-    : IValue(
-          std::move(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t))) {
-}
+    : IValue(std::move(
+          c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t))) {}
 
 template <
     typename... Args,
@@ -1328,9 +1343,9 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
-    : IValue(
-          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t)))) {
-}
+    : IValue(std::move(c10::guts::apply(
+          c10::ivalue::Tuple::create<Args&&...>,
+          std::move(t)))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
     : tag(Tag::String), is_intrusive_ptr(true) {
@@ -1345,7 +1360,8 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
+inline IValue::IValue(c10::List<T>&& v)
+    : IValue(impl::toList<T>(std::move(v))) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
@@ -1434,7 +1450,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
     } catch (const c10::Error&) {
       throw c10::Error(
           "Trying to instantiate a class that isn't a registered custom class: " +
-          std::string(c10::util::get_fully_qualified_type_name<T>()),
+              std::string(c10::util::get_fully_qualified_type_name<T>()),
           "");
     }
   }();
@@ -1487,7 +1503,8 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalStringRef on null intrusive_ptr IValue");
   return std::reference_wrapper<const std::string>(
-      static_cast<const c10::ivalue::ConstantString*>(payload.u.as_intrusive_ptr)
+      static_cast<const c10::ivalue::ConstantString*>(
+          payload.u.as_intrusive_ptr)
           ->string());
 }
 

@@ -321,15 +321,12 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
    *  ---------------
    *  Then we have all the pointers needed as before, but with less duplication.
    *  So instead of 27 pointers now we have:
-   *  (3 (# of output pixels) - 1) * (stride) * 3 (kernel height) * + 3 * 3 (kernel h*w)
-   *  = 4 * 3 + 9
-   *  = 21 pointers.
-   *  which is the equation below.
-   *  Now in order for this to work the kernel has to be adjusted.
-   *  Here the kernel produced output worth of entire width. Thus as you move from one
-   *  pixel to the next, the jump in the indirection buffer has to be not 3*3 = 9
-   *  but kernel height (3) * stride (2) = 6.
-   *  This you will see operator-run.c
+   *  (3 (# of output pixels) - 1) * (stride) * 3 (kernel height) * + 3 * 3
+   * (kernel h*w) = 4 * 3 + 9 = 21 pointers. which is the equation below. Now in
+   * order for this to work the kernel has to be adjusted. Here the kernel
+   * produced output worth of entire width. Thus as you move from one pixel to
+   * the next, the jump in the indirection buffer has to be not 3*3 = 9 but
+   * kernel height (3) * stride (2) = 6. This you will see operator-run.c
    */
   const size_t step_width = min(average_pooling->stride_width, pooling_width);
   const size_t step_height =

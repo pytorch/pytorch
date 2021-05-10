@@ -1,13 +1,18 @@
 #include <ATen/ATen.h>
 
-#include <THC/THCTensorSort.cuh>
-#include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-void index_put_accum_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices) {
+void index_put_accum_kernel_thrust_helper(
+    Tensor& linearIndex,
+    Tensor& orig_indices,
+    Tensor& sorted_indices,
+    int64_t num_indices) {
   sorted_indices.copy_(linearIndex);
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -24,9 +29,16 @@ void index_put_accum_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indi
   // don't need a stable or multidimensional sort, so just use Thrust
   // directly
   // Sort; a stable sort is not required
-  // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
+  // NB - not passing comparator causes thrust to use radix sort, and it hurts
+  // perf A LOT, at least for medium (few K) sized indices
   auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
-  thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
+  thrust::sort_by_key(
+      policy,
+      sorted_data,
+      sorted_data + num_indices,
+      orig_data,
+      ThrustLTOp<int64_t>());
 }
 
-}}
+} // namespace native
+} // namespace at

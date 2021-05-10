@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/cpu/vec256/functional.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <ATen/native/cpu/CatKernel.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -14,20 +15,21 @@ struct InputMeta {
   int64_t inner_size;
 
   InputMeta(const Tensor& t, int64_t dim, int64_t inner)
-    : data_ptr(t.data_ptr())
-    , inner_size(t.sizes()[dim] * inner) {}
+      : data_ptr(t.data_ptr()), inner_size(t.sizes()[dim] * inner) {}
 };
 
 template <typename scalar_t>
 void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      dim >= 0 && dim < result.dim(), "dim out of range in cat_serial_kernel_impl");
-  int64_t outer = result.numel() / (result.sizes()[dim] * result.strides()[dim]);
+      dim >= 0 && dim < result.dim(),
+      "dim out of range in cat_serial_kernel_impl");
+  int64_t outer =
+      result.numel() / (result.sizes()[dim] * result.strides()[dim]);
   scalar_t* result_data = result.data_ptr<scalar_t>();
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
-  for (auto const &tensor : tensors) {
+  for (auto const& tensor : tensors) {
     inputs.emplace_back(tensor, dim, result.strides()[dim]);
   }
 
@@ -38,18 +40,15 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       if (local_inner < Vec::size()) {
-        #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-        # pragma unroll
-        #endif
+#if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+#pragma unroll
+#endif
         for (int64_t k = 0; k < local_inner; k++) {
           result_ptr[k] = input_ptr[k];
         }
       } else {
         vec256::map(
-            [](Vec x) { return x; },
-            result_ptr,
-            input_ptr,
-            local_inner);
+            [](Vec x) { return x; }, result_ptr, input_ptr, local_inner);
       }
       result_ptr += local_inner;
     }
@@ -57,9 +56,10 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
-    cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
+        cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
+      });
 }
 
 } // anonymous namespace
@@ -67,4 +67,5 @@ void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
-}} // at::native
+} // namespace native
+} // namespace at
