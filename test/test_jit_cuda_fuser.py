@@ -200,54 +200,26 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    def test_reduction_half(self):
-        def t(x: torch.Tensor):
-            o = torch.mul(x, 1.0)
-            o = torch.sum(o, dim=[2])
-            return o
+    def test_reduction_dtypes(self):
 
-        t_jit = torch.jit.script(t)
-        x = torch.randn(8, 4, 16, dtype=torch.float16, device="cuda")
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
-        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+        for op in [torch.sum, torch.mean]:
+            for dtype in [torch.float16, torch.float32, torch.double]:
+                def make_func(op):
+                    def func(x: torch.Tensor):
+                        o = torch.mul(x, 1.0)
+                        o = op(o, dim=[2])
+                        return o
+                    return func
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_reduction_float(self):
-        def t(x: torch.Tensor):
-            o = torch.mul(x, 1.0)
-            o = torch.sum(o, dim=[2], dtype=torch.float32)
-            return o
-        t_jit = torch.jit.script(t)
-
-        x = torch.randn(8, 4, 16, dtype=torch.float, device="cuda")
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
-        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_reduction_double(self):
-        def t(x: torch.Tensor):
-            o = torch.mul(x, 1.0)
-            o = torch.add(o, x)
-            o = torch.sum(o, dim=[2], dtype=torch.double)
-            return o
-        t_jit = torch.jit.script(t)
-
-        x = torch.randn(8, 4, 16, dtype=torch.double, device="cuda")
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
+                x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
+                t = make_func(op)
+                t_jit = torch.jit.trace(t, x)
+                jit_o = t_jit(x)
+                jit_o = t_jit(x)
+                o = t(x)
+                self.assertEqual(o.dtype, jit_o.dtype)
+                self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+                self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

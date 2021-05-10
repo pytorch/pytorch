@@ -1192,6 +1192,65 @@ class IrParser {
     }
 
     {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto self = value_map[node->input(0)->unique()]->as<TensorView>();
+            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dims_list.has_value(),
+                "aten::mean cannot be fused with dynamic axes");
+            std::vector<int> dims;
+            for (const auto dim : dims_list->vec()) {
+              dims.emplace_back(static_cast<int>(dim));
+            }
+            auto keepdim = constant_as<bool>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                keepdim.has_value(),
+                "aten::mean cannot be fused with dynamic keepdim");
+            auto o_sum = sum(self, dims, keepdim.value());
+            Val* num_features = new Double(1);
+            const size_t kNumberOfDims = self->nDims();
+            for (const auto axis : dims) {
+              num_features =
+                  mul(num_features, self->domain()->domain()[axis]->extent());
+            }
+            auto out = div(o_sum, num_features);
+            value_map.emplace(node->output()->unique(), out);
+          },
+          [](const Node* node) -> bool {
+            // TODO: support cast of output types
+            if (!node->inputs()[3]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              // We can only handle output as half, float, and double;
+              if (const auto opt_ivalue = toIValue(node->input(3))) {
+                const auto scalar_type = opt_ivalue->toScalarType();
+                if (scalar_type == at::ScalarType::Double ||
+                    scalar_type == at::ScalarType::Float ||
+                    scalar_type == at::ScalarType::Half) {
+                  return true;
+                }
+              }
+              return false;
+            }
+            // we don't support dynamic reduction axes;
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we don't support dynamic keepdim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Reduction;
+          });
+    }
+    {
       std::array<const char*, kNumSumToSize> SumToSize = {
           "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
           "aten::sum_to_size(Tensor self, int[] size) -> Tensor"};
