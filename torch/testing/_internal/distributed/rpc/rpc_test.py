@@ -5807,10 +5807,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 output = model.rpc_sync().forward(data)
                 # to_here() internally calls localValue as the caller is
                 # the owner of the RRef.
-                v0 = rpc.RRef(
-                    output,
-                    devices=[torch.device(local_device)]
-                ).remote().sum().to_here().item()
+                v0 = rpc.RRef(output).remote().sum().to_here().item()
                 v1 = output.sum().item()
                 self.assertEqual(v0, v1)
 
@@ -5831,6 +5828,29 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization4(self):
         self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(1)
+    def test_tensor_view_as_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0 : 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.randn(1000, 200).cuda(0)
+        futs = []
+        for xx in x.split(100):
+            futs.append(rpc.rpc_async(dst, RpcTest._identity, args=(xx,)))
+
+        self.assertEqual(x, torch.cat([f.wait() for f in futs]))
+
+        rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
     def test_devices_option_mismatch(self):

@@ -239,6 +239,9 @@ Message tensorpipeDeserialize(
     TensorpipeReadBuffers&& buffers,
     const std::shared_ptr<LazyStreamContext>& ctx) {
 
+  // I believe we don't need this today, as unlike pickling, unpickling does
+  // not insert CUDA ops. But still putting this guard here for safety and
+  // potential future changes.
   c10::MultiStreamGuard guard(
         ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
 

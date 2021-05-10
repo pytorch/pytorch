@@ -509,15 +509,11 @@ TEST(ExternalCall, Inlining) {
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 
   Tensor* A = Compute(
-      "A",
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(5.0f);
       });
   Tensor* B = Compute(
-      "B",
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(4.0f);
       });
   Tensor* MatmulResult = new Tensor(
