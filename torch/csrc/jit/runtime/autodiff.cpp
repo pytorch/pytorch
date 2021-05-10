@@ -275,9 +275,7 @@ class GradientHelper {
            inputs.at(4),
            outputs.at(1),
            outputs.at(2),
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            inputs.at(5),
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            inputs.at(7),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are

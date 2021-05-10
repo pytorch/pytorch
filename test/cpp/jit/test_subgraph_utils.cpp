@@ -139,12 +139,10 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
       parse_map);
   std::string ref_full_name = "graph_tanh_mul_div_mul_tanh_tanh_tanh_tanh";
   std::string full_name =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       SubgraphUtils::generateNameForGraph(graph, 80, "graph");
   ASSERT_EQ(full_name, ref_full_name);
 
   std::string truncated_name =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       SubgraphUtils::generateNameForGraph(graph, 10, "graph");
 
   ASSERT_LE(truncated_name.size(), ref_full_name.size());

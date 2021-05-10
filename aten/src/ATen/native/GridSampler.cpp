@@ -873,7 +873,6 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
       static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Zeros &&
       align_corners &&
       input.dim() == 4 &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       input.size(1) <= 1024) {
     return cudnn_grid_sampler(input, grid);
   }
