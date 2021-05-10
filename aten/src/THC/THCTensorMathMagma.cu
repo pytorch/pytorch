@@ -25,5 +25,7 @@ void THCMagma_init(THCState* state) {
 #endif
 }
 
-#include <THC/THCGenerateAllTypes.h>
+// clang-format off
 #include <THC/generic/THCTensorMathMagma.cu>
+#include <THC/THCGenerateAllTypes.h>
+// clang-format on

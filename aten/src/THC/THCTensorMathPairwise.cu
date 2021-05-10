@@ -21,5 +21,7 @@ struct TensorMulConstantOp {
   const T val;
 };
 
-#include <THC/THCGenerateBoolType.h>
+// clang-format off
 #include <THC/generic/THCTensorMathPairwise.cu>
+#include <THC/THCGenerateBoolType.h>
+// clang-format on

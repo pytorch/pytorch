@@ -4,8 +4,7 @@
 
 #if !defined(THC_REAL_IS_BOOL)
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
-    defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 TORCH_CUDA_CU_API void THCTensor_(renorm)(
     THCState* state,

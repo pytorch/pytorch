@@ -117,14 +117,16 @@ TORCH_CUDA_CU_API bool THCTensor_maybeOverlappingIndices(
     THCState* state,
     const THCTensor* t);
 
+// clang-format off
+#include <THC/generic/THCTensor.hpp>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCTensor.hpp>
 
+#include <THC/generic/THCTensor.hpp>
 #include <THC/THCGenerateComplexTypes.h>
-#include <THC/generic/THCTensor.hpp>
 
+#include <THC/generic/THCTensor.hpp>
 #include <THC/THCGenerateBoolType.h>
-#include <THC/generic/THCTensor.hpp>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

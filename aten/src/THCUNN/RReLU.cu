@@ -95,5 +95,7 @@ struct RReLUUpdateOutputEvalIP_functor {
   }
 };
 
-#include <THC/THCGenerateFloatTypes.h>
+// clang-format off
 #include <THCUNN/generic/RReLU.cu>
+#include <THC/THCGenerateFloatTypes.h>
+// clang-format on

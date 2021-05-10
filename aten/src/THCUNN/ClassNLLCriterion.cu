@@ -193,8 +193,10 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   }
 }
 
+// clang-format off
+#include <THCUNN/generic/ClassNLLCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
-#include <THCUNN/generic/ClassNLLCriterion.cu>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THCUNN/generic/ClassNLLCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

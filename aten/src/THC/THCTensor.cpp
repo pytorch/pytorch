@@ -4,17 +4,19 @@
 
 #include <new>
 
+// clang-format off
+#include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCTensor.cpp>
 
+#include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateComplexTypes.h>
-#include <THC/generic/THCTensor.cpp>
 
+#include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBoolType.h>
-#include <THC/generic/THCTensor.cpp>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on
 
 #include <THC/THCTensorInfo.cuh>
 

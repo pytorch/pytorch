@@ -173,8 +173,10 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
   }
 }
 
+// clang-format off
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
-#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

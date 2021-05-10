@@ -125,8 +125,10 @@ __global__ void THCudaTensor_gatherKernel(
   }
 }
 
+// clang-format off
+#include <THC/generic/THCTensorScatterGather.cu>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCTensorScatterGather.cu>
 
-#include <THC/THCGenerateBoolType.h>
 #include <THC/generic/THCTensorScatterGather.cu>
+#include <THC/THCGenerateBoolType.h>
+// clang-format on

@@ -6,8 +6,10 @@
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
 
+// clang-format off
+#include <THCUNN/generic/SpatialConvolutionMM.cu>
 #include <THC/THCGenerateFloatTypes.h>
-#include <THCUNN/generic/SpatialConvolutionMM.cu>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THCUNN/generic/SpatialConvolutionMM.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

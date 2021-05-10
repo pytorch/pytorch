@@ -59,5 +59,7 @@ struct logSigmoid_updateGradInput_functor<half> {
   }
 };
 
-#include <THC/THCGenerateFloatTypes.h>
+// clang-format off
 #include <THCUNN/generic/LogSigmoid.cu>
+#include <THC/THCGenerateFloatTypes.h>
+// clang-format on

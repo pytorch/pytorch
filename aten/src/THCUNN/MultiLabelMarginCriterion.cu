@@ -156,10 +156,11 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(
   }
 }
 
+// clang-format off
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
-#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 #include <THC/THCGenerateBFloat16Type.h>
-#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
-
+// clang-format on
 #undef MULTILABELMARGIN_THREADS

@@ -119,7 +119,8 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(
   }
 }
 
-#include <THC/THCGenerateFloatTypes.h>
+// clang-format off
 #include <THCUNN/generic/MultiMarginCriterion.cu>
-
+#include <THC/THCGenerateFloatTypes.h>
+// clang-format on
 #undef MULTIMARGIN_THREADS

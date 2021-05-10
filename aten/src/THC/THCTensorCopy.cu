@@ -33,14 +33,16 @@ struct CopyOp<at::BFloat16> {
   }
 };
 
+// clang-format off
+#include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCTensorCopy.cu>
 
+#include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateComplexTypes.h>
-#include <THC/generic/THCTensorCopy.cu>
 
+#include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateBoolType.h>
-#include <THC/generic/THCTensorCopy.cu>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THC/generic/THCTensorCopy.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

@@ -1,5 +1,5 @@
-#include <THC/THCTensor.hpp>
 #include <THC/THCTensorMathReduce.cuh>
+#include <THC/THCTensor.hpp>
 
-#include <THC/THCGenerateByteType.h>
 #include <THC/generic/THCTensorMathReduce.cu>
+#include <THC/THCGenerateByteType.h>

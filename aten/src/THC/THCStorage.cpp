@@ -5,17 +5,19 @@
 
 #include <new>
 
+// clang-format off
+#include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCStorage.cpp>
 
+#include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateComplexTypes.h>
-#include <THC/generic/THCStorage.cpp>
 
+#include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateBoolType.h>
-#include <THC/generic/THCStorage.cpp>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on
 
 #include <c10/util/intrusive_ptr.h>
 

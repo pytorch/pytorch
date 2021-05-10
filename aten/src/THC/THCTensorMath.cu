@@ -30,11 +30,13 @@ struct TensorFillOp {
   const T val;
 };
 
+// clang-format off
+#include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateAllTypes.h>
-#include <THC/generic/THCTensorMath.cu>
 
+#include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateBoolType.h>
-#include <THC/generic/THCTensorMath.cu>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

@@ -36,5 +36,7 @@ struct gatedLinearDerivative {
   }
 };
 
-#include <THC/THCGenerateFloatTypes.h>
+// clang-format off
 #include <THCUNN/generic/GatedLinearUnit.cu>
+#include <THC/THCGenerateFloatTypes.h>
+// clang-format on

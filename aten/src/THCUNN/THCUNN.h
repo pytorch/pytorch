@@ -6,8 +6,10 @@ typedef int64_t THCIndex_t;
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 
+// clang-format off
+#include <THCUNN/generic/THCUNN.h>
 #include <THC/THCGenerateFloatTypes.h>
-#include <THCUNN/generic/THCUNN.h>
 
-#include <THC/THCGenerateBFloat16Type.h>
 #include <THCUNN/generic/THCUNN.h>
+#include <THC/THCGenerateBFloat16Type.h>
+// clang-format on

@@ -1,5 +1,5 @@
-#include <THC/THCTensor.hpp>
 #include <THC/THCTensorMathPointwise.cuh>
+#include <THC/THCTensor.hpp>
 
-#include <THC/THCGenerateBoolType.h>
 #include <THC/generic/THCTensorMathPointwise.cu>
+#include <THC/THCGenerateBoolType.h>
