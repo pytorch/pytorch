@@ -213,7 +213,7 @@ class TestDependencyAPI(PackageTestCase):
 
     def test_implicit_intern(self):
         """The save_module APIs should implicitly intern the module being saved."""
-        import package_a
+        import package_a  # noqa: F401
 
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
