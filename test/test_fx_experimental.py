@@ -1329,7 +1329,8 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
-                   '__rpow__'}
+                   '__rpow__',
+                   '__rmatmul__'}
 
         # Unsupported input types
         if op.name in op_skip:
