@@ -6,7 +6,7 @@ from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
-from typing import List, Sequence, Tuple
+from typing import List, Tuple
 
 
 
