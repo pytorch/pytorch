@@ -631,12 +631,14 @@ class TestFile:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
             # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
-            # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
+            # and distributed/test_distributed_spawn and test_c10d_gloo.
+            # In these cases, we store the test case that took the longest,
             # as in these jobs, the duplicate tests are run in parallel.
             # For other unexpected cases, we should raise a warning.
             if self.name == 'test_cpp_extensions_aot' or \
                self.name == 'distributed/test_distributed_fork' or \
                self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'distributed/test_c10d_gloo' or \
                self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
                 time_difference = self.test_suites[suite_name].replace(test_case)
                 self.total_time += time_difference
