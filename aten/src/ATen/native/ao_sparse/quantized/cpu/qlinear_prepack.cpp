@@ -186,7 +186,6 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   int8_t* w_data =
       reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
   for (int i = 0; i < wt_numel; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }
   bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(
