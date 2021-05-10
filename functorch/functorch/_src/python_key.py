@@ -64,31 +64,6 @@ def pythonkey_trace(root : Union[torch.nn.Module, Callable], concrete_args: Opti
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
 
-
-class WrapModule(torch.nn.Module):
-    def __init__(self, mod, inps):
-        super().__init__()
-        self.mod = mod
-        self.inps = inps
-        @functools.wraps(mod.forward)
-        def forward_wrapped(self, *args):
-            new_args = []
-            for inp, arg in zip(inps, args):
-                if isinstance(inp, torch.Tensor):
-                    new_arg = addPythonKey(PythonTensor(inp.shape, arg))
-                else:
-                    new_arg = inp
-                new_args.append(new_arg)
-            out = self.mod(*new_args)
-
-            flat_outs, out_spec = pytree.tree_flatten(out)
-            for idx in range(len(flat_outs)):
-                if hasPythonKey(flat_outs[idx]):
-                    flat_outs[idx] = removePythonKey(flat_outs[idx]).proxy
-            return pytree.tree_unflatten(flat_outs, out_spec)
-
-        type(self).forward = forward_wrapped
-
 def wrap_key(f, inps):
     flat_inps, inp_spec = pytree.tree_flatten(inps)
     @functools.wraps(f)
