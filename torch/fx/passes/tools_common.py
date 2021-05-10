@@ -10,6 +10,7 @@ Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
 NodeList = List[torch.fx.Node]
 NodeSet = Set[torch.fx.Node]
+Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 

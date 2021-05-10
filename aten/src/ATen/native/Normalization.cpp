@@ -431,11 +431,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       && (input.dim() >= 3)
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       && ((input.size(0) <= 880801 && training) // spatial, training
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           ||(input.size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()

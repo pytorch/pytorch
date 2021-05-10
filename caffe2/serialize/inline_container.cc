@@ -189,7 +189,6 @@ size_t getPadding(
   padding_buf[0] = 'F';
   padding_buf[1] = 'B';
   padding_buf[2] = (uint8_t)padding_size;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
@@ -262,7 +261,6 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
 }
 
 static int64_t read_le_16(uint8_t* buf) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return buf[0] + (buf[1] << 8);
 }
 
@@ -385,7 +383,6 @@ void PyTorchStreamWriter::writeEndOfFile() {
   // Rewrites version info
   std::string version = c10::to_string(version_);
   version.push_back('\n');
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (version_ >= 0x6L) {
     writeRecord(".data/version", version.c_str(), version.size());
   } else {
