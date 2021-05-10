@@ -2438,19 +2438,24 @@ def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (((S, S, S), (), 1.5, False, False),
-            ((), (), 1.5, False, False),
+            ((), 1.5, (), False, False),
             ((S, S, S), (S, S, S), 1.5, False, False),
             ((S,), (S, S, S), 1.5, False, True),
             ((S, S, S), (S,), 1.5, False, True),
             ((S, 1, S), (S, S), 1.5, False, True),
             ((), (S, S, S), 1.5, False, True),
-            ((S, S, S), (), 1.5, False, True)
+            ((S, S, S), 1.5, (), False, True)
             )
 
     def generator():
         for case in cases:
             shape, shape_other, add_other, requires_grad, broadcasts_input = case
-            yield(SampleInput(make_arg(shape), args=(make_arg(shape_other, requires_grad=requires_grad) + add_other,),
+            if isinstance(shape_other, tuple):
+                arg = make_arg(shape_other, requires_grad=False) + add_other
+            else:
+                # shape_other is scalar
+                arg = shape_other
+            yield(SampleInput(make_arg(shape), args=(arg,),
                 broadcasts_input=broadcasts_input))
 
     return list(generator())
@@ -4163,9 +4168,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('fmod',
-           op=torch.fmod,
            dtypes=all_types_and(torch.float16, torch.bool),
-           sample_inputs_func=sample_inputs_fmod,),
+           sample_inputs_func=sample_inputs_fmod,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+            ),),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -6072,17 +6080,7 @@ def method_tests():
         ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1', (False,)),
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
-        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('fmod', (S, S, S), (1.5,), '', (True,)),
-        ('fmod', (), (1.5,), 'scalar', (True,)),
-        ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-        ('fmod', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-        ('fmod', (S, S, S), (non_differentiable(torch.rand(S) + 1.5),), 'tensor_broadcast_rhs'),
-        ('fmod', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-        ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-        
-        ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
+        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)), 
         ('remainder', (S, S, S), (1.5,), '', (True,)),
         ('remainder', (), (1.5,), 'scalar', (True,)),
         ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
