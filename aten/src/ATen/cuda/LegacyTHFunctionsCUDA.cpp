@@ -266,7 +266,8 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A
     TORCH_WARN_ONCE(
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
-      "the returned tuple, (it returns other information about the problem).\n",
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
       "The returned solution in torch.lstsq stored the residuals of the solution in the ",
       "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
       "residuals in the field 'residuals' of the returned named tuple.\n",
@@ -304,7 +305,8 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
     TORCH_WARN_ONCE(
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
-      "the returned tuple, (it returns other information about the problem).\n",
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
       "The returned solution in torch.lstsq stored the residuals of the solution in the ",
       "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
       "residuals in the field 'residuals' of the returned named tuple.\n",
