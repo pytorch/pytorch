@@ -2992,11 +2992,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
   }
 }
 
-void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
-  (void)rank;  // unused
-  (void)singular_values;  // unused
-  (void)rcond;  // unused
-  (void)driver_name;  // unused
+void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
 #if defined(USE_CUSOLVER)
   // linalg_lstsq_gels is a generic function that is implemented using
   // geqrf_stub, ormqr_stub, and triangular_solve_stub
@@ -3005,6 +3001,46 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 #else
   return gels_magma(a, b, infos);
 #endif
+}
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singular_values*/, Tensor& infos, double /*rcond*/, std::string /*driver_name*/)  {
+  auto m = a.size(-2);
+  auto n = a.size(-1);
+
+  // first handle the underdetermined case (m < n)
+  // this case is not supported by MAGMA or cuBLAS
+  if (m < n) {
+#if defined(USE_CUSOLVER)
+    linalg_lstsq_gels(a, b, infos);
+#else
+    TORCH_CHECK(
+        false,
+        "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA. ",
+        "Please rebuild with cuSOLVER.");
+#endif
+  } else { // m >= n
+#ifndef USE_MAGMA
+    // MAGMA is not available we can either use cuBLAS or cuSOLVER here
+    // the batched vs looped dispatch is implemented based on the following performance results
+    // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
+    if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+      // if CUDART_VERSION is defined then cuBLAS is available
+      #ifdef CUDART_VERSION
+      gels_batched_cublas(a, b, infos);
+      #else
+      // this would either call cuSOLVER or MAGMA,
+      // if MAGMA is called a runtime error is thrown about not finding MAGMA in compilation
+      gels_looped(a, b, infos);
+      #endif // CUDART_VERSION
+    } else {
+      gels_looped(a, b, infos);
+    }
+#else
+    // if both MAGMA and cuSOLVER are available this would call cuSOLVER
+    // MAGMA is called if cuSOLVER is not available
+    gels_looped(a, b, infos);
+#endif // USE_MAGMA
+  }
 }
 
 REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
