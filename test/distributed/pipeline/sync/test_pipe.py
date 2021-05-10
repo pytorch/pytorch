@@ -491,15 +491,16 @@ def test_merged_partitions(setup_rpc):
     a = nn.Linear(1, 1)
     b = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 2))
     c = nn.Linear(1, 1).to(0)
+    d = nn.Linear(1, 2).to(0)
 
-    model = nn.Sequential(a, b, c)
+    model = nn.Sequential(a, b, c, d)
     model = Pipe(model)
 
     assert isinstance(model.partitions, nn.ModuleList)
     assert isinstance(model.partitions[0], nn.Sequential)
     assert isinstance(model.partitions[1], nn.Sequential)
     assert list(model.partitions[0]) == [a, b[0], b[1]]
-    assert list(model.partitions[1]) == [c]
+    assert list(model.partitions[1]) == [c, d]
 
 
 def test_deny_moving(setup_rpc):
