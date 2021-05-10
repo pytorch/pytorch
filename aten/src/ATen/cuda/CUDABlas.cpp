@@ -891,7 +891,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       incy,
       reinterpret_cast<rocblas_bfloat16*>(result)));
 #else
-  AT_ERROR("Cublas_bfdot requires CUDA 8.0+");
+  AT_ERROR("Cublas_bfdot requires CUDA 11.0+");
 #endif
 }
 
