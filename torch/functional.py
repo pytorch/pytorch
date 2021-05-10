@@ -30,7 +30,6 @@ __all__ = [
     'einsum',
     'istft',
     'lu',
-    'lu_unpack',
     'norm',
     'meshgrid',
     'pca_lowrank',
@@ -182,115 +181,6 @@ def _index_tensor_with_indices_list(tensor, indices):
     for index in indices:
         out = out[index]
     return out
-
-
-def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
-    r"""Unpacks the data and pivots from a LU factorization of a tensor.
-
-    Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
-
-    Args:
-        LU_data (Tensor): the packed LU factorization data
-        LU_pivots (Tensor): the packed LU factorization pivots
-        unpack_data (bool): flag indicating if the data should be unpacked
-        unpack_pivots (bool): flag indicating if the pivots should be unpacked
-
-    Examples::
-
-        >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>>
-        >>> # can recover A from factorization
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-
-        >>> # LU factorization of a rectangular matrix:
-        >>> A = torch.randn(2, 3, 2)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>> P
-        tensor([[[1., 0., 0.],
-                 [0., 1., 0.],
-                 [0., 0., 1.]],
-
-                [[0., 0., 1.],
-                 [0., 1., 0.],
-                 [1., 0., 0.]]])
-        >>> A_L
-        tensor([[[ 1.0000,  0.0000],
-                 [ 0.4763,  1.0000],
-                 [ 0.3683,  0.1135]],
-
-                [[ 1.0000,  0.0000],
-                 [ 0.2957,  1.0000],
-                 [-0.9668, -0.3335]]])
-        >>> A_U
-        tensor([[[ 2.1962,  1.0881],
-                 [ 0.0000, -0.8681]],
-
-                [[-1.0947,  0.3736],
-                 [ 0.0000,  0.5718]]])
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-        >>> torch.norm(A_ - A)
-        tensor(2.9802e-08)
-    """
-    if has_torch_function_variadic(LU_data, LU_pivots):
-        return handle_torch_function(
-            lu_unpack, (LU_data, LU_pivots), LU_data, LU_pivots,
-            unpack_data=unpack_data,
-            unpack_pivots=unpack_pivots)
-    shape = LU_data.shape
-    # In generalized LU factorization, the following shape relations hold:
-    #   A.shape[-2:] == (m, n)
-    #   P.shape[-2:] == (m, m)
-    #   L.shape[-2:] == (m, k)
-    #   U.shape[-2:] == (k, n)
-    # where k = min(m, n)
-    m, n = shape[-2:]
-    k = min(m, n)
-    if unpack_data:
-        U: Optional[Tensor] = LU_data.triu()
-        assert U is not None
-        if m != k:
-            U = U.narrow(-2, 0, k)
-        L: Optional[Tensor] = LU_data.tril()
-        assert L is not None
-        if k != n:
-            L = L.narrow(-1, 0, k)
-        L.diagonal(dim1=-2, dim2=-1).fill_(1)
-    else:
-        L = U = None
-
-    if unpack_pivots:
-        LU_pivots_zero_idx = LU_pivots - 1
-        if LU_data.dim() > 2:
-            P: Optional[Tensor] = torch.eye(m, device=LU_data.device,
-                                            dtype=LU_data.dtype) \
-                .expand(shape[:-1] + (m,)) \
-                .clone(memory_format=torch.contiguous_format)
-            assert P is not None
-
-            # TODO: rewrite when TorchScript supports product and map as
-            # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
-            indices = _indices_product(shape[:-2])
-            for idx in indices:
-                final_order = list(range(m))
-                for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
-                    final_order[k], final_order[j] = final_order[j], final_order[k]
-                # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
-                p_idx = _index_tensor_with_indices_list(P, idx)
-                p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
-        else:
-            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
-            for k, j, in enumerate(LU_pivots_zero_idx):
-                final_order[k], final_order[j] = final_order[j], final_order[k]
-            P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
-    else:
-        P = None
-
-    return P, L, U
 
 
 def einsum(equation, *operands):

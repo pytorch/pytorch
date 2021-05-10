@@ -16,7 +16,7 @@ all_operators_with_namedtuple_return = {
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
-    'frexp'
+    'frexp', 'lu_unpack'
 }
 
 
@@ -83,6 +83,9 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
             op(operators=['linalg_lstsq'], input=(a,), names=('solution', 'residuals', 'rank', 'singular_values'), hasout=False),
             op(operators=['frexp'], input=(), names=('mantissa', 'exponent'), hasout=True),
+            op(operators=['lu_unpack'],
+               input=(torch.tensor([3, 2, 1, 4, 5], dtype=torch.int32), True, True),
+               names=('P', 'L', 'U'), hasout=True),
         ]
 
         def get_func(f):
