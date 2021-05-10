@@ -33,6 +33,9 @@
 namespace torch {
 namespace jit {
 
+static constexpr const char* kArchiveNameConstants = "constants";
+static constexpr const char* kArchiveNameBytecode = "bytecode";
+
 char const* toString(OpCode op);
 
 namespace {
@@ -192,7 +195,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
+       {kArchiveNameConstants, Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
 
@@ -339,7 +342,8 @@ void ScriptModuleSerializer::serialize(
   // so loading the code does not depend on loading the data
   std::vector<IValue> ivalue_constants(
       constant_table_.begin(), constant_table_.end());
-  writeArchive(c10::ivalue::Tuple::create(ivalue_constants), "constants");
+  writeArchive(
+      c10::ivalue::Tuple::create(ivalue_constants), kArchiveNameConstants);
   if (bytecode_format) {
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -353,7 +357,8 @@ void ScriptModuleSerializer::serialize(
 
 void ScriptModuleSerializer::writeArchive(
     const IValue& value,
-    const std::string& archive_name) {
+    const std::string& archive_name,
+    bool use_tensors_archive_table) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -366,15 +371,47 @@ void ScriptModuleSerializer::writeArchive(
         return type_name_uniquer_.getUniqueName(t);
       },
       &memoizedClassTypes);
+  if (use_tensors_archive_table && !tensors_archive_table_.empty()) {
+    data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+  }
   data_pickle.protocol();
   data_pickle.pushIValue(value);
   data_pickle.stop();
   size_t i = 0;
   std::string prefix = archive_name + "/";
+
+  // TODO: currently there exists logic only for archive constant and
+  // bytecode, to avoid exporting duplicate tensors. The logic can be more
+  // generic such that it can be used by other tensors from other archive, to
+  // avoid deduplicating tensors among different archives.
+
+  // Store all tensors from archives `constants` to tensors_archive_table_
+  if (archive_name == kArchiveNameConstants) {
+    const auto tensor_candidates = data_pickle.tensorData();
+    for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
+         tensor_index++) {
+      tensors_archive_table_[tensor_candidates[tensor_index]] =
+          std::make_pair(kArchiveNameConstants, tensor_index);
+    }
+  }
+
+  // Export deduplicate tensors only if use_tensors_archive_table is set to
+  // true and archive name is `bytecode`
+  bool can_use_tensors_archive_table =
+      (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
+
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = prefix + c10::to_string(i++);
-    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    if (can_use_tensors_archive_table) {
+      const auto found = tensors_archive_table_.find(td);
+      if (found == tensors_archive_table_.end()) {
+        writer_.writeRecord(
+            fname, writable_td.data(), writable_td.sizeInBytes());
+      }
+    } else {
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    }
   }
   std::string fname = archive_name + ".pkl";
   writer_.writeRecord(fname, data.data(), data.size());
@@ -538,7 +575,6 @@ void ScriptModuleSerializer::writeByteCode(
         cs_data.size() > kMinToCompress /*compress*/);
   }
 }
-
 
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
