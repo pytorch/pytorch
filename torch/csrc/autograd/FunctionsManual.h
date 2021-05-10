@@ -238,11 +238,6 @@ Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
-Tensor lu_unpack_backward(
-  const std::vector<torch::autograd::Variable>& grads,
-  const Tensor& LU_data,
-  bool unpack_data
-);
 
 } // namespace details
 } // namespace generated
