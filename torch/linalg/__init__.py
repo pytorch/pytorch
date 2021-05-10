@@ -997,6 +997,17 @@ other `int` or `float`     -- not supported --        `sum(abs(x)**\ `:attr:`ord
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
+.. seealso::
+
+        :func:`torch.linalg.vector_norm` computes a vector norm.
+
+        :func:`torch.linalg.matrix_norm` computes a matrix norm.
+
+        It is always prefered to use the above operators instead of :func:`torch.linalg.norm` as they
+        remove potential ambiguities. For example, `torch.linalg.norm(A, ord=1, dim=(0, 1))` always
+        computes a matrix norm, but with `torch.linalg.vector_norm(A, ord=1, dim=(0, 1))` it is possible
+        to compute a vector norm over the two dimensions.
+
 Args:
     A (Tensor): tensor of shape `(*, n)` or `(*, m, n)` where `*` is zero or more batch dimensions
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
