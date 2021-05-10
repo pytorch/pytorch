@@ -491,7 +491,6 @@ class PackageImporter(Importer):
                 return node
             if isinstance(node, _ModuleNode):
                 name = ".".join(atoms[:i])
-                print(f"full name: {atoms}")
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
