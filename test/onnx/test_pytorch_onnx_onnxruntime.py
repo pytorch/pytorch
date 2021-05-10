@@ -8779,28 +8779,35 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_float(self):
         class M(torch.nn.Module):
-            def forward(self, x, loop_count: int):
-                result = torch.tensor([1.1 for i in range(loop_count)], dtype=torch.float)
+            def forward(self, x):
+                result = torch.tensor([1.1 for _ in range(x.shape[1])], dtype=torch.float)
                 x = torch.add(x, result)
-                return x, loop_count
+                return x
 
         x = torch.randint(5, (10, 5))
-        loop_count = 5
-
-        self.run_test(M(), (x, loop_count))
+        self.run_test(M(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_bool(self):
         class M(torch.nn.Module):
-            def forward(self, x, loop_count: int):
-                result = torch.tensor([True for i in range(loop_count)], dtype=torch.bool)
+            def forward(self, x):
+                result = torch.tensor([True for _ in range(x.shape[1])], dtype=torch.bool)
                 x = torch.add(x, result)
-                return x, loop_count
+                return x
 
         x = torch.randint(5, (10, 5))
-        loop_count = 5
+        self.run_test(M(), (x,))
 
-        self.run_test(M(), (x, loop_count))
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                result = torch.tensor([1 for _ in range(x.shape[1])], dtype=torch.int)
+                x = torch.add(x, result)
+                return x
+
+        x = torch.randint(5, (10, 5))
+        self.run_test(M(), (x,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
