@@ -1,3 +1,4 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
@@ -8,17 +9,14 @@
 
 namespace at { namespace native {
 
-template <typename scalar_t>
+template <typename scalar_t, typename out_t=scalar_t>
 void std_var_kernel_impl(TensorIterator& iter, int32_t correction, bool take_sqrt) {
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
   using accscalar_t = at::acc_type<scalar_t, true>;
-  gpu_reduce_kernel<scalar_t, scalar_t, 2>(
-      iter,
-      WelfordOps<
-          scalar_t, accscalar_t, int32_t, float,
-          thrust::pair<scalar_t, scalar_t>>{correction, take_sqrt},
-      WelfordData<accscalar_t, int32_t, float>{});
+  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, float, thrust::pair<out_t, out_t>>;
+  gpu_reduce_kernel<scalar_t, out_t, 2>(
+      iter, ops_t{correction, take_sqrt}, typename ops_t::acc_t{});
 }
 
 static void std_var_kernel_cuda(TensorIterator& iter, int64_t correction, bool take_sqrt) {
@@ -27,9 +25,19 @@ static void std_var_kernel_cuda(TensorIterator& iter, int64_t correction, bool t
       correction < limits::max() && correction > limits::min(),
       "The correction argument for std and var computation on CUDA must "
       "fit within a 32-bit integer, but got ", correction);
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_var_cuda", [&]() {
-    std_var_kernel_impl<scalar_t>(iter, correction, take_sqrt);
-  });
+  const auto input_dtype = iter.input_dtype();
+  if (input_dtype == kHalf && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    std_var_kernel_impl<at::Half, float>(iter, correction, take_sqrt);
+  } else if (input_dtype == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    std_var_kernel_impl<at::BFloat16, float>(iter, correction, take_sqrt);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                    iter.dtype(), "std_cuda", [&]() {
+      std_var_kernel_impl<scalar_t>(iter, correction, take_sqrt);
+    });
+  }
 }
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>

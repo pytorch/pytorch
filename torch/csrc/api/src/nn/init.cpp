@@ -90,7 +90,6 @@ Tensor dirac_(Tensor tensor) {
       case 4: // Spatial convolution
         tensor[d][d][sizes[2] / 2][sizes[3] / 2] = 1;
         break;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 5: // Volumetric convolution
         tensor[d][d][sizes[2] / 2][sizes[3] / 2][sizes[4] / 2] = 1;
         break;
