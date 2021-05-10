@@ -676,7 +676,7 @@ class LnStructured(BasePruningMethod):
             fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-            entries for argument ``p`` in :func:`torch.norm`.
+            entries for argument ``ord`` in :func:`torch.linalg.norm`.
         dim (int, optional): index of the dim along which we define
             channels to prune. Default: -1.
     """
@@ -774,7 +774,7 @@ class LnStructured(BasePruningMethod):
                 fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
             n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-                entries for argument ``p`` in :func:`torch.norm`.
+                entries for argument ``ord`` in :func:`torch.linalg.norm`.
             dim (int): index of the dim along which we define channels to
                 prune.
             importance_scores (torch.Tensor): tensor of importance scores (of same
@@ -981,7 +981,7 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
             fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-            entries for argument ``p`` in :func:`torch.norm`.
+            entries for argument ``ord`` in :func:`torch.linalg.norm`.
         dim (int): index of the dim along which we define channels to prune.
         importance_scores (torch.Tensor): tensor of importance scores (of same
             shape as module parameter) used to compute mask for pruning.
@@ -1331,7 +1331,7 @@ def _compute_norm(t, n, dim):
     Args:
         t (torch.Tensor): tensor representing the parameter to prune
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-            entries for argument p in torch.norm
+            entries for argument ord in torch.linalg.norm
         dim (int): dim identifying the channels to prune
 
     Returns:
