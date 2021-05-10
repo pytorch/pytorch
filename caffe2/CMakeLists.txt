@@ -516,9 +516,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   list(APPEND LIBTORCH_CMAKE_SRCS "")
 
+  list(APPEND LITE_EAGER_SYMOBLICATION_SRCS "")
+  if(USE_SOURCE_DEBUG_ON_MOBILE)
+    append_filelist("libtorch_lite_eager_symbolication" LITE_EAGER_SYMOBLICATION_SRCS)
+    # For source debug on lite interpreter, we have to add dependency on pickling
+    # but references to read/writeArchiveAndTensor is not built for mobile
+    # so this condition specifically says we are building for source debug
+    # on mobile.
+    if(BUILD_LITE_INTERPRETER)
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
+    endif()
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
@@ -557,14 +570,18 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
+    list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   endif()
 
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
@@ -583,6 +600,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
@@ -938,8 +957,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
     COMMAND
-    "${PYTHON_EXECUTABLE}"
-    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
     --yaml_file_path "${SELECTED_OP_LIST}"
     --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
     WORKING_DIRECTORY "${TORCH_ROOT}")
@@ -1041,6 +1059,10 @@ endif()
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/nnc
+        ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
