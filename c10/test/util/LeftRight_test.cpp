@@ -9,7 +9,6 @@ using std::vector;
 TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<int> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](int& obj) { obj = 5; });
   int read = obj.read([](const int& obj) { return obj; });
   EXPECT_EQ(5, read);
@@ -24,12 +23,10 @@ TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
 TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<vector<int>> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](vector<int>& obj) { obj.push_back(5); });
   vector<int> read = obj.read([](const vector<int>& obj) { return obj; });
   EXPECT_EQ((vector<int>{5}), read);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](vector<int>& obj) { obj.push_back(6); });
   read = obj.read([](const vector<int>& obj) { return obj; });
   EXPECT_EQ((vector<int>{5, 6}), read);
@@ -39,7 +36,6 @@ TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
 TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
   LeftRight<vector<int>> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = obj.write([](vector<int>&) -> int { return 5; });
   static_assert(std::is_same<int, decltype(a)>::value, "");
   EXPECT_EQ(5, a);
@@ -137,7 +133,6 @@ TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
   std::thread writer1([&]() {
     obj.write([&](int&) {
       first_writer_started = true;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       first_writer_finished = true;
     });
@@ -184,7 +179,6 @@ TEST(
     givenInt_whenWriteThrowsExceptionOnFirstCall_thenResetsToOldState) {
   LeftRight<int> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](int& obj) { obj = 5; });
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -213,7 +207,6 @@ TEST(
     givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewState) {
   LeftRight<int> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](int& obj) { obj = 5; });
   bool write_called = false;
 
@@ -244,7 +237,6 @@ TEST(
 TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
   LeftRight<vector<int>> obj;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([](vector<int>& obj) { obj.push_back(5); });
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)

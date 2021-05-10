@@ -30,7 +30,6 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;
@@ -102,7 +101,6 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
@@ -144,7 +142,6 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
