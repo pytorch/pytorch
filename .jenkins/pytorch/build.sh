@@ -339,7 +339,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # shellcheck disable=SC1003
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 
-  python setup.py install
+  PYTHONPATH="$PYTHONPATH:$PWD/../tools" python setup.py install
   popd
   assert_git_not_dirty
 fi
