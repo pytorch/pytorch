@@ -90,11 +90,8 @@ class IDEEPAdamOp final : public IDEEPOperator {
 
   IDEEPAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU

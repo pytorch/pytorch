@@ -410,9 +410,9 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       at::Storage storage;
-      if (storage_tracker_ != nullptr && storage_tracker_->hasStorage(key)) {
+      if (storage_context_ != nullptr && storage_context_->hasStorage(key)) {
         // for torch.package logic where storage may be loaded already
-        storage = storage_tracker_->getStorage(key);
+        storage = storage_context_->getStorage(key);
       } else {
         at::DataPtr storage_ptr = read_record_(key);
         int64_t numel = args.at(4).toInt();
@@ -424,8 +424,8 @@ PickleOpCode Unpickler::readInstruction() {
             /*allocator=*/nullptr,
             /*resizable=*/false); // NB: we didn't set any allocator for the
                                   // tensor
-        if (storage_tracker_ != nullptr) {
-          storage_tracker_->addStorage(key, storage);
+        if (storage_context_ != nullptr) {
+          storage_context_->addStorage(key, storage);
         }
       }
 

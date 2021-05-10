@@ -85,11 +85,16 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
+      bool use_tensors_archive_table = false,
       bool tensor_cdata_naming_scheme = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
+
+  // key: tensor, value: pair(arhive_name, index)
+  TensorIndexMap tensors_archive_table_;
+
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;

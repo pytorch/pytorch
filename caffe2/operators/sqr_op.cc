@@ -73,7 +73,6 @@ class GetSqrGradient : public GradientMakerBase {
   std::vector<OperatorDef> GetGradientDefs() override {
     Argument scale_arg;
     scale_arg.set_name("scale");
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     scale_arg.set_f(2.0);
     return std::vector<OperatorDef>{CreateOperatorDef(
                                         "Scale",

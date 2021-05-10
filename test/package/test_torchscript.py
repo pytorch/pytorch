@@ -83,7 +83,6 @@ class PackageScriptModuleTest(PackageTestCase):
 
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as e:
-            e.gate_torchscript_serialization = False
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         # test we can load from a directory
@@ -443,10 +442,12 @@ class PackageScriptModuleTest(PackageTestCase):
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
         self.assertTrue(
-            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+            loaded_mod_1.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
         self.assertTrue(
-            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+            loaded_mod_1.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
 
         loaded_mod_1.tensor.add_(torch.ones(3, 3))
@@ -493,10 +494,12 @@ class PackageScriptModuleTest(PackageTestCase):
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
         self.assertTrue(
-            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+            loaded_mod_1.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
         self.assertTrue(
-            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+            loaded_mod_1.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
 
         loaded_mod_1.tensor.add_(
