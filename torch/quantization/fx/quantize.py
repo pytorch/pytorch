@@ -472,10 +472,16 @@ def get_target_dtype_for_node_rewrite(
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
     qhandler: Optional[QuantizeHandler],
-) -> torch.dtype:
+    modules: Dict[str, torch.nn.Module],
+    cache_for_no_tensor_check: Dict[Node, bool],
+) -> Optional[torch.dtype]:
     """
     Returns the expected dtype of the input and output of this node after
-    convert.
+    convert. If the value is not None, it represents the dtype of the
+    Tensor. If the value is None, it means the value is not a Tensor.
+
+    TODO(future PR, if needed): explicitly spell out the non-Tensor
+    dtypes.
     """
     if node.op == 'placeholder':
         if inputs_seen_counter in input_quantized_idxs:
@@ -486,6 +492,12 @@ def get_target_dtype_for_node_rewrite(
             return torch.float
 
     elif node.op in ('call_module', 'call_method', 'call_function'):
+        args_have_no_tensors = \
+            all_node_args_have_no_tensors(
+                node, modules, cache_for_no_tensor_check)
+        if args_have_no_tensors:
+            return None
+
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
@@ -520,7 +532,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Any],
-    cache_for_no_tensor_check: Dict[Node, bool],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> Argument:
@@ -538,7 +549,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
         for inner_arg in arg:
             new_inner_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
                 node, inner_arg, qconfig, load_arg, model, modules,
-                graph, node_name_to_target_dtype, cache_for_no_tensor_check,
+                graph, node_name_to_target_dtype,
                 qhandler, prepare_custom_config_dict)
             new_arg_to_return.append(new_inner_arg)
         return new_arg_to_return
@@ -561,9 +572,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             qconfig.activation
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
-        arg_args_have_no_tensors = \
-            all_node_args_have_no_tensors(
-                arg, modules, cache_for_no_tensor_check)
         weight_needs_obs = is_weight and weight_is_quantized(qconfig)
         bias_needs_obs = \
             (is_bias and activation_dtype(qconfig) == torch.float16) and \
@@ -579,8 +587,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             # TODO(future PR): change this so a placeholder is inserted for
             # future dequants, to make the logic easier to understand
             (node_dtype != torch.float) and
-            # if arg is a bool tensor, do not insert observer
-            (arg_dtype != torch.bool) and
+            # if arg is a bool tensor or not a tensor, do not insert observer
+            (arg_dtype not in (torch.bool, None)) and
             (is_activation and activation_is_statically_quantized(qconfig))
         )
 
@@ -588,7 +596,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             weight_needs_obs or
             bias_needs_obs or
             dtype_changes_and_second_dtype_not_float
-        ) and not (arg_args_have_no_tensors)
+        )
 
     else:
         # custom flow for standalone modules
@@ -658,7 +666,6 @@ def maybe_insert_input_observers_for_node_rewrite(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Any],
-    cache_for_no_tensor_check: Dict[Node, bool],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> None:
@@ -680,7 +687,7 @@ def maybe_insert_input_observers_for_node_rewrite(
     for arg in node.args:
         new_arg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             node, arg, qconfig, load_arg, model, modules, graph,
-            node_name_to_target_dtype, cache_for_no_tensor_check,
+            node_name_to_target_dtype,
             qhandler, prepare_custom_config_dict)
         new_args.append(new_arg)
 
@@ -688,7 +695,7 @@ def maybe_insert_input_observers_for_node_rewrite(
     for k, kwarg in node.kwargs.items():
         new_kwarg = maybe_insert_input_observer_for_arg_or_kwarg_rewrite(
             node, kwarg, qconfig, load_arg, model, modules, graph,
-            node_name_to_target_dtype, cache_for_no_tensor_check,
+            node_name_to_target_dtype,
             qhandler, prepare_custom_config_dict)
         new_kwargs[k] = new_kwarg
 
@@ -926,12 +933,14 @@ def insert_observers_for_model_rewrite(
     # this assumes:
     # graph inputs are fp32 by default, and int8 where overriden
     # other nodes output dtype is specified by the qconfig
+    modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
         root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
         node_name_to_target_dtype[node.name] = get_target_dtype_for_node_rewrite(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
-            input_quantized_idxs, output_quantized_idxs, qhandler)
+            input_quantized_idxs, output_quantized_idxs, qhandler,
+            modules, cache_for_no_tensor_check)
 
     # Second, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
@@ -970,15 +979,15 @@ def insert_observers_for_model_rewrite(
 
         elif new_node.op in ('call_module', 'call_method', 'call_function', 'output'):
             modules = dict(model.named_modules(remove_duplicate=False))
-            args_have_no_tensors = \
-                all_node_args_have_no_tensors(
-                    new_node, modules, cache_for_no_tensor_check)
+            this_node_dtype = node_name_to_target_dtype[new_node.name]
+            output_not_a_tensor = this_node_dtype is None
+            # TODO(future PR): consider stopping matching getitem
             is_getitem = new_node.op == 'call_function' and \
                 new_node.target == operator.getitem
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                args_have_no_tensors or
+                output_not_a_tensor or
                 is_getitem
             ) and (not new_node.op == 'output')
 
@@ -987,7 +996,7 @@ def insert_observers_for_model_rewrite(
                     # this modifies new_node inplace
                     maybe_insert_input_observers_for_node_rewrite(
                         new_node, qconfig, load_arg, model, modules, observed_graph,
-                        node_name_to_target_dtype, cache_for_no_tensor_check,
+                        node_name_to_target_dtype,
                         qhandler, prepare_custom_config_dict)
 
                     is_last_node_of_pattern = root_node is node
@@ -1031,13 +1040,13 @@ def insert_observers_for_model_rewrite(
                         maybe_insert_input_observers_for_node_rewrite(
                             new_node, prev_node_qconfig, load_arg, model,
                             modules, observed_graph,
-                            node_name_to_target_dtype, cache_for_no_tensor_check,
+                            node_name_to_target_dtype,
                             qhandler, prepare_custom_config_dict)
             else:
                 # if we skipped observation and we have a copy node,
                 # assign the dtype to the dtype of the previous node
                 # new_node.dtype = new_node.args[0].dtype
-                if args_have_no_tensors or is_getitem:
+                if is_getitem:
                     node_name_to_target_dtype[new_node.name] = \
                         torch.float
 
