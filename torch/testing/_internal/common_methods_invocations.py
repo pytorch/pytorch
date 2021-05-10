@@ -1982,7 +1982,6 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
-
 def sample_inputs_foreach(self, device, dtype, N):
     tensors = [make_tensor((N, N), device, dtype) for _ in range(N)]
     return tensors
