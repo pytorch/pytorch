@@ -1965,6 +1965,7 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
+
 def sample_inputs_foreach(self, device, dtype, N):
     tensors = [make_tensor((N, N), device, dtype) for _ in range(N)]
     return tensors
@@ -2432,6 +2433,27 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
                                    args=(make_tensor((2, 2), device, dtype,
                                                      requires_grad=requires_grad),)))
     return tuple(samples)
+
+def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (), 1.5, False, False),
+            ((), (), 1.5, False, False),
+            ((S, S, S), (S, S, S), 1.5, False, False),
+            ((S,), (S, S, S), 1.5, False, True),
+            ((S, S, S), (S,), 1.5, False, True),
+            ((S, 1, S), (S, S), 1.5, False, True),
+            ((), (S, S, S), 1.5, False, True),
+            ((S, S, S), (), 1.5, False, True)
+            )
+
+    def generator():
+        for case in cases:
+            shape, shape_other, add_other, requires_grad, broadcasts_input = case
+            yield(SampleInput(make_arg(shape), args=(make_arg(shape_other, requires_grad=requires_grad) + add_other,),
+                broadcasts_input=broadcasts_input))
+
+    return list(generator())
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
@@ -4140,6 +4162,10 @@ op_db: List[OpInfo] = [
            op=torch.fmin,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('fmod',
+           op=torch.fmod,
+           dtypes=all_types_and(torch.float16, torch.bool),
+           sample_inputs_func=sample_inputs_fmod,),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -6054,6 +6080,7 @@ def method_tests():
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S) + 1.5),), 'tensor_broadcast_rhs'),
         ('fmod', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
+        
         ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
         ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
         ('remainder', (S, S, S), (1.5,), '', (True,)),
