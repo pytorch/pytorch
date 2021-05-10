@@ -167,7 +167,6 @@ struct Benchmark {
       std::string strategy,
       // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string file_to_run,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t n_seconds = 5)
       : manager_(manager),
         n_threads_(n_threads),
@@ -301,7 +300,6 @@ int main(int argc, char* argv[]) {
     I.global("sys", "path").attr("append")({"torch/csrc/deploy/example"});
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto n_threads = {1, 2, 4, 8, 16, 32, 40};
   for (int i = 4; i < argc; ++i) {
     std::string model_file = argv[i];
