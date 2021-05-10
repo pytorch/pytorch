@@ -31,7 +31,7 @@ Tensors
 .. _tensor-creation-ops:
 
 Creation Ops
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. note::
     Random sampling creation ops are listed under :ref:`random-sampling` and
@@ -77,6 +77,8 @@ Creation Ops
     polar
     heaviside
 
+.. _indexing-slicing-joining:
+
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -85,9 +87,11 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dsplit
     column_stack
     dstack
     gather
+    hsplit
     hstack
     index_select
     masked_select
@@ -106,11 +110,13 @@ Indexing, Slicing, Joining, Mutating Ops
     swapdims
     t
     take
+    take_along_dim
     tensor_split
     tile
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -298,12 +304,15 @@ Pointwise Ops
     exp
     exp2
     expm1
+    fake_quantize_per_channel_affine
+    fake_quantize_per_tensor_affine
     fix
     float_power
     floor
     floor_divide
     fmod
     frac
+    frexp
     imag
     ldexp
     lerp
@@ -331,6 +340,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real
@@ -340,6 +350,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
     sinc
@@ -364,6 +375,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -414,6 +427,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
@@ -465,6 +480,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip
@@ -553,7 +569,9 @@ Utilities
     result_type
     can_cast
     promote_types
-    set_deterministic
-    is_deterministic
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
+    set_warn_always
+    is_warn_always_enabled
     vmap
     _assert

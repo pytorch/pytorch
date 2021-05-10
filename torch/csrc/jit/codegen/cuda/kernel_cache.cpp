@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -27,6 +28,7 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
     if (index != -1 && index != cur_index) {
       return -1;
     }
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     index = cur_index;
   }
   return index;

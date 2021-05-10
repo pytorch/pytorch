@@ -17,6 +17,7 @@ using ::c10::IValue;
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Pickler::~Pickler() {
   flush();
 }
@@ -49,6 +50,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
     pushDouble(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    pushComplexDouble(ivalue);
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -292,7 +295,18 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  pushString(c10::to_string(tensor_data_.size()));
+  // if tensors_archive_table_ includes the tensor, root_key will be,
+  // for example: constants/0, such that it refers to the existing tensor
+  // archive/index.
+  const auto& found = tensors_archive_table_.find(tensor);
+  std::string root_key;
+  if (found != tensors_archive_table_.end()) {
+    std::string archive_name_slash = found->second.first + "/";
+    root_key = archive_name_slash + c10::to_string(found->second.second);
+  } else {
+    root_key = c10::to_string(tensor_data_.size());
+  }
+  pushString(root_key);
   // location
   pushString(tensor.device().str());
   // size
@@ -451,6 +465,7 @@ void Pickler::pushSpecializedList(
 
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double flipped;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
   for (size_t i = 0; i < sizeof(double); ++i) {
@@ -463,6 +478,14 @@ void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
+}
+void Pickler::pushComplexDouble(const IValue& value) {
+  c10::complex<double> d = value.toComplexDouble();
+  pushGlobal("builtins", "complex");
+  pushIValue(d.real());
+  pushIValue(d.imag());
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushLong(const std::string& data) {
@@ -603,7 +626,7 @@ WriteableTensorData getWriteableTensorData(
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
+  if (tensor.storage().device_type() != DeviceType::CPU && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.

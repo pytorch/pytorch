@@ -120,7 +120,7 @@ namespace cuda {
 class TensorDomain;
 class TensorView;
 
-class TORCH_CUDA_API TransformReplay {
+class TORCH_CUDA_CU_API TransformReplay {
  public:
   // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayPasC(

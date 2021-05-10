@@ -1,5 +1,3 @@
-from typing import List
-
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
@@ -11,7 +9,10 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_utils import is_iterable_of_tensors
+
 from copy import deepcopy
+from typing import List, Union
 import math  # noqa: F401
 
 # Testing utils
@@ -103,8 +104,8 @@ nn_functional_tests = [
     ('tanh', (S, S, S), (), '', (True,)),
     ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
@@ -122,16 +123,18 @@ nn_functional_tests = [
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '',),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('huber_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
@@ -267,7 +270,7 @@ def get_constant(x):
 
 def get_script_args(args):
     formals: List[str] = []
-    tensors: List[torch.Tensor] = []
+    tensors: List[Union[torch.Tensor, List[torch.Tensor]]] = []
     actuals: List[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
@@ -275,6 +278,11 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif is_iterable_of_tensors(arg):
+            name = 'i{}'.format(len(formals))
+            formals.append(name + ': List[torch.Tensor]')
+            actuals.append(name)
+            tensors.append(list(arg))
         elif isinstance(arg, str):
             actuals.append("'{}'".format(arg))
         else:
@@ -290,14 +298,15 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
     CU = torch.jit.CompilationUnit(script)
     return CU.the_method, tensors
 
-# create a script function from (name, func_type, output_process_fn),
-# returns a function takes in (args, kwargs) and runs the compiled function and
-# then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+# create a script function from (name, func_type),
+# returns a function takes in (args, kwargs) and runs the compiled function
+def create_script_fn(self, method_name, func_type):
+    # function returns tuple containing original output and
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
-        output = output_process_fn(fn(*tensors))
+        output = fn(*tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output
@@ -307,13 +316,13 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 # applied, and all tensor arguments remain.
 # used to trace functions when some arguments are not tensors
 def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
+    source = ['t' if (isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)) else 's' for arg in args]
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
         return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
 
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)]
 
 # create a trace function from input fn
 def create_traced_fn(self, fn):
@@ -527,8 +536,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         constructor_args = kwargs.get('constructor_args', ())
 
     # Set up inputs from tuple of sizes or constructor fn
+    input_dtype = torch.double
     if 'input_fn' in kwargs:
         input = kwargs['input_fn']()
+        if isinstance(input, torch.Tensor):
+            input = (input,)
+
+        if all(tensor.is_complex() for tensor in input):
+            input_dtype = torch.cdouble
     else:
         input = (kwargs['input_size'],)
 
@@ -543,7 +558,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input)
+    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 

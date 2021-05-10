@@ -28,6 +28,7 @@ from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
 from six import StringIO
+from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ FeatureSpec = namedtuple(
     ]
 )
 
+# pyre-fixme[16]: `FeatureSpec.__new__` has no attribute `__defaults__`
 FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
 
 
@@ -87,9 +89,10 @@ class Metadata(
     `feature_specs` - information about the features that contained in this
     field. For example if field have more than 1 feature it can have list of
     feature names contained in this field."""
-    __slots__ = ()
+    __slots__: Sequence[str] = ()
 
 
+# pyre-fixme[16]: `Metadata.__new__` has no attribute `__defaults__`
 Metadata.__new__.__defaults__ = (None, None, None)
 
 
@@ -97,7 +100,7 @@ class Field(object):
     """Represents an abstract field type in a dataset.
     """
 
-    __slots__ = ("_parent", "_field_offsets")
+    __slots__: Sequence[str] = ("_parent", "_field_offsets")
 
     def __init__(self, children):
         """Derived classes must call this after their initialization."""
@@ -205,7 +208,7 @@ class List(Field):
     the parent domain.
     """
 
-    __slots__ = ("lengths", "_items")
+    __slots__: Sequence[str] = ("lengths", "_items")
 
     def __init__(self, values, lengths_blob=None):
         if isinstance(lengths_blob, Field):
@@ -285,7 +288,7 @@ class ListWithEvicted(List):
     LRU Hashing.
     """
 
-    __slots__ = ("_evicted_values",)
+    __slots__: Sequence[str] = ("_evicted_values",)
 
     def __init__(self, values, lengths_blob=None, evicted_values=None):
         if isinstance(evicted_values, Field):
@@ -368,7 +371,7 @@ class Struct(Field):
     """Represents a named list of fields sharing the same domain.
     """
 
-    __slots__ = ("fields", "_frozen")
+    __slots__: Sequence[str] = ("fields", "_frozen")
 
     def __init__(self, *fields):
         """ fields is a list of tuples in format of (name, field). The name is
@@ -718,7 +721,7 @@ class Scalar(Field):
     a conversion to numpy.ndarray is attempted.
     """
 
-    __slots__ = ("_metadata", "dtype", "_original_dtype", "_blob")
+    __slots__: Sequence[str] = ("_metadata", "dtype", "_original_dtype", "_blob")
 
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
@@ -980,7 +983,7 @@ def from_dtype(dtype, _outer_shape=()):
 class _SchemaNode(object):
     """This is a private class used to represent a Schema Node"""
 
-    __slots__ = ("name", "children", "type_str", "field")
+    __slots__: Sequence[str] = ("name", "children", "type_str", "field")
 
     def __init__(self, name, type_str=''):
         self.name = name

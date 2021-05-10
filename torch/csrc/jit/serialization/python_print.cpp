@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/python_print.h>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
 #include <algorithm>
 
@@ -44,6 +46,8 @@ const static std::unordered_set<std::string> reserved_names = {
     "getattr",
     "inf",
     "nan",
+    "infj",
+    "nanj",
     "ops",
     "__torch__",
     // the python keywords
@@ -352,6 +356,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
@@ -599,6 +604,7 @@ struct PythonPrintImpl {
   }
 
   bool isLongLine(const std::string& str) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return str.size() + level * 2 >= 40;
   }
 
@@ -822,14 +828,14 @@ struct PythonPrintImpl {
         body_ << "):\n";
         printBody(graph->block());
       } break;
-      case prim::ModuleDictIndex: {
-        const auto dict = node->inputs().at(0);
+      case prim::ModuleContainerIndex: {
+        const auto container = node->inputs().at(0);
         const auto key = node->inputs().at(1);
         const auto out = node->outputs().at(0);
         assignValuesToTheirUniqueNames(out);
         indent();
         body_ << useOf(out) << " : " << out->type()->annotation_str() << " = "
-              << useOf(dict) << "[" << useOf(key) << "]\n";
+              << useOf(container) << "[" << useOf(key) << "]\n";
       } break;
       default:
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
@@ -858,6 +864,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto& c : val.toStringRef()) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -879,10 +886,10 @@ struct PythonPrintImpl {
         return true;
       }
 
-      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->annotation_str(type_printer_);
+        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
@@ -980,7 +987,7 @@ struct PythonPrintImpl {
       } break;
       case prim::TupleConstruct: {
         if (auto qualname =
-                node->output()->type()->expect<TupleType>()->name()) {
+                node->output()->type()->expectRef<TupleType>().name()) {
           stmt << node->output()->type()->annotation_str(type_printer_);
         }
         printValueList(
@@ -1150,10 +1157,14 @@ struct PythonPrintImpl {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
         stmt << "(";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (i > 0) {
+        // calculate how many args are specified.
+        // see (https://github.com/pytorch/pytorch/pull/56079) for more
+        // details.
+        size_t necessary_args =
+            CalculateNecessaryArgs(schema.arguments(), node->inputs());
+        for (size_t i = 0; i < necessary_args; ++i) {
+          if (i > 0)
             stmt << ", ";
-          }
           auto v = useOf(node->inputs().at(i));
           // print the kwarg name if it is a kwarg only argument.
           if (i < schema.arguments().size()) {
@@ -1346,6 +1357,25 @@ struct PythonPrintImpl {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
+        auto forwardPreHooks = classType->getForwardPreHooks();
+        if (forwardPreHooks.size() > 0) {
+          indent();
+          body_ << "__forward_pre_hooks__ = [";
+          for (const auto& pre_hook : forwardPreHooks) {
+            body_ << "\"" << pre_hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
+
+        auto forwardHooks = classType->getForwardHooks();
+        if (forwardHooks.size() > 0) {
+          indent();
+          body_ << "__forward_hooks__ = [";
+          for (const auto& hook : forwardHooks) {
+            body_ << "\"" << hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1392,6 +1422,19 @@ struct PythonPrintImpl {
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }
+      std::set<std::string> already_printed;
+      for (auto& hook : classType->getForwardHooks()) {
+        if (already_printed.count(hook->name()) == 0) {
+          already_printed.insert(hook->name());
+          printFunction(*hook);
+        }
+      }
+      for (auto& pre_hook : classType->getForwardPreHooks()) {
+        if (already_printed.count(pre_hook->name()) == 0) {
+          already_printed.insert(pre_hook->name());
+          printFunction(*pre_hook);
+        }
+      }
     }
   }
 
@@ -1430,6 +1473,7 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto type = arg.type();
             registerClassDependencies(type);
             body_ << ", " << arg.name() << ": "

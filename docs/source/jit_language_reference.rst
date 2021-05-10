@@ -63,7 +63,7 @@ net models. In particular, TorchScript supports:
    :header: "Type", "Description"
 
    "``Tensor``", "A PyTorch tensor of any dtype, dimension, or backend"
-   "``Tuple[T0, T1, ...]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
+   "``Tuple[T0, T1, ..., TN]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
    "``bool``", "A boolean value"
    "``int``", "A scalar integer"
    "``float``", "A scalar floating point number"
@@ -131,6 +131,7 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
    ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
    ":any:`typing.NoReturn`", "Not implemented"
    ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
+   ":any:`typing.Sequence`", "Not implemented"
    ":any:`typing.Callable`", "Not implemented"
    ":any:`typing.Literal`", "Not implemented"
    ":any:`typing.ClassVar`", "Not implemented"

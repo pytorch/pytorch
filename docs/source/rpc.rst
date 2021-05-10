@@ -254,6 +254,20 @@ details.
 
     rpc/rref
 
+.. _remote_module:
+
+RemoteModule
+------------
+
+``RemoteModule`` is an easy way to create an nn.Module remotely on a different
+process. The actual module resides on a remote host, but the local host has a
+handle to this module and invoke this module similar to a regular nn.Module.
+The invocation however incurs RPC calls to the remote end and can be performed
+asynchronously if needed via additional APIs supported by RemoteModule.
+
+.. autoclass:: torch.distributed.nn.api.remote_module.RemoteModule
+    :members: remote_parameters, get_module_rref
+
 
 Distributed Autograd Framework
 ------------------------------
@@ -298,7 +312,7 @@ to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
--  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework (covers **RemoteModule** as well) <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
 -  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
 -  `Implementing batch RPC processing <https://pytorch.org/tutorials/intermediate/rpc_async_execution.html>`__
 -  `Distributed Pipeline Parallel <https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html>`__

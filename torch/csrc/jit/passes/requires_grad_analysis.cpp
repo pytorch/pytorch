@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -59,6 +60,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
       "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (node->isMemberOf(comparison_ops)) {
     return setRequiresGrad(node->output(), false);
   } else if (node->matches(

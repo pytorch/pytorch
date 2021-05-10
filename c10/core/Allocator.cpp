@@ -12,13 +12,16 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
     void* ptr,
     const std::function<void(void*)>& deleter,
     Device device) {
-  return {ptr,
-          new InefficientStdFunctionContext({ptr, deleter}),
-          &deleteInefficientStdFunctionContext,
-          device};
+  return {
+      ptr,
+      new InefficientStdFunctionContext({ptr, deleter}),
+      &deleteInefficientStdFunctionContext,
+      device};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 C10_API uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
@@ -30,7 +33,7 @@ void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
   auto* alloc = allocator_array[static_cast<int>(t)];
-  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alloc, "Allocator for ", t, " is not set.");
   return alloc;
 }
 
@@ -48,6 +51,7 @@ void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device) {
   }
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 MemoryReportingInfoBase::MemoryReportingInfoBase() {}
 
 } // namespace c10

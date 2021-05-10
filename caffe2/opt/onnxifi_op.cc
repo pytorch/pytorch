@@ -1,6 +1,6 @@
+#include "caffe2/opt/onnxifi_op.h"
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
-#include "caffe2/opt/onnxifi_op.h"
 
 namespace caffe2 {
 
@@ -65,6 +65,7 @@ void setInputTensorDescriptorTypeAndBuffer(
 template <typename T>
 void adjustQuantizedOffsetImpl(Tensor* t, uint8_t offset) {
   auto* data = t->mutable_data<T>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < t->numel(); ++i) {
     data[i] -= offset;
   }
@@ -131,6 +132,7 @@ void BlobToTensorDescriptor(
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
   const bool is_int8tensor =
       blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_external_tensor;
 #ifndef C10_MOBILE
   auto function_ptr =
@@ -278,6 +280,7 @@ details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
   output_reshape_info.begins.reserve(output_names_.size());
   output_reshape_info.ends.reserve(output_names_.size());
   output_reshape_info.fast_path.reserve(output_names_.size());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < output_names_.size(); ++i) {
     const auto it = output_shape_hints_.find(i);
     CAFFE_ENFORCE(
@@ -305,7 +308,7 @@ template <typename DimContainer>
 void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
     const DimContainer& real_shape,
     c10::ArrayRef<uint64_t> max_shape,
-    details::OutputReshapeInfo &output_reshape_info,
+    details::OutputReshapeInfo& output_reshape_info,
     int currentIndex) {
   CAFFE_ENFORCE_EQ(real_shape.size(), max_shape.size());
   const auto dim_size = real_shape.size();
@@ -316,6 +319,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
   end.Resize(dim_size);
   int32_t* end_ptr = end.template mutable_data<int32_t>();
   int32_t mismatch = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int j = 0; j < dim_size; ++j) {
     CAFFE_ENFORCE_GE(
         max_shape[j],
@@ -330,14 +334,20 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
         real_shape[j],
         ")");
     begin_ptr[j] = 0;
-    if (max_shape[j] >= real_shape[j]) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    if (max_shape[j] > real_shape[j]) {
       end_ptr[j] = real_shape[j];
       mismatch += j;
     } else {
-      end_ptr[j] = -1;
+      end_ptr[j] = max_shape[j];
     }
   }
-  output_reshape_info.fast_path[currentIndex] = !mismatch;
+
+  if (dim_size > 0) {
+    output_reshape_info.fast_path[currentIndex] = !mismatch;
+  } else {
+    output_reshape_info.fast_path[currentIndex] = false;
+  }
 }
 
 template <>
@@ -377,15 +387,24 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     return current_batch_size;
   }
 
-  auto& output_reshape_info = output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo()).first->second;
+  auto& output_reshape_info =
+      output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo())
+          .first->second;
 
   if (use_passed_output_shapes_) {
     auto shape_info_it = output_shapes_per_bs_.find(current_batch_size);
-    CAFFE_ENFORCE(shape_info_it != output_shapes_per_bs_.end(), "Unable to find outputs shapes for bs=", current_batch_size);
+    CAFFE_ENFORCE(
+        shape_info_it != output_shapes_per_bs_.end(),
+        "Unable to find outputs shapes for bs=",
+        current_batch_size);
     CAFFE_ENFORCE_EQ(shape_info_it->second.size(), OutputSize());
 
     for (int i = 0; i < OutputSize(); ++i) {
-      fillOutputReshapeInfo(shape_info_it->second[i], output_shapes_max_bs_[i], output_reshape_info, i);
+      fillOutputReshapeInfo(
+          shape_info_it->second[i],
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
     }
   } else {
     BoundShapeSpec spec(dims[0], max_seq_size_);
@@ -422,7 +441,11 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     for (int i = 0; i < OutputSize(); ++i) {
       const auto find_res = shape_info.find(output_names_[i]);
       CAFFE_ENFORCE(find_res != shape_info.end());
-      fillOutputReshapeInfo(find_res->second.shape.dims(), output_shapes_max_bs_[i], output_reshape_info, i);
+      fillOutputReshapeInfo(
+          find_res->second.shape.dims(),
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
     }
   }
 
@@ -515,22 +538,107 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(
   }
 }
 
+string mapOnnxStatusToString(onnxStatus status) {
+  switch (status) {
+    case ONNXIFI_STATUS_SUCCESS:
+      return "ONNXIFI_STATUS_SUCCESS";
+    case ONNXIFI_STATUS_FALLBACK:
+      return "ONNXIFI_STATUS_FALLBACK";
+    case ONNXIFI_STATUS_INVALID_ID:
+      return "ONNXIFI_STATUS_INVALID_ID";
+    case ONNXIFI_STATUS_INVALID_SIZE:
+      return "ONNXIFI_STATUS_INVALID_SIZE";
+    case ONNXIFI_STATUS_INVALID_POINTER:
+      return "ONNXIFI_STATUS_INVALID_POINTER";
+    case ONNXIFI_STATUS_INVALID_PROTOBUF:
+      return "ONNXIFI_STATUS_INVALID_PROTOBUF";
+    case ONNXIFI_STATUS_INVALID_MODEL:
+      return "ONNXIFI_STATUS_INVALID_MODEL";
+    case ONNXIFI_STATUS_INVALID_BACKEND:
+      return "ONNXIFI_STATUS_INVALID_BACKEND";
+    case ONNXIFI_STATUS_INVALID_GRAPH:
+      return "ONNXIFI_STATUS_INVALID_GRAPH";
+    case ONNXIFI_STATUS_INVALID_EVENT:
+      return "ONNXIFI_STATUS_INVALID_EVENT";
+    case ONNXIFI_STATUS_INVALID_STATE:
+      return "ONNXIFI_STATUS_INVALID_STATE";
+    case ONNXIFI_STATUS_INVALID_NAME:
+      return "ONNXIFI_STATUS_INVALID_NAME";
+    case ONNXIFI_STATUS_INVALID_SHAPE:
+      return "ONNXIFI_STATUS_INVALID_SHAPE";
+    case ONNXIFI_STATUS_INVALID_DATATYPE:
+      return "ONNXIFI_STATUS_INVALID_DATATYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_TYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_LOCATION:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_LOCATION";
+    case ONNXIFI_STATUS_INVALID_FENCE_TYPE:
+      return "ONNXIFI_STATUS_INVALID_FENCE_TYPE";
+    case ONNXIFI_STATUS_INVALID_PROPERTY:
+      return "ONNXIFI_STATUS_INVALID_PROPERTY";
+    case ONNXIFI_STATUS_UNSUPPORTED_TAG:
+      return "ONNXIFI_STATUS_UNSUPPORTED_TAG";
+    case ONNXIFI_STATUS_UNSUPPORTED_VERSION:
+      return "ONNXIFI_STATUS_UNSUPPORTED_VERSION";
+    case ONNXIFI_STATUS_UNSUPPORTED_OPERATOR:
+      return "ONNXIFI_STATUS_UNSUPPORTED_OPERATOR";
+    case ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE";
+    case ONNXIFI_STATUS_UNSUPPORTED_SHAPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_SHAPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_DATATYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_DATATYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_PROPERTY:
+      return "ONNXIFI_STATUS_UNSUPPORTED_PROPERTY";
+    case ONNXIFI_STATUS_UNIDENTIFIED_NAME:
+      return "ONNXIFI_STATUS_UNIDENTIFIED_NAME";
+    case ONNXIFI_STATUS_MISMATCHING_SHAPE:
+      return "ONNXIFI_STATUS_MISMATCHING_SHAPE";
+    case ONNXIFI_STATUS_MISMATCHING_DATATYPE:
+      return "ONNXIFI_STATUS_MISMATCHING_DATATYPE";
+    case ONNXIFI_STATUS_NO_SYSTEM_MEMORY:
+      return "ONNXIFI_STATUS_NO_SYSTEM_MEMORY";
+    case ONNXIFI_STATUS_NO_DEVICE_MEMORY:
+      return "ONNXIFI_STATUS_NO_DEVICE_MEMORY";
+    case ONNXIFI_STATUS_NO_SYSTEM_RESOURCES:
+      return "ONNXIFI_STATUS_NO_SYSTEM_RESOURCES";
+    case ONNXIFI_STATUS_NO_DEVICE_RESOURCES:
+      return "ONNXIFI_STATUS_NO_DEVICE_RESOURCES";
+    case ONNXIFI_STATUS_BACKEND_UNAVAILABLE:
+      return "ONNXIFI_STATUS_BACKEND_UNAVAILABLE";
+    case ONNXIFI_STATUS_INTERNAL_ERROR:
+      return "ONNXIFI_STATUS_INTERNAL_ERROR";
+    case ONNXIFI_STATUS_FATAL_ERROR:
+      return "ONNXIFI_STATUS_FATAL_ERROR";
+    default:
+      return "ONNXIFI_STATUS_STRING_NOT_MAPPED";
+  }
+}
+
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < InputSize(); ++i) {
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     at::IntArrayRef tensor_dims;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
       const auto& input_tensor_int8 =
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           this->template Input<int8::Int8TensorCPU>(i);
       const auto& cpu_tensor = input_tensor_int8.t;
       tensor_dims = cpu_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(
           input_tensor_int8, &tensor_descriptor);
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const auto& input_tensor = Input(i);
       tensor_dims = input_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
@@ -545,7 +653,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   c10::SmallVector<int64_t, 4> tensor_dims_int64;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < OutputSize(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     setOutputShapeAndType(i, tensor_dims_int64);
   }
   bool ext_supported = false;
@@ -576,18 +686,25 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
           });
       traces_->numEvents = 0;
     }
+
+    const onnxStatus status = (*onnxSetIOAndRunGraphPointer_)(
+        graph_,
+        input_desc_.size(),
+        input_desc_.data(),
+        output_desc_.size(),
+        output_desc_.data(),
+        &output_fence,
+        traces_.get());
     CAFFE_ENFORCE_EQ(
-        (*onnxSetIOAndRunGraphPointer_)(
-            graph_,
-            input_desc_.size(),
-            input_desc_.data(),
-            output_desc_.size(),
-            output_desc_.data(),
-            &output_fence,
-            traces_.get()),
-        ONNXIFI_STATUS_SUCCESS);
+        status,
+        ONNXIFI_STATUS_SUCCESS,
+        "Reason: onnxSetIOAndRunGraph returned status code ",
+        mapOnnxStatusToString(status));
+
     current_batch_size = extractOutputBatchSizes();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxEventState eventState;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxStatus eventStatus;
     std::string message;
     size_t messageLength = 512;
@@ -599,6 +716,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             timeout_,
             &eventState,
             &eventStatus,
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<char*>(message.data()),
             &messageLength),
         ONNXIFI_STATUS_SUCCESS);
@@ -656,8 +774,10 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   if (adjust_quantized_offset_) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (unsigned i = 0U; i < OutputSize(); ++i) {
       if (quantized_outputs_[i]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         auto* int8_tensor = this->template Output<int8::Int8TensorCPU>(i);
         int8_tensor->zero_point += adjust_quantized_offset_;
         adjustQuantizedOffset(&int8_tensor->t, adjust_quantized_offset_);
@@ -672,7 +792,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)

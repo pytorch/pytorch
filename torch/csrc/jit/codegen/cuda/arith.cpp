@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -242,7 +243,7 @@ TensorView* arithOpOverloads(
 }
 } // namespace
 
-TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
+TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   auto vals = maybeBroadcast({v1, v2});
   Val* out = newOutputVal({vals[0], vals[1]});
   if (is_logical_op(type)) {
@@ -481,6 +482,7 @@ TensorView* reductionOp(
 }
 
 TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):
@@ -592,7 +594,7 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
   return arithOpOverloads(sub_alpha, v1, v2, v3);
 }
 // lerp
-TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight) {
+TORCH_CUDA_CU_API Val* lerp(Val* start, Val* end, Val* weight) {
   auto vals = maybeBroadcast({start, end, weight});
   Val* intrm1 = binaryOp(BinaryOpType::Sub, vals[1], vals[0]);
   Val* intrm2 = binaryOp(BinaryOpType::Mul, vals[2], intrm1);

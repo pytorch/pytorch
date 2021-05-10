@@ -7,6 +7,7 @@ import threading
 from typing import Generic, TypeVar, Set, Any
 
 import torch
+from torch.futures import Future
 
 from torch._C._distributed_rpc import (
     PyRRef,
@@ -309,7 +310,7 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join()
+        _get_current_rpc_agent().join(shutdown=True)
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -346,7 +347,7 @@ def get_worker_info(worker_name=None):
         ``worker_name`` or :class:`~torch.distributed.rpc.WorkerInfo` of the
         current worker if ``worker_name`` is ``None``.
     """
-    if worker_name:
+    if worker_name is not None:
         return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
         return _get_current_rpc_agent().get_worker_info()
@@ -361,16 +362,31 @@ def _to_worker_info(to):
         raise ValueError("Cannot get WorkerInfo from name {}".format(to))
 
 
-def _rref_typeof_on_owner(rref):
-    return type(rref.local_value())
+def _rref_typeof_on_owner(rref, blocking=True):
+    rref_type = type(rref.local_value())
+    if blocking:
+        return rref_type
+    else:
+        # Wrap result into a completed Future. This is so that if blocking=`False`
+        # is specified, we return a future regardless of if this call is on user
+        # or owner.
+        future = Future[type]()
+        future.set_result(rref_type)
+        return future
 
 
-def _rref_typeof_on_user(rref):
-    return rpc_sync(
+def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT, blocking=True):
+    fut = rpc_async(
         rref.owner(),
         _rref_typeof_on_owner,
-        args=(rref,)
+        args=(rref,),
+        timeout=timeout
     )
+    if blocking:
+        return fut.wait()
+    else:
+        return fut
+
 
 
 T = TypeVar("T")
@@ -381,16 +397,16 @@ try:
     # Combine the implementation class and the type class.
     class RRef(PyRRef, Generic[T]):
         pass
-except TypeError as exc:
+except TypeError:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
     # Mypy doesn't understand __class__ (mypy bug #4177)
-    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):  # type: ignore
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):  # type: ignore[name-defined, misc, valid-type]
         pass
 
     # Combine the implementation class and the type class.
     # Types for classes expecting a certain generic parameter (mypy bug #7791)
-    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):  # type: ignore
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):  # type: ignore[misc, no-redef, valid-type]
         pass
 
 
@@ -474,12 +490,6 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         to retrieve the result value locally.
 
     .. warning ::
-        Using GPU tensors as arguments or return values of ``func`` is not
-        supported since we don't support sending GPU tensors over the wire. You
-        need to explicitly copy GPU tensors to CPU before using them as
-        arguments or return values of ``func``.
-
-    .. warning ::
         The ``remote`` API does not copy storages of argument tensors until
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
@@ -546,28 +556,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     dst_worker_info = _to_worker_info(to)
     should_profile = torch.autograd._profiler_enabled()
 
-    ctx_manager = contextlib.suppress()
-    if should_profile:
-        # Create appropriate string representation based on type of func
-        # (builtin, script, python)
-        if qualified_name is None:
-            func_name = (
-                torch._jit_internal._qualified_name(func)
-                if isinstance(func, torch.jit.ScriptFunction)
-                else func.__qualname__
-            )
-        else:
-            func_name = qualified_name
-        # Build RPC profiling key.
-        rpc_profiling_key = _build_rpc_profiling_key(
-            RPCExecMode.REMOTE,
-            func_name,
-            get_worker_info().name,
-            dst_worker_info.name,
-        )
-        RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
-        # Mypy doesn't support re-def of a variable not in the same block (#1174)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)  # type: ignore[assignment]
+    ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, RPCExecMode.REMOTE, dst_worker_info)
 
     with ctx_manager as rf:
         args = args if args else ()
@@ -618,32 +607,9 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
 
-    # TODO: profiling logic does not really belong in invoke_rpc, it should be
-    # added as part of a context manager or helper (https://github.com/pytorch/pytorch/issues/36360)
     should_profile = torch.autograd._profiler_enabled()
 
-    ctx_manager = contextlib.suppress()
-    if should_profile:
-        # Create appropriate string representation based on type of func
-        # (builtin, script, python)
-        if qualified_name is None:
-            func_name = (
-                torch._jit_internal._qualified_name(func)
-                if isinstance(func, torch.jit.ScriptFunction)
-                else func.__qualname__
-            )
-        else:
-            func_name = qualified_name
-        # Build RPC profiling key.
-        rpc_profiling_key = _build_rpc_profiling_key(
-            rpc_type,
-            func_name,
-            get_worker_info().name,
-            dst_worker_info.name,
-        )
-        RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
-        # Mypy doesn't support re-def of a variable not in the same block (#1174)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)  # type: ignore[assignment]
+    ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info)
 
     with ctx_manager as rf:
         args = args if args else ()
@@ -722,12 +688,6 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Returns:
         Returns the result of running ``func`` with ``args`` and ``kwargs``.
-
-    .. warning ::
-        Using GPU tensors as arguments or return values of ``func`` is not
-        supported since we don't support sending GPU tensors over the wire. You
-        need to explicitly copy GPU tensors to CPU before using them as
-        arguments or return values of ``func``.
 
     Example::
         Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
@@ -866,3 +826,31 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     if hasattr(_thread_local_var, "future_list"):
         _thread_local_var.future_list.append(fut)
     return fut
+
+
+def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
+    ctx_manager = contextlib.suppress()
+
+    if should_profile:
+        # Create appropriate string representation based on type of func
+        # (builtin, script, python)
+        if qualified_name is None:
+            func_name = (
+                torch._jit_internal._qualified_name(func)
+                if isinstance(func, torch.jit.ScriptFunction)
+                else func.__qualname__
+            )
+        else:
+            func_name = qualified_name
+        # Build RPC profiling key.
+        rpc_profiling_key = _build_rpc_profiling_key(
+            rpc_type,
+            func_name,
+            get_worker_info().name,
+            dst_worker_info.name,
+        )
+        RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
+        # Mypy doesn't support re-def of a variable not in the same block (#1174)
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)  # type: ignore[assignment]
+
+    return ctx_manager

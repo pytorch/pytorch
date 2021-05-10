@@ -37,7 +37,14 @@ class Distribution(object):
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
-            for param, constraint in self.arg_constraints.items():
+            try:
+                arg_constraints = self.arg_constraints
+            except NotImplementedError:
+                arg_constraints = {}
+                warnings.warn(f'{self.__class__} does not define `arg_constraints`. ' +
+                              'Please set `arg_constraints = {}` or initialize the distribution ' +
+                              'with `validate_args=False` to turn off validation.')
+            for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
                     continue  # skip constraints that cannot be checked
                 if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
@@ -258,8 +265,15 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
-        assert self.support is not None
-        if not self.support.check(value).all():
+        try:
+            support = self.support
+        except NotImplementedError:
+            warnings.warn(f'{self.__class__} does not define `support` to enable ' +
+                          'sample validation. Please initialize the distribution with ' +
+                          '`validate_args=False` to turn off validation.')
+            return
+        assert support is not None
+        if not support.check(value).all():
             raise ValueError('The value argument must be within the support')
 
     def _get_checked_instance(self, cls, _instance=None):

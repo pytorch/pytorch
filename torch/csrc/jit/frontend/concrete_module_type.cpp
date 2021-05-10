@@ -111,7 +111,9 @@ bool ConcreteModuleTypeBuilder::equals(
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
-      builtinFunctions_ == other.builtinFunctions_;
+      builtinFunctions_ == other.builtinFunctions_ &&
+      forwardHooks_ == other.forwardHooks_ &&
+      forwardPreHooks_ == other.forwardPreHooks_;
   // clang-format on
   if (!equal) {
     return false;
@@ -256,8 +258,8 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
   TORCH_INTERNAL_ASSERT(type);
   functionAttributes_.emplace(
       std::move(name),
-      ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
-                                                   std::move(pyFunction)});
+      ConcreteModuleTypeBuilder::FunctionAttribute{
+          type->expect<FunctionType>(), std::move(pyFunction)});
 }
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
@@ -272,6 +274,14 @@ void ConcreteModuleTypeBuilder::addModule(
     std::shared_ptr<ConcreteModuleType> meta) {
   modules_.emplace_back(
       ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
+}
+
+void ConcreteModuleTypeBuilder::addForwardHook(py::object hook) {
+  forwardHooks_.emplace_back(std::move(hook));
+}
+
+void ConcreteModuleTypeBuilder::addForwardPreHook(py::object pre_hook) {
+  forwardPreHooks_.emplace_back(std::move(pre_hook));
 }
 
 void ConcreteModuleTypeBuilder::addOverload(
@@ -306,6 +316,16 @@ void ConcreteModuleType::dump() const {
   for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
               << info.meta_->getJitType()->annotation_str() << "\n";
+  }
+  std::cout << "\nForward Pre-Hooks: \n";
+  for (const auto& pre_hook_id : data_.forwardPreHooks_) {
+    std::cout << "\t"
+              << "pre_hook id: " << pre_hook_id << "\n";
+  }
+  std::cout << "\nForward Hooks: \n";
+  for (const auto& hook_id : data_.forwardHooks_) {
+    std::cout << "\t"
+              << "hook id: " << hook_id << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {

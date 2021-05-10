@@ -9,4 +9,12 @@ Benchmark Utils - torch.utils.benchmark
 
 .. autoclass:: Timer
     :members:
-    :show-inheritance:
+
+.. autoclass:: Measurement
+    :members:
+
+.. autoclass:: CallgrindStats
+    :members:
+
+.. autoclass:: FunctionCounts
+    :members:

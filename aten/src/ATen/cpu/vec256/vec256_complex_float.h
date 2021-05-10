@@ -22,7 +22,8 @@ private:
   __m256 values;
 public:
   using value_type = c10::complex<float>;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 4;
   }
   Vec256() {}
@@ -49,6 +50,7 @@ public:
   template <int64_t mask>
   static Vec256<c10::complex<float>> blend(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& b) {
      // convert c10::complex<V> index mask to V index mask: xy -> xxyy
+    // NOLINTNEXTLINE(clang-diagnostic-warning)
     switch (mask) {
       case 0:
         return a;
@@ -241,9 +243,7 @@ public:
     return Vec256(_mm256_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
   }
   Vec256<c10::complex<float>> acos() const {
-    // acos(x) = pi/2 - asin(x)
-    const __m256 pi_2 = _mm256_setr_ps(M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0);
-    return _mm256_sub_ps(pi_2, asin());
+    return map(std::acos);
   }
   Vec256<c10::complex<float>> atan() const;
   Vec256<c10::complex<float>> atan2(const Vec256<c10::complex<float>> &b) const {

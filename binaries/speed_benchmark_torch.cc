@@ -17,14 +17,16 @@
 #include <string>
 #include <vector>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/script.h"
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/script.h>
 
-#include "c10/mobile/CPUCachingAllocator.h"
+#include <c10/mobile/CPUCachingAllocator.h>
 
 #include <chrono>
 using namespace std::chrono;
@@ -160,21 +162,23 @@ std::vector<c10::IValue> create_inputs() {
   return inputs;
 }
 
+template<class T>
 class Runner {
  public:
   virtual ~Runner() = default;
   virtual c10::IValue run(
-      torch::jit::Module& module,
+      T& module,
       const std::vector<c10::IValue>& inputs) {
     return module.forward(inputs);
   }
 };
 
-class vkRunner final : public Runner {
+template<class T>
+class vkRunner final : public Runner<T> {
  public:
   virtual ~vkRunner() = default;
   virtual c10::IValue run(
-      torch::jit::Module& module,
+      T& module,
       const std::vector<c10::IValue>& inputs) override {
     // Upload the input tensor(s) to GPU memory.
     inputs_.clear();
@@ -209,9 +213,13 @@ int main(int argc, char** argv) {
 
   std::vector<c10::IValue> inputs = create_inputs();
 
-  torch::autograd::AutoGradMode guard(false);
+  c10::InferenceMode mode;
+#if BUILD_LITE_INTERPRETER
+  auto module = torch::jit::_load_for_mobile(FLAGS_model);
+#else
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
+#endif
 
   if (FLAGS_use_bundled_input >= 0) {
     auto get_method = module.find_method("get_all_bundled_inputs");
@@ -231,11 +239,19 @@ int main(int argc, char** argv) {
     inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
   }
 
-  const std::unique_ptr<Runner> runner =
-      FLAGS_vulkan ? std::make_unique<vkRunner>() :
-                     std::make_unique<Runner>();
+#ifdef BUILD_LITE_INTERPRETER
+  using ModuleType = torch::jit::mobile::Module;
+#else
+  using ModuleType = torch::jit::Module;
+#endif
 
+  const auto runner = FLAGS_vulkan ? std::make_unique<vkRunner<ModuleType>>()
+                                   : std::make_unique<Runner<ModuleType>>();
+
+#ifndef BUILD_LITE_INTERPRETER
   module.eval();
+#endif
+
   if (FLAGS_print_output) {
     std::cout << runner->run(module, inputs) << std::endl;
   }

@@ -29,7 +29,7 @@ class PruningOpTest(TestCase):
         mask = self._generate_rowwise_mask(embedding_rows)
 
         def get_pt_result(embedding_weights, mask, indices_type):
-            return torch.rowwise_prune(embedding_weights, mask, indices_type)
+            return torch._rowwise_prune(embedding_weights, mask, indices_type)
 
         # Reference implementation.
         def get_reference_result(embedding_weights, mask, indices_type):

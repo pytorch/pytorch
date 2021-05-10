@@ -262,7 +262,8 @@ NvrtcFunction nvrtcCompile(
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
   int major = 0, minor = 0;
-  getMajorMinor(prop, major, minor);
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
@@ -280,8 +281,23 @@ NvrtcFunction nvrtcCompile(
 
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 40200
+  args.push_back("-hip-pch");
+#endif
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      (compile_to_sass ? "sm_" : "compute_") +
+#else
+      "compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
@@ -290,10 +306,16 @@ NvrtcFunction nvrtcCompile(
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
+#ifdef __HIP_PLATFORM_HCC__
+    TORCH_WARN_ONCE(
+        "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
+#else
     args.push_back("--fmad=false");
+#endif
   }
 
   const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t jit_opt_level;
 
   std::vector<CUjit_option> options;
@@ -323,6 +345,7 @@ NvrtcFunction nvrtcCompile(
         program, args.size(), args.data());
 
     if (result != NVRTC_SUCCESS) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t logsize;
       at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
       std::vector<char> log(logsize);
@@ -344,11 +367,22 @@ NvrtcFunction nvrtcCompile(
 
   {
     FUSER_PERF_SCOPE("get PTX");
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
+#if CUDA_VERSION >= 11010
+    // compile_to_sass determines whether we are generating SASS or PTX, hence
+    // the different API.
+    const auto getSize = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+        : at::globalContext().getNVRTC().nvrtcGetPTX;
+#else
+    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+#endif
+    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
     ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
   }
 
   NvrtcFunction compiled_kernel_;
@@ -358,6 +392,11 @@ NvrtcFunction nvrtcCompile(
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
 #ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
+#if CUDA_VERSION >= 11010
+    TORCH_CHECK(
+        !compile_to_sass,
+        "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
+#endif
     FUSER_PERF_SCOPE("load CUBIN");
 
     // Output ptx file
@@ -369,6 +408,7 @@ NvrtcFunction nvrtcCompile(
       myPtxFile.close();
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUlinkState linkState;
 
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
@@ -384,7 +424,9 @@ NvrtcFunction nvrtcCompile(
         options.data(),
         option_vals.data()));
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t cubinSize;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* cubin;
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkComplete(
         linkState, &cubin, &cubinSize));

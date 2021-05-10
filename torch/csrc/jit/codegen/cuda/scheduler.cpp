@@ -220,6 +220,7 @@ ReductionParams reductionHeuristic(
   // Decision to do a cross-warp reduction per block
   if (red_elems_per_thread >= (bdimy * kMinValuesPerThread) ||
       red_elems_per_thread >= kMaxValuesPerThread || !rparams.fastest_dim) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     inputs_consumed_per_block_iter *= bdimy;
     red_elems_per_thread = ceilDiv(red_elems_per_thread, bdimy);
     rparams.cross_block = true;
@@ -288,7 +289,7 @@ ReductionParams reductionHeuristic(
 }
 } // anonymous namespace
 
-TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
     TensorView* red_tv) {

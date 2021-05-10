@@ -1,5 +1,13 @@
+
+_help_mutation = """\
+If you are attempting to modify the kwargs or args of a torch.fx.Node object,
+instead create a new copy of it and assign the copy to the node:
+    new_args = ... # copy and mutate args
+    node.args = new_args
+"""
+
 def _no_mutation(self, *args, **kwargs):
-    raise NotImplementedError(f"'{type(self).__name__}' object does not support mutation")
+    raise NotImplementedError(f"'{type(self).__name__}' object does not support mutation. {_help_mutation}")
 
 def _create_immutable_container(base, mutable_functions):
     container = type('immutable_' + base.__name__, (base,), {})
