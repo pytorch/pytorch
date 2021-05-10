@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
-    kineto_available, profile, record_function, DeviceType, ProfilerActivity
+    kineto_available, profile, record_function, supported_activities,
+    DeviceType, ProfilerActivity
 )
 
 try:
@@ -177,7 +178,7 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
 
     def test_memory_profiler(self):
-        def run_profiler(tensor_creation_fn, metric):
+        def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
             with _profile(profile_memory=True, record_shapes=True, use_kineto=kineto_available()) as prof:
                 x = None
@@ -209,7 +210,7 @@ class TestProfiler(TestCase):
         def create_mkldnn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
 
-        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
+        stats = run_profiler(create_cpu_tensor)
         check_metrics(
             stats,
             "cpu_memory_usage",
@@ -223,9 +224,33 @@ class TestProfiler(TestCase):
             ]
         )
 
+        # if kineto_available():
+        #    with TemporaryFileName(mode="w+") as fname:
+        #        with profile(profile_memory=True) as prof:
+        #            x = None
+        #            with record_function("test_user_scope_alloc"):
+        #                x = create_cpu_tensor()
+        #            with record_function("test_user_scope_dealloc"):
+        #                del x
+        #        prof.export_chrome_trace(fname)
+        #        with io.open(fname, 'r') as f:
+        #            trace = json.load(f)
+        #            assert "traceEvents" in trace
+        #            events = trace["traceEvents"]
+        #            found_memory_events = False
+        #            for evt in events:
+        #                assert "name" in evt
+        #                if evt["name"] == "[memory]":
+        #                    found_memory_events = True
+        #                    assert "args" in evt
+        #                    assert "Device Type" in evt["args"]
+        #                    assert "Device Id" in evt["args"]
+        #                    assert "Bytes" in evt["args"]
+        #            assert found_memory_events
+
         if torch.cuda.is_available():
             create_cuda_tensor()
-            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
+            stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
                 "cuda_memory_usage",
@@ -249,7 +274,7 @@ class TestProfiler(TestCase):
 
         if torch._C.has_mkldnn:
             create_mkldnn_tensor()
-            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
+            stats = run_profiler(create_mkldnn_tensor)
             check_metrics(
                 stats,
                 "cpu_memory_usage",
@@ -413,12 +438,11 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1)
         self.assertIn("FLOPS", profiler_output)
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_profiler_api(self):
         called_num = [0]
 
-        use_cuda = torch.cuda.is_available()
-        with _profile(use_cuda=use_cuda, use_kineto=True):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        with profile(activities=supported_activities()):
             self.payload(use_cuda=use_cuda)
 
         def trace_handler(p):
@@ -429,11 +453,7 @@ class TestProfiler(TestCase):
             called_num[0] += 1
 
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities(),
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
@@ -448,11 +468,7 @@ class TestProfiler(TestCase):
 
         # case without schedule
         with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU
-            ] + ([
-                torch.profiler.ProfilerActivity.CUDA
-            ] if use_cuda else []),
+            activities=supported_activities()
         ) as p:
             self.payload(use_cuda=use_cuda)
             self.payload(use_cuda=use_cuda)
