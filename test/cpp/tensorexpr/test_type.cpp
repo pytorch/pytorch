@@ -16,10 +16,8 @@ TEST(Type, Test01) {
     ASSERT_EQ(dt1, kInt);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dtype dt2_a(kInt, 8);
     Dtype dt2_b(kInt, 4);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dtype dt2_c(ScalarType::Int, 8);
     ASSERT_EQ(dt2_a, dt2_c);
     ASSERT_NE(dt2_a, dt2_b);
@@ -36,9 +34,7 @@ TEST(Type, Test01) {
     ASSERT_EQ(kBool, ToDtype<bool>());
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dtype int32x8(kInt, 8);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dtype float32x8(kFloat, 8);
     ASSERT_NE(int32x8, float32x8);
     ASSERT_EQ(float32x8, BinaryOpDtype(int32x8, float32x8));
@@ -82,7 +78,6 @@ TEST(Type, BitCasting) {
   constexpr int16_t ref16 = 1337;
   constexpr int32_t ref32 = 1337;
   constexpr int64_t ref64 = 1337;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Half reff16 = 1337.0f;
   constexpr float reff32 = 1337.0f;
   constexpr double reff64 = 1337.0f;
@@ -170,9 +165,7 @@ TEST(Type, Propagation) {
     KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = FloatImm::make(2.f) +
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (x * FloatImm::make(3.f) + FloatImm::make(4.f) * y);
     ASSERT_EQ(body.dtype(), kFloat);
   }
@@ -182,7 +175,6 @@ TEST(Type, Propagation) {
     VarHandle x("x", kShort);
     VarHandle y("y", kLong);
     ExprHandle body =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ShortImm::make(2.f) + (x * ShortImm::make(3) + ShortImm::make(4) * y);
     ASSERT_EQ(body.dtype(), kLong);
   }
@@ -192,7 +184,6 @@ TEST(Type, Propagation) {
     VarHandle x("x", kHalf);
     VarHandle y("y", kDouble);
     ExprHandle body =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         HalfImm::make(2.f) + (x * HalfImm::make(3) + HalfImm::make(4) * y);
     ASSERT_EQ(body.dtype(), kDouble);
   }

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -1656,7 +1657,7 @@ void initJitScriptBindings(PyObject* module) {
       "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
          std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
-         std::shared_ptr<torch::jit::StorageContext> storage_tracker,
+         std::shared_ptr<torch::jit::StorageContext> storage_context,
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
@@ -1668,7 +1669,7 @@ void initJitScriptBindings(PyObject* module) {
         return import_ir_module(
             std::move(cu),
             std::move(reader),
-            std::move(storage_tracker),
+            std::move(storage_context),
             optional_device,
             std::move(ts_id));
       });
@@ -1713,6 +1714,37 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return _load_for_mobile(in, optional_device);
+      });
+  m.def(
+      "_backport_for_mobile",
+      [](const std::string& filename_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        return _backport_for_mobile(filename_input, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer",
+      [](const std::string& buffer_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        std::istringstream in(buffer_input);
+        return _backport_for_mobile(in, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_to_buffer",
+      [](const std::string& filename_input, const int64_t version) {
+        std::ostringstream buffer_output;
+        bool success =
+            _backport_for_mobile(filename_input, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer_to_buffer",
+      [](const std::string& buffer_input, const int64_t version) {
+        std::istringstream in(buffer_input);
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(in, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
       });
   m.def("_get_model_bytecode_version", [](const std::string& filename) {
     return _get_model_bytecode_version(filename);

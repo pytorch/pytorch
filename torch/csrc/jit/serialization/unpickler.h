@@ -51,7 +51,7 @@ class TORCH_API Unpickler {
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
       bool use_storage_device = false,
-      std::shared_ptr<StorageContext> storage_tracker = nullptr)
+      std::shared_ptr<StorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
         tensor_table_(),
         type_resolver_(std::move(type_resolver)),
@@ -60,7 +60,7 @@ class TORCH_API Unpickler {
         // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
-        storage_tracker_(std::move(storage_tracker)),
+        storage_context_(std::move(storage_context)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
@@ -124,7 +124,6 @@ class TORCH_API Unpickler {
   // remember the position. Don't call reader_ directly.
   std::function<size_t(char*, size_t)> reader_;
   // Small buffer to avoid calling reader_ on a per-byte basis.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 256> buffer_;
   size_t buffer_pos_{0};
   size_t buffer_remaining_{0};
@@ -158,7 +157,7 @@ class TORCH_API Unpickler {
 
   // Used for torch.package to enable sharing of storages across
   // ScriptModules and eager modules
-  std::shared_ptr<StorageContext> storage_tracker_;
+  std::shared_ptr<StorageContext> storage_context_;
 
   // See [type tag serialization]
   uint64_t version_;

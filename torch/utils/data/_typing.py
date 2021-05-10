@@ -129,7 +129,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # Variant is not TypeVar or Union
     if hasattr(variant, '__origin__') and variant.__origin__ is not None:
         v_origin = variant.__origin__
-        v_args = variant.__args__
+        # In Python-3.9 typing library untyped generics do not have args
+        v_args = getattr(variant, "__args__", None)
     else:
         v_origin = variant
         v_args = None
@@ -150,7 +151,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                 if v_origin == c_origin:
                     if not recursive:
                         return True
-                    c_args = constraint.__args__
+                    # In Python-3.9 typing library untyped generics do not have args
+                    c_args = getattr(constraint, "__args__", None)
                     if c_args is None or len(c_args) == 0:
                         return True
                     if v_args is not None and len(v_args) == len(c_args) and \
@@ -168,21 +170,23 @@ def issubinstance(data, data_type):
     if not issubtype(type(data), data_type, recursive=False):
         return False
 
+    # In Python-3.9 typing library __args__ attribute is not defined for untyped generics
+    dt_args = getattr(data_type, "__args__", None)
     if isinstance(data, tuple):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        if len(data_type.__args__) != len(data):
+        if len(dt_args) != len(data):
             return False
-        return all(issubinstance(d, t) for d, t in zip(data, data_type.__args__))
+        return all(issubinstance(d, t) for d, t in zip(data, dt_args))
     elif isinstance(data, (list, set)):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        t = data_type.__args__[0]
+        t = dt_args[0]
         return all(issubinstance(d, t) for d in data)
     elif isinstance(data, dict):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        kt, vt = data_type.__args__
+        kt, vt = dt_args
         return all(issubinstance(k, kt) and issubinstance(v, vt) for k, v in data.items())
 
     return True

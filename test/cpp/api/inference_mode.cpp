@@ -467,12 +467,9 @@ TEST(InferenceModeTest, TestCreationMetaPropagationInput) {
     c = s.split_with_sizes({1, 1});
   }
   for (auto& b_el: b) {
-    // TODO: fix the codegen not setting these properly in no_grad/inference mode
-    // The next line should be assert_tensor_creation_meta(b_el, CreationMeta::INFERENCE_MODE);
-    assert_tensor_creation_meta(b_el, CreationMeta::MULTI_OUTPUT_SAFE);
-    // The error in the next line should be "A view was created in inference mode and is being..."
+    assert_tensor_creation_meta(b_el, CreationMeta::INFERENCE_MODE);
     ASSERT_THROWS_WITH(b_el.add_(1),
-      "This view is an output of a function that returns multiple views.");
+      "A view was created in inference mode and is being modified inplace");
   }
   for (auto& c_el: c) {
     assert_tensor_creation_meta(c_el, CreationMeta::INFERENCE_MODE);
