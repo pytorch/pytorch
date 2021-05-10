@@ -2,11 +2,15 @@ from collections import namedtuple
 import warnings
 
 import torch
+from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
+from typing import List, Sequence, Tuple
 
-PackedSequence_ = namedtuple('PackedSequence',
+
+
+PackedSequence_ = namedtuple('PackedSequence_',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
 # type annotation for PackedSequence_ to make it compatible with TorchScript
@@ -317,7 +321,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0.0):
-    # type: (List[Tensor], bool, float) -> Tensor
+    # type: (Sequence[Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
