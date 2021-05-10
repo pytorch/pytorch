@@ -4607,14 +4607,18 @@
     CPU, CUDA: rsub
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: heaviside_out
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
   variants: function, method
+  structured_delegate: heaviside.out
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
   variants: method
+  structured_delegate: heaviside.out
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor

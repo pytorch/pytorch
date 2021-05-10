@@ -36,6 +36,20 @@ inline void sub_check(const Tensor& self, const Scalar& scalar) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
+inline void heaviside_check(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+}
+
+inline void heaviside_check(const Tensor& self, const Tensor& other, const Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !other.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == other.dtype() && result.dtype() == self.dtype(),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+}
+
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 
@@ -89,7 +103,7 @@ DECLARE_DISPATCH(structured_binary_fn, hypot_stub);
 DECLARE_DISPATCH(structured_binary_fn, igamma_stub);
 DECLARE_DISPATCH(structured_binary_fn, igammac_stub);
 DECLARE_DISPATCH(structured_binary_fn, nextafter_stub);
-DECLARE_DISPATCH(binary_fn, heaviside_stub);
+DECLARE_DISPATCH(structured_binary_fn, heaviside_stub);
 DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
 DECLARE_DISPATCH(binary_fn, xlogy_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
