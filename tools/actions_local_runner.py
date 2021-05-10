@@ -12,8 +12,9 @@ import re
 import fnmatch
 import shlex
 import configparser
-
 from typing import List, Dict, Any, Optional, Tuple, Union
+
+from tools import mypy_wrapper
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -164,27 +165,15 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
     if files is not None:
         # Running quick lint, use mypy-wrapper instead so it checks that the files
         # actually should be linted
-        stdout = ""
-        stderr = ""
-        passed = True
 
-        # Pass each file to the mypy_wrapper script
-        # TODO: Fix mypy wrapper to mock mypy's args and take in N files instead
-        # of just 1 at a time
-        for f in files:
-            f = os.path.join(REPO_ROOT, f)
-            f_passed, f_stdout, f_stderr = await shell_cmd(
-                [sys.executable, "tools/mypy_wrapper.py", f]
-            )
-            if not f_passed:
-                passed = False
+        exit_code, mypy_issues = mypy_wrapper.run(args=[], files=[
+            os.path.join(REPO_ROOT, f) for f in files
+        ])
+        passed = exit_code == 0
 
-            if f_stdout != "":
-                stdout += f_stdout + "\n"
-            if f_stderr != "":
-                stderr += f_stderr + "\n"
-
-        print_results("mypy (skipped typestub generation)", passed, [stdout, stderr])
+        print_results("mypy (skipped typestub generation)", passed, [
+            "".join([f"{issue}\n" for issue in mypy_issues]),
+        ])
         return passed
 
     # Not running quicklint, so use lint.yml
