@@ -982,12 +982,9 @@ class TestIterator(TestCase):
 class TestRNN(TestCase):
     # Regression test for gh-55868
     def test_rnn(self):
-        try:
-            model = torch.nn.RNN(10, 20, 2)
-            input = Wrapper(torch.randn(1, 5, 10))
-            model(input)
-        except Exception as e:
-            self.assertIsNot(type(e), AssertionError)
+        model = torch.nn.RNN(10, 20, 2)
+        input = Wrapper(torch.randn(1, 5, 10))
+        model(input)
 
 
 if __name__ == '__main__':
