@@ -219,7 +219,7 @@ class TestPeephole(JitTestCase):
             FileCheck().check("conv").check("dim").run(conv_dim.graph)
 
     def test_normalized_is_op(self):
-        def convertible_is_op(x:bool, y:bool):
+        def convertible_is_op(x: bool, y: bool):
             return x is True, False is x, x is y
 
         self.checkScript(convertible_is_op, (True, False))
@@ -229,7 +229,7 @@ class TestPeephole(JitTestCase):
         FileCheck().check_count("aten::__is__", 0, exactly=True).run(op_graph)
 
     def test_normalized_isnot_op(self):
-        def convertible_isnot_op(x:bool, y:bool):
+        def convertible_isnot_op(x: bool, y: bool):
             return x is not True, False is not x, x is not y
 
         self.checkScript(convertible_isnot_op, (True, False))
