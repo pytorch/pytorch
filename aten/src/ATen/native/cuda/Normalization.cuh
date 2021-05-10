@@ -19,6 +19,8 @@ constexpr int MAX_BLOCK_SIZE = 256;
 constexpr int MAX_BLOCK_SIZE = 512;
 #endif
 
+constexpr unsigned MAX_GRID_SIZE = 65535u;
+
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
 #if defined(__HIP_PLATFORM_HCC__)
@@ -272,8 +274,8 @@ __global__ void batch_norm_transform_input_kernel(
   }
 }
 
-template<typename T>
 struct InvStd {
+  template <typename T>
   __device__ __forceinline__ T operator()(T var, double epsilon) const {
     T invstd = 0;
     if (var != static_cast<T>(0) || epsilon != static_cast<T>(0)) {
@@ -283,20 +285,18 @@ struct InvStd {
   }
 };
 
-template<typename T>
 struct Var {
+  template <typename T>
   __device__ __forceinline__ T operator()(T var, double epsilon) const {
     return var;
   }
 };
 
-template <template<typename T> class VarTransform, typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
+template <typename VarTransform, typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
 __global__ void batch_norm_collect_statistics_kernel(
     const GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
     const stat_accscalar_t epsilon,
     const stat_accscalar_t momentum,
-    GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> running_mean,
-    GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> running_var,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
@@ -373,14 +373,7 @@ __global__ void batch_norm_collect_statistics_kernel(
       save_mean[plane] = avg;
     }
     if (save_transformed_var.data() != NULL) {
-      save_transformed_var[plane] = VarTransform<stat_accscalar_t>{}(var_n / N, epsilon);
-    }
-    if (running_mean.data() != NULL) {
-      running_mean[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
-    }
-    if (running_var.data() != NULL) {
-      stat_accscalar_t unbiasedVar = var_n / (N - 1);
-      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      save_transformed_var[plane] = VarTransform{}(var_n / N, epsilon);
     }
   }
 
@@ -594,74 +587,6 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_acc
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_invstd_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
-                                                            const Tensor& running_mean_, const Tensor& running_var_,
-                                                            bool train, double momentum, double epsilon) {
-
-  TensorArg output_arg{ output_, "output", 1 },
-            save_mean_arg{ save_mean_, "save_mean", 2 },
-            save_invstd_arg{ save_invstd_, "save_invstd", 3 },
-            input_arg{ input_, "input", 4 },
-            weight_arg{ weight_, "weight", 5 },
-            bias_arg{ bias_, "bias", 6 },
-            run_mean_arg{ running_mean_, "running_mean", 7 },
-            run_var_arg{ running_var_, "running_var", 8 };
-  CheckedFrom c = "batch_norm_cuda";
-  checkAllSameGPU(c, {output_arg, save_mean_arg, save_invstd_arg, input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
-
-  using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
-  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
-
-  auto bs = input_reshaped.size(0);
-  auto features = input_reshaped.size(2);
-  auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
-    input_options = input_options.dtype(ScalarType::Float);
-  }
-  auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
-  auto bias = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(bias_);
-  auto running_mean = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_);
-  auto running_var = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_var_);
-  auto save_mean = save_mean_.generic_packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
-  auto save_invstd = save_invstd_.generic_packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
-  // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
-  // and good occupancy. Quite likely, we could go with even more blocks than 1024.
-  // The various planes are independent, so we use blocks for them.
-  int tf = std::max<int>(getNumThreads(input.size(2)/4),
-                         std::min<int>(getNumThreads(input.size(2)), 64));
-  int tb = std::max<int>(64/tf, 1);
-  dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
-                                                                  (input.size(0)+tb-1)/tb)));
-  blocks_trans.y = std::min<int>(blocks_trans.y, 65535);
-  dim3 threads_trans(tf, tb);
-  if (!train) {
-    batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, false, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
-      (input, output, running_mean, running_var, weight, bias, epsilon);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  } else {
-    // for the reduction, we cannot use blocks for the batch dim, but if we have few threads in
-    // the feature dimension, we'll use some threads for blocks
-    dim3 blocks(input.size(1));
-    tf = getNumThreads(input.size(2));
-    dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
-
-    batch_norm_collect_statistics_kernel<InvStd, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
-      (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-    batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
-      (input, output, save_mean, save_invstd, weight, bias, epsilon);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
-}
-
-template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tensor& grad_out_, const Tensor& input_, const Tensor& weight_,
                                                                      const Tensor& running_mean_, const Tensor& running_var_, const Tensor& save_mean_, const Tensor& save_invstd_,
                                                                      bool train, double epsilon, std::array<bool,3> grad_input_mask) {
@@ -709,49 +634,39 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
 }
 
-template<typename scalar_t, typename index_t>
-std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, double epsilon) {
+template<typename scalar_t, typename index_t, typename VarTransform>
+void batch_norm_stats_cuda_template(
+    const Tensor& out_mean, const Tensor& out_invstd, const Tensor& input_, double epsilon) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor dummy_mean_;
   Tensor dummy_var_;
-  Tensor mean_;
-  Tensor invstd_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto input_options = input_.options();
-  dummy_mean_ = at::empty({0}, input_options);
-  dummy_var_ = at::empty({0}, input_options);
-  // promote only mean_/invstd_ precision
-  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
-    input_options = input_options.dtype(ScalarType::Float);
-  }
-  mean_ = at::empty({n_input}, input_options);
-  invstd_ = at::empty({n_input}, input_options);
-  auto mean = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
-  auto invstd = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
-  auto dummy_mean = dummy_mean_.generic_packed_accessor<scalar_t, 1, RestrictPtrTraits, index_t>();
-  auto dummy_invstd = dummy_var_.generic_packed_accessor<scalar_t, 1, RestrictPtrTraits, index_t>();
+  TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
+                        out_invstd.sizes()[0]);
+  TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
+                        out_mean.sizes()[0]);
+
+  auto mean = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(out_mean);
+  auto invstd = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(out_invstd);
   auto stream = at::cuda::getCurrentCUDAStream();
 
   dim3 blocks(input.size(1));
   int tf = getNumThreads(input.size(2));
   dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
-  batch_norm_collect_statistics_kernel<InvStd, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
-    (input, epsilon, 0.0, dummy_mean, dummy_invstd, mean, invstd);
+  batch_norm_collect_statistics_kernel<VarTransform, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
+    (input, epsilon, 0.0, mean, invstd);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  return std::make_tuple(mean_, invstd_);
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
-                                                                  const Tensor& mean_, const Tensor& invstd_,
-                                                                  double epsilon) {
+void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_, const Tensor& weight_,
+                                    const Tensor& bias_, const Tensor& mean_, const Tensor& invstd_) {
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -761,16 +676,15 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
-    input_options = input_options.dtype(ScalarType::Float);
-  }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
   auto bias = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(bias_);
   auto mean = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
+
+  // NOTE: We use transform_input_kernel in training mode, which ignores epsilon
+  const double dummy_epsilon = 1e-5;
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
@@ -781,9 +695,10 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   int tb = std::max<int>(64/tf, 1);
   dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
                                                                   (input.size(0)+tb-1)/tb)));
+  blocks_trans.y = std::min(blocks_trans.y, MAX_GRID_SIZE);
   dim3 threads_trans(tf, tb);
   batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
-    (input, output, mean, invstd, weight, bias, epsilon);
+    (input, output, mean, invstd, weight, bias, dummy_epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -915,45 +830,10 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   return grad_input_reshaped.view(input_.sizes());
 }
 
-template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
-        const Tensor& input_, const Tensor& running_mean_, const Tensor& running_var_, double momentum) {
-
-  using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
-  int64_t n_channels = input_.size(1);
-  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-
-  auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
-    input_options = input_options.dtype(ScalarType::Float);
-  }
-  Tensor save_mean_ = at::empty({n_channels}, input_options);
-  Tensor save_var_ = at::empty({n_channels}, input_options);
-
-  auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto running_mean = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_);
-  auto running_var = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_var_);
-  auto save_mean = save_mean_.generic_packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
-  auto save_var = save_var_.generic_packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // for the reduction, we cannot use blocks for the batch dim, but if we have few threads in
-  // the feature dimension, we'll use some threads for blocks
-  dim3 blocks(input.size(1));
-  int tf = getNumThreads(input.size(2));
-  dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
-  // NB: epsilon is unused by the Var transform, so we set it to 0
-  batch_norm_collect_statistics_kernel<Var, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
-    (input, 0., momentum, running_mean, running_var, save_mean, save_var);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  return std::make_tuple(save_mean_, save_var_);
-}
-
 // welford kernel for c last tensor calculating mean/biased_variance/unbiased_variance
 // original apex name: welford_kernel_c_last
 template
-   <template<typename T> class VarTransform,
+   <typename VarTransform,
     typename scalar_t,
     typename accscalar_t,
     int PARALLEL_LOADS>
@@ -1084,13 +964,13 @@ batch_norm_collect_statistics_channels_last_kernel(
       welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
       if (threadIdx.y == 0 && c_offset < stride) {
         out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
-        out_invstd[c_offset] = VarTransform<accscalar_t>{}(m2_th/count_th, epsilon);
+        out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
       }
     }
   } else {
     if (blockIdx.y == 0 && threadIdx.y == 0 && c_offset < stride) {
       out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
-      out_invstd[c_offset] = VarTransform<accscalar_t>{}(m2_th/count_th, epsilon);
+      out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
     }
   }
 }
@@ -1380,18 +1260,18 @@ __global__ void batch_norm_backward_elemt_channels_last_kernel(
   }
 }
 
-template<typename scalar_t>
-std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Tensor& input, double epsilon) {
+template<typename scalar_t, typename VarTransform>
+void batch_norm_stats_channels_last_cuda_template(
+    const Tensor& out_mean, const Tensor& out_invstd, const Tensor& input, double epsilon) {
   using accscalar_t = at::acc_type<scalar_t, true>;
 
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
-  auto scalar_type = input.scalar_type() == at::kHalf ? at::kFloat : input.scalar_type();
-  auto option = input.options().dtype(scalar_type);
-
-  at::Tensor out_invstd = at::empty({stride}, option);
-  at::Tensor out_mean = at::empty({stride}, option);
+  TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
+                        out_invstd.sizes()[0]);
+  TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
+                        out_mean.sizes()[0]);
 
   dim3 block;
   dim3 grid;
@@ -1400,13 +1280,13 @@ std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Te
   at::Tensor staging_data;
   at::Tensor semaphores;
   if (grid.y > 1) {
-    staging_data = at::empty({4*stride*grid.y}, option);
+    staging_data = at::empty({4*stride*grid.y}, out_mean.options());
     semaphores = at::zeros({grid.x}, input.options().dtype(at::kInt));
   }
 
   accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
   int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
-  batch_norm_collect_statistics_channels_last_kernel<InvStd, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
+  batch_norm_collect_statistics_channels_last_kernel<VarTransform, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
       input.data_ptr<scalar_t>(),
       out_mean.data_ptr<accscalar_t>(),
@@ -1417,18 +1297,15 @@ std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Te
       stride,
       epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  return std::make_tuple(out_mean, out_invstd);
 }
 
 void batch_norm_elemt_channels_last_cuda_template(
-    at::Tensor& output,
+    const at::Tensor& output,
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& shift,  // bias of BN
     const at::Tensor& mean,
     const at::Tensor& inv_std,
-    double epsilon,
     const at::optional<at::Tensor>& z = c10::nullopt,  // bias after BN
     const bool fuse_relu = false) {
   const auto stride = input.sizes()[1];
