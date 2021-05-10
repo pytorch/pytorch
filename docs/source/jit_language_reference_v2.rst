@@ -1687,8 +1687,8 @@ Python Built-in Functions Support
      - None
      -
    * - ``hasattr()``
-     - Full
-     -
+     - Partial
+     - Attribute name must be string literal.
    * - ``hash()``
      - Full
      - ``Tensor``'s hash is based on identity not numeric value.
