@@ -328,7 +328,7 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
   auto rc = oss.str();
   rc.pop_back();
-  return rc;
+  return "\"" + rc + "\"";
 }
 
 } // namespace
@@ -422,6 +422,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 void addMetadata(const std::string& key, const std::string& value) {
+  if (!libkineto::api().isProfilerInitialized()){
+    throw std::runtime_error("The profiler is not initialized");
+  }
+
   libkineto::api().activityProfiler().addMetadata(key, value);
 }
 
