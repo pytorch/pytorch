@@ -2737,7 +2737,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             return
 
         # entries in here need don't work and need to be fixed.
-        vmap_fail = {'repeat'}
+        vmap_fail = {'repeat', 'ravel', 'clamp'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

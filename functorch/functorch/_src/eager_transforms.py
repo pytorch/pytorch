@@ -3,8 +3,8 @@ from functools import partial, wraps
 import collections
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils._pytree import tree_flatten, tree_unflatten
-from .pytree_hacks import tree_map, tree_map_, treespec_pprint
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from .pytree_hacks import tree_map_, treespec_pprint
 import gc
 
 from .vmap import vmap
