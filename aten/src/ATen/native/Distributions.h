@@ -426,7 +426,7 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_
   const accscalar_t total = alpha + beta;
   const accscalar_t mean = alpha / total;
   const accscalar_t std = compat_sqrt(alpha * beta / (total + 1)) / total;
-  if (mean - 0.1 * std <= x && x <= mean + 0.1 * std) {
+  if (mean - 0.2 * std <= x && x <= mean + 0.2 * std) {
     // Avoid the singularity at x = mean.
     const accscalar_t poly = 47 * x * (beta * beta) * (beta * beta) + alpha * (
                            (43 + 20 * (16 + 27 * beta) * x) * (beta * beta) * beta + alpha * (
@@ -445,12 +445,12 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_
   const accscalar_t axbx = alpha * (x - 1) + beta * x;
   const accscalar_t term1_den = compat_sqrt(2 * alpha / beta) * compat_pow(total, static_cast<accscalar_t>(1.5f)) * axbx * axbx;
   const accscalar_t term1 = term1_num / term1_den;
-  const accscalar_t term2 = 0.5f * compat_log(alpha / (total * x));
+  const accscalar_t term2 = 0.5f * (compat_log(alpha) - compat_log((total * x)));
   const accscalar_t term3_num = compat_sqrt(8 * alpha * beta / total);
   const accscalar_t term3_den = beta * x + alpha * (x - 1);
   const accscalar_t term3 = term3_num / term3_den;
-  const accscalar_t term4_base = beta * compat_log(beta / (total * (1 - x))) +
-                               alpha * compat_log(alpha / (total * x));
+  const accscalar_t term4_base = beta * (compat_log(beta)  - compat_log(total * (1 - x))) +
+                                alpha * (compat_log(alpha) - compat_log(total * x));
   const accscalar_t term4 = compat_pow(term4_base, static_cast<accscalar_t>(-1.5f));
   const accscalar_t term1234 = term1 + term2 * (term3 + (x < mean ? term4 : -term4));
   return static_cast<scalar_t>(stirling * prefactor * term1234);
