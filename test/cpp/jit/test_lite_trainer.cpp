@@ -240,8 +240,7 @@ TEST(LiteTrainerTest, SequentialSampler) {
   const int kBatchSize = 10;
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          DummyDataset(25),
-          kBatchSize);
+          DummyDataset(25), kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {

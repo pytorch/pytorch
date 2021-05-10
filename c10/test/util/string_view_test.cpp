@@ -119,8 +119,7 @@ TEST(StringViewTest, testCopyAssignment) {
 
     static_assert(5 == (string_view() = "hello").size(), "");
     static_assert(
-        string_equal("hello", (string_view() = "hello").data(), 5),
-        "");
+        string_equal("hello", (string_view() = "hello").data(), 5), "");
   }
 #endif
   const string_view hello = assign("hello");
