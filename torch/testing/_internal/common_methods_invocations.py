@@ -5203,7 +5203,6 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    dtypes=all_types_and(torch.half, torch.bool)),
     UnaryUfuncInfo('reciprocal',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.reciprocal),
