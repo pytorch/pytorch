@@ -10260,6 +10260,25 @@ class TestNN(NNTestCase):
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_sync_batchnorm_accuracy_cuda(self):
+        # The target of this test is to test the functionality and accuracy of
+        #   those single-GPU cuda kernels used in SyncBatchNorm
+        # They are:
+        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
+        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
+
+        def _batch_norm_stats(data):
+            mean1, _ = torch.batch_norm_stats(data, 1e-5)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
+            mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
+
+            self.assertEqual(mean_ref, mean1)
+            self.assertEqual(mean_ref, mean2)
+
+        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda')
+        _batch_norm_stats(data)
+
     def test_functional_grad_conv(self):
         # Conv 1D
         input = torch.randn(1, 1, 5, requires_grad=True)
@@ -13507,6 +13526,25 @@ class TestNNDeviceType(NNTestCase):
                 conv1.bias = nn.Parameter(bias_c)
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
+
+    def test_save_lstm_compatibility(self, device):
+        # Test that saving an LSTM in PyTorch 1.7 and older can still be
+        # loaded in newer versions of PyTorch.
+        model = nn.LSTM(2, 3)
+        x = torch.randn(32, 5, 2)
+        expected = model(x)
+
+        # Get a state dict for PyTorch 1.7 LSTM. Before PyTorch 1.8, proj_size
+        # didn't exist.
+        assert model.proj_size == 0
+        state_dict = model.__dict__
+        del state_dict['proj_size']
+
+        # load a model
+        loaded_model = nn.LSTM(2, 3)
+        loaded_model.__setstate__(state_dict)
+        result = loaded_model(x)
+        self.assertEqual(result, expected)
 
     @onlyCUDA
     @tf32_on_and_off(0.005)
