@@ -255,10 +255,11 @@ if not torch._C._autograd_init():
 # Import all native method/classes
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available)
+                                _enable_record_function, _set_empty_test_observer, kineto_available,
+                                supported_kineto_activities)
 
 if kineto_available():
     from torch._C._autograd import (ProfilerResult, KinetoEvent,
-                                    _prepare_profiler, _enable_profiler, _disable_profiler)
+                                    _add_metadata, _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler

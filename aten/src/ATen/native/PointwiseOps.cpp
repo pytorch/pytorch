@@ -89,7 +89,9 @@ Tensor& addcdiv_out(const Tensor& self,
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addcmul_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addcdiv_stub);
 
 } // namespace native
