@@ -3781,12 +3781,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -4735,8 +4735,8 @@ op_db: List[OpInfo] = [
     OpInfo('matmul',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
-           dtypesIfROCM=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
@@ -4747,7 +4747,12 @@ op_db: List[OpInfo] = [
                         device_type='cpu', dtypes=(torch.complex128,)),
                # https://github.com/pytorch/pytorch/issues/55755
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                        device_type='cpu', dtypes=(torch.float16,)),)),
+                        device_type='cpu', dtypes=(torch.float16,)),
+               # Backward for BFloat16 isn't supported because of the error
+               # "RuntimeError: CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when
+               # calling cublasGemmStridedBatchedExFix."
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        device_type='cuda', dtypes=(torch.bfloat16,)),)),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
