@@ -142,7 +142,7 @@ Message getMessageWithAutograd(
   return std::move(*rpcWithAutograd).toMessage();
 }
 
-std::shared_ptr<JitFuture> sendMessageWithAutograd(
+c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
@@ -156,7 +156,7 @@ std::shared_ptr<JitFuture> sendMessageWithAutograd(
       forceGradRecording,
       agent.getDeviceMap(dst));
 
-  std::shared_ptr<JitFuture> fut;
+  c10::intrusive_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
   if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {

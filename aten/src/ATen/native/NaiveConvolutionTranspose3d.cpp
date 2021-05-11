@@ -104,7 +104,6 @@ static inline void slow_conv_transpose3d_shape_check(
   int dimh = 2;
   int dimw = 3;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ndim == 5) {
     dimf++;
     dimd++;

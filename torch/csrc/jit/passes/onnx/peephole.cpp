@@ -471,11 +471,9 @@ void fixDefaultRnnHiddenState(Block* b, int opset_version) {
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
     // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (n->inputs().size() < 6) {
       continue;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fixDefaultRNNState(b->owningGraph(), n, 5, opset_version);
   }
 }
@@ -492,11 +490,9 @@ void fixDefaultLstmCellState(Block* b, int opset_version) {
     }
     // Cell state is the seventh input for LSTM.
     // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (n->inputs().size() < 7) {
       continue;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fixDefaultRNNState(b->owningGraph(), n, 6, opset_version);
   }
 }
