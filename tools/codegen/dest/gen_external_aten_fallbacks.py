@@ -7,7 +7,8 @@ from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (Argument, BackendIndex, SchemaKind, assert_never,
                                  Return, NativeFunction, NativeFunctionsGroup,
-                                 ListType, OptionalType, BaseType, BaseTy, Variant)
+                                 ListType, OptionalType, BaseType, BaseTy, Variant,
+                                 gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.cpp as cpp
@@ -160,7 +161,7 @@ class GenExternalAtenFallback:
                 # We also skip registrations if there is a functional backend kernel,
                 # because we generate out/inplace wrappers in that case (handled in register_dispatch_key.py).
                 if self.backend_index.get(f) is not None or \
-                        (isinstance(g, NativeFunctionsGroup) and self.backend_index.get(g.functional) is not None):
+                        (isinstance(g, NativeFunctionsGroup) and gets_generated_out_inplace_wrapper(f, g, self.backend_index)):
                     return ''
                 payload = f"static_cast<{dispatcher_sig.ptr_type()}>(&AtenXlaTypeDefault::{name})"
                 return f'  m.impl("{f.func.name}", {payload});\n'

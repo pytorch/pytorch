@@ -11,7 +11,8 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
                                  TensorOptionsArguments,
                                  DeviceCheckType, Argument,
                                  assert_never, BaseType, BaseTy,
-                                 is_cuda_dispatch_key, BackendIndex)
+                                 is_cuda_dispatch_key, BackendIndex,
+                                 gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
@@ -79,16 +80,9 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
-            if not self.backend_index.use_out_as_primary:
-                # For external backends that specify that they'd like to primarily implement functional kernels (namely XLA),
-                # we can generate anonymous wrappers for the out and in-place kernels for them, even for un-structured operators.
-                # Note that we can't go the other way around (generate the functional using the out), since we don't know
-                # how to create the output tensor without a meta function.
-                return list(mapMaybe(
-                    lambda x: self.gen_inplace_out_wrapper(x, f), f.functions(functional_first=True)))  # type: ignore[arg-type]
             # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
             # gen_structured() has special logic to handle auto-generated kernels.
-            elif f.structured:
+            if f.structured:
                 return self.gen_structured(f)
             else:
                 return list(mapMaybe(self.gen_unstructured, f.functions()))
@@ -98,33 +92,19 @@ class RegisterDispatchKey:
         else:
             assert_never(f)
 
-    def gets_generated_out_inplace_wrapper(self, f: NativeFunction, g: NativeFunctionsGroup) -> bool:
-        return f.func.kind() is not SchemaKind.functional \
-            and not self.backend_index.has_backend(f) and self.backend_index.has_backend(g.functional)
-
     def wrapper_kernel_sig(self, f: NativeFunction) -> Union[NativeSignature, DispatcherSignature]:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
         return kernel_signature(f, self.backend_index, prefix=f'wrapper_{f.func.name.overload_name}_')
 
-    def gen_inplace_out_wrapper(self, f: NativeFunction, g: NativeFunctionsGroup) -> Optional[str]:
-        # Only anonymous definitions get "special treatment" for out/inplace wrappers.
-        # All other functionality can be directly pulled from gen_unstructured.
-        is_generated_wrapper = self.gets_generated_out_inplace_wrapper(f, g)
-        if self.target is not Target.ANONYMOUS_DEFINITION:
-            return self.gen_unstructured(f, is_generated_wrapper=is_generated_wrapper)
+    def gen_out_inplace_wrapper(self, f: NativeFunction, g: NativeFunctionsGroup) -> Optional[str]:
+        k = f.func.kind()
+        if k is SchemaKind.inplace:
+            copy_op = 'at::_copy_from'
+        elif k is SchemaKind.out:
+            copy_op = 'at::_copy_from_and_resize'
+        else:
+            raise AssertionError("gen_out_inplace_wrapper called on a functional op")
 
-        if f.func.kind() is SchemaKind.functional:
-            # Wrappers are generated for out/inplace kernels, using the functional kernel,
-            # so the functional kernel itself is generated normally.
-            return self.gen_unstructured(f)
-        if self.backend_index.has_backend(f):
-            # If the backend provided their own out/inplace kernel, use it.
-            return self.gen_unstructured(f)
-
-        if not is_generated_wrapper:
-            return None
-
-        # Special out/inplace wrapper logic starts here.
         sig = self.wrapper_kernel_sig(f)
         name = sig.name()
 
@@ -133,16 +113,16 @@ class RegisterDispatchKey:
         tensors = [a for a in jit_args if isinstance(a, Argument) and a.type == BaseType(BaseTy.Tensor)]
         print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
 
-        functional_result_name = f'{name}_tmp'
+        func_res = f'{name}_tmp'
         return_names = cpp.return_names(f)
         if len(return_names) > 1:
             updates = '\n  '.join(
-                f'at::_copy_from_and_resize(std::get<{i}>({functional_result_name}), {ret_name});'
+                f'{copy_op}(std::get<{i}>({func_res}), {ret_name});'
                 for i, ret_name in enumerate(return_names))
             returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
         else:
             ret_name = return_names[0]
-            updates = f'at::_copy_from_and_resize({functional_result_name}, {ret_name});'
+            updates = f'{copy_op}({func_res}, {ret_name});'
             returns = ret_name
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
@@ -151,7 +131,7 @@ class RegisterDispatchKey:
 {sig.defn()} {{
   XLA_FN_TRACK(3);
   TF_VLOG(3) << "XLA {name} :"{print_args_str};
-  auto {functional_result_name} = {functional_sig.name()}({", ".join(a.name for a in functional_sig.arguments())});
+  auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
 }}
@@ -168,7 +148,7 @@ class RegisterDispatchKey:
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif metadata is None or not metadata.structured:
-            return list(mapMaybe(self.gen_unstructured, g.functions()))
+            return list(mapMaybe(lambda f: self.gen_unstructured(f, g), g.functions()))
 
         structured_gen = StructuredRegisterDispatchKey(
             self.backend_index,
@@ -180,9 +160,10 @@ class RegisterDispatchKey:
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
-    def gen_unstructured(self, f: NativeFunction, *, is_generated_wrapper: bool = False) -> Optional[str]:
+    def gen_unstructured(self, f: NativeFunction, g: Optional[NativeFunctionsGroup] = None) -> Optional[str]:
         with native_function_manager(f):
             inplace_meta = False
+            gets_out_inplace_wrapper = False
             if not self.backend_index.has_backend(f):
                 if (self.backend_index.dispatch_key == DispatchKey.Meta and
                         f.func.kind() is SchemaKind.inplace and
@@ -191,8 +172,12 @@ class RegisterDispatchKey:
                         # Inplace list operations are not supported
                         len(f.func.returns) == 1):
                     inplace_meta = True
-                # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
-                elif not is_generated_wrapper:
+                elif (not self.backend_index.use_out_as_primary and
+                        g is not None
+                        and gets_generated_out_inplace_wrapper(f, g, self.backend_index)):
+                    # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
+                    gets_out_inplace_wrapper = True
+                else:
                     return None
             if f.manual_kernel_registration:
                 return None
@@ -239,6 +224,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
   return {self_arg_name};
 }}
 """
+
+                # short circuit for generated inplace/out wrappers
+                if gets_out_inplace_wrapper:
+                    return self.gen_out_inplace_wrapper(f, g)
 
                 metadata = self.backend_index.get(f)
                 if metadata is None:
@@ -363,11 +352,11 @@ if (strides.empty()) {
                 expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
                     "options.device_opt(), options.pinned_memory_opt()"
                 if self.backend_index.dispatch_key == DispatchKey.CPU:
-                    empty_impl = f"{self.cpp_namespace}::empty_cpu"
-                    empty_strided_impl = f"{self.cpp_namespace}::empty_strided_cpu"
+                    empty_impl = f"at::native::empty_cpu"
+                    empty_strided_impl = f"at::native::empty_strided_cpu"
                 elif self.backend_index.dispatch_key == DispatchKey.CUDA:
-                    empty_impl = f"{self.cpp_namespace}::empty_cuda"
-                    empty_strided_impl = f"{self.cpp_namespace}::empty_strided_cuda"
+                    empty_impl = f"at::native::empty_cuda"
+                    empty_strided_impl = f"at::native::empty_strided_cuda"
                 elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                     empty_impl = "at::empty"
                     empty_strided_impl = "at::empty_strided"
@@ -390,14 +379,14 @@ TORCH_CHECK(options.dtype() == out.dtype(),
     "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
 TORCH_CHECK(options.device() == out.device(),
     "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
-bool resized = {self.cpp_namespace}::resize_output(outputs_[output_idx], sizes);
+bool resized = at::native::resize_output(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
 // preexisting strides
 if (resized) {{
     if (!strides.empty()) {{
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-        {self.cpp_namespace}::as_strided_(outputs_[output_idx], sizes, strides);
+        at::native::as_strided_(outputs_[output_idx], sizes, strides);
     }} else if (options.memory_format_opt().has_value()) {{
         outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
     }}
