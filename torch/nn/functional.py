@@ -4668,7 +4668,7 @@ def _in_projection_packed(
 ) -> List[Tensor]:
     r"""
     Performs the in-projection step of the attention operation, using packed weights.
-    Output is a tensor list containing projections for query, key and value.
+    Output is a triple containing projection tensors for query, key and value.
 
     Args:
         q, k, v: query, key and value tensors to be projected. For self-attention,
@@ -4725,12 +4725,12 @@ def _in_projection(
     b_q: Optional[Tensor] = None,
     b_k: Optional[Tensor] = None,
     b_v: Optional[Tensor] = None,
-) -> List[Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
     Performs the in-projection step of the attention operation. This is simply
     a triple of linear projections, with shape constraints on the weights which
     ensure embedding dimension uniformity in the projected outputs.
-    Output is a tensor list containing projections for query, key and value.
+    Output is a triple containing projection tensors for query, key and value.
 
     Args:
         q, k, v: query, key and value tensors to be projected.
@@ -4968,14 +4968,14 @@ def multi_head_attention_forward(
                 f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
-            correct_size = (tgt_len, src_len)
-            if attn_mask.shape != correct_size:
-                raise RuntimeError(f"The shape of the 2D attn_mask is {attn_mask.shape}, but should be {correct_size}.")
+            correct_2d_size = (tgt_len, src_len)
+            if attn_mask.shape != correct_2d_size:
+                raise RuntimeError(f"The shape of the 2D attn_mask is {attn_mask.shape}, but should be {correct_2d_size}.")
             attn_mask = attn_mask.unsqueeze(0)
         elif attn_mask.dim() == 3:
-            correct_size = (bsz * num_heads, tgt_len, src_len)
-            if attn_mask.shape != correct_size:
-                raise RuntimeError(f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_size}.")
+            correct_3d_size = (bsz * num_heads, tgt_len, src_len)
+            if attn_mask.shape != correct_3d_size:
+                raise RuntimeError(f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_3d_size}.")
         else:
             raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
 
