@@ -228,7 +228,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     #
     # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
     chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
-    chr_poly_D_at_A_to_U_ortho_L = torch.cholesky(
+    chr_poly_D_at_A_to_U_ortho_L = torch.linalg.cholesky(
         chr_poly_D_at_A_to_U_ortho_sign * chr_poly_D_at_A_to_U_ortho
     )
 
@@ -939,7 +939,8 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        R = torch.cholesky((SBS * d_row) * d_col, upper=True)
+        # TODO: Consider reordering the operations to work with lower-triangular matrices
+        R = torch.linalg.cholesky(((SBS * d_row) * d_col).transpose(-2, -1).conj()).transpose(-2, -1).conj()
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
         return Rinv * d_col
