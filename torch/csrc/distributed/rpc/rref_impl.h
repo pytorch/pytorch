@@ -230,12 +230,12 @@ class TORCH_API RRef : public RRefInterface {
   // node. Note that this is only set when processing requests invoked with
   // rpc.remote. This is only used to get the future corresponding to the rref
   // for profiling use cases.
-  inline void registerOwnerCreationFuture(std::shared_ptr<JitFuture> fut) {
+  inline void registerOwnerCreationFuture(c10::intrusive_ptr<JitFuture> fut) {
     ownerCreationFuture_ = std::move(fut);
   }
 
   // Get the future corresponding to the creation of this rref.
-  inline std::shared_ptr<JitFuture> getOwnerCreationFuture() const {
+  inline c10::intrusive_ptr<JitFuture> getOwnerCreationFuture() const {
     return ownerCreationFuture_;
   }
 
@@ -279,7 +279,7 @@ class TORCH_API RRef : public RRefInterface {
   const TypePtr type_;
   // Future corresponding to request to create RRef on remote node.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::shared_ptr<JitFuture> ownerCreationFuture_;
+  c10::intrusive_ptr<JitFuture> ownerCreationFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
@@ -362,14 +362,14 @@ class TORCH_API OwnerRRef final : public RRef {
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      std::vector<c10::DeviceIndex> devices = {});
+      std::vector<c10::Device> devices);
 
   OwnerRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
       c10::optional<IValue> value,
-      std::vector<c10::DeviceIndex> devices = {});
+      std::vector<c10::Device> devices);
 
   inline bool isOwner() const override {
     return true;
@@ -395,12 +395,12 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<JitFuture> getFuture();
+  c10::intrusive_ptr<JitFuture> getFuture();
 
  private:
   friend class RRefContext;
 
-  std::shared_ptr<JitFuture> future_;
+  c10::intrusive_ptr<JitFuture> future_;
 
  public:
   // Records an event per each stream in the context and stores them in
