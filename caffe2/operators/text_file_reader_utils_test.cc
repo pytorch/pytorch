@@ -16,6 +16,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TextFileReaderUtilsTest, TokenizeTest) {
   TokenizedString tokenized;
   std::string ch =
@@ -65,6 +66,7 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
   }
 
   struct ChunkProvider : public StringProvider {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     ChunkProvider(const std::string& str) : ch(str) {}
     std::string ch;
     size_t charIdx{0};
@@ -87,6 +89,7 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
   for (int numPasses = 1; numPasses <= 2; ++numPasses) {
     ChunkProvider chunkProvider(ch);
     BufferedTokenizer bt(tokenizer, &chunkProvider, numPasses);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     Token token;
     int i = 0;
     for (i = 0; bt.next(token); ++i) {
@@ -107,7 +110,9 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
   for (int numPasses = 1; numPasses <= 2; ++numPasses) {
     FileReader fr(tmpname, 5);
     BufferedTokenizer fileTokenizer(tokenizer, &fr, numPasses);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     Token token;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int i;
     for (i = 0; fileTokenizer.next(token); ++i) {
       EXPECT_GT(expected.size() * numPasses, i);

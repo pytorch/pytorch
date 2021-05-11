@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool _NoPThreadPoolGuard_enabled = false;
 
 bool _NoPThreadPoolGuard::is_enabled() {
