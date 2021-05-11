@@ -61,6 +61,9 @@ _large_float16_vals = (-501, 501,
                        -13437.7, 13437.7)
 _large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
+_bfloat16_extremals = (torch.finfo(torch.bfloat16).max + 1.0,
+                       torch.finfo(torch.bfloat16).min - 1.0,
+                       float('nan'))
 _medium_length = 812
 _large_size = (1029, 917)
 
@@ -179,7 +182,9 @@ def generate_numeric_tensors_extremal(device, dtype, *,
         return ()
 
     vals = []
-    if dtype.is_floating_point:
+    if dtype is torch.bfloat16:
+        vals = _bfloat16_extremals
+    elif dtype.is_floating_point:
         vals = _float_extremals
     elif dtype.is_complex:
         vals = tuple(complex(x, y) for x, y in chain(product(_float_extremals, _float_extremals),
