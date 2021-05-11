@@ -614,22 +614,19 @@ See :func:`torch.bernoulli`
 
 add_docstr_all('bernoulli_',
                r"""
-.. function:: bernoulli_(p=0.5, *, generator=None) -> Tensor
+bernoulli_(p=0.5, *, generator=None) -> Tensor
 
-    Fills each location of :attr:`self` with an independent sample from
-    :math:`\text{Bernoulli}(\texttt{p})`. :attr:`self` can have integral
-    ``dtype``.
+Fills each location of :attr:`self` with an independent sample from
+:math:`\text{Bernoulli}(\texttt{p})`. :attr:`self` can have integral
+``dtype``.
 
-.. function:: bernoulli_(p_tensor, *, generator=None) -> Tensor
+:attr:`p` should either be a scalar or tensor containing probabilities to be
+used for drawing the binary random number.
 
-    :attr:`p_tensor` should be a tensor containing probabilities to be used for
-    drawing the binary random number.
-
-    The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
-    value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
-
-    :attr:`self` can have integral ``dtype``, but :attr:`p_tensor` must have
-    floating point ``dtype``.
+If it is a tensor, the :math:`\text{i}^{th}` element of :attr:`self` tensor
+will be set to a value sampled from
+:math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`. In this case `p` must have
+floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
 """)
@@ -815,26 +812,26 @@ See :func:`torch.cholesky_inverse`
 
 add_docstr_all('clamp',
                r"""
-clamp(min, max) -> Tensor
+clamp(min=None, max=None) -> Tensor
 
 See :func:`torch.clamp`
 """)
 
 add_docstr_all('clamp_',
                r"""
-clamp_(min, max) -> Tensor
+clamp_(min=None, max=None) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
 """)
 
 add_docstr_all('clip', r"""
-clip(min, max) -> Tensor
+clip(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp`.
 """)
 
 add_docstr_all('clip_', r"""
-clip_(min, max) -> Tensor
+clip_(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp_`.
 """)
@@ -2638,17 +2635,7 @@ add_docstr_all('permute',
                r"""
 permute(*dims) -> Tensor
 
-Returns a view of the original tensor with its dimensions permuted.
-
-Args:
-    *dims (int...): The desired ordering of dimensions
-
-Example:
-    >>> x = torch.randn(2, 3, 5)
-    >>> x.size()
-    torch.Size([2, 3, 5])
-    >>> x.permute(2, 0, 1).size()
-    torch.Size([5, 2, 3])
+See :func:`torch.permute`
 """)
 
 add_docstr_all('polygamma',
@@ -2663,6 +2650,13 @@ add_docstr_all('polygamma_',
 polygamma_(n) -> Tensor
 
 In-place version of :meth:`~Tensor.polygamma`
+""")
+
+add_docstr_all('positive',
+               r"""
+positive() -> Tensor
+
+See :func:`torch.positive`
 """)
 
 add_docstr_all('pow',
@@ -2702,19 +2696,22 @@ See :func:`torch.prod`
 
 add_docstr_all('put_',
                r"""
-put_(indices, tensor, accumulate=False) -> Tensor
+put_(index, source, accumulate=False) -> Tensor
 
-Copies the elements from :attr:`tensor` into the positions specified by
-indices. For the purpose of indexing, the :attr:`self` tensor is treated as if
+Copies the elements from :attr:`source` into the positions specified by
+:attr:`index`. For the purpose of indexing, the :attr:`self` tensor is treated as if
 it were a 1-D tensor.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
-:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+:attr:`index` and :attr:`source` need to have the same number of elements, but not necessarily
+the same shape.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`source` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if :attr:`index`
 contain duplicate elements.
 
 Args:
-    indices (LongTensor): the indices into self
-    tensor (Tensor): the tensor containing values to copy from
+    index (LongTensor): the indices into self
+    source (Tensor): the tensor containing values to copy from
     accumulate (bool): whether to accumulate into self
 
 Example::
@@ -2724,6 +2721,14 @@ Example::
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
+""")
+
+add_docstr_all('put',
+               r"""
+put(input, index, source, accumulate=False) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.put_`.
+`input` corresponds to `self` in :meth:`torch.Tensor.put_`.
 """)
 
 add_docstr_all('qr',
@@ -2740,15 +2745,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
-add_docstr_all('quantile',
-               r"""
+add_docstr_all('quantile', r"""
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
+add_docstr_all('nanquantile', r"""
 nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`
@@ -3525,7 +3528,12 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                r"""
-std(dim=None, unbiased=True, keepdim=False) -> Tensor
+std(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.std`
+
+.. function:: std(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 """)
@@ -4182,7 +4190,12 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                r"""
-var(dim=None, unbiased=True, keepdim=False) -> Tensor
+var(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.var`
+
+.. function:: var(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 """)
@@ -4419,6 +4432,27 @@ tensor_split(indices_or_sections, dim=0) -> List of Tensors
 See :func:`torch.tensor_split`
 """)
 
+add_docstr_all('hsplit',
+               r"""
+hsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.hsplit`
+""")
+
+add_docstr_all('vsplit',
+               r"""
+vsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.vsplit`
+""")
+
+add_docstr_all('dsplit',
+               r"""
+dsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.dsplit`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
@@ -4645,6 +4679,11 @@ add_docstr_all('is_sparse',
 Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
 """)
 
+add_docstr_all('is_sparse_csr',
+               r"""
+Is ``True`` if the Tensor uses sparse CSR storage layout, ``False`` otherwise.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
@@ -4704,4 +4743,40 @@ as_subclass(cls) -> Tensor
 Makes a ``cls`` instance with the same data pointer as ``self``. Changes
 in the output mirror changes in ``self``, and the output stays attached
 to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
+""")
+
+add_docstr_all('crow_indices',
+               r"""
+crow_indices() -> IntTensor
+
+Returns the tensor containing the compressed row indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``crow_indices`` tensor is strictly of shape (:attr:`self`.size(0) + 1)
+and of type ``int32`` or ``int64``. When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.crow_indices()
+    tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+
+""")
+
+add_docstr_all('col_indices',
+               r"""
+col_indices() -> IntTensor
+
+Returns the tensor containing the column indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``col_indices`` tensor is strictly of shape (:attr:`self`.nnz())
+and of type ``int32`` or ``int64``.  When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.col_indices()
+    tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
 """)

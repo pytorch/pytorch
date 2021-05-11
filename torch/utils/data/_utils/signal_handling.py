@@ -49,7 +49,7 @@ def _set_SIGCHLD_handler():
     if IS_WINDOWS:
         return
     # can't set signal in child threads
-    if not isinstance(threading.current_thread(), threading._MainThread):  # type: ignore
+    if not isinstance(threading.current_thread(), threading._MainThread):  # type: ignore[attr-defined]
         return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:

@@ -128,7 +128,7 @@ def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=Fal
         `model`: input float TorchScript model
         `qconfig_dict`: qconfig_dict is a dictionary with names of sub modules as key and
         qconfig for that module as value, empty key means the qconfig will be applied
-        to whole model unless it’s overwritten by more specific configurations, the
+        to whole model unless it's overwritten by more specific configurations, the
         qconfig for each module is either found in the dictionary or fallback to
          the qconfig of parent module.
 
