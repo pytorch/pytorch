@@ -2317,7 +2317,7 @@ Tensor* tensorexpr::computeOperandValue(
       // need to handle the first input
       return computeOneOperand(
           "aten_to",
-          inputs,
+          {inputs[0]},
           outputShape,
           outputType,
           [outputType](const ExprHandle& a) {
@@ -2576,7 +2576,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::round:
     case aten::trunc:
     case aten::_cast_Float:
-    case aten::to:
     case aten::threshold:
     case aten::where:
     case aten::frac:
@@ -2598,6 +2597,19 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       for (auto inp : inputs) {
         argInputs.push_back(toArg(inp));
       }
+      auto outputType = findDtypeForValue(v->node()->output());
+      std::vector<ExprHandle> outputShape = {};
+      // shape inference not implemented for sum
+      if (v->node()->kind() != aten::sum) {
+        outputShape = sizesForValue(v);
+      }
+      return computeOperandValue(
+          v->node()->kind(), argInputs, outputShape, outputType, device_);
+    } break;
+
+    case aten::to: {
+      std::vector<ArgValue> argInputs;
+      argInputs.push_back(toArg(inputs[0]));
       auto outputType = findDtypeForValue(v->node()->output());
       std::vector<ExprHandle> outputShape = {};
       // shape inference not implemented for sum
