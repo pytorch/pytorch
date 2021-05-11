@@ -1,10 +1,10 @@
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 #include <cuda.h>
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
