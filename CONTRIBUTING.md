@@ -13,6 +13,7 @@
   - [Local linting](#local-linting)
   - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -424,6 +425,18 @@ is part of the test suite `ContainerAliasingTest` in the file
 
 ```bash
 ./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+```
+
+
+### Run Specific CI Jobs
+
+You can generate a commit that limits the CI to only run a specific job by using
+`tools/explicit_ci_jobs.py` like so:
+
+```bash
+# --job: specify one or more times to filter to a specific job + its dependencies
+# --make-commit: commit CI changes to git with a message explaining the change
+python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
 ```
 
 ## Writing documentation

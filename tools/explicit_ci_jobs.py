@@ -1,5 +1,7 @@
 import yaml
+import textwrap
 import os
+import subprocess
 import argparse
 
 from typing import Dict, List, Any
@@ -79,6 +81,31 @@ def get_filtered_circleci_config(
     return new_workflows
 
 
+def commit_ci(files: List[str], message: str):
+    # Check that there are no other modified files than the ones edited by this
+    # tool
+    stdout = subprocess.run(["git", "status", "--porcelain"], stdout=subprocess.PIPE).stdout.decode()
+    for line in stdout.split("\n"):
+        if line == "":
+            continue
+        if line[0] != " ":
+            raise RuntimeError(f"Refusing to commit while other changes are already staged: {line}")
+
+
+    # Make the commit
+    print(files)
+    subprocess.run(["git", "add", CONFIG_YML, ".github/workflows/."])
+    subprocess.run(["git", "commit", "-m", message])
+    # for line in stdout.split("\n"):
+    #     for filename in files:
+    #         if filename in line:
+                
+
+
+    # subprocess.run(["git", 
+    # subprocess.run(["git", "add", "
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="make .circleci/config.yml only have a specific set of jobs and delete GitHub actions"
@@ -87,12 +114,30 @@ if __name__ == "__main__":
     parser.add_argument(
         "--keep-gha", action="store_true", help="don't delete GitHub actions"
     )
+    parser.add_argument(
+        "--make-commit", action="store_true", help="add change to git with to a do-not-merge commit"
+    )
     args = parser.parse_args()
 
-    config_yml = yaml.safe_load(open(CONFIG_YML, "r").read())
-    config_yml["workflows"] = get_filtered_circleci_config(config_yml["workflows"], args.job)
-    yaml.dump(config_yml, open(CONFIG_YML, "w"))
+    touched_files = [CONFIG_YML]
+    # config_yml = yaml.safe_load(open(CONFIG_YML, "r").read())
+    # config_yml["workflows"] = get_filtered_circleci_config(config_yml["workflows"], args.job)
+    # yaml.dump(config_yml, open(CONFIG_YML, "w"))
 
     if not args.keep_gha:
         for f in os.listdir(WORKFLOWS_DIR):
-            os.remove(os.path.join(WORKFLOWS_DIR, f))
+            path = os.path.join(WORKFLOWS_DIR, f)
+            touched_files.append(path)
+            os.remove(path)
+
+    if args.make_commit:
+        jobs_str = '\n'.join([f" * {job}" for job in args.job])
+        message = textwrap.dedent(f"""
+        [skip ci][do not merge] Edit config.yml to filter specific jobs
+
+        Filter CircleCI to only run:
+        {jobs_str}
+
+        See [Run Specific CI Jobs](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#run-specific-ci-jobs) for details.
+        """).strip()
+        commit_ci(touched_files, message)
