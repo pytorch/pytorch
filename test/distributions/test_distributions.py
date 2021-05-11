@@ -3044,17 +3044,17 @@ class TestRsample(TestCase):
             ]))
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not found")
-     def test_dirichlet_grad_consistency(self):
-         # Fix for https://github.com/pytorch/pytorch/issues/57447
-         dtype = torch.float32
-         x = torch.tensor([0.15497829020023346, 0.845021665096283], dtype=dtype)
-         c = torch.tensor([14539.8583984375, 79369.6484375], dtype=dtype)
-         t = torch.tensor([93909.5078125, 93909.5078125], dtype=dtype)
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_dirichlet_grad_consistency(self):
+        # Fix for https://github.com/pytorch/pytorch/issues/57447
+        dtype = torch.float32
+        x = torch.tensor([0.15497829020023346, 0.845021665096283], dtype=dtype)
+        c = torch.tensor([14539.8583984375, 79369.6484375], dtype=dtype)
+        t = torch.tensor([93909.5078125, 93909.5078125], dtype=dtype)
 
-         expected = torch._dirichlet_grad(x, c, t)
-         actual = torch._dirichlet_grad(x.to('cuda'), c.to('cuda'), t.to('cuda'))
-         self.assertAlmostEqual(expected, actual, 4) 
+        expected = torch._dirichlet_grad(x, c, t)
+        actual = torch._dirichlet_grad(x.to('cuda'), c.to('cuda'), t.to('cuda'))
+        self.assertAlmostEqual(expected, actual, 4) 
 
     def test_dirichlet_tangent_field(self):
         num_samples = 20
