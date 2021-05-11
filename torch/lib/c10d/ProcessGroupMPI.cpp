@@ -94,13 +94,31 @@ void checkSameSizeAndType(
 
 } // namespace
 
+std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
+  return outputTensors_;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
+  return future_;
+}
+
+void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupMPI::WorkMPI::finishWorkMPI() {
+  future_->markCompleted(at::IValue(outputTensors_));
+  finish();
+}
+
 ProcessGroupMPI::AsyncWork::AsyncWork(
-    at::Tensor tensor,
     MPI_Request request,
+    std::vector<at::Tensor> outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
-      tensor_(std::move(tensor)),
+      outputTensors_(std::move(outputTensors)),
       request_(request) {
   memset(&status_, 0, sizeof(status_));
 }
@@ -180,6 +198,10 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
 
 void ProcessGroupMPI::AsyncWork::abort() {
   TORCH_CHECK(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
+}
+
+std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
+  return outputTensors_;
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
@@ -330,9 +352,9 @@ void ProcessGroupMPI::runLoop() {
 
     try {
       workEntry->run(workEntry);
-      work->finish();
+      work->finishWorkMPI();
     } catch (...) {
-      work->finish(std::current_exception());
+      work->finishWorkMPIError(std::current_exception());
     }
 
     lock.lock();
@@ -343,7 +365,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors) {
-  auto work = c10::make_intrusive<WorkMPI>(profilingTitle, inputTensors);
+  auto work = c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   lock.unlock();
@@ -367,8 +389,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
             opts.rootRank,
             pgComm_));
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:broadcast",
@@ -393,8 +414,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
             mpiOp.at(opts.reduceOp),
             pgComm_));
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:all_reduce",
@@ -431,8 +451,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
             opts.rootRank,
             pgComm_));
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:reduce",
@@ -460,7 +479,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
-        std::vector<at::Tensor>& outputDataVec = entry->dst;
+        std::vector<at::Tensor> outputDataVec = entry->dst;
         auto flatOutputTensor = newLikeFlat(outputDataVec);
 
         c10::DeviceGuard guard(data.device());
@@ -478,8 +497,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
           outputDataVec[i].copy_(flatOutputTensor[i]);
         }
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(
+      &inputTensors, &outputTensors[0], std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:all_gather",
@@ -524,8 +543,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         void* recvbuf = nullptr;
         at::Tensor flatOutputTensor;
 
+        std::vector<at::Tensor> dstdata = entry->dst;
         if (rank_ == opts.rootRank) {
-          flatOutputTensor = newLikeFlat(entry->dst);
+          flatOutputTensor = newLikeFlat(dstdata);
           recvbuf = flatOutputTensor.data_ptr();
         }
 
@@ -542,7 +562,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
             pgComm_));
 
         if (rank_ == opts.rootRank) {
-          std::vector<at::Tensor>& outputDataVec = entry->dst;
+          const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
           for (size_t i = 0; i < outputDataVec.size(); ++i) {
             outputDataVec.at(i).copy_(flatOutputTensor[i]);
@@ -551,15 +571,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
       };
 
   if (rank_ == opts.rootRank) {
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+        &inputTensors, &outputTensors[0], std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:gather",
         c10::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(&inputTensors, nullptr, std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+        &inputTensors, nullptr, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:gather",
@@ -623,8 +643,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
       };
 
   if (rank_ == opts.rootRank) {
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(&inputTensors[0], &outputTensors, std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+        &inputTensors[0], &outputTensors, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:scatter",
@@ -632,8 +652,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
             ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
             : c10::nullopt);
   } else {
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(nullptr, &outputTensors, std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+      nullptr, &outputTensors, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:scatter",
@@ -686,8 +706,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
         };
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(&inputTensors, &outputTensors, std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+        &inputTensors, &outputTensors, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
@@ -724,14 +744,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
         };
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
-    auto entry = std::unique_ptr<WorkEntry>(
-        new WorkEntry(&inputTensors, &outputTensors, std::move(runFunc)));
+    auto entry = std::make_unique<WorkEntry>(
+        &inputTensors, &outputTensors, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
         c10::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
+
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
@@ -784,8 +805,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
           dstdata[i].view({-1}).copy_(dstFlatDataSplits[i]);
         }
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&inputTensors, &outputTensors, std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(
+      &inputTensors, &outputTensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:all_to_all",
@@ -815,8 +836,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
   }
 
   return c10::make_intrusive<AsyncWork>(
-      tensor,
       request,
+      std::vector<at::Tensor>(),
       "mpi:send",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
@@ -844,8 +865,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
   }
 
   return c10::make_intrusive<AsyncWork>(
-      tensor,
       request,
+      tensors,
       "mpi:recv",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
@@ -872,8 +893,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
   }
 
   return c10::make_intrusive<AsyncWork>(
-      tensor,
       request,
+      tensors,
       "mpi:recvAnySource",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
@@ -885,17 +906,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Barrier(pgComm_));
       };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(nullptr, nullptr, std::move(runFunc)));
+  auto entry = std::make_unique<WorkEntry>(nullptr, nullptr, std::move(runFunc));
   return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
   throw std::runtime_error(
-      "no support for allgather_base in MPI process group");
+      "no support for _allgather_base in MPI process group");
 }
 
 } // namespace c10d
