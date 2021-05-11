@@ -429,20 +429,25 @@ struct ConcreteInterpreterSessionImpl
 
   Obj call_kwargs(
       Obj obj,
-      std::vector<std::tuple<std::string, at::IValue>> kwargs) override {
-    std::vector<std::tuple<std::string, py::object>> kwargs_list;
-    kwargs_list.reserve(kwargs.size());
-    for (auto& kv : kwargs) {
-      kwargs_list.emplace_back(
-          std::get<0>(kv), torch::jit::toPyObject(std::get<1>(kv)));
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs) override {
+    py::tuple py_args(args.size());
+    for (size_t i = 0, N = args.size(); i != N; ++i) {
+      py_args[i] = torch::jit::toPyObject(args[i]);
     }
-    py::object o = py::cast(kwargs_list);
-    if (!o) {
-      throw py::error_already_set();
+
+    py::dict py_kwargs;
+    for (auto kv : kwargs) {
+      py_kwargs[py::cast(std::get<0>(kv))] =
+          torch::jit::toPyObject(std::get<1>(kv));
     }
-    py::dict py_kwargs(o);
-    py::list py_args;
     return wrap(call(unwrap(obj), py_args, py_kwargs));
+  }
+
+  Obj call_kwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
+      override {
+    std::vector<at::IValue> args;
+    return call_kwargs(obj, args, kwargs);
   }
 
   Obj attr(Obj obj, const char* attr) override {

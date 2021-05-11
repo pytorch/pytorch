@@ -127,9 +127,7 @@ TEST(DispatchKeySet, SpecificKeys) {
   DispatchKeySet keyset({
       static_cast<DispatchKey>(0), // Undefined should be ignored
       static_cast<DispatchKey>(4),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       static_cast<DispatchKey>(10),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       static_cast<DispatchKey>(15),
   });
   std::unordered_set<DispatchKey> visited_keys;
