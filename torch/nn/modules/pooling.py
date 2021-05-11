@@ -823,7 +823,7 @@ class FractionalMaxPool3d(Module):
         if output_size is not None and output_ratio is not None:
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
-            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):  # type: ignore[index]
+            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):  # type: ignore[index]  # noqa: B950
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 

@@ -715,7 +715,7 @@ class MyModule(torch.jit.ScriptModule):
         return x + y + z
 
     @torch.jit.script_method
-    def multi_input_tensor_list(self, tensor_list):  # type: ignore[name-defined]  # pyre-ignore: PT type annotations
+    def multi_input_tensor_list(self, tensor_list):  # type: ignore[name-defined]
         # type: (List[Tensor]) -> Tensor
         return tensor_list[0] + tensor_list[1] + tensor_list[2]
 

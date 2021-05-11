@@ -1115,7 +1115,7 @@ class DistributedTest:
                     for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
                         events = get_profiling_event(event_name, prof)
                         # Each rank sends/recvs from other rank twice.
-                        self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))  # type: ignore[attr-defined]
+                        self.assertEqual(sum(event.count for event in events), 2 * (dist.get_world_size() - 1))  # type: ignore[attr-defined]  # noqa: B950
                         for event in events:
                             self.assertTrue(event.is_async)  # type: ignore[attr-defined]
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])  # type: ignore[attr-defined]
@@ -1703,7 +1703,7 @@ class DistributedTest:
                     self.assertGreaterEqual(e.cpu_time, 0)  # type: ignore[attr-defined]
                     # Verify tensor shapes if given
                     if tensor_shapes is not None:
-                        self.assertEqual(e.input_shapes, tensor_shapes, f"event shape: {e.input_shapes} vs tensor {tensor_shapes}")  # type: ignore[attr-defined]
+                        self.assertEqual(e.input_shapes, tensor_shapes, f"event shape: {e.input_shapes} vs tensor {tensor_shapes}")  # type: ignore[attr-defined]  # noqa: B950
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -3244,7 +3244,7 @@ class DistributedTest:
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         def test_DistributedDataParallel_requires_grad(self):
             # a module without gradients shouldn't be accepted
-            self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))  # type: ignore[attr-defined]
+            self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))  # type: ignore[attr-defined]  # noqa: B950
             self._barrier()
 
         @unittest.skipIf(
@@ -3383,7 +3383,7 @@ class DistributedTest:
                 # Verify hook grad with expected.
                 # Cannot use exact match here due to a very small accuracy loss,
                 # e.g. 1e-05, for powerSGD hook case.
-                assert_func = self.assertEqual if hook == default.allreduce_hook else torch.testing.assert_allclose  # type: ignore[attr-defined]
+                assert_func = self.assertEqual if hook == default.allreduce_hook else torch.testing.assert_allclose  # type: ignore[attr-defined]  # noqa: B950
                 assert_func(
                     avg_hook[0, 0],
                     expected_grad,
@@ -3814,8 +3814,8 @@ class DistributedTest:
             )
 
             memory_format = torch.channels_last
-            input_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)  # type: ignore[call-overload]
-            target_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)  # type: ignore[call-overload]
+            input_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)  # type: ignore[call-overload]  # noqa: B950
+            target_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)  # type: ignore[call-overload]  # noqa: B950
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
@@ -4145,10 +4145,10 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("bucket_sizes"), str(param_size))  # type: ignore[attr-defined]
             self.assertEqual(ddp_logging_data.get("master_port"), parse_env("MASTER_PORT"))  # type: ignore[attr-defined]
             self.assertEqual(ddp_logging_data.get("master_addr"), parse_env("MASTER_ADDR"))  # type: ignore[attr-defined]
-            self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))  # type: ignore[attr-defined]
+            self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))  # type: ignore[attr-defined]  # noqa: B950
             if ddp_logging_data.get("backend_name") == "gloo":
-                self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))  # type: ignore[attr-defined]
-                self.assertEqual(ddp_logging_data.get("gloo_device_transport"), parse_env("GLOO_DEVICE_TRANSPORT"))  # type: ignore[attr-defined]
+                self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))  # type: ignore[attr-defined]  # noqa: B950
+                self.assertEqual(ddp_logging_data.get("gloo_device_transport"), parse_env("GLOO_DEVICE_TRANSPORT"))  # type: ignore[attr-defined]  # noqa: B950
             self.assertEqual(ddp_logging_data.get("nccl_socket_ifname"), None)  # type: ignore[attr-defined]
             self.assertEqual(ddp_logging_data.get("nccl_blocking_wait"), None)  # type: ignore[attr-defined]
             self.assertEqual(ddp_logging_data.get("nccl_async_error_handling"), None)  # type: ignore[attr-defined]
@@ -5547,7 +5547,7 @@ class DistributedTest:
                 if i % 2 == 0:
                     expected = torch.tensor([world_size, 0], device=self.rank, dtype=torch.int32)  # type: ignore[attr-defined]
                 else:
-                    expected = torch.tensor([world_size, world_size], device=self.rank, dtype=torch.int32)  # type: ignore[attr-defined]
+                    expected = torch.tensor([world_size, world_size], device=self.rank, dtype=torch.int32)  # type: ignore[attr-defined]  # noqa: B950
 
                 # Validate parameter usage.
                 variable_usage_tensor = local_used_maps[0]
@@ -5576,7 +5576,7 @@ class DistributedTest:
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
                             ddp_outputs_not_used_in_loss_str,
-                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"  # type: ignore[attr-defined]
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"  # type: ignore[attr-defined]  # noqa: B950
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
@@ -5679,7 +5679,7 @@ class DistributedTest:
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
                             ddp_outputs_not_used_in_loss_str,
-                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"  # type: ignore[attr-defined]
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"  # type: ignore[attr-defined]  # noqa: B950
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
@@ -5796,7 +5796,7 @@ class DistributedTest:
                             msg = str(e)
                             unused_index = 0
                             unused_index_substr = (
-                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"  # type: ignore[attr-defined]
+                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"  # type: ignore[attr-defined]  # noqa: B950
                             )
                             if ddp == net:
                                 expected_strs = [
