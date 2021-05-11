@@ -1,9 +1,6 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
-#include <jit/ir/graph_node_list.h>
-#include <jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
