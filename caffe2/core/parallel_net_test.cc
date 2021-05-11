@@ -23,7 +23,6 @@ class SleepOp final : public Operator<CPUContext> {
  public:
   SleepOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ms_(OperatorBase::GetSingleArgument<int>("ms", 1000)) {
     DCHECK_GT(ms_, 0);
     DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";

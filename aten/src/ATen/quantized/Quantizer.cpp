@@ -84,7 +84,6 @@ int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
   int64_t new_size_bytes;
   switch(t) {
     case at::ScalarType::QUInt4x2:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       new_size_bytes = std::ceil(size_bytes * 0.5);
       break;
     default:
