@@ -67,8 +67,7 @@ tensorpipeAllocate(
 // completed. The holder can be destroyed once this function returns.
 TORCH_API Message tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
-    TensorpipeReadBuffers&& holder,
-    const std::shared_ptr<LazyStreamContext>& ctx);
+    TensorpipeReadBuffers&& holder);
 
 } // namespace rpc
 } // namespace distributed
