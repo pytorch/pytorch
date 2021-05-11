@@ -58,22 +58,22 @@ tensor it’s converted from.
 5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H, W=W).
 6) ...
  */
-static inline std::vector<int64_t> computeTextureSize(IntArrayRef sizes) {
-  std::vector<int64_t> textureSize(4, 1);
+static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
+  std::vector<int64_t> imageSize(4, 1);
   int64_t index = 3;
   int64_t batch = 1;
   for (int i = sizes.size() - 1; i >= 0; i--) {
     if (index != 0) {
-      textureSize[index] = sizes[i];
+        imageSize[index] = sizes[i];
       index--;
       continue;
     }
     // For higher dimensional tensors,
-    // multiply rest of dims into textureSize[0]
+    // multiply rest of dims into imageSize[0]
     batch *= sizes[i];
   }
-  textureSize[0] = batch;
-  return textureSize;
+  imageSize[0] = batch;
+  return imageSize;
 }
 
 } // namespace metal
