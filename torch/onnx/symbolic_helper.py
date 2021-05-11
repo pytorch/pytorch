@@ -125,12 +125,6 @@ def _is_packed_list(list_value):
     return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
 
 
-def _is_sequence(x):
-    if x is None:
-        return False
-    return "List[" in str(x.type())
-
-
 def parse_args(*arg_descriptors):
     """A decorator which converts args from torch._C.Value to built-in types.
 
@@ -217,6 +211,9 @@ def _is_tensor(x):
 
 def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
+
+def _is_scalar_list(x):
+    return isinstance(x.type(), torch._C.ListType) and (scalar_name_to_pytorch[str(x.type().getElementType())] in cast_pytorch_to_onnx.keys())
 
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
