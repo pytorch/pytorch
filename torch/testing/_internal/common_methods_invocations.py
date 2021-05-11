@@ -5274,9 +5274,9 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    skips=(
-                          # Ref: https://github.com/pytorch/pytorch/issues/57982#issuecomment-838013256
-                          SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                   dtypes=[torch.bfloat16]),)),
+                       # Ref: https://github.com/pytorch/pytorch/issues/57982#issuecomment-838013256
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.bfloat16]),)),
     UnaryUfuncInfo('reciprocal',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.reciprocal),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
