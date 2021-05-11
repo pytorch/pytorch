@@ -1403,17 +1403,17 @@ REGISTER_OPERATOR_FUNCTOR(
             at::borrow_from_optional_tensor(bias_opt);
         const at::Tensor& bias = *bias_maybe_owned;
 
-        auto inputs = at::native::_prepare_layer_norm_inputs(
+        auto M_N = at::native::_check_layer_norm_inputs(
             input, normalized_shape, weight, bias);
-        auto X = std::get<0>(inputs);
-        auto gamma = std::get<1>(inputs);
-        auto beta = std::get<2>(inputs);
-        auto M = std::get<3>(inputs);
-        auto N = std::get<4>(inputs);
+        auto M = M_N.first;
+        auto N = M_N.second;
+        auto X = input.expect_contiguous();
+        auto gamma = weight.expect_contiguous();
+        auto beta = bias.expect_contiguous();
 
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = at::native::empty_like(
-              X,
+              *X,
               c10::nullopt /* dtype */,
               c10::nullopt /* layout */,
               c10::nullopt /* device */,
@@ -1421,11 +1421,11 @@ REGISTER_OPERATOR_FUNCTOR(
               at::MemoryFormat::Contiguous);
         } else {
           at::native::resize_(
-              p_node->Output(0).toTensor(), X.sizes(), c10::nullopt);
+              p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
         }
         at::Tensor& output = p_node->Output(0).toTensor();
-        at::Tensor mean = at::empty({M}, X.options());
-        at::Tensor rstd = at::empty({M}, X.options());
+        at::Tensor mean = create_empty_from({M}, *X);
+        at::Tensor rstd = create_empty_from({M}, *X);
 
         at::native::layer_norm_cpu_out(
             output,
@@ -1433,8 +1433,8 @@ REGISTER_OPERATOR_FUNCTOR(
             rstd,
             input,
             normalized_shape,
-            gamma,
-            beta,
+            *gamma,
+            *beta,
             eps,
             M,
             N);
