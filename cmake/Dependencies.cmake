@@ -1826,7 +1826,7 @@ if(USE_KINETO AND INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_KINETO)
-  if((NOT USE_CUDA) OR MSVC)
+  if(NOT USE_CUDA)
     set(LIBKINETO_NOCUPTI ON CACHE STRING "")
     message(STATUS "Using CPU-only version of Kineto")
   else()

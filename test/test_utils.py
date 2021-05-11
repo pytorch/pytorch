@@ -775,6 +775,7 @@ class TestCrashHandler(TestCase):
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
+        print("DEBUG: build_dir = ", build_dir)
         try:
             src_path = os.path.join(build_dir, "main.cpp")
             src = textwrap.dedent("""\
@@ -821,7 +822,8 @@ class TestStandaloneCPPJIT(TestCase):
                 )
 
         finally:
-            shutil.rmtree(build_dir)
+            pass
+            #shutil.rmtree(build_dir)
 
 
 if __name__ == '__main__':

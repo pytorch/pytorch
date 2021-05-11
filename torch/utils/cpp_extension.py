@@ -1495,6 +1495,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             assert ROCM_VERSION is not None
             extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
             extra_ldflags.append('-lamdhip64' if ROCM_VERSION >= (3, 5) else '-lhip_hcc')
+    # On Windows CUPTI (used by Kineto profiler) is linked dynamically (.DLL)
+    if IS_WINDOWS and torch.cuda.is_available():
+        extra_ldflags.append(f'/LIBPATH:{_join_cuda_home(os.path.join("extras", "CUPTI", "lib64"))}')
+        extra_ldflags.append('cupti.lib')
     return extra_ldflags
 
 
@@ -1690,6 +1694,8 @@ def _get_exec_path(module_name, path):
         )
         if not torch_lib_in_path:
             os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
+    if IS_WINDOWS and torch.cuda.is_available():
+        os.environ['PATH'] = f"{_join_cuda_home(os.path.join('extras', 'CUPTI', 'lib64'))};{os.getenv('PATH', '')}"
     return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
 
