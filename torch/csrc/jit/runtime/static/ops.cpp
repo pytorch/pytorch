@@ -676,7 +676,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// TODO: fix clone
 // clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
@@ -684,13 +683,27 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     return nullptr;
   }
   return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto& src = p_node->Input(0).toTensor();
+    const auto& optional_memory_format =
+        p_node->Input(1).toOptional<c10::MemoryFormat>();
+    auto memory_format =
+        optional_memory_format.value_or(c10::MemoryFormat::Preserve);
+
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_t);
+      if (memory_format == c10::MemoryFormat::Preserve &&
+          src.is_non_overlapping_and_dense()) {
+        // Copy all strides
+        p_node->Output(0) =
+            at::empty_strided(src.sizes(), src.strides(), src.options());
+      } else {
+        memory_format = src.suggest_memory_format();
+        p_node->Output(0) = create_empty_from(src, memory_format);
+      }
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-    at::native::copy_(out_t, in0_t, false);
+    at::native::resize_impl_cpu_(
+        out_t.unsafeGetTensorImpl(), src.sizes(), src.strides());
+    at::native::copy_(out_t, src, false);
   };
 });
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
