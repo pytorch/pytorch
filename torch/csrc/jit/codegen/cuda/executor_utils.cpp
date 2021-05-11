@@ -668,9 +668,9 @@ NvrtcFunction nvrtcCompile(
 #endif
   }
 
-  // Add debug info to generated kernels
+  // Add line info to generated kernels
 #ifndef NDEBUG
-  args.push_back("-G");
+  args.push_back("-lineinfo");
 #endif
 
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
