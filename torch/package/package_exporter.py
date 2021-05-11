@@ -1,4 +1,5 @@
 import collections
+import importlib.machinery
 import io
 import linecache
 import pickletools
@@ -51,20 +52,70 @@ class EmptyMatchError(Exception):
     pass
 
 
-class DeniedModuleError(Exception):
-    """This is an exception that is thrown when a pattern added with deny matches
-    a module required during the packaging process.
+class PackagingError(Exception):
+    """This exception is raised when there is an issue with exporting a package.
+    ``PackageExporter`` will attempt to gather up all the errors and present
+    them to you at once.
+
+    To make error information more understandable, the exception message will
+    only show modules that you ``intern``'d or direct dependencies of
+    ``intern``'d modules. To see the full list of error modules, consult the
+    attributes on this exception.
+
+    Attributes:
+        denied (Set[str]): modules that have been marked as denied by the exporter.
+        broken (Dict[str, str]): modules for which the exporter could not retrieve source info,
+            along with the reason that retrieval it failed.
+        unhandled (Set[str]): modules for which there is no user-specified action.
     """
 
-    pass
+    def __init__(
+        self,
+        denied: Set[str],
+        broken: Dict[str, str],
+        unhandled: Set[str],
+        include_filter: Set[str],
+    ):
+        self.denied = denied
+        self.broken = broken
+        self.unhandled = unhandled
 
+        filtered_denied = set()
+        for module in self.denied:
+            if module in include_filter:
+                filtered_denied.add(module)
 
-class UnhandledDependencyError(Exception):
-    """This exception is thrown when, at the end of packaging, there are still
-    module dependencies that do not match against any patterns.
-    """
+        filtered_broken = {}
+        for module, reason in self.broken.items():
+            if module in include_filter:
+                filtered_broken[module] = reason
 
-    pass
+        filtered_unhandled = set()
+        for module in self.unhandled:
+            if module in include_filter:
+                filtered_unhandled.add(module)
+
+        message = io.StringIO("Errors raised while packaging:")
+
+        if len(filtered_denied) != 0:
+            message.write(
+                "\n\n* The following modules were detected as dependencies but have been denied:\n"
+                f"{textwrap.indent(pprint.pformat(filtered_denied), prefix='  ')}"
+            )
+        if len(filtered_broken) != 0:
+            message.write(
+                "\n\n* The following modules did not have source information. "
+                "Extern, mock, or refactor to remove the dependency:\n"
+                f"{textwrap.indent(pprint.pformat(filtered_broken), prefix='  ')}"
+            )
+        if len(filtered_unhandled) != 0:
+            message.write(
+                "\n\n* The following modules did not match against any patterns. "
+                "Intern, extern, or mock them:\n"
+                f"{textwrap.indent(pprint.pformat(filtered_unhandled), prefix='  ')}"
+            )
+
+        super().__init__(message.getvalue())
 
 
 class PackageExporter:
@@ -370,7 +421,9 @@ node [shape=box];
         if source is None:
             # Couldn't find a source!  Add it to our dependency graph as broken
             # and continue.
-            self.dependency_graph.nodes[module_name]["broken"] = True
+            self.dependency_graph.add_node(
+                module_name, broken=True, filename=getattr(module_obj, "__file__", None)
+            )
             return
 
         deps = self._get_dependencies(source, module_name, is_package)
@@ -600,7 +653,7 @@ node [shape=box];
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
         """Blocklist modules who names match the given glob patterns from the list of modules the package can import.
-        If a dependency on any matching packages is found, a :class:`DeniedModuleError` is thrown.
+        If a dependency on any matching packages is found, a :class:`PackagingError` is raised.
 
         Args:
             include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
@@ -649,43 +702,60 @@ node [shape=box];
             str_or_bytes = str_or_bytes.encode("utf-8")
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
 
-    def _execute_dependency_graph(self):
-        """Takes a finalized dependency graph describing how to package all
-        modules and executes it, writing to the ZIP archive.
-        """
-        # Pre-validation on the dependency graph:
-        # 1. All modules should have an associated action.
-        # 2. No modules should be dnied.
-        unhandled = set()
+    def _validate_dependency_graph(self):
+        # 1. No modules should be denied.
+        # 2. No broken modules (we should have been able to retrieve source for everything interned).
+        # 3. All modules should have an associated action.
+        # 4. All patterns for which allow_empty=False have been matched at least once.
         denied = set()
+        broken = {}
+        unhandled = set()
         for module_name, attrs in self.dependency_graph.nodes.items():
-            if attrs.get("action") is None:
-                unhandled.add(module_name)
-            elif attrs.get("action") == _ModuleProviderAction.DENY:
+            if attrs.get("action") == _ModuleProviderAction.DENY:
                 denied.add(module_name)
 
-        if len(unhandled) != 0:
-            raise UnhandledDependencyError(
-                "The following modules did not match against any patterns. "
-                "Please intern, extern, or mock them:\n"
-                f"{textwrap.indent(pprint.pformat(unhandled), prefix='  ')}"
-            )
+            if attrs.get("broken") is True:
+                filename = attrs.get("filename")
+                if filename is None:
+                    broken_reason = "Module does not have a __file__ attribute set."
+                elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
+                    broken_reason = (
+                        "Module is an C extension module, which is not supported in packaging. "
+                        "Extern/mock it, or refactor your code to avoid the dependency."
+                    )
+                else:
+                    broken_reason = f"Source file {filename} not found."
+                broken[module_name] = broken_reason
 
-        if len(denied) != 0:
-            raise DeniedModuleError(
-                f"The following modules were detected as dependencies but have been denied:"
-                f"{textwrap.indent(pprint.pformat(denied), prefix='  ')}"
-            )
+            if attrs.get("action") is None:
+                unhandled.add(module_name)
 
+        if len(denied) != 0 or len(broken) != 0 or len(unhandled) != 0:
+            # build up the filter set
+            interns = set()
+            for module_name, attrs in self.dependency_graph.nodes.items():
+                if attrs.get("action") == _ModuleProviderAction.INTERN:
+                    interns.add(module_name)
 
-        # Check for any unmatched patterns
+            include_filter = interns.copy()
+            for intern in interns:
+                for dep in self.dependency_graph.successors(intern):
+                    include_filter.add(dep)
+
+            raise PackagingError(denied, broken, unhandled, include_filter)
+
         for pattern, _, allow_empty in self.patterns:
             if not allow_empty and pattern not in self.matched_patterns:
                 raise EmptyMatchError(
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
-        # Now do the associated action for each module in the dependency graph.
+    def _execute_dependency_graph(self):
+        """Takes a finalized dependency graph describing how to package all
+        modules and executes it, writing to the ZIP archive.
+        """
+        self._validate_dependency_graph()
+
         extern_modules = []
         _mock_written = False
         for module_name, attrs in self.dependency_graph.nodes.items():
@@ -739,7 +809,9 @@ node [shape=box];
                 self._write_source_string(module_name, source, is_package)
 
             else:
-                raise AssertionError(f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch.")
+                raise AssertionError(
+                    f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch."
+                )
 
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)

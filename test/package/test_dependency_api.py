@@ -1,15 +1,11 @@
+import importlib
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
-from torch.package.package_exporter import UnhandledDependencyError
 from unittest import skipIf
 
-from torch.package import (
-    DeniedModuleError,
-    EmptyMatchError,
-    PackageExporter,
-    PackageImporter,
-)
+from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
+from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -90,7 +86,7 @@ class TestDependencyAPI(PackageTestCase):
         """
         buffer = BytesIO()
 
-        with self.assertRaises(DeniedModuleError):
+        with self.assertRaises(PackagingError):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
                 exporter.save_source_string("foo", "import package_a.subpackage")
@@ -100,7 +96,7 @@ class TestDependencyAPI(PackageTestCase):
         Test marking packages as "deny" using globs instead of package names.
         """
         buffer = BytesIO()
-        with self.assertRaises(DeniedModuleError):
+        with self.assertRaises(PackagingError):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
@@ -227,14 +223,59 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with self.assertRaises(UnhandledDependencyError):
+
+        exception_raised = False
+        try:
             with PackageExporter(buffer, verbose=False) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
+        except PackagingError as e:
+            exception_raised = True
+            self.assertEqual(e.unhandled, set(["package_a", "package_a.subpackage"]))
+
+        self.assertTrue(exception_raised)
 
         # Interning all dependencies should work
         with PackageExporter(buffer, verbose=False) as he:
             he.intern(["package_a", "package_a.subpackage"])
             he.save_pickle("obj", "obj.pkl", obj2)
+
+    def test_broken_dependency(self):
+        """A unpackageable dependency should raise a BrokenDependencyError."""
+
+        def create_module(name):
+            spec = importlib.machinery.ModuleSpec(name, self, is_package=False)  # type: ignore[arg-type]
+            module = importlib.util.module_from_spec(spec)
+            ns = module.__dict__
+            ns["__spec__"] = spec
+            ns["__loader__"] = self
+            ns["__file__"] = f"{name}.so"
+            ns["__cached__"] = None
+            return module
+
+        class BrokenImporter(Importer):
+            def __init__(self):
+                self.modules = {
+                    "foo": create_module("foo"),
+                    "bar": create_module("bar"),
+                }
+
+            def import_module(self, module_name):
+                return self.modules[module_name]
+
+        buffer = BytesIO()
+
+        exception_raised = False
+        try:
+            with PackageExporter(
+                buffer, verbose=False, importer=BrokenImporter()
+            ) as exporter:
+                exporter.intern(["foo", "bar"])
+                exporter.save_source_string("my_module", "import foo; import bar")
+        except PackagingError as e:
+            exception_raised = True
+            self.assertEqual(set(e.broken.keys()), set(["foo", "bar"]))
+
+        self.assertTrue(exception_raised)
 
 
 if __name__ == "__main__":
