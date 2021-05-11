@@ -8063,13 +8063,25 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
 
     def test_tensor_base_init(self):
         # Direct construction not OK
-        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+        self.assertRaises(RuntimeError, lambda: torch._C._TensorBase())
 
         # But construction of subclass is OK
         class T(torch._C._TensorBase):
             pass
 
         T()
+
+    def test_tensor_base_new(self):
+
+        # OK to call super().__new__, see
+        # https://github.com/pytorch/pytorch/issues/57421
+        class TestTensor(torch._C._TensorBase):
+            @staticmethod
+            def __new__(cls, x, *args, **kwargs):
+                return super().__new__(cls, x, *args, **kwargs)
+
+        x = torch.ones(5)
+        test_tensor = TestTensor(x)
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
