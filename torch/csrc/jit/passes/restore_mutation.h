@@ -9,9 +9,18 @@
 namespace torch {
 namespace jit {
 
-class FunctionalActivationRewriter {
+struct FunctionalToInplaceRewriterFlags {
+  bool transform;
+  bool check_shape;
+  bool check_dtype;
+};
+
+class FunctionalToInplaceRewriter {
  public:
-  FunctionalActivationRewriter(std::shared_ptr<Graph> graph);
+  FunctionalToInplaceRewriter(
+      std::shared_ptr<Graph> graph,
+      c10::optional<std::function<FunctionalToInplaceRewriterFlags(Node*)>>
+          node_filter = c10::nullopt);
 
   bool FunctionalToInplace(Block* block);
 
@@ -25,10 +34,10 @@ class FunctionalActivationRewriter {
 
   bool CanBeInplace(Node* node);
 
-  std::unordered_set<Symbol> functional_activation_possible_type_promotion;
-  std::unordered_set<Symbol> functional_activation_no_type_promotion;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
+  c10::optional<std::function<FunctionalToInplaceRewriterFlags(Node*)>>
+      node_filter_;
 };
 
 // A common application scenario is to apply InplaceToFunctionalActivation

@@ -70,7 +70,6 @@ and biases.
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .ValueLengthInputFillers(
@@ -151,7 +150,6 @@ and biases.
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .ValueLengthInputFillers(

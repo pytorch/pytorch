@@ -31,6 +31,8 @@ class TestFunctionalToInplaceActivation(JitTestCase):
             F.relu6,
             torch.relu,
         ]:
+            # Without type inference, conversion can only happen when
+            # there is no possiblity of type promotion.
             def test_basic(x):
                 y = x + 1
                 z = activation(y)
