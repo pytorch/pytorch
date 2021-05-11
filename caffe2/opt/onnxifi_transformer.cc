@@ -186,7 +186,6 @@ void fillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
   opset_id->set_domain("");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   opset_id->set_version(7);
 }
 
