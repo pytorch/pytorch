@@ -172,13 +172,13 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
             tensor_protos = caffe2_pb2.TensorProtos()
             image_tensor = tensor_protos.protos.add()
             # string data
-            image_tensor.data_type = 4  # type: ignore[assignment, assignment]
+            image_tensor.data_type = 4  # type: ignore[assignment]
             image_tensor.string_data.append(img_str.getvalue())
             img_str.close()
 
             label_tensor = tensor_protos.protos.add()
             # int32 data
-            label_tensor.data_type = 2  # type: ignore[assignment, assignment]
+            label_tensor.data_type = 2  # type: ignore[assignment]
             assert (label_type >= 0 and label_type <= 3)
             if label_type == 0:
                 label_tensor.int32_data.append(index)
@@ -197,7 +197,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
             elif label_type == 3:
                 weight_tensor = tensor_protos.protos.add()
                 # float weights
-                weight_tensor.data_type = 1  # type: ignore[assignment, assignment]
+                weight_tensor.data_type = 1  # type: ignore[assignment]
                 binary_labels = np.random.randint(2, size=num_labels)
                 expected_label = np.zeros(num_labels).astype(np.float32)  # type: ignore[assignment]
                 for idx, val in enumerate(binary_labels.tolist()):
@@ -209,14 +209,14 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
             if output1:
                 output1_tensor = tensor_protos.protos.add()
                 # float data
-                output1_tensor.data_type = 1  # type: ignore[assignment, assignment]
+                output1_tensor.data_type = 1  # type: ignore[assignment]
                 output1_tensor.float_data.append(output1)
 
             output2 = []
             if output2_size:
                 output2_tensor = tensor_protos.protos.add()
                 # int32 data
-                output2_tensor.data_type = 2  # type: ignore[assignment, assignment]
+                output2_tensor.data_type = 2  # type: ignore[assignment]
                 values = np.random.randint(1024, size=output2_size)
                 for val in values.tolist():
                     output2.append(val)
@@ -228,7 +228,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
             if not do_default_bound:
                 bounding_tensor = tensor_protos.protos.add()
                 # int32 data
-                bounding_tensor.data_type = 2  # type: ignore[assignment, assignment]
+                bounding_tensor.data_type = 2  # type: ignore[assignment]
                 bounding_tensor.int32_data.extend(bounding_box)
 
             txn.put(
