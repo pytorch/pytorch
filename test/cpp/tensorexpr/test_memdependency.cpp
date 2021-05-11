@@ -785,10 +785,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   std::vector<Stmt*> stmts(
       {For::make(x, 1, 10, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(
-           x,
-           1,
-           9,
-           Store::make(b, {x}, Mul::make(Load::make(b, {x}), 2))),
+           x, 1, 9, Store::make(b, {x}, Mul::make(Load::make(b, {x}), 2))),
        For::make(x, 3, 4, Store::make(c, {x}, Load::make(a, {x}))),
        For::make(x, 0, 10, Store::make(c, {x}, Load::make(b, {x})))});
 
@@ -977,14 +974,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
            0,
            9,
            Store::make(
-               a,
-               {ExprHandle(9) - x},
-               Load::make(a, {ExprHandle(8) - x}))),
+               a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x}))),
        For::make(
-           x,
-           0,
-           10,
-           Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x}))),
+           x, 0, 10, Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x}))),
        For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x})))});
 
   stmt->accept(&analyzer);
@@ -1326,9 +1318,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
         3,
         10,
         Store::make(
-            a,
-            {ExprHandle(9) - x},
-            Load::make(a, {ExprHandle(8) - x})));
+            a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x})));
     stmt->accept(&analyzer);
 
     // However here was can determine the A store is earlier in the order than
@@ -1352,9 +1342,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
         3,
         10,
         Store::make(
-            a,
-            {ExprHandle(8) - x},
-            Load::make(a, {ExprHandle(9) - x})));
+            a, {ExprHandle(8) - x}, Load::make(a, {ExprHandle(9) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1375,9 +1363,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
         3,
         10,
         Store::make(
-            a,
-            {ExprHandle(9) - x},
-            Load::make(a, {ExprHandle(8) - x})));
+            a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1438,10 +1424,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // distinct.
 
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1457,10 +1440,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        1,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 - 1})));
+        x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1476,10 +1456,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 2})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 2})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1495,10 +1472,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        1,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 - 2})));
+        x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 2})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1514,10 +1488,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // of stride.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 7})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 7})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1532,10 +1503,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Works with offsets which are multiples of the stride.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 4})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 4})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1552,10 +1520,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 6}, Load::make(a, {x * 6 + 5})));
+        x, 0, 10, Store::make(a, {x * 6}, Load::make(a, {x * 6 + 5})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1605,10 +1570,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 6 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1624,10 +1586,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 6 + 4})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 4})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1643,10 +1602,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2 + 3}, Load::make(a, {x * 6})));
+        x, 0, 10, Store::make(a, {x * 2 + 3}, Load::make(a, {x * 6})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1661,10 +1617,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If they have strides with no common muliple > 1, they overlap.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1695,10 +1648,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If they have different execution orders they may overlap.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x})));
+        x, 0, 10, Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1747,10 +1697,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If the stride is not monotonic, they overlap - even with an offset.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        x,
-        0,
-        10,
-        Store::make(a, {x / 2}, Load::make(a, {x / 2 + 1})));
+        x, 0, 10, Store::make(a, {x / 2}, Load::make(a, {x / 2 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1819,10 +1766,7 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   MemDependencyChecker analyzer({a.node()}, {b.node()});
   Stmt* stmt = Block::make(
       {For::make(
-           x,
-           0,
-           10,
-           Store::make(b, {x * 2 + 1}, Load::make(a, {x * 2 + 1}))),
+           x, 0, 10, Store::make(b, {x * 2 + 1}, Load::make(a, {x * 2 + 1}))),
        For::make(x, 0, 10, Store::make(b, {x * 2}, Load::make(a, {x * 2})))
 
       });
@@ -2050,9 +1994,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
         {For::make(x, 0, 10, initStore),
          Cond::make(
              CompareSelect::make(
-                 conditionalLoad,
-                 5,
-                 CompareSelectOperation::kLT),
+                 conditionalLoad, 5, CompareSelectOperation::kLT),
              Store::make(c, {0}, 5),
              nullptr)});
 
@@ -2368,10 +2310,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        x,
-        0,
-        10,
-        Store::make(c, {x}, Load::make(a, {Load::make(b, {x})})))});
+        x, 0, 10, Store::make(c, {x}, Load::make(a, {Load::make(b, {x})})))});
 
     stmt->accept(&analyzer);
 
@@ -2416,10 +2355,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        x,
-        0,
-        10,
-        Store::make(c, {Load::make(b, {x})}, Load::make(a, {x})))});
+        x, 0, 10, Store::make(c, {Load::make(b, {x})}, Load::make(a, {x})))});
 
     stmt->accept(&analyzer);
 
@@ -2463,10 +2399,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        x,
-        0,
-        10,
-        Store::make(c, {Load::make(b, {Load::make(a, {x})})}, x))});
+        x, 0, 10, Store::make(c, {Load::make(b, {Load::make(a, {x})})}, x))});
 
     stmt->accept(&analyzer);
 
