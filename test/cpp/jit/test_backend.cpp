@@ -8,6 +8,7 @@
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, ToBackend) {
   Module m("m");
   m.define(R"(
@@ -79,6 +80,7 @@ TEST(BackendTest, ToBackend) {
   AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, ToBackendNotAvailable) {
   Module m("m");
   m.define(R"(
@@ -112,6 +114,7 @@ TEST(BackendTest, ToBackendNotAvailable) {
       lm.forward(inputs).toTuple()->elements(), "Backend is not available.");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompiler) {
   Module m("m");
   m.define(R"(
@@ -142,6 +145,7 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
   m.define(R"(
