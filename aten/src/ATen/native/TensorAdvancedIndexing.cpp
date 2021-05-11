@@ -1446,7 +1446,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& out) {
   }
   sizes[dimensions] = 0;
 
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kHalf, kBFloat16, self.scalar_type(), "nonzero_cpu", [&]() {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           char* self_data = data[0];
@@ -1454,7 +1454,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& out) {
 
           for (int64_t i = 0; i < n; i++) {
             scalar_t self_data_i = *(scalar_t*)(self_data + self_stride * i);
-            if (self_data_i != 0) {
+            if (self_data_i != static_cast<scalar_t>(0)) {
               // `ii` is read-only pointer.
               auto const* ii = idx + dimensions;
               for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
