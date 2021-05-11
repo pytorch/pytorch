@@ -48,7 +48,7 @@ TORCH_API rpc::Message getMessageWithAutograd(
         {});
 
 // Send message after autograd checking
-TORCH_API std::shared_ptr<c10::ivalue::Future>
+TORCH_API c10::intrusive_ptr<c10::ivalue::Future>
 sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,

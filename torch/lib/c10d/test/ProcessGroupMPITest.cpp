@@ -28,6 +28,31 @@ std::vector<std::vector<at::Tensor>> waitWork(
   return outputTensors;
 }
 
+// Wait using Futures
+std::vector<std::vector<at::Tensor>> waitFuture(
+    c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+  std::vector<std::vector<at::Tensor>> outputTensors;
+  for (auto& work : works) {
+    auto fut = work->getFuture();
+    try {
+      fut->wait();
+    } catch (const std::exception& ex) {
+      std::cerr << "Exception received: " << ex.what() << std::endl;
+      pg->abort();
+    }
+    auto result = fut->value();
+    if (result.isNone()) {
+      outputTensors.emplace_back();
+    } else if (result.isTensorList()) {
+      outputTensors.emplace_back(result.toTensorVector());
+    } else {
+      throw std::runtime_error("future result should be tensor list or none");
+    }
+  }
+  return outputTensors;
+}
+
 void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
 
@@ -43,7 +68,7 @@ void testAllreduce(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -79,7 +104,7 @@ void testBroadcast(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -105,7 +130,7 @@ void testReduce(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -148,7 +173,7 @@ void testAllgather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -191,7 +216,7 @@ void testGather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
   if (rank == 0) {
@@ -242,7 +267,7 @@ void testScatter(int iter = 1) {
     works.push_back(std::move(work));
   }
 
-  auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {

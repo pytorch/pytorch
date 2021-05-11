@@ -203,11 +203,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
   })();
   namedinference::propagate_names(result, self);
 
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
-    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
-  }
+  // Detach the forward grads by not setting anything on the result
 
   return result;
 }
@@ -245,11 +241,7 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    self._fw_grad(/* level */ 0).detach_();
-  }
+  autograd_meta->fw_grad_.reset();
 
   return self;
 }
@@ -302,7 +294,8 @@ namespace ADInplaceOrView {
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
-                          /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
+                          /* is_fw_differentiable */ false, /* view_func */ func,
+                          /* creation_meta */ CreationMeta::DEFAULT,
                           /*allow_tensor_metadata_change=*/false);
 
     return result;

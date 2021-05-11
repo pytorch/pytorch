@@ -72,7 +72,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       dequantize_output_) {
     if (!GetCpuId().avx2()) {
       static int log_occurences = 0;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         LOG(WARNING)
@@ -81,7 +80,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       }
     } else {
       static int log_occurences = 0;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         LOG(WARNING) << "Falling back to the default Caffe2 operator because "
@@ -809,7 +807,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
               std::abs(
                   bias_qparams.scale -
                   in_qparams_[0].scale * filter_qparams_[0].scale),
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               1e-4);
         }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
@@ -831,7 +828,6 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
                 b_dequantized_data_[j],
                 0,
                 in_qparams_[0].scale * filter_qparams_[0].scale,
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 32);
           }
           b_quantized_data_ = b_quantized_->data();

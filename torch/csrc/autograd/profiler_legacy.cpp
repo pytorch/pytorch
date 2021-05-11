@@ -222,7 +222,8 @@ void ProfilerThreadLocalState::pushRange(
         record_cuda,
         fn.handle(),
         std::move(shapes),
-        at::RecordFunction::getDefaultNodeId());
+        at::RecordFunction::getDefaultNodeId(),
+        fn.isAsync());
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());

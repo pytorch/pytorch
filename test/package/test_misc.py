@@ -28,6 +28,9 @@ class TestMisc(PackageTestCase):
 
         export_plain = dedent(
             """\
+                ├── .data
+                │   ├── extern_modules
+                │   └── version
                 ├── main
                 │   └── main
                 ├── obj
@@ -73,25 +76,27 @@ class TestMisc(PackageTestCase):
             he.save_pickle("obj", "obj.pkl", obj)
             he.save_text("main", "main", "my string")
 
-            export_file_structure = he.file_structure()
-            # remove first line from testing because WINDOW/iOS/Unix treat the buffer differently
-            self.assertEqual(
-                dedent("\n".join(str(export_file_structure).split("\n")[1:])),
-                export_plain,
-            )
-            export_file_structure = he.file_structure(
-                include=["**/subpackage.py", "**/*.pkl"]
-            )
-            self.assertEqual(
-                dedent("\n".join(str(export_file_structure).split("\n")[1:])),
-                export_include,
-            )
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        import_file_structure = hi.file_structure(exclude="**/*.storage")
+
+        file_structure = hi.file_structure()
+        # remove first line from testing because WINDOW/iOS/Unix treat the buffer differently
         self.assertEqual(
-            dedent("\n".join(str(import_file_structure).split("\n")[1:])),
+            dedent("\n".join(str(file_structure).split("\n")[1:])),
+            export_plain,
+        )
+        file_structure = hi.file_structure(
+            include=["**/subpackage.py", "**/*.pkl"]
+        )
+        self.assertEqual(
+            dedent("\n".join(str(file_structure).split("\n")[1:])),
+            export_include,
+        )
+
+        file_structure = hi.file_structure(exclude="**/*.storage")
+        self.assertEqual(
+            dedent("\n".join(str(file_structure).split("\n")[1:])),
             import_exclude,
         )
 
@@ -106,9 +111,12 @@ class TestMisc(PackageTestCase):
             obj = package_a.subpackage.PackageASubpackageObject()
             he.save_pickle("obj", "obj.pkl", obj)
 
-            export_file_structure = he.file_structure()
-            self.assertTrue(export_file_structure.has_file("package_a/subpackage.py"))
-            self.assertFalse(export_file_structure.has_file("package_a/subpackage"))
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        file_structure = importer.file_structure()
+        self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
+        self.assertFalse(file_structure.has_file("package_a/subpackage"))
 
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""
