@@ -2614,7 +2614,7 @@ class TestFunctionalTracing(JitTestCase):
     )
 
     # Inconsistent behavior between Python 3.8 and other Python versions:
-    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Python 3.8+: Re-raise internal exception like `PROXY_ITERATED`
     # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
     #                 internal exception above
     # Use the following map to override the expected exception for Python 3.8
@@ -2667,7 +2667,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
