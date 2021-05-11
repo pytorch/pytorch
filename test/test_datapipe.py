@@ -577,7 +577,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
 
 # Metaclass conflict for Python 3.6
-if sys.version_info >= (3, 7):
+# Multiple inheritance with NamedTuple is not supported for Python 3.9
+_generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
+if _generic_namedtuple_allowed:
     class InvalidData(Generic[T_co], NamedTuple):
         name: str
         data: T_co
@@ -686,7 +688,7 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
-        if sys.version_info >= (3, 7):
+        if _generic_namedtuple_allowed:
             with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
                 class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
                     pass
