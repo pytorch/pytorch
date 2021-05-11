@@ -12,6 +12,7 @@ from torch.distributed.nn import RemoteModule
 from torch.distributed.nn.api.remote_module import _REMOTE_MODULE_PICKLED_ATTRIBUTES
 from torch.distributed.nn.api.remote_module import _RemoteModule
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -405,7 +406,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.extra_repr()
 
     @dist_utils.dist_init
-    def test_send_remote_module_with_a_new_attribute_over_the_wire(self):
+    def test_send_remote_module_with_a_new_attribute_ignored_over_the_wire(self):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
@@ -418,16 +419,44 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         ):
             new_attr_name = "new_attr"
             setattr(remote_module, new_attr_name, 1)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Attribute ``{}`` of RemoteModule must be either in "
-                "``_REMOTE_MODULE_PICKLED_ATTRIBUTES``  or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``".format(
-                    new_attr_name
-                ),
-            ):
-                rpc.rpc_sync(
-                    dst_worker_name, remote_module_attributes, (remote_module,)
-                )
+
+            attrs = rpc.rpc_sync(dst_worker_name, remote_module_attributes, (remote_module,))
+            self.assertNotIn(new_attr_name, attrs)
+
+    @dist_utils.dist_init
+    def test_remote_module_py_pickle_not_supported(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            with TemporaryFileName() as fname:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC",
+                ):
+                    torch.save(remote_module, fname)
+
+    @unittest.skip(
+        "Script RemoteModule cannot be sent over RPC at this time. See #57865"
+    )
+    @dist_utils.dist_init
+    def test_remote_module_py_pickle_not_supported_script(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+        ):
+            with TemporaryFileName() as fname:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC",
+                ):
+                    torch.save(remote_module, fname)
 
 
 class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):

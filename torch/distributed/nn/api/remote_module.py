@@ -279,28 +279,14 @@ class _RemoteModule(nn.Module):
         return self.module_rref
 
     def __getstate__(self):
-        # Only pickle the attributes in _REMOTE_MODULE_PICKLED_ATTRIBUTES,
-        # and check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
-        attrs = {}
-        for k, v in self.__dict__.items():
-            if k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
-                attrs[k] = v
-            elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
-                raise RuntimeError(
-                    "Attribute ``{}`` of RemoteModule must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` "
-                    " or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
-                )
-
-        return attrs
+        raise RuntimeError(
+            "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC"
+        )
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
-
-        # Install generated methods when unpickled.
-        for method in self.generated_methods:
-            method_name = method.__name__
-            method = torch.jit.export(method)
-            setattr(self, method_name, types.MethodType(method, self))
+        raise RuntimeError(
+            "Cannot unpickle RemoteModule in python pickler. RemoteModule can only be unpickled when using RPC"
+        )
 
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
