@@ -8872,6 +8872,15 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(2, 1), (x,))
         self.run_test(M([-1, 3], [-2, -1]), (x,))
 
+    def test_sum_empty_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                # pytorch sum over empty tensor gives 0, while onnx produce error.
+                return x[0:0].sum()
+
+        x = torch.ones(12)
+        self.run_test(M(), (x,))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
