@@ -415,7 +415,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 void addMetadata(const std::string& key, const std::string& value) {
-  libkineto::api().activityProfiler().addMetadata(key, value);
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().addMetadata(key, value);
+  } else {
+    LOG(WARNING) << "Profiler is not initialized: skipping profiling metadata";
+  }
 }
 
 KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
