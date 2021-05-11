@@ -232,6 +232,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
@@ -246,6 +249,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 5) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
@@ -261,8 +267,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
+// TODO: support
+// clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 3) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
@@ -278,6 +289,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
@@ -295,6 +309,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::nan_to_num,
     aten_nan_to_num,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 4) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_d = p_node->Input(1).toOptional<double>();
@@ -310,6 +327,9 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto in0_tl = p_node->Input(0).toTensorVector();
     const auto in1_i = p_node->Input(1).toInt();
@@ -324,6 +344,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
 
 // Split out into a function to appease MSVC's pre-processor
 SROperator aten_stack(Node* n) {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
     const auto dim = p_node->Input(1).toInt();
@@ -344,6 +367,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::leaky_relu,
     aten_leaky_relu,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 2) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_s = p_node->Input(1).toScalar();
@@ -508,6 +534,9 @@ std::shared_ptr<TEWrapper> createSigmoid() {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 1) {
+    return nullptr;
+  }
   auto te = createRelu();
   return [te](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
@@ -528,6 +557,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 1) {
+    return nullptr;
+  }
   auto te = createTanh();
   return [te](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
@@ -551,6 +583,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::sigmoid,
     aten_sigmoid,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 1) {
+        return nullptr;
+      }
       auto te = createSigmoid();
       return [te](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
@@ -601,8 +636,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
+// TODO: fix clone
+// clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
@@ -618,6 +658,9 @@ REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 9) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
         const auto& indices = p_node->Input(1).toTensor();
@@ -651,6 +694,9 @@ REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 9) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
         const auto& indices = p_node->Input(1).toTensor();
@@ -686,6 +732,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::narrow_copy,
     aten_narrow_copy,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 4) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor(); // self
         const auto dim = p_node->Input(1).toInt(); // dim
@@ -708,6 +757,9 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto in1_l =
@@ -722,6 +774,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
 });
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     if (p_node->Output(0).isNone()) {
       c10::ScalarType dtype;
@@ -775,6 +830,7 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_to_copy,
     [](Node* n) -> SROperator {
       // support 4- or 5-arg for adindexer/adfinder models
+      // Keep TORCH_CHECK here because there is no alternative for fallback
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor();
@@ -824,6 +880,7 @@ REGISTER_OPERATOR_FUNCTOR(
     static_runtime::reshape_copy,
     aten_reshape,
     [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 2);
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor(); // self
         const auto proposed_shape = p_node->Input(1).toIntVector(); // shape
@@ -857,6 +914,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2 && n->inputs().size() != 4) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const at::Tensor& self = p_node->Input(0).toTensor();
 
@@ -887,6 +947,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
 
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
   if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
+    if (n->inputs().size() != 3) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toInt();
@@ -894,8 +957,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       p_node->Output(0) = at::native::transpose(in0_t, in1_i, in2_i);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::flatten")) {
+    if (n->inputs().size() != 3) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
-      DCHECK(p_node->inputs().size() == 3);
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toInt();
       const auto in2_i = p_node->Input(2).toInt();
@@ -940,6 +1005,9 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       p_node->Output(0) = std::move(stack[0]);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    if (n->inputs().size() != 2) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       auto dict = p_node->Input(0).toGenericDict();
       auto key = p_node->Input(1);
@@ -984,18 +1052,27 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       }
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::permute")) {
+    if (n->inputs().size() != 2) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_iv = p_node->Input(1).toIntVector();
       p_node->Output(0) = at::native::permute(in0_t, in1_iv);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::reshape")) {
+    if (n->inputs().size() != 2) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_iv = p_node->Input(1).toIntVector();
       p_node->Output(0) = at::native::reshape(in0_t, in1_iv);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::slice")) {
+    if (n->inputs().size() != 5) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toInt();
@@ -1005,6 +1082,9 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       p_node->Output(0) = at::native::slice(in0_t, in1_i, in2_i, in3_i, in4_i);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::narrow")) {
+    if (n->inputs().size() != 4) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor(); // self
       const auto dim = p_node->Input(1).toInt(); // dim
@@ -1065,13 +1145,11 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::embedding_bag,
     aten_embedding_bag,
     [](Node* n) -> SROperator {
+      // TODO: Support only 9 args once the old signature has been removed.
+      if (n->inputs().size() != 8 && n->inputs().size() != 9) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
-        // TODO: Support only 9 args once the old signature has been removed.
-        TORCH_CHECK(
-            p_node->inputs().size() == 8 || p_node->inputs().size() == 9,
-            "Expected number of inputs is 8 or 9, but got " +
-                std::to_string(p_node->inputs().size()));
-
         const auto& weight = p_node->Input(0).toTensor();
         const auto& indices = p_node->Input(1).toTensor();
         const auto& offsets = p_node->Input(2).toTensor();
@@ -1167,6 +1245,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2 && n->inputs().size() != 3) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     c10::optional<std::string> rounding_mode = c10::nullopt;
@@ -1189,6 +1270,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 3) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto alpha = p_node->Input(2).toScalar();
@@ -1211,6 +1295,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::clamp_min,
     aten_clamp_min,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 2) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_s = p_node->Input(1).toScalar();
@@ -1225,6 +1312,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 3) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto dim = p_node->Input(1).toOptional<int64_t>();
@@ -1242,7 +1332,11 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::layer_norm,
     aten_layer_norm,
     [](Node* n) -> SROperator {
+      if (n->inputs().size() != 6) {
+        return nullptr;
+      }
       return [](ProcessedNode* p_node) {
+        // ignore Input(5): `bool cudnn_enable=True`
         const auto& input = p_node->Input(0).toTensor();
         const auto normalized_shape = p_node->Input(1).toIntVector();
         auto weight_opt = p_node->Input(2).toOptional<at::Tensor>();
@@ -1357,6 +1451,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
