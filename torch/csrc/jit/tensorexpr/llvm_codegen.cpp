@@ -316,7 +316,6 @@ static void* argToPtr(
 #define TYPE_CASE(_1, Name) \
   case ScalarType::Name:    \
     return callArg.Name##Ptr();
-    break;
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -325,6 +324,11 @@ static void* argToPtr(
       throw unsupported_dtype();
   }
   return nullptr;
+}
+
+void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  value<float>(const_cast<void**>(args.data()));
+  USE_TRIGGER(llvm_codegen_executed);
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {

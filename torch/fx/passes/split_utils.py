@@ -4,7 +4,7 @@ from typing import List, Optional, Dict
 import torch.fx
 import torch.nn as nn
 from torch.fx.graph import map_arg
-from .tools_common import Nodes
+from .tools_common import NodeList, NodeSet
 
 
 @dataclass
@@ -97,11 +97,11 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         return main_1
     """
 
-    def flatten(x: torch.fx.node.Argument) -> Nodes:
+    def flatten(x: torch.fx.node.Argument) -> NodeList:
         """
         Stores nodes in x to a list and returns the list.
         """
-        r: Nodes = []
+        r: NodeList = []
         map_arg(x, r.append)
         return r
 
@@ -119,13 +119,13 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     all_components: List[Component] = []
 
     # Stores nodes that will be used in main graph.
-    used_in_main = set()
+    used_in_main: NodeSet = set()
 
     # Main graph after split.
     main_g = torch.fx.Graph()
 
-    # Mapping from node in original module  to node in main graph after split.
-    main_remapping = {}
+    # Mapping from node in original module to node in main graph after split.
+    main_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Output node of original module.
     output_node: Optional[torch.fx.Node] = None
