@@ -2513,9 +2513,9 @@ def sample_inputs_remainder(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = [
-                ((S, S, S), (), 1.5, False),
-                ((), 1.5, (), False),
-                ((), 1.5, (), False)
+                ((S, S, S), (), 1.5, False), # Scalar
+                ((), 1.5, (), False), # Scalar
+                ((), 1.5, (), False) # Scalar
             ]
 
     # Sample inputs with broadcasting
