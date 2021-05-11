@@ -279,7 +279,6 @@ void GeluKernelImpl(TensorIterator& it) {
           it,
           [](scalar_t x) {
             constexpr scalar_t kAlpha = M_SQRT1_2;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
           },
           [&](Vec x_vec) {
@@ -355,7 +354,6 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     const scalar_t one_sixth(1.0f / 6.0f);
     using Vec = Vec256<scalar_t>;
     Vec kZeroVec(0.0f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Vec kOneSixthVec(1.0f / 6.0f);
     cpu_kernel_vec(
         iter,
