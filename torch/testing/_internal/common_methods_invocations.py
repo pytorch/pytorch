@@ -1048,6 +1048,7 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
     shapes = ((S, S),
               (2, S, S),
               (2, 1, S, S), )
+
     def generator():
         for shape in shapes:
             yield SampleInput(make_arg(shape))
