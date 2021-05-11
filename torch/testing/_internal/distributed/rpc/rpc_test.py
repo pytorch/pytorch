@@ -3918,10 +3918,10 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])  # type: ignore[attr-defined]
 
         # Test errors.
-        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.RRef(torch.rand(10)).backward()  # type: ignore[attr-defined]
 
-        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.RRef(torch.rand(10, requires_grad=True)).backward()  # type: ignore[attr-defined]
 
         with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):  # type: ignore[attr-defined]
@@ -3953,7 +3953,7 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):  # type: ignore[attr-defined]
                 rref.backward(context_id)
 
-            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):  # type: ignore[attr-defined]
+            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):  # type: ignore[attr-defined]  # noqa: B950
                 rref.backward()
 
 class CudaRpcTest(RpcAgentTestFixture):
@@ -4319,27 +4319,27 @@ class ProcessGroupAgentCudaRpcTest(RpcAgentTestFixture):
         t3 = torch.rand(3, 3)
 
         # cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(dst, torch.add, args=(t1, t2))
 
         # mix of cpu and cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(dst, torch.add, args=(t1, t3))
 
         # gpu tensor list as args fails.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
 
         # cuda tensors as return values fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
 
         # cuda tensors as a list of return value fails
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
 
         # Sending to self should fail too.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):  # type: ignore[attr-defined]  # noqa: B950
             rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))  # type: ignore[attr-defined]
 
 class FaultyAgentRpcTest(RpcAgentTestFixture):
