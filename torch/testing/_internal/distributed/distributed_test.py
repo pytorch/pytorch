@@ -1707,10 +1707,6 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_profiling_event(profiling_title_postfix, autograd_profiler_ctx)
-                print(f'profiling title postfix: {profiling_title_postfix}')
-                print(f'all events: {prof.function_events}')
-                print(f'events: {events}')
-                print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
