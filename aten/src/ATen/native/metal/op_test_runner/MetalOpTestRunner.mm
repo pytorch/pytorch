@@ -1,6 +1,5 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 #import <ATen/native/metal/op_test_runner/MetalOpTestRunner.h>
 
