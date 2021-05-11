@@ -53,7 +53,7 @@ class VideoInputOpTest(unittest.TestCase):
                     tensor_protos = caffe2_pb2.TensorProtos()
                     video_tensor = tensor_protos.protos.add()
                     # string data
-                    video_tensor.data_type = 4  # type: ignore[assignment, assignment]
+                    video_tensor.data_type = 4  # type: ignore[assignment]
                     video_tensor.string_data.append(video_data)
 
                     label_tensor = tensor_protos.protos.add()
