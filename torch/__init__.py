@@ -42,6 +42,7 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
     'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'inference_mode', 'set_inference_mode',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -680,6 +681,8 @@ from torch.autograd import (
     no_grad as no_grad,
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
+    inference_mode as inference_mode,
+    set_inference_mode as set_inference_mode,
 )
 from torch import fft as fft
 from torch import futures as futures

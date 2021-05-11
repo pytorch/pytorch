@@ -1,11 +1,13 @@
 import sys
+
 import torch
 import functools
 import inspect
 from typing import Any, Callable, TypeVar, cast
 
 
-__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
+__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
+           'inference_mode', 'set_inference_mode_enabled']
 
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
@@ -206,3 +208,61 @@ class set_grad_enabled(object):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
+
+
+class inference_mode(_DecoratorContextManager):
+    r"""Context-manager that enables inference mode
+
+    TODO: Improve this
+    Inference mode is a new "no grad mode" that gets better performance
+    by disabling view tracking and version counter bumps. Because we lack view
+    tracking and version counter information, code acting on inference tensors
+    have stricter restrictions.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+
+
+    Example::
+        TODO
+    """
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            super().__init__()
+        self.prev = True
+
+    def __enter__(self):
+        self.prev = torch.is_inference_mode_enabled()
+        torch._C._set_inference_mode_enabled(True)
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_inference_mode_enabled(self.prev)
+
+
+class set_inference_mode(object):
+    r"""Context-manager that sets gradient calculation to on or off.
+
+    ``set_inference_mode`` will enable or disable inference_mode based on
+    its argument :attr:`mode`. It can be used as a context-manager or as a
+    function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    Args:
+        mode (bool): Flag whether to enable inference mode (``True``), or
+                     disable (``False``). This can be used to conditionally
+                     enable inference mode.
+
+    """
+    def __init__(self, mode):
+        self.prev = torch.is_inference_mode_enabled()
+        torch._C._set_inference_mode_enabled(mode)
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_inference_mode_enabled(self.prev)
