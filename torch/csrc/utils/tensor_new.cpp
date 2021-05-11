@@ -170,7 +170,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     }
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
+  AT_ERROR("Could not infer dtype of HIIII ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
@@ -207,6 +207,16 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
+
+  std::cout << "PRINTING IN INTERNAL\n";
+  
+  // std::string asd = *device_opt;
+
+  // if (*device_opt=="meta"){
+    // std::cout << *device_opt;
+  // }
+
+
 
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
@@ -349,6 +359,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 // TODO: Make this accept options instead of dispatch key
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
+    
     TORCH_CHECK(dispatchKeyToDeviceType(dispatch_key) == device.value().type(),
              "legacy constructor expects device type: ", dispatchKeyToDeviceType(dispatch_key),
              "but device type: ", device.value().type(), " was passed");
@@ -771,7 +782,16 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
 
+
+
+
+
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+
+  
+  // char * str = "device";
+  // PyObject* user_val = PyObject_GetAttrString(kwargs, str);
+  // PyObject_Print(args, stdout, Py_PRINT_RAW);
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
   });
@@ -779,8 +799,22 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   constexpr int ctor_num_args = 6;
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
+    PyObject* data1;
+    std::cout << "--------------------------";
+    data1 = PyObject_GetAttrString(kwargs, "device");
+    if(data1 == NULL){
+      std::cout<<"No Meta";
+    }
+    else{
+      std::cout<<"Meta";
+    }
+
+    
+
+    std::cout << "--------------------------";
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
@@ -810,6 +844,11 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
+
+
+
+
+
 
 Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   // TODO: add requires_grad once we decide on semantics for sharing data.
