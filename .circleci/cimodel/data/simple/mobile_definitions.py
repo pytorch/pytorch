@@ -52,27 +52,6 @@ class MobileJob:
 
 
 WORKFLOW_DATA = [
-    MobileJob(
-        DOCKER_IMAGE_ASAN,
-        [DOCKER_REQUIREMENT_ASAN],
-        ["build"]
-    ),
-
-    # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-    MobileJob(
-        DOCKER_IMAGE_NDK,
-        [DOCKER_REQUIREMENT_NDK],
-        ["custom", "build", "dynamic"]
-    ),
-
-    # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-    # Most of this CI is already covered by "mobile-custom-build-dynamic" job
-    MobileJob(
-        DOCKER_IMAGE_NDK,
-        [DOCKER_REQUIREMENT_NDK],
-        ["code", "analysis"],
-        True
-    ),
 ]
 
 
