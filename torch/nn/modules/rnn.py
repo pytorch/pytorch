@@ -299,6 +299,11 @@ class RNNBase(Module):
         super(RNNBase, self).__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
+        # In PyTorch 1.8 we added a proj_size member variable to LSTM.
+        # LSTMs that were serialized via torch.save(module) before PyTorch 1.8
+        # don't have it, so to preserve compatibility we set proj_size here.
+        if 'proj_size' not in d:
+            self.proj_size = 0
 
         if isinstance(self._all_weights[0][0], str):
             return
