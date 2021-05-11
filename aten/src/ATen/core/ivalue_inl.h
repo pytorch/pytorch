@@ -399,7 +399,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       events_.push_back(std::move(event));
     }
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -458,13 +458,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!eptr_);
+    return dataPtrs_;
+  }
+
   /**
    * Add a callback to the future.
    * The callbacks will be executed once the future completes.
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  void addCallback(std::function<void(Future&)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -480,18 +489,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * to know for sure when the callback has finished.
    */
   c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback,
+      std::function<IValue(Future&)> callback,
       TypePtr type) {
-    auto fut = createInstance(std::move(type));
+    auto childFut = createInstance(std::move(type));
     addCallback(
-        [fut, cb = std::move(callback)]() {
+        [childFut, cb = std::move(callback)](Future& parentFut) {
           try {
-            fut->markCompleted(cb());
+            childFut->markCompleted(cb(parentFut));
           } catch (std::exception&) {
-            fut->setError(std::current_exception());
+            childFut->setError(std::current_exception());
           }
         });
-    return fut;
+    return childFut;
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
@@ -529,6 +538,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return type_;
   }
 
+  const std::vector<c10::Device>& devices() const {
+    return devices_;
+  }
+
   // This method should be used when one intends to manually create a child
   // future, for example when implementing a customized version of then().
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
@@ -541,7 +554,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(std::function<void(void)> callback) {
+  void invokeCallback(std::function<void(Future&)> callback) {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
@@ -551,7 +564,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::MultiStreamGuard streamGuard(streams);
     synchronizeWithCurrentStreams();
 
-    callback();
+    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it
@@ -583,7 +596,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -725,7 +738,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
+  std::vector<std::function<void(Future&)>> callbacks_;
   std::exception_ptr eptr_;
 
   // An upcast pointer to a virtual class which allows us to manipulate events,

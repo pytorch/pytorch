@@ -230,7 +230,6 @@ void quantile_impl(
       interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
     // calculate weights for linear and midpoint
     Tensor weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ? at::full_like(ranks, 0.5)
         : ranks - ranks_below;
 

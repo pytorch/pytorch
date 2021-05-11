@@ -121,6 +121,24 @@ const auto sigmoid_out_script = R"JIT(
       return (b)
 )JIT";
 
+const auto logit_script_1 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp)
+      return (a)
+)JIT";
+
+const auto logit_script_2 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp, 1e-6)
+      return (a)
+)JIT";
+
+const auto logit_script_3 = R"JIT(
+  def forward(self, inp: Tensor, eps: float):
+      a = torch.logit(inp, eps)
+      return (a)
+)JIT";
+
 // b is in_contiguous
 const auto reshape_incontiguous_script = R"JIT(
   def forward(self, a: Tensor, shape: List[int]):
@@ -303,4 +321,9 @@ const auto norm_5arg = R"JIT(
 const auto aten_matmul = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.matmul(a, b)
+)JIT";
+
+const std::string repeat = R"JIT(
+  def forward(self, a: Tensor, repeats: List[int]):
+      return torch.repeat(a, repeats)
 )JIT";

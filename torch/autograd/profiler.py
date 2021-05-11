@@ -8,6 +8,7 @@ from collections import defaultdict, namedtuple
 from operator import attrgetter
 
 from typing import Dict, List, Tuple, Optional
+from warnings import warn
 
 import math
 
@@ -426,26 +427,25 @@ class profile(object):
         self.profiler_kind = None
         self.kineto_activities = set()
         if use_kineto:
-            self.profiler_kind = torch.autograd.ProfilerState.KINETO
-            if self.use_cpu:
-                self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
-            if self.use_cuda:
-                self.kineto_activities.add(
-                    # uses CUPTI
-                    torch.autograd.ProfilerActivity.CUDA)
-            assert len(self.kineto_activities) > 0, \
-                "No activities specified for Kineto profiler"
-        elif self.use_cuda:
-            # legacy CUDA mode
-            self.profiler_kind = torch.autograd.ProfilerState.CUDA
-        else:
-            self.profiler_kind = torch.autograd.ProfilerState.CPU
+            if torch.autograd.kineto_available():
+                self.profiler_kind = torch.autograd.ProfilerState.KINETO
+                if self.use_cpu:
+                    self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
+                if self.use_cuda:
+                    self.kineto_activities.add(
+                        # uses CUPTI
+                        torch.autograd.ProfilerActivity.CUDA)
+                assert len(self.kineto_activities) > 0, \
+                    "No activities specified for Kineto profiler"
+            else:
+                warn("Kineto is not available, falling back to legacy profiler")
 
-        if self.profiler_kind == torch.autograd.ProfilerState.KINETO:
-            assert (
-                torch.autograd.kineto_available()
-            ), """Requested Kineto profiling but Kineto is not available,
-                  make sure PyTorch is built with USE_KINETO=1"""
+        if not self.kineto_activities:
+            if self.use_cuda:
+                # legacy CUDA mode
+                self.profiler_kind = torch.autograd.ProfilerState.CUDA
+            else:
+                self.profiler_kind = torch.autograd.ProfilerState.CPU
 
     def config(self):
         assert self.profiler_kind is not None
@@ -461,22 +461,24 @@ class profile(object):
             return
         if self.entered:
             raise RuntimeError("profiler context manager is not reentrant")
+        self._prepare_trace()
+        self._start_trace()
+        return self
+
+    def _prepare_trace(self):
         self.entered = True
         if self.kineto_activities:
             torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
+        else:
+            # no-op in case of legacy profiler
+            pass
+
+    def _start_trace(self):
+        self.entered = True
+        if self.kineto_activities:
             torch.autograd._enable_profiler(self.config(), self.kineto_activities)
         else:
             torch.autograd._enable_profiler_legacy(self.config())
-        return self
-
-    def _prepare_kineto_trace(self):
-        assert self.kineto_activities
-        self.entered = True
-        torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
-
-    def _start_kineto_trace(self):
-        assert self.kineto_activities
-        torch.autograd._enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
