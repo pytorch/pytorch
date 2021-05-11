@@ -77,14 +77,4 @@ const at::Tensor& ForwardGrad::undef_grad() {
     return singleton_undefined_tensor;
 }
 
-// Temporary functions to disable forward AD
-// TODO(alband) remove these when perf issues are solved
-bool isForwardADEnabled() {
-    return is_forward_grad_enabled;
-}
-
-void setForwardADEnabled(bool value) {
-    is_forward_grad_enabled = value;
-}
-
 }} // namespace torch::autograd
