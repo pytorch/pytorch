@@ -125,6 +125,7 @@ static void  transpose_copy_kernel(Tensor& self, const Tensor& src) {
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 REGISTER_DISPATCH(transpose_copy_stub, &transpose_copy_kernel);
 
