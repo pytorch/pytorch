@@ -3646,11 +3646,6 @@ workflows:
           requires:
             - binary_windows_libtorch_3_7_cpu_debug_build
       - binary_windows_test:
-          build_environment: libtorch 3.7 cpu release
-          name: binary_windows_libtorch_3_7_cpu_release_test
-          requires:
-            - binary_windows_libtorch_3_7_cpu_release_build
-      - binary_windows_test:
           build_environment: wheel 3.7 cu102
           executor: windows-with-nvidia-gpu
           filters:

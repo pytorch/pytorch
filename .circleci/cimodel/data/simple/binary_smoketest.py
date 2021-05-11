@@ -129,14 +129,6 @@ WORKFLOW_DATA = [
     ),
     SmoketestJob(
         "binary_windows_test",
-        ["libtorch", "3.7", "cpu", "release"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_release_test",
-        is_master_only=False,
-        requires=["binary_windows_libtorch_3_7_cpu_release_build"],
-    ),
-    SmoketestJob(
-        "binary_windows_test",
         ["wheel", "3.7", "cu102"],
         None,
         "binary_windows_wheel_3_7_cu102_test",
