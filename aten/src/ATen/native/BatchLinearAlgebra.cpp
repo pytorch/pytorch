@@ -737,6 +737,7 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
     "torch.solve is deprecated in favor of torch.linalg.solve",
     "and will be removed in a future PyTorch release.\n",
     "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
     "X = torch.solve(B, A).solution\n",
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
@@ -755,6 +756,7 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
     "torch.solve is deprecated in favor of torch.linalg.solve",
     "and will be removed in a future PyTorch release.\n",
     "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
     "X = torch.solve(B, A).solution\n",
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
