@@ -4071,8 +4071,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
                    skips=(
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                               dtypes=(torch.float32, )),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                    )),
     OpInfo('resolve_conj',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),

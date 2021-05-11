@@ -414,6 +414,7 @@ Tensor& conj_physical_(Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
+  // negation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
 
@@ -421,6 +422,7 @@ Tensor resolve_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
+  // conjugation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
 
