@@ -175,7 +175,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       // Need to reverse the device map for the backward pass of distributed
       // autograd.
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
       for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
         reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
       }

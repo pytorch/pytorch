@@ -42,7 +42,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage,
-    std::vector<c10::DeviceIndex> deviceIndices,
+    std::vector<c10::Device> devices,
     const std::shared_ptr<LazyStreamContext>& ctx) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
@@ -89,10 +89,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     // tensor to CPU.
     const auto& tensorData =
         jit::getWriteableTensorData(tensorDataVec[i], /* toCpu */ false);
-    tensorpipe::Device targetDevice =
-        deviceIndices.empty() || deviceIndices[i] == -1
+    tensorpipe::Device targetDevice = devices.empty() || devices[i].is_cpu()
         ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0}
-        : tensorpipe::Device{tensorpipe::kCudaDeviceType, deviceIndices[i]};
+        : tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
 
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
@@ -126,8 +125,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
-        auto stream = at::cuda::CUDAStream(
-            ctx->getStream(tensorDataVec[i].device().index()));
+        auto stream =
+            at::cuda::CUDAStream(ctx->getStream(tensorDataVec[i].device()));
         tensorpipe::CudaBuffer buffer;
         buffer.ptr = tensorPtr;
         buffer.stream = stream.stream();
@@ -209,8 +208,8 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
       tpAllocation.tensors[tensorIdx].buffer = buffer;
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
-      auto deviceIndex = tensor.targetDevice->index;
-      auto stream = at::cuda::CUDAStream(ctx->getStream(deviceIndex));
+      c10::Device device(c10::kCUDA, tensor.targetDevice->index);
+      auto stream = at::cuda::CUDAStream(ctx->getStream(device));
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
