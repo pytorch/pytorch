@@ -42,6 +42,7 @@ void LockingLogger::setAggregationType(
   agg_types[stat_name] = type;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<LoggerBase*> global_logger{new NoopLogger()};
 
 LoggerBase* getLogger() {
