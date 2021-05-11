@@ -130,8 +130,7 @@ def _RemoveLegacyPad(net, net_params, input_dims):
         external_input = net.op[0].input[0]
         ws.create_blob(external_input).feed_blob(dummy_input)  # type: ignore[attr-defined]
         for param in net_params.protos:
-            ws.create_blob(param.name) \
-              .feed_blob(utils.Caffe2TensorToNumpyArray(param))
+            ws.create_blob(param.name).feed_blob(utils.Caffe2TensorToNumpyArray(param))  # type: ignore[attr-defined]
 
         for i in range(len(net.op)):
             op_def = net.op[i]

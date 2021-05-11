@@ -88,10 +88,10 @@ if not has_gpu_support:
     GpuDeviceType = caffe2_pb2.CUDA
     # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = lambda: 0 # noqa
-    GetDeviceProperties = lambda x: None # noqa  # type: ignore[assignment, assignment, return-value]
+    GetDeviceProperties = lambda x: None  # type: ignore[assignment, return-value]  # noqa
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
     # pyre-fixme[9]: incompatible type assignment
-    GetGPUMemoryInfo = lambda: None # noqa  # type: ignore[misc, misc, assignment]
+    GetGPUMemoryInfo = lambda: None  # type: ignore[misc, assignment]  # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes

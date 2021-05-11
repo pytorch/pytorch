@@ -329,10 +329,10 @@ class SparseLookup(ModelLayer):
             return net.Fused4BitRowwiseQuantizedToFloat(gathered_w, out)
 
         else:
-            raise "Unsupported version of operators in SparseLookup " +\
+            raise ("Unsupported version of operators in SparseLookup " +  # type: ignore[misc]
                 "layer: {0} for sparse feature {1}".format(
                     version, self.sparse_key
-                )
+                ))
 
     def _sparse_lengths_weighted_reducer(
         self,
@@ -381,10 +381,10 @@ class SparseLookup(ModelLayer):
             net.__getattr__(layer_name + 'Fused4BitRowwise')(
                 op_input, self.output_schema.field_blobs())
         else:
-            raise "Unsupported version of operator in SparseLookUp " +\
+            raise ("Unsupported version of operator in SparseLookUp " +  # type: ignore[misc]
                 "layer: {0} for sparse feature {1}".format(
                     version, self.sparse_key
-                )
+                ))
 
     # deal with sparse features of id_list type
     def _add_ops_id_list(self, net, version):
@@ -425,10 +425,10 @@ class SparseLookup(ModelLayer):
                 net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
-                raise "Unsupported version of operator in SparseLookUp " +\
+                raise ("Unsupported version of operator in SparseLookUp " +  # type: ignore[misc]
                     "layer: {0} for sparse feature {1}".format(
                         version, self.sparse_key
-                    )
+                    ))
 
         elif self.reducer == 'Sqrt':
             sqrt_weight = net.LengthsToWeights(
@@ -500,10 +500,10 @@ class SparseLookup(ModelLayer):
                 net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
-                raise "Unsupported version of operator in SparseLookUp " +\
+                raise ("Unsupported version of operator in SparseLookUp " +  # type: ignore[misc]
                     "layer: {0} for sparse feature {1}".format(
                         version, self.sparse_key
-                    )
+                    ))
 
         elif self.reducer == 'None':
             # Gather operator will gather the embedding for each id of
@@ -511,10 +511,10 @@ class SparseLookup(ModelLayer):
             self._gather_wrapper(net, version, self.input_record.keys(),
                                  self.output_schema.field_blobs())
         else:
-            raise "Only Sum, Mean, None are supported for IdScoreList input." +\
+            raise ("Only Sum, Mean, None are supported for IdScoreList input." +  # type: ignore[misc]
                 "Trying to create with {} for sparse feature {}".format(
                     self.reducer, self.sparse_key
-                )
+                ))
 
     def _add_ops(self, net, version='fp32', is_train=True):
         if self.evicted_values and is_train:
