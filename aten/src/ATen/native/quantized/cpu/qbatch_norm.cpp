@@ -357,7 +357,6 @@ Tensor q_batch_norm_impl(
   } else if (dim == 4) {
     qy = q_batch_norm2d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (dim == 5) {
     qy = q_batch_norm3d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
