@@ -32,7 +32,7 @@ static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
-static bool cat_wo_conditionals = true; // NOLINT
+static bool cat_wo_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
