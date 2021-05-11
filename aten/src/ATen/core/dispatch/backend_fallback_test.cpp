@@ -90,9 +90,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = ones({5, 5}, kDouble);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 2);
 }
@@ -103,9 +101,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
 
   override_call_count = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 1);
 }
@@ -122,7 +118,6 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
 
   override_call_count = 0;
   // Doesn't trigger, as we fallthrough
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = zeros({5, 5}, kDouble);
   ASSERT_EQ(override_call_count, 0);
   // Does trigger, because we explicitly set it
