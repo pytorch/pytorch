@@ -377,7 +377,8 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 .. seealso::
 
         :func:`torch.linalg.eigvals` computes only the eigenvalues.
-        Unlike :func:`torch.linalg.eig`, the gradients of this function are always numerically stable.
+        Unlike :func:`torch.linalg.eig`, the gradients of :func:`~eigvals` are always
+        numerically stable.
 
         :func:`torch.linalg.eigh` for a (faster) function that computes the eigenvalue decomposition
         for Hermitian and symmetric matrices.
@@ -526,8 +527,9 @@ The eigenvalues are returned in ascending order.
 
 .. seealso::
 
-        :func:`torch.linalg.eigvalsh` computes only the eigenvalues,
-        but its gradients are always numerically stable.
+        :func:`torch.linalg.eigvalsh` computes only the eigenvalues values of a Hermitian matrix.
+        Unlike :func:`torch.linalg.eigh`, the gradients of :func:`~eigvalsh` are always
+        numerically stable.
 
         :func:`torch.linalg.cholesky` for a different decomposition of a Hermitian matrix.
         The Cholesky decomposition gives less information about the matrix but is much faster
@@ -1380,8 +1382,9 @@ Differences with `numpy.linalg.svd`:
 
 .. seealso::
 
-        :func:`torch.linalg.svdvals` computes only the singular values,
-        but its gradients are always numerically stable.
+        :func:`torch.linalg.svdvals` computes only the singular values.
+        Unlike :func:`torch.linalg.svd`, the gradients of :func:`~svdvals` are always
+        numerically stable.
 
         :func:`torch.linalg.eig` for a function that computes another type of spectral
         decomposition of a matrix. The eigendecomposition works just on on square matrices.
