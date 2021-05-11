@@ -114,7 +114,6 @@ REGISTER_CPU_OPERATOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TTSparseLengthsSum)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(4)
     .SetDoc(R"DOC(
