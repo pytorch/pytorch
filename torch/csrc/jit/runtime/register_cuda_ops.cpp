@@ -118,6 +118,7 @@ RegisterOperators const reg({
           auto s = v.toCustomClass<torch::jit::CUDAStream>();
           auto stream_device_idx = static_cast<int64_t>(s->device_index());
           auto cur_device_idx =
+              // NOLINTNEXTLINE(bugprone-signed-char-misuse)
               static_cast<int64_t>(c10::cuda::current_device());
           // If the stream is not on the current device, change the
           // device to the device of the stream.

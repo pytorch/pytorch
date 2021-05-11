@@ -19,17 +19,26 @@ using transform::Graph;
  *                    \-->(Relu)
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonSubexpressionEliminationTest, TestSimple) {
   NetDef netdef;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   OperatorDef* op;
 
   // This operator simply reads input and outputs it.
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in", "w", "b"}, {"in1"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in1", "w", "b"}, {"mid1"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in1", "w", "b"}, {"mid2"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in1", "w", "b"}, {"mid3"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid1"}, {"out1"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid2"}, {"out2"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid3"}, {"out3"});
 
   auto t = TransformRegistry()->Create("CommonSubexpressionElimination");
@@ -66,16 +75,24 @@ TEST(CommonSubexpressionEliminationTest, TestSimple) {
  *                 \-->(Relu)
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonSubexpressionEliminationTest, TestFromExternal) {
   NetDef netdef;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   OperatorDef* op;
 
   // This operator simply reads input and outputs it.
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in", "w", "b"}, {"mid1"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in", "w", "b"}, {"mid2"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "FC", {"in", "w", "b"}, {"mid3"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid1"}, {"out1"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid2"}, {"out2"});
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Relu", {"mid3"}, {"out3"});
 
   auto t = TransformRegistry()->Create("CommonSubexpressionElimination");
