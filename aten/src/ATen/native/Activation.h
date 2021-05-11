@@ -10,6 +10,8 @@ struct TensorIterator;
 
 namespace native {
 
+using structured_activation_fn = void (*)(TensorIteratorBase&);
+
 using activation_fn = void (*)(TensorIterator&);
 using activation_backward_fn = void (*)(TensorIterator&);
 using softplus_fn = void (*)(TensorIteratorBase&, const Scalar&, const Scalar&);
@@ -50,7 +52,7 @@ DECLARE_DISPATCH(leaky_relu_fn, leaky_relu_stub);
 DECLARE_DISPATCH(leaky_relu_backward_fn, leaky_relu_backward_stub);
 DECLARE_DISPATCH(activation_fn, glu_stub);
 DECLARE_DISPATCH(activation_backward_fn, glu_backward_stub);
-DECLARE_DISPATCH(activation_fn, silu_stub);
+DECLARE_DISPATCH(structured_activation_fn, silu_stub);
 DECLARE_DISPATCH(activation_backward_fn, silu_backward_stub);
 
 } // namespace native

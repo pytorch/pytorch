@@ -22,6 +22,10 @@ TORCH_META_FUNC(elu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(silu) (const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(softplus) (
   const Tensor& self, const Scalar& beta, const Scalar& threshold
 ) {
@@ -100,6 +104,12 @@ TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
 ) {
   elu_stub(device_type(), *this, alpha, scale, input_scale);
+}
+
+TORCH_IMPL_FUNC(silu_out) (
+  const Tensor& self, const Tensor& result
+) {
+  silu_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(softplus_out) (
@@ -250,25 +260,6 @@ Tensor & celu_(Tensor & self, const Scalar& alpha) {
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
-}
-
-Tensor silu(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::silu_out(result, self);
-  return result;
-}
-
-Tensor& silu_(Tensor& self) {
-  return at::silu_out(self, self);
-}
-
-Tensor& silu_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(
-      result.dtype() == self.dtype(),
-      "Output Tensor should have the same type as in Input Tensor.")
-  auto iter = TensorIterator::unary_op(result, self);
-  silu_stub(iter.device_type(), iter);
-  return result;
 }
 
 Tensor silu_backward(
