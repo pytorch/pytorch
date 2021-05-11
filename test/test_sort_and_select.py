@@ -121,14 +121,7 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
-        if self.device_type == 'cpu':
-            sizes = (100, 1000, 10000)
-        elif self.device_type == 'cuda':
-            # On CUDA, stable sort is supported only when the size of
-            # the sorted dim is greater than 2048
-            sizes = (1025, 10000)
-        else:
-            return
+        sizes = (100, 1000, 10000)
         for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
             _, idx = x.sort(stable=True)
