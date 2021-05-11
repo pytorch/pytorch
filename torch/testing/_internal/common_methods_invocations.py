@@ -1815,7 +1815,7 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for shape, args in shapes_and_args:
             tensor = make_tensor(shape, device, dtype, low=None, high=None,
-                                requires_grad=requires_grad)
+                                 requires_grad=requires_grad)
             yield SampleInput(tensor, args=args)
 
     return list(generator())
