@@ -16,12 +16,14 @@ static PyObject * THCPStream_pynew(
   PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
   int priority = 0;
   uint64_t cdata = 0;
 
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char *kwlist[] = {"priority", "_cdata", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
       args, kwargs, "|iK", kwlist, &priority, &cdata)) {
@@ -72,6 +74,7 @@ static PyObject * THCPStream_get_priority(THCPStream *self, void *unused) {
 
 static PyObject * THCPStream_priority_range(PyObject *_unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int least_priority, greatest_priority;
   std::tie(least_priority, greatest_priority) =
     at::cuda::CUDAStream::priority_range();
@@ -105,10 +108,12 @@ static PyObject * THCPStream_eq(PyObject *_self, PyObject *_other) {
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMemberDef THCPStream_members[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyGetSetDef THCPStream_properties[] = {
   {"cuda_stream",
     (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
@@ -116,6 +121,7 @@ static struct PyGetSetDef THCPStream_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", THCPStream_query, METH_NOARGS, nullptr},
   {(char*)"synchronize",
@@ -133,36 +139,60 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_itemsize */
   (destructor)THCPStream_dealloc,        /* tp_dealloc */
   0,                                     /* tp_vectorcall_offset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_getattr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_setattr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_reserved */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_repr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_number */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_sequence */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_mapping */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_hash  */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_call */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_str */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_getattro */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_setattro */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
   nullptr,                                  /* tp_doc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_traverse */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_clear */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_iter */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
   THCPStream_properties,                 /* tp_getset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_base */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_dict */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_descr_get */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_descr_set */
   0,                                     /* tp_dictoffset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_init */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_alloc */
   THCPStream_pynew,                      /* tp_new */
 };
