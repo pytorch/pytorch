@@ -176,6 +176,12 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
   at::native::resize_output(values, topKSize);
   at::native::resize_output(indices, topKSize);
+
+  // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
+  if (k == 0) {
+    return std::forward_as_tuple(values, indices);
+  }
+
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
