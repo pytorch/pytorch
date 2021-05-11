@@ -2,7 +2,6 @@
 
 
 
-import multiprocessing
 import os
 import re
 from subprocess import check_call, check_output, CalledProcessError
@@ -340,7 +339,7 @@ class CMake:
 
         from .env import build_type
 
-        max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+        max_jobs = '20'  # the number of CPUs CircleCI machines actually have
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
         # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
