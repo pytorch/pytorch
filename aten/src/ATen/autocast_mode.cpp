@@ -30,7 +30,7 @@ void set_cpu_enabled(bool new_enabled) {
 
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
-// Our heuristic is to cache fp16 casts of fp32 model weights (see cached_cast below).
+// Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
 //
 // After discussion with @ezyang, the cache uses the following structure:
 // The key is the fp32 source tensor's TensorImpl*, a proxy for a Tensor uuid that's
@@ -56,10 +56,10 @@ thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int nesting = 0;
-}
 
-// autocast_cpu_dtype is setted by frontend API
+// autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
+}
 
 void clear_cache() {
   cached_casts.clear();
@@ -88,12 +88,11 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
 // TODO (possible optimization):
 // Move cast_cache to an inline function in a header with cached_casts declared as
 // extern thread_local in the header.
-Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_type) {
-  if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
-    // Heuristic:  Do what Apex does, and cache fp16(CUDA)/bf16(CPU) casts of fp32 model weights (leaves).
+Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
+  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
+    // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
-    bool can_try_cache = ((device_type == DeviceType::CUDA ? to_type == at::kHalf : to_type == at::kBFloat16) &&
-                          arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf() && !arg.is_view());
+    bool can_try_cache = (to_type == get_autocast_dtype() && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf() && !arg.is_view());
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
@@ -114,7 +113,8 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 // Policies correspond to op categories that need code-divergent handling.
 // Wrapper templates below are specialized based on a policy template parameter.
 enum class CastPolicy : uint8_t {
-  fp16 = 0, // Cast all inputs to at::kHalf before running the op.
+  lower_precision_fp = 0, // Cast all inputs to lower_precision_fp before running the op.
+                          // Currently, lower_precision_fp is fp16 for AutocastCUDA, and is defined by user(default bf16) for AutocastCPU.
   fp32, // Cast all inputs to at::kFloat before running the op.
   fp32_set_opt_dtype, // Treats functions (like softmax) that
                       //   1. we'd like to run in fp32 and
@@ -128,7 +128,6 @@ enum class CastPolicy : uint8_t {
                      // The wrapper policy is:  append at::kFloat to the args, and redispatch to the
                      // type-aware overload.
   promote, // Run in the widest dtype among several args.
-  lower_precision_fp, // Cast all inputs to lower_precision_fp from input before running the op.
 };
 
 /********************************************************************************************************
@@ -145,12 +144,12 @@ Interior WrapFunction_ specializations are defined for each CastPolicy.
 // Base template for WrapFunction_, which is specialized to contain a "call" method each CastPolicy
 template<CastPolicy policy, DeviceType device_type, class Redispatch, Redispatch* F, class Ret, class ArgList> struct WrapFunction_ {};
 
-// CastPolicy::fp16 DeviceType::CUDA
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp16, DeviceType::CUDA, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+// CastPolicy::lower_precision_fp General_DeviceType
+template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::lower_precision_fp, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    return (*F)(cached_cast(at::kHalf, args)...);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
+    return (*F)(cached_cast(get_lower_precision_fp_from_device_type(device_type), args)...);
   }
 };
 
@@ -159,7 +158,7 @@ template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, cla
 struct WrapFunction_<CastPolicy::fp32, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
-    return (*F)(cached_cast(at::kFloat, args, device_type)...);
+    return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
 
@@ -193,17 +192,8 @@ template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, cla
 struct WrapFunction_<CastPolicy::promote, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
-    auto to_type = promote_type(get_lower_precision_fp_from_device_type(device_type), device_type, args...);
-    return (*F)(cached_cast(to_type, args, device_type)...);
-  }
-};
-
-// CastPolicy::lower_precision_fp DeviceType::CPU
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::lower_precision_fp, DeviceType::CPU, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::AutocastCPU);
-    return (*F)(cached_cast(autocast_cpu_dtype, args, DeviceType::CPU)...);
+    auto to_type = promote_type(get_lower_precision_fp_from_device_type(device_type), args...);
+    return (*F)(cached_cast(to_type, args)...);
   }
 };
 
@@ -245,14 +235,15 @@ namespace {
 This section performs load-time registration for autocast wrappers.
 
 It's debatable at what level operations should be patched.  We'd like casts to be autograd-exposed
-and precede autograd history recording, so that for fp16 ops, input tensors are saved for backward
-in fp16 rather than fp32.  Saving inputs in fp16 can significantly reduce a model's memory footprint.
+and precede autograd history recording, so that for lower_precision_fp ops, input tensors are saved for backward
+in lower_precision_fp rather than fp32.  Saving inputs in lower_precision_fp can significantly reduce
+a model's memory footprint.
 
 Option 1 (strawman):  Patch only at the level of explicit calls into cudnn/cublas (cudnn_convolution, etc),
 because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the ones that
-will benefit most from fp16.   Potential pitfall:  convolutions (and other ops) are wrapped in several
+will benefit most from lower_precision_fp.   Potential pitfall:  convolutions (and other ops) are wrapped in several
 layers of at::* calls.  If one of those happens to record autograd history, then we've lost the
-opportunity to save inputs in fp16.
+opportunity to save inputs in lower_precision_fp.
 
 Option 2:  Patch the Python-exposed surface of calls, to make 100% sure autograd history
 recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
@@ -294,65 +285,65 @@ TORCH_LIBRARY_IMPL(_, Autocast, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
-  // fp16
-  KERNEL(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
-  KERNEL(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), fp16)
-  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
-  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), fp16)
+  // lower_precision_fp
+  KERNEL(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), lower_precision_fp)
+  KERNEL(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), lower_precision_fp)
+  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), lower_precision_fp)
+  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
+  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), lower_precision_fp)
+  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), lower_precision_fp)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(_thnn_fused_lstm_cell)>::type::call)));
   m.impl("_thnn_fused_gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
   m.impl("lstm_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(lstm_cell)>::type::call)));
   m.impl("gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(gru_cell)>::type::call)));
   m.impl("rnn_tanh_cell", // tanh unary op is executed as a cuda math library call.
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(rnn_tanh_cell)>::type::call)));
   m.impl("rnn_relu_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16, DeviceType::CUDA,
+         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(rnn_relu_cell)>::type::call)));

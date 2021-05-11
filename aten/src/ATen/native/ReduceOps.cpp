@@ -876,7 +876,6 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "norm only supports CPU and CUDA device types, but got: ", self.device().type());
@@ -1400,6 +1399,13 @@ std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
   return at::var_mean(
       self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
+}
+
+std::tuple<Tensor&, Tensor&> var_mean_out(
+    Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    int64_t correction, bool keepdim) {
+  return std_var_mean_out(
+      "var_mean", result1, result2, self, dim, correction, keepdim, false);
 }
 
 std::tuple<Tensor, Tensor> var_mean(
