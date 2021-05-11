@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <torch/deploy.h>
 
@@ -24,6 +25,7 @@ constexpr auto latency_p = {
     50.,
     95.}; //{1., 5., 25., 50., 75., 90., 95., 99., 99.25, 99.5, 99.75, 99.9};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Report {
   std::string benchmark;
   std::string strategy;
@@ -143,6 +145,7 @@ struct RunJIT {
   }
   void operator()(int i) {
     if (cuda) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int device_id = i % models_.size();
       auto d = torch::Device(torch::DeviceType::CUDA, device_id);
       to_device(
@@ -157,10 +160,12 @@ struct RunJIT {
 };
 
 struct Benchmark {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Benchmark(
       torch::deploy::InterpreterManager& manager,
       size_t n_threads,
       std::string strategy,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string file_to_run,
       size_t n_seconds = 5)
       : manager_(manager),
