@@ -31,6 +31,9 @@ import mypy.config_parser
 
 
 def read_config(config_path: Path) -> Set[str]:
+    """
+    Return the set of `files` in the `mypy` ini file at config_path.
+    """
     config = ConfigParser()
     config.read(config_path)
     # hopefully on Windows this gives posix paths
@@ -39,21 +42,43 @@ def read_config(config_path: Path) -> Set[str]:
     ))
 
 
+# see tools/test/test_mypy_wrapper.py for examples of many of the
+# following functions
+
+
 def config_files() -> Dict[str, Set[str]]:
+    """
+    Return a dict from all our `mypy` ini filenames to their `files`.
+    """
     return {str(ini): read_config(ini) for ini in Path().glob('mypy*.ini')}
 
 
 def split_path(path: str) -> List[str]:
+    """
+    Split a relative (not absolute) POSIX path into its segments.
+    """
     pure = PurePosixPath(path)
     return [str(p.name) for p in list(reversed(pure.parents))[1:] + [pure]]
 
 
 # mypy doesn't support recursive types yet
 # https://github.com/python/mypy/issues/731
+
+# but if it did, the `Any` here would be `Union[Set[str], 'Trie']`,
+# although that is not completely accurate: specifically, every `None`
+# key must map to a `Set[str]`, and every `str` key must map to a `Trie`
 Trie = Dict[Optional[str], Any]
 
 
 def make_trie(configs: Dict[str, Set[str]]) -> Trie:
+    """
+    Return a trie from path prefixes to their `mypy` configs.
+
+    Specifically, each layer of the trie represents a segment of a POSIX
+    path relative to the root of this repo. If you follow a path down
+    the trie and reach a `None` key, that `None` maps to the (nonempty)
+    set of keys in `configs` which explicitly include that path.
+    """
     trie: Trie = {}
     for ini, files in configs.items():
         for f in files:
@@ -65,6 +90,14 @@ def make_trie(configs: Dict[str, Set[str]]) -> Trie:
 
 
 def lookup(trie: Trie, filename: str) -> Set[str]:
+    """
+    Return the configs in `trie` that include a prefix of `filename`.
+
+    A path is included by a config if any of its ancestors are included
+    by the wildcard-expanded version of that config's `files`. Thus,
+    this function follows `filename`'s path down the `trie` and
+    accumulates all the configs it finds along the way.
+    """
     configs = set()
     inner = trie
     for segment in split_path(filename):
@@ -78,6 +111,13 @@ def make_plan(
     configs: Dict[str, Set[str]],
     files: List[str]
 ) -> Dict[str, List[str]]:
+    """
+    Return a dict from config names to the files to run them with.
+
+    The keys of the returned dict are a subset of the keys of `configs`.
+    The list of files in each value of returned dict should contain a
+    nonempty subset of the given `files`, in the same order as `files`.
+    """
     trie = make_trie(configs)
     plan = defaultdict(list)
     for filename in files:
@@ -87,6 +127,16 @@ def make_plan(
 
 
 def run(*, args: List[str], files: List[str]) -> Tuple[int, List[str]]:
+    """
+    Return the exit code and list of output lines from running `mypy`.
+
+    The given `args` are passed verbatim to `mypy`. The `files` (each of
+    which must be an absolute path) are converted to relative paths
+    (that is, relative to the root of this repo) and then classified
+    according to which ones need to be run with each `mypy` config.
+    Thus, `mypy` may be run zero, one, or multiple times, but it will be
+    run at most once for each `mypy` config used by this repo.
+    """
     repo_root = Path.cwd()
     plan = make_plan(configs=config_files(), files=[
         PurePath(f).relative_to(repo_root).as_posix() for f in files
