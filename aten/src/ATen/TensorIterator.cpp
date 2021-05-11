@@ -19,7 +19,10 @@ using StrideVector = TensorIteratorBase::StrideVector;
 
 /// Construction
 TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
+  TORCH_INTERNAL_ASSERT(
+      num_inputs_ == 0,
+      "Keep in mind that you have to add all outputs first before adding any input. "
+      "For more details, see https://github.com/pytorch/pytorch/wiki/How-to-use-TensorIterator.");
   tensors_.push_back(c10::MaybeOwned<Tensor>::owned(c10::in_place, output));
   num_outputs_++;
   return *this;
@@ -32,7 +35,10 @@ TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input) {
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_borrowed_output(const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
+  TORCH_INTERNAL_ASSERT(
+      num_inputs_ == 0,
+      "Keep in mind that you have to add all outputs first before adding any input. "
+      "For more details, see https://github.com/pytorch/pytorch/wiki/How-to-use-TensorIterator.");
   tensors_.push_back(c10::MaybeOwned<Tensor>::borrowed(output));
   num_outputs_++;
   return *this;

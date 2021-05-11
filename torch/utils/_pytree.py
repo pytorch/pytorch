@@ -65,7 +65,6 @@ _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 def _is_leaf(pytree: PyTree) -> bool:
     return type(pytree) not in SUPPORTED_NODES.keys()
 
-
 # A TreeSpec represents the structure of a pytree. It holds:
 # "type": the type of root Node of the pytree
 # context: some context that is useful in unflattening the pytree
@@ -91,7 +90,6 @@ class TreeSpec:
     def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)
 
-
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
@@ -99,7 +97,6 @@ class LeafSpec(TreeSpec):
 
     def __repr__(self) -> str:
         return '*'
-
 
 def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
@@ -151,6 +148,9 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 
     return unflatten_fn(child_pytrees, spec.context)
 
+def tree_map(fn: Any, pytree: PyTree) -> PyTree:
+    flat_args, spec = tree_flatten(pytree)
+    return tree_unflatten([fn(i) for i in flat_args], spec)
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
 # values. If this is not possible, then this function returns None.

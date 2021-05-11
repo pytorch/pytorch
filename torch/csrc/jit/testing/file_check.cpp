@@ -189,6 +189,7 @@ struct FileCheckImpl {
     addCheck(Check(type, s, count));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_run = false;
 
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);

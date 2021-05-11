@@ -56,6 +56,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > max_epoch) {
       return false;
@@ -125,6 +126,7 @@ void check_lstm_sizes_proj(std::tuple<torch::Tensor, std::tuple<torch::Tensor, t
 
 struct RNNTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputSizes) {
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
   // Input size is: sequence length, batch size, input size
@@ -151,6 +153,7 @@ TEST_F(RNNTest, CheckOutputSizes) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputSizesProj) {
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
   // Input size is: sequence length, batch size, input size
@@ -178,6 +181,7 @@ TEST_F(RNNTest, CheckOutputSizesProj) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   torch::manual_seed(0);
   // Make sure the outputs match pytorch outputs
@@ -204,6 +208,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   ASSERT_EQ(std::get<0>(out).size(2), 2);
 
   auto flat = std::get<0>(out).view(3 * 4 * 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
                    0.4183, 0.5147, 0.6822, 0.8064, 0.6726, 0.7968,
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
@@ -226,6 +231,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   ASSERT_EQ(cx.size(2), 2);
 
   flat = torch::cat({hx, cx}, 0).view(16);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float h_out[] = {0.7889,
                    0.9003,
                    0.7769,
@@ -247,31 +253,37 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTM) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTMProj) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndGRU) {
   ASSERT_TRUE(
       test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNRelu) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNTanh) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, Sizes_CUDA) {
   torch::manual_seed(0);
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
@@ -300,6 +312,7 @@ TEST_F(RNNTest, Sizes_CUDA) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, SizesProj_CUDA) {
   torch::manual_seed(0);
   LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
@@ -329,30 +342,36 @@ TEST_F(RNNTest, SizesProj_CUDA) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }, true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndLSTMProj_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }, true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndGRU_CUDA) {
   ASSERT_TRUE(test_RNN_xor<GRU>(
       [](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }, true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }, true));
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }, true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, PrettyPrintRNNs) {
   ASSERT_EQ(
       c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2))),
@@ -371,6 +390,7 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
 // This test assures that flatten_parameters does not crash,
 // when bidirectional is set to true
 // https://github.com/pytorch/pytorch/issues/19545
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalFlattenParameters) {
   GRU gru(GRUOptions(100, 256).num_layers(2).bidirectional(true));
   gru->flatten_parameters();
@@ -446,10 +466,12 @@ void BidirectionalGRUReverseForward(bool cuda) {
             std::get<1>(reverse_output)[0][0][0].item<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalGRUReverseForward) {
   BidirectionalGRUReverseForward(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
   BidirectionalGRUReverseForward(true);
 }
@@ -498,14 +520,17 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
             std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
   BidirectionalLSTMReverseForwardTest(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
   BidirectionalLSTMReverseForwardTest(true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Create two GRUs with the same options
   auto opt = GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -556,6 +581,7 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -605,6 +631,7 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true).proj_size(2);
@@ -654,6 +681,7 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNNTest, UsePackedSequenceAsInput) {
   {
     torch::manual_seed(0);

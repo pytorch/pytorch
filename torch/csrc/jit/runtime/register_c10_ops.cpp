@@ -207,6 +207,7 @@ Registerer& registerer() {
 }
 
 // global instance to run its constructor on startup
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Registerer& dummy = registerer();
 
 } // namespace

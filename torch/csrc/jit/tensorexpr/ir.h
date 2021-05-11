@@ -40,35 +40,26 @@ inline int getPrecedence(IRNodeType ty) {
       return 2;
     case kAdd:
     case kSub:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 6;
     case kMul:
     case kDiv:
     case kMod:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 5;
     case kMax:
     case kMin:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
     case kAnd:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 11;
     case kOr:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 13;
     case kLshift:
     case kRshift:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 7;
     case kXor:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 12;
     case kCompareSelect:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 16;
     default:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
   }
 }
@@ -149,6 +140,7 @@ class BinaryOpNode : public ExprNode<Op> {
       IRNodeType expr_type,
       ScalarType ret_type = ScalarType::Undefined)
       : ExprNode<Op>(
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
