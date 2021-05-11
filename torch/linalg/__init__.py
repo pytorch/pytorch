@@ -230,7 +230,7 @@ Examples::
 inv_ex = _add_docstr(_linalg.linalg_inv_ex, r"""
 linalg.inv_ex(input, *, check_errors=False, out=None) -> (Tensor, Tensor)
 
-Computes the inverse of a square matrix if it is `invertible`_.
+Computes the inverse of a square matrix if it is invertible.
 
 Returns a namedtuple ``(inverse,info)``. ``inverse`` contains the result of inverting the input matrix.
 ``info`` stores the LAPACK error codes.
@@ -276,8 +276,6 @@ Examples::
     >>> info
     tensor(0, dtype=torch.int32)
 
-.. _invertible:
-    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
 
 det = _add_docstr(_linalg.linalg_det, r"""
