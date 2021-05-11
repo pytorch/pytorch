@@ -45,7 +45,7 @@ Tensor conv2d(
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y];
   auto output = makeTensor(std::move(mt), input.options());
@@ -63,7 +63,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
                       context.get_dilation(),
                       context.get_groups()};
   MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.get_conv2dOpPtr());
-  NeuronType nt = neuronType(context);
+  NeuronType nt = neuronType(context.get_output_min(), context.get_output_max());
   if (!op) {
     float* w = context.get_weight().data_ptr<float>();
     float* b = context.get_bias().has_value() ? ((*context.get_bias()).data_ptr<float>())
@@ -80,7 +80,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
   // fuse hardtanh with convolution
@@ -91,7 +91,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     MPSCNNClampOp* clampOp =
         [MPSCNNClampOp newWithTextures:@[ Y1, Y2 ] Args:@[ @(min), @(max) ]];
     [clampOp encode:commandBuffer.buffer];
-    mt.texture()->setTexture(Y2);
+    mt.texture()->setImage(Y2);
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;

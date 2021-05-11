@@ -13,16 +13,24 @@ from torch.testing._internal.common_utils import (
 
 class TestSegmentReductions(TestCase):
     def _test_max_simple_1d(self, device, dtype, unsafe, axis):
-        lengths = torch.tensor([1, 2, 3], device=device)
+        lengths = torch.tensor([1, 2, 3, 0], device=device)
         data = torch.tensor(
             [1, float("nan"), 3, 4, 5, 5],
             device=device,
             dtype=dtype,
             requires_grad=True,
         )
-        expected_result = torch.tensor([1, float("nan"), 5], device=device, dtype=dtype)
+        initial_value = 0
+        expected_result = torch.tensor(
+            [1, float("nan"), 5, initial_value], device=device, dtype=dtype
+        )
         actual_result = torch.segment_reduce(
-            data=data, reduce="max", lengths=lengths, axis=axis, unsafe=unsafe
+            data=data,
+            reduce="max",
+            lengths=lengths,
+            axis=axis,
+            unsafe=unsafe,
+            initial=initial_value,
         )
         self.assertEqual(
             expected_result, actual_result, rtol=1e-03, atol=1e-05, equal_nan=True
@@ -52,7 +60,12 @@ class TestSegmentReductions(TestCase):
             self.assertTrue(
                 gradcheck(
                     lambda x: torch.segment_reduce(
-                        data=x, reduce="max", lengths=lengths, axis=axis, unsafe=unsafe
+                        data=x,
+                        reduce="max",
+                        lengths=lengths,
+                        axis=axis,
+                        unsafe=unsafe,
+                        initial=initial_value,
                     ),
                     (data,),
                 )

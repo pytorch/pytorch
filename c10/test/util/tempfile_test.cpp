@@ -1,7 +1,7 @@
 #include <c10/util/tempfile.h>
 #include <gtest/gtest.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #if !defined(_WIN32)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
