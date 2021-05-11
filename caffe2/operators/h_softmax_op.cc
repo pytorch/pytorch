@@ -206,7 +206,6 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& b = Input(2);
   auto& label = Input(3);
   auto& intermediate_output = Input(4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto& dY = Input(5);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());

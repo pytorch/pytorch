@@ -398,7 +398,7 @@ Tensor& conj_physical_(Tensor& self) {
 }
 
 Tensor _resolve_conj(const Tensor& self) {
-  auto result = at::empty_like(self, self.options());
+  auto result = at::empty_like(self, self.options(), self.suggest_memory_format());
   // conjugation is handled in `copy_()`
   return result.copy_(self);
 }
