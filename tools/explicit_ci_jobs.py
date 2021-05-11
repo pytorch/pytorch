@@ -2,7 +2,6 @@
 
 import yaml
 import textwrap
-import os
 import subprocess
 import pathlib
 import argparse
