@@ -63,11 +63,11 @@ class TestShapeOps(TestCase):
     @onlyCPU
     def test_tolist(self, device):
         list0D = []
-        tensor0D = torch.Tensor(list0D)
+        tensor0D = torch.tensor(list0D)
         self.assertEqual(tensor0D.tolist(), list0D)
 
-        table1D = [1, 2, 3]
-        tensor1D = torch.Tensor(table1D)
+        table1D = [1., 2., 3.]
+        tensor1D = torch.tensor(table1D)
         storage = torch.Storage(table1D)
         self.assertEqual(tensor1D.tolist(), table1D)
         self.assertEqual(storage.tolist(), table1D)
@@ -75,10 +75,10 @@ class TestShapeOps(TestCase):
         self.assertEqual(storage.tolist(), table1D)
 
         table2D = [[1, 2], [3, 4]]
-        tensor2D = torch.Tensor(table2D)
+        tensor2D = torch.tensor(table2D)
         self.assertEqual(tensor2D.tolist(), table2D)
 
-        tensor3D = torch.Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+        tensor3D = torch.tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
         tensorNonContig = tensor3D.select(1, 1)
         self.assertFalse(tensorNonContig.is_contiguous())
         self.assertEqual(tensorNonContig.tolist(), [[3, 4], [7, 8]])
@@ -533,7 +533,7 @@ class TestShapeOps(TestCase):
                 self.assertRaisesRegex(
                     RuntimeError,
                     "scalar type Long",
-                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float))
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float, device=device))
                 )
             if self.device_type == 'cuda':
                 self.assertRaisesRegex(
@@ -620,6 +620,7 @@ class TestShapeFuncs(TestCase):
     def test_repeat_tile_vs_numpy(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
+            assert isinstance(sample.input, torch.Tensor)
             expected = op.ref(sample.input.cpu().numpy(), *sample.args, **sample.kwargs)
             result = op(sample.input, *sample.args, **sample.kwargs).cpu().numpy()
             self.assertEqual(expected, result)

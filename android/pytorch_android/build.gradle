@@ -34,9 +34,6 @@ android {
             minifyEnabled false
         }
     }
-    buildFeatures {
-        prefab true
-    }
     sourceSets {
         main {
             java {
@@ -76,7 +73,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.facebook.fbjni:fbjni:' + rootProject.fbjniVersion
+    implementation 'com.facebook.fbjni:fbjni-java-only:' + rootProject.fbjniJavaOnlyVersion
     implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
     implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 
@@ -121,38 +118,37 @@ afterEvaluate {
 
 tasks.whenTaskAdded { task ->
   if (task.name.startsWith("bundle") && task.name.endsWith("Aar")) {
-    task.configure {
-      finalizedBy
-      addFolderToAarTask(
-        "addHeadersTo" + task.name,
-        task.archivePath,
-        getLibtorchHeadersDir(),
-        "headers")
+    doLast {
+      addFolderToAar("addHeadersTo" + task.name, task.archivePath, getLibtorchHeadersDir(), 'headers')
     }
   }
 }
 
 def addFolderToAarTask(taskName, aarPath, folderPath, folderPathInAar) {
-  def tmpDir = file("${buildDir}/${taskName}")
-  tmpDir.mkdir()
-  def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
-  tmpDirFolder.mkdir()
-  return tasks.create(name: taskName) {
+  return tasks.register(taskName) {
     doLast {
-      copy {
-        from zipTree(aarPath)
-        into tmpDir
-      }
-      copy {
-        from fileTree(folderPath)
-        into tmpDirFolder
-      }
-      ant.zip(destfile: aarPath) {
-        fileset(dir: tmpDir.path)
-      }
-      delete tmpDir
+      addFolderToAar(taskName, aarPath, folderPath, folderPathInAar)
     }
   }
+}
+
+def addFolderToAar(taskName, aarPath, folderPath, folderPathInAar) {
+    def tmpDir = file("${buildDir}/${taskName}")
+    tmpDir.mkdir()
+    def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
+    tmpDirFolder.mkdir()
+    copy {
+      from zipTree(aarPath)
+      into tmpDir
+    }
+    copy {
+      from fileTree(folderPath)
+      into tmpDirFolder
+    }
+    ant.zip(destfile: aarPath) {
+      fileset(dir: tmpDir.path)
+    }
+    delete tmpDir
 }
 
 artifacts.add('archives', sourcesJar)

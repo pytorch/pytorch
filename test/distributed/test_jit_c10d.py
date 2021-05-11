@@ -4,12 +4,10 @@ import sys
 import torch
 import torch.distributed as c10d
 import time
-from datetime import timedelta
 from typing import List
 
-import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_distributed import requires_nccl
-from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, IS_WINDOWS
+from torch.testing._internal.common_distributed import requires_nccl, create_tcp_store
+from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -32,19 +30,10 @@ def unique_process_group_name(prefix):
     now = int(time.time() * 1000)
     return "%s_%d" % (prefix, now)
 
-def _create_tcp_store():
-    addr = "localhost"
-    port = common.find_free_port()
-    timeout = timedelta(minutes=5)
-    timeout_millisecond = int(timeout / timedelta(milliseconds=1))
-    return torch.classes.dist_c10d.TCPStore(addr, port, 1, True, timeout_millisecond)
-
-
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class ProcessGroupNCCLJitTest(JitTestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -57,7 +46,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
             raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def _create_nccl_pg(self, name_prefix):
-        tcp_store = _create_tcp_store()
+        tcp_store = create_tcp_store(jit_class=True)
         opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(0, True)
 
         name = unique_process_group_name(name_prefix)
@@ -65,7 +54,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         return torch.classes.dist_c10d.ProcessGroupNCCL(tcp_store, self.rank, self.world_size, opts, name)
 
     def _create_nccl_pg_as_base_process_group(self, name):
-        tcp_store = _create_tcp_store()
+        tcp_store = create_tcp_store(jit_class=True)
 
         return torch.classes.dist_c10d.frontend().new_process_group_helper(
             self.world_size, self.rank, [], "nccl", tcp_store, name, 0)
@@ -169,7 +158,6 @@ class StoreTest(JitTestCase):
         create_prefix_file_store(self.filestore, self.prefix)
 
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dFrontendJitTest(JitTestCase):
     def setUp(self):
         self.rank = 0
@@ -184,7 +172,7 @@ class C10dFrontendJitTest(JitTestCase):
         frontend1 = torch.classes.dist_c10d.frontend()
         frontend2 = torch.classes.dist_c10d.frontend()
 
-        tcp_store = _create_tcp_store()
+        tcp_store = create_tcp_store(jit_class=True)
 
         pg_name = unique_process_group_name("singleton_test_process_group")
 
@@ -194,7 +182,6 @@ class C10dFrontendJitTest(JitTestCase):
         ProcessGroupNCCL2 = frontend2.get_process_group_by_name(pg_name)
         self.assertEqual(frontend2.get_name_of_process_group(ProcessGroupNCCL2), pg_name)
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dProcessGroupSerialization(JitTestCase):
     def setUp(self):
         self.num_gpus = torch.cuda.device_count()
@@ -206,7 +193,7 @@ class C10dProcessGroupSerialization(JitTestCase):
         class TestModule(torch.nn.Module):
             def __init__(self):
                 super(TestModule, self).__init__()
-                tcp_store = _create_tcp_store()
+                tcp_store = create_tcp_store(jit_class=True)
 
                 name = unique_process_group_name("module_member_process_group")
                 self.pg = torch.classes.dist_c10d.frontend().new_process_group_helper(

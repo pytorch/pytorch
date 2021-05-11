@@ -26,7 +26,7 @@ std::string collectQualname(const Select& select) {
 TypePtr ScriptTypeParser::subscriptToType(
     const std::string& typeName,
     const Subscript& subscript) const {
-  if (typeName == "Tuple") {
+  if (typeName == "Tuple" || typeName == "tuple") {
     if (subscript.subscript_exprs().size() == 1 &&
         subscript.subscript_exprs()[0].kind() == TK_TUPLE_LITERAL) {
       // `typing.Tuple` special cases syntax for empty tuple annotations,
@@ -45,7 +45,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       subscript_expr_types.push_back(parseTypeFromExprImpl(expr));
     }
     return TupleType::create(subscript_expr_types);
-  } else if (typeName == "List") {
+  } else if (typeName == "List" || typeName == "list") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
@@ -65,7 +65,7 @@ TypePtr ScriptTypeParser::subscriptToType(
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
 
-  } else if (typeName == "Future") {
+  } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
@@ -107,7 +107,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       throw ErrorReport(subscript.range()) << err;
     }
 
-  } else if (typeName == "Dict") {
+  } else if (typeName == "Dict" || typeName == "dict") {
     if (subscript.subscript_exprs().size() != 2) {
       throw ErrorReport(subscript)
           << " expected exactly 2 element types but found "
@@ -183,6 +183,7 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* end;
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
@@ -209,9 +210,20 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
-      // Special case for torch.Tensor
-      if (isTorch(select.value()) && name == "Tensor") {
-        return "Tensor";
+      // Special case for torch.Tensor and its' subclasses
+      const std::unordered_set<std::string> tensor_subtypes = {
+          "Tensor",
+          "LongTensor",
+          "FloatTensor",
+          "DoubleTensor",
+          "IntTensor",
+          "ShortTensor",
+          "HalfTensor",
+          "CharTensor",
+          "ByteTensor",
+          "BoolTensor"};
+      if (isTorch(select.value()) && tensor_subtypes.count(name) == 1) {
+        return name;
       } else {
         // Otherwise, it's a fully qualified class name
         return collectQualname(select);

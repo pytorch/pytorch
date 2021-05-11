@@ -121,31 +121,22 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
   }
 }
 
-void fractional_max_pool2d_out_cuda_template(
-  Tensor & output,
-  Tensor& indices,
+} // anonymous namespace
+
+TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   const Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const Tensor& randomSamples) {
-  TORCH_CHECK(
-      pool_size.size() == 2,
-      "fractional_max_pool2d: kernel_size must either be a single Int or tuple of Ints")
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "fractional_max_pool2d: output_size must either be a single Int or tuple of Ints")
+  const Tensor& randomSamples,
+  const Tensor& output,
+  const Tensor& indices
+) {
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
   int numBatch = 1;
 
   int ndims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0,
-    "fractional_max_pool2d(): expected input to have non-empty ",
-    "spatial dimensions.");
-
-  TORCH_CHECK((ndims == 3 || ndims == 4),
-     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   if (ndims == 4) {
     numBatch = input.size(0);
@@ -156,30 +147,11 @@ void fractional_max_pool2d_out_cuda_template(
 
   /* sizes */
   int numPlanes = input.size(planeDim);
-  int inputH = input.size(dimh);
-  int inputW = input.size(dimw);
 
   int outputH = output_size[0];
   int outputW = output_size[1];
   int poolSizeH = pool_size[0];
   int poolSizeW = pool_size[1];
-
-  TORCH_CHECK(outputH + poolSizeH - 1 <= inputH,
-             "fractional_max_pool2d(): pool_size height ", poolSizeH,
-             " too large relative to input height ", inputH);
-  TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
-           "pool_size width ", poolSizeW,
-           " too large relative to input width ", inputW);
-
-  if (ndims == 3) {
-    /* resize output */
-    output.resize_({numPlanes, outputH, outputW});
-    /* indices will contain the locations for each output point */
-    indices.resize_({numPlanes, outputH, outputW});
-  } else {
-    output.resize_({numBatch, numPlanes, outputH, outputW});
-    indices.resize_({numBatch, numPlanes, outputH, outputW});
-  }
 
   auto output_ = output;
   auto input_ = input;
@@ -211,10 +183,12 @@ void fractional_max_pool2d_out_cuda_template(
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
           poolSizeH, poolSizeW);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-       }
-     );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+     }
+   );
 }
+
+namespace {
 
 void fractional_max_pool2d_backward_out_cuda_template(
   Tensor& gradInput,
@@ -284,41 +258,6 @@ void fractional_max_pool2d_backward_out_cuda_template(
 }
 
 }// namespace
-
-std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cuda(
-    const at::Tensor& input,
-    IntArrayRef pool_size,
-    IntArrayRef output_size,
-    const at::Tensor& randomSamples,
-    at::Tensor& output,
-    at::Tensor& indices) {
-  fractional_max_pool2d_out_cuda_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> fractional_max_pool2d_cuda(
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  fractional_max_pool2d_out_cuda_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor, Tensor>(output, indices);
-}
 
 Tensor& fractional_max_pool2d_backward_out_cuda(const at::Tensor& gradOutput_,
   const at::Tensor& input,

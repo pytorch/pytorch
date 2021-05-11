@@ -1,6 +1,7 @@
 #import <ATen/Tensor.h>
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
+#import <ATen/native/metal/MetalUtils.h>
 
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
@@ -10,7 +11,7 @@ namespace metal {
 
 MPSImage* createStaticImage(const std::vector<int64_t>& sizes);
 MPSImage* createStaticImage(
-    const uint16_t* src,
+    const fp16_t* src,
     const std::vector<int64_t>& sizes);
 MPSImage* createStaticImage(
     const float* src,
@@ -35,7 +36,7 @@ MPSTemporaryImage* createTemporaryImage(
 
 void copyToHost(float* dst, MPSImage* image);
 
-std::vector<uint16_t> staticImageToFp16Array(MPSImage* image);
+std::vector<fp16_t> staticImageToFp16Array(MPSImage* image);
 at::Tensor staticImageToTensor(MPSImage* image);
 
 static inline MPSImage* imageFromTensor(const Tensor& tensor) {
@@ -57,22 +58,22 @@ tensor it’s converted from.
 5) 5D tensors (T, N, C, H, W) are always stored as MPSImage(N=T*N, C=C, H=H, W=W).
 6) ...
  */
-static inline std::vector<int64_t> computeTextureSize(IntArrayRef sizes) {
-  std::vector<int64_t> textureSize(4, 1);
+static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
+  std::vector<int64_t> imageSize(4, 1);
   int64_t index = 3;
   int64_t batch = 1;
   for (int i = sizes.size() - 1; i >= 0; i--) {
     if (index != 0) {
-      textureSize[index] = sizes[i];
+        imageSize[index] = sizes[i];
       index--;
       continue;
     }
     // For higher dimensional tensors,
-    // multiply rest of dims into textureSize[0]
+    // multiply rest of dims into imageSize[0]
     batch *= sizes[i];
   }
-  textureSize[0] = batch;
-  return textureSize;
+  imageSize[0] = batch;
+  return imageSize;
 }
 
 } // namespace metal

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -162,7 +163,7 @@ class PortalBlue(torch.autograd.Function):
     """Hides a tensor from the autograd engine by a :class:`Portal`."""
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(
         ctx: Context,
         portal: Portal,
@@ -175,7 +176,7 @@ class PortalBlue(torch.autograd.Function):
         return phony.detach()
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def backward(ctx: Context, grad_phony: Tensor,) -> Tuple[None, Tensor]:
         # The paired PortalOrange should keep the gradient.
         grad = ctx.portal.use_grad()
@@ -186,7 +187,7 @@ class PortalOrange(torch.autograd.Function):
     """Retrieves the hidden tensor from a :class:`Portal`."""
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(ctx: Context, portal: Portal, phony: Tensor) -> Tensor:
         ctx.portal = portal
 
@@ -196,7 +197,7 @@ class PortalOrange(torch.autograd.Function):
         return tensor.detach()
 
     @staticmethod
-    def backward(ctx: Context, grad: Tensor) -> Tuple[None, None]:  # type: ignore
+    def backward(ctx: Context, grad: Tensor) -> Tuple[None, None]:  # type: ignore[override]
         # The paired PortalBlue will use the gradient.
         ctx.portal.put_grad(grad)
         return None, None
@@ -208,7 +209,7 @@ class PortalCopy(torch.autograd.Function):
     """
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(
         ctx: Context, portal: Portal, prev_stream: AbstractStream, next_stream: AbstractStream, phony: Tensor,
     ) -> Tensor:
@@ -221,7 +222,7 @@ class PortalCopy(torch.autograd.Function):
         return phony.detach()
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def backward(ctx: Context, grad_phony: Tensor,) -> Tuple[None, None, None, None]:
         portal = ctx.portal
 

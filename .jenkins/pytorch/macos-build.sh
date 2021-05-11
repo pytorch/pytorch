@@ -16,7 +16,7 @@ fi
 # The way this is done is by detecting the command of the parent pid of the current process and checking whether
 # that is sccache, and wrapping sccache around the process if its parent were not already sccache.
 function write_sccache_stub() {
-  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which $1)" "$(which $1)" > "${WORKSPACE_DIR}/$1"
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "$1")" "$(which "$1")" > "${WORKSPACE_DIR}/$1"
   chmod a+x "${WORKSPACE_DIR}/$1"
 }
 
@@ -38,6 +38,6 @@ assert_git_not_dirty
 
 # Upload torch binaries when the build job is finished
 if [ -z "${IN_CI}" ]; then
-  7z a ${IMAGE_COMMIT_TAG}.7z ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read
+  7z a "${IMAGE_COMMIT_TAG}".7z "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
+  aws s3 cp "${IMAGE_COMMIT_TAG}".7z s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z --acl public-read
 fi

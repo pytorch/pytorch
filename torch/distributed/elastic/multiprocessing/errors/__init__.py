@@ -57,16 +57,22 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Any
 
-from .error_handler import ErrorHandler  # noqa F401
-from .handlers import get_error_handler  # noqa F401
+from torch.distributed.elastic.utils.logging import get_logger
+
+from .error_handler import ErrorHandler  # noqa: F401
+from .handlers import get_error_handler  # noqa: F401
+
+log = get_logger()
 
 
 JSON = Dict
 
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -97,18 +103,22 @@ class ProcessFailure:
     timestamp: int = field(init=False)
 
     def __post_init__(self):
+        self.error_file_data = _EMPTY_ERROR_DATA
         if os.path.isfile(self.error_file):
-            with open(self.error_file, "r") as fp:
-                self.error_file_data = json.load(fp)
-                self.message = self.error_file_data["message"]["message"]
-                self.timestamp = int(
-                    self.error_file_data["message"]["extraInfo"]["timestamp"]
-                )
+            try:
+                with open(self.error_file, "r") as fp:
+                    self.error_file_data = json.load(fp)
+                    log.info(
+                        f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
+                    )
+                    self.message, self.timestamp = self._get_error_data(
+                        self.error_file_data
+                    )
+            except Exception:
+                log.exception(f"Failed to parse reply file: {self.error_file}")
+                raise
         else:
-            self.error_file = _NOT_AVAILABLE
-            self.error_file_data = _EMPTY_ERROR_DATA
-            self.message = ""
-            self.timestamp = int(time.time())
+            self._set_no_reply_file()
 
         # make up an informative message if not already present
         if not self.message:
@@ -120,6 +130,20 @@ class ProcessFailure:
                 )
             else:
                 self.message = f"Process failed with exitcode {self.exitcode}"
+
+    def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
+        message = error_file_data["message"]
+        if isinstance(message, str):
+            timestamp = error_file_data.get("timestamp", 0)
+        else:
+            timestamp = int(message["extraInfo"]["timestamp"])
+        return (message, timestamp)
+
+    def _set_no_reply_file(self):
+        self.error_file = _NOT_AVAILABLE
+        self.error_file_data = _EMPTY_ERROR_DATA
+        self.message = ""
+        self.timestamp = int(time.time())
 
     def signal_name(self) -> str:
         if self.exitcode < 0:
@@ -249,8 +273,8 @@ class ChildFailedError(Exception):
 
 def _no_error_file_warning_msg(rank: int, failure: ProcessFailure) -> str:
     msg = [
-        "CHILD PROCESS FAILED WITH NO ERROR_FILE"
-        f"Child process {failure.pid} (local_rank {rank}) FAILED (exitcode {failure.exitcode})"
+        "CHILD PROCESS FAILED WITH NO ERROR_FILE",
+        f"Child process {failure.pid} (local_rank {rank}) FAILED (exitcode {failure.exitcode})",
         f"Error msg: {failure.message}",
         f"Without writing an error file to {failure.error_file}.",
         "While this DOES NOT affect the correctness of your application,",
@@ -273,7 +297,9 @@ def _no_error_file_warning_msg(rank: int, failure: ProcessFailure) -> str:
     return "\n".join(["\n", boarder, header, boarder, *msg, boarder])
 
 
-def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
+def record(
+    fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None
+) -> Callable[..., T]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -287,7 +313,8 @@ def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
      try:
         foobar()
      except ChildFailedError as e:
-        error_handler.copy_error_file(e.get_first_failure())
+        _, failure = e.get_first_failure()
+        error_handler.dump_error_file(failure.error_file, failure.exitcode)
         raise
      except Exception as e:
         error_handler.record(e)
@@ -322,7 +349,7 @@ def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
                 if failure.error_file != _NOT_AVAILABLE:
-                    error_handler.copy_error_file(failure.error_file)
+                    error_handler.dump_error_file(failure.error_file, failure.exitcode)
                 else:
                     warnings.warn(_no_error_file_warning_msg(rank, failure))
                 raise

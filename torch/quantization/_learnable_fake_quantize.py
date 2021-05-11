@@ -1,4 +1,3 @@
-# type: ignore
 import torch
 from torch.nn.parameter import Parameter
 
@@ -92,7 +91,7 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def toggle_observer_update(self, enabled=True):
-        self.static_enabled[0] = int(enabled)
+        self.static_enabled[0] = int(enabled)  # type: ignore[operator]
         return self
 
     @torch.jit.export
@@ -101,7 +100,7 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def toggle_qparam_learning(self, enabled=True):
-        self.learning_enabled[0] = int(enabled)
+        self.learning_enabled[0] = int(enabled)  # type: ignore[operator]
         self.scale.requires_grad = enabled
         self.zero_point.requires_grad = enabled
         return self
@@ -118,13 +117,13 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        self.scale.data.clamp_(min=self.eps.item())
+        self.scale.data.clamp_(min=self.eps.item())  # type: ignore[operator]
         scale = self.scale.detach()
         zero_point = self.zero_point.detach().round().clamp(self.quant_min, self.quant_max).long()
         return scale, zero_point
 
     def forward(self, X):
-        if self.static_enabled[0] == 1:
+        if self.static_enabled[0] == 1:  # type: ignore[index]
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.activation_post_process.calculate_qparams()
             _scale = _scale.to(self.scale.device)
@@ -132,7 +131,7 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
             self.scale.data.copy_(_scale)
             self.zero_point.data.copy_(_zero_point)
         else:
-            self.scale.data.clamp_(min=self.eps.item())
+            self.scale.data.clamp_(min=self.eps.item())  # type: ignore[operator]
 
         if self.fake_quant_enabled[0] == 1:
             if self.qscheme in (torch.per_channel_symmetric, torch.per_tensor_symmetric):

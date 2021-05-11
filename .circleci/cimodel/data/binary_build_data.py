@@ -55,9 +55,11 @@ CONFIG_TREE_DATA = OrderedDict(
     macos_arm64=([None], OrderedDict(
         wheel=[
             "3.8",
+            "3.9",
         ],
         conda=[
             "3.8",
+            "3.9",
         ],
     )),
     windows=(

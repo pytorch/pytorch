@@ -228,6 +228,8 @@ static void exec_cufft_plan(
 // tensors being contiguous, and that the strides at the innermost signal
 // dimension being unit (1) w.r.t. the corresponding data type.
 
+#pragma push
+#pragma diag_suppress 177   // Function was declared but never referenced
 static inline Tensor _run_cufft(
     const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
     bool complex_input, bool complex_output, bool inverse,
@@ -280,6 +282,7 @@ static inline Tensor _run_cufft(
   }
   return output;
 }
+#pragma pop
 
 // The cuFFT plan cache
 // unique_ptr for nullability and to avoid reference invalidation on vector resize
@@ -344,7 +347,7 @@ namespace {
 constexpr int64_t cufft_max_ndim = 3;
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
