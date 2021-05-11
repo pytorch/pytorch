@@ -650,10 +650,11 @@ class DistributedDataParallel(Module):
                 fqn = f"{module_name}.{param_name}"
                 # Bypass ignored parameters since those are not reduced by DDP
                 # to begin with.
-                if fqn not in self.parameters_to_ignore:
+                if fqn not in self.parameters_to_ignore and param.requires_grad:
                     if param not in param_set:
                         raise ValueError(
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
+                            " This indicates a bug in DDP, please report an issue to PyTorch."
                         )
                     param_index = param_to_param_index[param]
                     param_index_to_param_fqn[param_index] = fqn
@@ -664,7 +665,8 @@ class DistributedDataParallel(Module):
                 (
                     "Expected param to name mapping to cover all parameters, but"
                     f" got conflicting lengths: {len(param_set)} vs "
-                    f"{len(param_index_to_param_fqn)}"
+                    f"{len(param_index_to_param_fqn)}. This indicates a bug in DDP"
+                    ", please report an issue to PyTorch."
                 )
             )
 
@@ -958,11 +960,14 @@ class DistributedDataParallel(Module):
         modifications to the model or data loading is required.
 
         .. warning::
-            If the model or training loop this context manager is wrapepd around
+            If the model or training loop this context manager is wrapped around
             has additional distributed collective operations, such as
             ``SyncBatchNorm`` in the model's forward pass, then the flag
             ``throw_on_early_termination`` must be enabled. This is because this
             context manager is not aware of non-DDP collective communication.
+            This flag will cause all ranks to throw when any one rank
+            exhausts inputs, allowing these errors to be caught and recovered
+            from across all ranks.
 
         Args:
             divide_by_initial_world_size (bool): If ``True``, will divide
@@ -993,7 +998,8 @@ class DistributedDataParallel(Module):
                 of data. If ``False``, will continue training with a smaller
                 effective world size until all ranks are joined. Note that if
                 this flag is specified, then the flag
-                ``divide_by_initial_world_size`` would be ignored.
+                ``divide_by_initial_world_size`` would be ignored. Default
+                is ``False``.
 
 
         Example::

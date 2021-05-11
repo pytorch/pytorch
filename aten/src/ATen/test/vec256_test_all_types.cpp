@@ -164,20 +164,14 @@ namespace {
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         UVT case1 = -658.5f;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         UVT exp1 = -658.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         UVT case2 = -657.5f;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         UVT exp2 = -658.f;
         auto test_case = TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-1000, 1000}} })
             .addCustom({ {case1},exp1 })
             .addCustom({ {case2},exp2 })
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(64000)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -266,11 +260,8 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         auto test_case = TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-4096, 4096}}, true, 1.2e-7f})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-8192, 8192}}, true, 3.0e-7f})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(8000)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -284,11 +275,8 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         auto test_case = TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-4096, 4096}}, true, 1.2e-7f})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-8192, 8192}}, true, 3.0e-7f})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(8000)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -321,9 +309,7 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, getDefaultTolerance<UVT>()})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -338,9 +324,7 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, getDefaultTolerance<UVT>()})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -356,9 +340,7 @@ namespace {
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -374,9 +356,7 @@ namespace {
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -392,9 +372,7 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-100, 100}}, checkRelativeErr, getDefaultTolerance<UVT>()})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -437,11 +415,8 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {-1, 1000}}, true, getDefaultTolerance<UVT>()})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {1000, 1.e+30}}, true, getDefaultTolerance<UVT>()})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -510,10 +485,8 @@ namespace {
               test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
               // All bits are set to 1 if true, otherwise 0.
               // same rule as at::Vec256<T>::binary_pred.
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               std::memset(static_cast<void*>(&expected_vals[i]), 0xFF, sizeof(VT));
             } else {
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               test_vals[i] = (VT)0.123;
               std::memset(static_cast<void*>(&expected_vals[i]), 0, sizeof(VT));
             }
@@ -529,14 +502,10 @@ namespace {
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         UVT maxCorrect = std::is_same<UVT, float>::value ? (UVT)4e+36 : (UVT)2e+305;
         TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)1000, maxCorrect }}, true, tolerance})
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -836,7 +805,6 @@ namespace {
                     test_vals[i] = (VT)0;
                 }
                 else {
-                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                     test_vals[i] = (VT)0.897;
                 }
             }
@@ -860,7 +828,6 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN IntVT actual_vals1[vec::size()];
         for (int64_t i = 0; i < vec::size(); i++) {
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             input1[i] = (VT)i * (VT)2.1 + (VT)0.5;
             expected_vals1[i] = static_cast<IntVT>(input1[i]);
         }
@@ -894,7 +861,6 @@ namespace {
 
         auto test_case = TestingCase<vec>::getBuilder()
           .addDomain(CheckWithinDomains<VT>{
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
               true, getDefaultTolerance<VT>()})
           .setTestSeed(TestSeed());
@@ -908,14 +874,12 @@ namespace {
             RESOLVE_OVERLOAD(filter_fmadd));
     }
     template<typename vec, typename VT, int64_t mask>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
     {
     }
     template<typename vec, typename VT, int64_t mask>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
@@ -970,7 +934,6 @@ namespace {
           mask[idx] = (VT)0;
         }
         else {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
           std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
         }
@@ -993,7 +956,6 @@ namespace {
     void blend_init<Complex<float>, 4>(Complex<float>(&a)[4], Complex<float>(&b)[4]) {
         auto add = Complex<float>(1., 100.);
         a[0] = Complex<float>(1., 100.);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         b[0] = Complex<float>(5., 1000.);
         for (int i = 1; i < 4; i++) {
             a[i] = a[i - 1] + add;
@@ -1005,7 +967,6 @@ namespace {
     void blend_init<Complex<double>, 2>(Complex<double>(&a)[2], Complex<double>(&b)[2]) {
         auto add = Complex<double>(1.0, 100.0);
         a[0] = Complex<double>(1.0, 100.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         b[0] = Complex<double>(3.0, 1000.0);
         a[1] = a[0] + add;
         b[1] = b[0] + add;
@@ -1075,17 +1036,13 @@ namespace {
     template<typename T>
     std::enable_if_t<!is_complex<T>::value, void>
     arange_init(T& base, T& step) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         base = (T)5.0;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         step = (T)2.0;
     }
     template<typename T>
     std::enable_if_t<is_complex<T>::value, void>
     arange_init(T& base, T& step) {
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        base = T(5.0, 5.0);
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        step = T(2.0, 3.0);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1143,12 +1100,9 @@ namespace {
         //zero point
         ValueGen<int> generator_zp(min_val, max_val, seed);
         //scale
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
         //value
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
         for (int i = 0; i < trials; i++) {
@@ -1188,7 +1142,6 @@ namespace {
         auto seed = TestSeed();
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
@@ -1237,7 +1190,6 @@ namespace {
         //zero point and value
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
         for (int i = 0; i < trials; i++) {
             float multiplier = 1.f / (generator_sc.get());
