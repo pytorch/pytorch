@@ -75,29 +75,6 @@ class AndroidGradleJob:
 
 
 WORKFLOW_DATA = [
-    AndroidJob(["x86_32"], "pytorch_linux_build", is_master_only=False),
-    AndroidJob(["x86_64"], "pytorch_linux_build"),
-    AndroidJob(["arm", "v7a"], "pytorch_linux_build"),
-    AndroidJob(["arm", "v8a"], "pytorch_linux_build"),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
-        "pytorch_android_gradle_build-x86_32",
-        ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
-        is_master_only=False,
-        is_pr_only=True),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
-        "pytorch_android_gradle_custom_build_single",
-        [DOCKER_REQUIREMENT_NDK],
-        is_master_only=False,
-        is_pr_only=True),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
-        "pytorch_android_gradle_build",
-        ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build",
-         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build",
-         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build",
-         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build"]),
 ]
 
 
