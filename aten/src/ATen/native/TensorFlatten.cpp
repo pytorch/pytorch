@@ -8,7 +8,7 @@ namespace native {
     if (tensors.size() == 1)
       return flatten(tensors[0]);
     return at::cat(fmap(tensors, flatten));
-  } 
+  }
 
   std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tensors) {
     std::vector<Tensor> outputs;
