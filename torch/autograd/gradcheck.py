@@ -873,8 +873,9 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         # For sparse, create a random sparse vec with random values in the same
         # indices. Make sure size is set so that it isn't inferred to be smaller.
         x_values = x._values()
+        dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
         values = torch.rand(x_values.numel(), generator=generator) \
-            .to(dtype=x.dtype, device=x.device) \
+            .to(dtype=dtype, device=x.device) \
             .reshape(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_coo_tensor(x._indices(), values, x.size())

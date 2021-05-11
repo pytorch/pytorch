@@ -119,11 +119,24 @@ TEST(StaticRuntime, UnaryOps) {
 
   std::vector<IValue> args{a};
 
+  // sum
   testStaticRuntime(aten_sum, args);
   testStaticRuntime(aten_sum_0, args);
   testStaticRuntime(aten_sum_1, args);
   testStaticRuntime(aten_sum_0_true, args);
   testStaticRuntime(aten_sum_1_true, args);
+}
+
+TEST(StaticRuntime, Logit) {
+  auto a = at::ones({2, 3});
+  double b = 1e-6;
+  std::vector<IValue> args_1{a};
+  std::vector<IValue> args_2({a, b});
+
+  // logit
+  testStaticRuntime(logit_script_1, args_1);
+  testStaticRuntime(logit_script_2, args_1);
+  testStaticRuntime(logit_script_3, args_2);
 }
 
 TEST(StaticRuntime, EmbeddingBag) {
@@ -142,9 +155,7 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
-
   const auto input = torch::rand({20, 10, 10, 10});
-
   for (int normalized_size: {2, 3}) {
       std::vector<int64_t> normalized_shape(normalized_size, 10);
       const auto weight = torch::rand(normalized_shape);
@@ -255,6 +266,17 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_5, args);
   testStaticRuntime(reshape_inplace_script, args);
   testStaticRuntime(reshape_incontiguous_script, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Repeat) {
+  auto a = at::randn({2, 3});
+  auto b = std::vector<int64_t>({1, 2});
+  auto c = std::vector<int64_t>({2, 3});
+  std::vector<IValue> args1{a, b};
+  std::vector<IValue> args2{a, c};
+
+  testStaticRuntime(repeat, args1);
+  testStaticRuntime(repeat, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {

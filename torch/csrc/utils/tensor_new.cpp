@@ -408,7 +408,6 @@ Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType sc
     "new(IntArrayRef size, *, Device? device=None)",
   });
   check_base_legacy_new(dispatch_key, c10::kSparse);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -510,7 +509,6 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
       return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
@@ -570,7 +568,6 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
       return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
@@ -687,7 +684,6 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ParsedArgs<6> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -716,7 +712,6 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(4), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto inferred_options = typeIdWithDefault(r, 2, dispatch_key);
@@ -805,7 +800,6 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
                /*copy_numpy=*/true,
                /*type_inference=*/type_inference,
                pin_memory);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto names = r.toDimnameListOptional(5);
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);

@@ -541,7 +541,7 @@ def unused(fn):
     return fn
 
 # No op context manager from python side
-class ignore_experimental(contextlib.AbstractContextManager):
+class _IgnoreContextManager(contextlib.AbstractContextManager):
     def __init__(self, **kwargs):
         pass
 

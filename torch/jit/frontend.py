@@ -1,6 +1,7 @@
 import torch
 import sys
 import ast
+import astunparse
 import inspect
 import string
 from collections import namedtuple
@@ -300,6 +301,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
 
+# TODO: more robust handling of recognizing ignore context manager
 def is_torch_jit_ignore_context_manager(stmt):
     # checks if the statement is torch.jit.ignore context manager
     if isinstance(stmt.items[0].context_expr, ast.Call):
@@ -308,8 +310,8 @@ def is_torch_jit_ignore_context_manager(stmt):
         if isinstance(function, ast.Attribute):
             attr_name = function.attr
             attr_value = function.value
-            if attr_name == "ignore_experimental" and isinstance(attr_value, ast.Attribute):
-                # there should be at most two nested attributes (e.g torch.jit.ignore_experimental)
+            if attr_name == "_IgnoreContextManager" and isinstance(attr_value, ast.Attribute):
+                # there should be at most two nested attributes (e.g torch.jit._IgnoreContextManager)
                 if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
                     if attr_value.value.id == "torch":
                         return True
@@ -405,6 +407,7 @@ def build_ignore_context_manager(ctx, stmt):
     def process_ins_outs(args):
         # parse the context manager to figure out inputs and outputs
         # with their annotated types
+        # TODO: add input, output validator
         inputs = []
         outputs = []
         for arg in args:
@@ -460,7 +463,7 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_function.body.append(return_stmt)
 
     # registers the custom function in the global context
-    ignore_func_str = "@torch.jit.ignore\n" + ast.unparse(ignore_function)
+    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
     ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
     exec(ignore_func_str)  # noqa: P204
 
@@ -659,8 +662,6 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
-            if sys.version_info < (3, 9):
-                raise NotSupportedError(r, "torch.jit.ignore context manager is only supported in 3.9")
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
