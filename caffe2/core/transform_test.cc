@@ -346,7 +346,6 @@ class TransformSleepFastOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     return true;
   }
@@ -365,7 +364,6 @@ class TransformSleepSlowOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return true;
   }
@@ -456,7 +454,6 @@ TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
 
   // Should be still transform normally.
   auto mystery_net =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ApplyTransformIfFaster("SlowToFast", netdef, init_netdef, 5, 10, 1.01);
   EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
 }
@@ -477,7 +474,6 @@ TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
 
   // Should not actually change!
   auto mystery_net =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ApplyTransformIfFaster("FastToSlow", netdef, init_netdef, 5, 10, 1.01);
   EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
 }

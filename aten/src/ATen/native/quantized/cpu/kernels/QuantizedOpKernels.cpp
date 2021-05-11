@@ -437,7 +437,6 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six = at::native::quantize_val<scalar_t>(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qx.q_scale(), qx.q_zero_point(), 6.0);
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto six_vec = Vec(six);
@@ -564,11 +563,9 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardsigmoid", [&]() {
 
     // - Output scale is set to 1.0 / 2^(BIT_NUM)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float output_scale = 0.00390625;  // 1.0 / 2^8
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
     }
     float inv_output_scale = 1.0 / output_scale;
@@ -592,9 +589,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     using qVec = Vec256<scalar_t>;
     using fVec = Vec256<float>;
     fVec kZeroVec(0.0f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fVec kThreeVec(3.0f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fVec kSixVec(6.0f);
 
     // Naive implemenentation: uses dequantize/execute/quantize routine
@@ -800,9 +795,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   fVec i_zero_point_vec(i_zero_point);
   fVec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
   fVec zero_vec(0.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   fVec three_vec(3.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   fVec six_vec(6.0f);
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardswish", [&]() {
@@ -845,12 +838,10 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
     // - Output scale is set to 2.0 / 2^(BIT_NUM)
     // - For signed types output zero point is set to 0
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float output_scale = 0.0078125;  // 2.0 / 512
     int64_t output_zero_point = 0;
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       output_scale = 4.656612873077393e-10;  // 2.0 / 2^32
     } else if (SCALAR_TYPE == at::kQUInt8) {
       output_zero_point = 128;
@@ -2249,9 +2240,7 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
       float* dzero_point_output = (float*)(data[2] + i * strides[2]);
       float* x_input = (float*)(data[3] + i * strides[3]);
       float* dy_input = (float*)(data[4] + i * strides[4]);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       float* scale_input = (float*)(data[5] + i * strides[5]);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       float* zero_point_input = (float*)(data[6] + i * strides[6]);
 
       float inv_scale = 1.0f / (*scale_input);
@@ -2918,7 +2907,6 @@ void dequantize_per_channel_affine_kernel(
       Tensor scales,
       Tensor zero_points,
       int64_t axis,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       int bit_width=8) {
 
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
@@ -2949,7 +2937,6 @@ void dequantize_per_channel_affine_kernel(
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
           auto qvalue = qd[i / elem_per_byte].val_;
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           if (bit_width < 8) {
             qvalue >>= (i % elem_per_byte) * bit_width;
             qvalue &= (1 << bit_width) - 1;
@@ -2968,7 +2955,6 @@ void dequantize_per_channel_affine_kernel(
           // subtraction subexpression returns a float
           // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
           auto qvalue = qd[i / elem_per_byte].val_;
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           if (bit_width < 8) {
             qvalue >>= (i % elem_per_byte) * bit_width;
             qvalue &= (1 << bit_width) - 1;

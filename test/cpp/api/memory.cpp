@@ -14,7 +14,6 @@ struct TestValue {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ptr = torch::make_unique<TestValue>(123);
   ASSERT_FALSE(ptr->lvalue_.has_value());
   ASSERT_TRUE(ptr->rvalue_.has_value());
@@ -23,7 +22,6 @@ TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int x = 5;
   auto ptr = torch::make_unique<TestValue>(x);
   ASSERT_TRUE(ptr->lvalue_.has_value());
