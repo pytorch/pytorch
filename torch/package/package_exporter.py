@@ -516,6 +516,8 @@ node [shape=box];
 
             hook(exporter: PackageExporter, module_name: str) -> None
 
+        Hooks will be called in order of registration.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -534,6 +536,8 @@ node [shape=box];
         It should have the following signature::
 
             hook(exporter: PackageExporter, module_name: str) -> None
+
+        Hooks will be called in order of registration.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
