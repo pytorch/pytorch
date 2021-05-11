@@ -1434,7 +1434,8 @@ class TestTEFuser(JitTestCase):
             F.hardswish,
             torch.sqrt,
             torch.rsqrt,
-            F.gelu,
+            # TODO: Fix and re-enable: https://github.com/pytorch/pytorch/issues/58053
+            # F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
