@@ -14,7 +14,7 @@ import shlex
 import configparser
 from typing import List, Dict, Any, Optional, Tuple, Union
 
-from tools import mypy_wrapper
+from . import mypy_wrapper
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
