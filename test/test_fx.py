@@ -304,6 +304,18 @@ class TestFX(JitTestCase):
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
 
+    def test_wrapped_retrace(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+
+        retraced = symbolic_trace(m)
+        self.assertIn('wrapped_via_decorator', retraced.code)
+        self.assertEqual(retraced(0), 1)
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):

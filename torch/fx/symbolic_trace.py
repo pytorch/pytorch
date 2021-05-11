@@ -532,7 +532,9 @@ def _create_wrapped_func(orig_fn):
         """
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
-            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+            return_proxy = proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+            return_proxy.node.meta['is_wrapped'] = True
+            return return_proxy
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -716,6 +718,10 @@ def wrap(fn_or_name : Union[str, Callable]):
     # semantics would be slightly different, but would add support `from x import wrapped_function`
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
+
+# HACK: `torch.fx.symbolic_trace` refers to the function, not the module
+# wrap's default `__module__` is `torch.fx.symbolic_trace`. This leads to fuckery
+wrap.__module__ = 'torch.fx'
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
