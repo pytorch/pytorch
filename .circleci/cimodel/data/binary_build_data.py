@@ -97,8 +97,6 @@ class PackageFormatConfigNode(ConfigNode):
     def get_children(self):
         if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
-        elif self.find_prop("os_name") == "windows" and self.find_prop("package_format") == "libtorch":
-            return [WindowsLibtorchConfigNode(self, v) for v in WINDOWS_LIBTORCH_CONFIG_VARIANTS]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("gpu_versions")]
 
