@@ -35,14 +35,12 @@ void AddNoiseInput(const vector<int64_t>& shape,
   math::RandGaussian<float, CPUContext>(
       tensor->numel(),
       0.0f,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10.0f,
       tensor->template mutable_data<float>(),
       &context);
 }
 
 inline float relativeError(float a, float b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return std::abs(a - b) / (0.5f * (std::abs(a) + std::abs(b)));
 }
 
