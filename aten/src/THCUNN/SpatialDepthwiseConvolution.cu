@@ -55,8 +55,8 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     // result is same as would be in the code below
     // const int n = linearIndex / batchStride; //batchStride = outputChannels *
     // outputHeight * outputWidth const int c = (linearIndex / channelStride) %
-    // outputChannels; //channelStride = outputHeight * outputWidth const int h =
-    // (linearIndex / outputWidth) % outputHeight; const int w = linearIndex %
+    // outputChannels; //channelStride = outputHeight * outputWidth const int h
+    // = (linearIndex / outputWidth) % outputHeight; const int w = linearIndex %
     // outputWidth;
 
     int indtmp1 = linearIndex / outputWidth;

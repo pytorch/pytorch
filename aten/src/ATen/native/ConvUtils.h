@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/ArrayRef.h>
 
 namespace at {

@@ -243,7 +243,7 @@ struct unroll {
 // caller manually.
 template <int vec_size, typename data_t> // vec_size: number of scalars, can be
                                          // 1, 2, or 4.
-                                         struct vectorized {
+struct vectorized {
   static_assert(
       thread_work_size % vec_size == 0,
       "The workload per thread must be a multiple of vec_size");

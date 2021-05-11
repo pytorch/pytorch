@@ -661,8 +661,8 @@ void cdist_backward_kernel_impl(
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
   // current implementation supports only gradient that can be collapsed to 1D.
-  // However, to avoid checking this assumption, we call grad.contiguous() before
-  // backward, so stride is guaranteed to be 1
+  // However, to avoid checking this assumption, we call grad.contiguous()
+  // before backward, so stride is guaranteed to be 1
   const int64_t gs = 1;
 
   Tensor buffer = at::empty({batch, r2, r1, m}, result.options());

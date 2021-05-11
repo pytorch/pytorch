@@ -9,37 +9,41 @@
 #include <hip/hip_version.h>
 #endif
 
-scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
-{
+scalar_t* THCStorage_(data)(THCState* state, const THCStorage* self) {
   return self->data<scalar_t>();
 }
 
-int THCStorage_(elementSize)(THCState *state)
-{
+int THCStorage_(elementSize)(THCState* state) {
   return sizeof(scalar_t);
 }
 
-void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
-{
+void THCStorage_(
+    set)(THCState* state, THCStorage* self, ptrdiff_t index, scalar_t value) {
   THArgCheck(
       (index >= 0) && (index < (self->nbytes() / sizeof(scalar_t))),
       2,
       "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 #if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
-                                  cudaMemcpyHostToDevice,
-                                  stream));
+  THCudaCheck(hipMemcpyWithStream(
+      THCStorage_(data)(state, self) + index,
+      &value,
+      sizeof(scalar_t),
+      cudaMemcpyHostToDevice,
+      stream));
 #else
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
-                              cudaMemcpyHostToDevice,
-                              stream));
+  THCudaCheck(cudaMemcpyAsync(
+      THCStorage_(data)(state, self) + index,
+      &value,
+      sizeof(scalar_t),
+      cudaMemcpyHostToDevice,
+      stream));
   THCudaCheck(cudaStreamSynchronize(stream));
 #endif
 }
 
-scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
-{
+scalar_t THCStorage_(
+    get)(THCState* state, const THCStorage* self, ptrdiff_t index) {
   THArgCheck(
       (index >= 0) && (index < (self->nbytes() / sizeof(scalar_t))),
       2,
@@ -47,18 +51,25 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 #if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
-                                  cudaMemcpyDeviceToHost, stream));
+  THCudaCheck(hipMemcpyWithStream(
+      &value,
+      THCStorage_(data)(state, self) + index,
+      sizeof(scalar_t),
+      cudaMemcpyDeviceToHost,
+      stream));
 #else
-  THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
-                              cudaMemcpyDeviceToHost, stream));
+  THCudaCheck(cudaMemcpyAsync(
+      &value,
+      THCStorage_(data)(state, self) + index,
+      sizeof(scalar_t),
+      cudaMemcpyDeviceToHost,
+      stream));
   THCudaCheck(cudaStreamSynchronize(stream));
 #endif
   return value;
 }
 
-THCStorage* THCStorage_(new)(THCState *state)
-{
+THCStorage* THCStorage_(new)(THCState* state) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
                            0,
@@ -68,8 +79,7 @@ THCStorage* THCStorage_(new)(THCState *state)
   return storage;
 }
 
-THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
-{
+THCStorage* THCStorage_(newWithSize)(THCState* state, ptrdiff_t size) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
                            size * sizeof(scalar_t),
@@ -79,9 +89,10 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
   return storage;
 }
 
-THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
-                                          at::Allocator* allocator)
-{
+THCStorage* THCStorage_(newWithAllocator)(
+    THCState* state,
+    ptrdiff_t size,
+    at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
                            size * sizeof(scalar_t),
@@ -91,15 +102,17 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
   return storage;
 }
 
-THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t data0)
-{
-  THCStorage *self = THCStorage_(newWithSize)(state, 1);
+THCStorage* THCStorage_(newWithSize1)(THCState* state, scalar_t data0) {
+  THCStorage* self = THCStorage_(newWithSize)(state, 1);
   THCStorage_(set)(state, self, 0, data0);
   return self;
 }
 
-THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, ptrdiff_t size, int isShared)
-{
+THCStorage* THCStorage_(newWithMapping)(
+    THCState* state,
+    const char* fileName,
+    ptrdiff_t size,
+    int isShared) {
   THError("not available yet for THCStorage");
   return NULL;
 }
@@ -119,13 +132,11 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
   return storage;
 }
 
-void THCStorage_(retain)(THCState *state, THCStorage *self)
-{
+void THCStorage_(retain)(THCState* state, THCStorage* self) {
   THStorage_retain(self);
 }
 
-void THCStorage_(free)(THCState *state, THCStorage *self)
-{
+void THCStorage_(free)(THCState* state, THCStorage* self) {
   THStorage_free(self);
 }
 #endif

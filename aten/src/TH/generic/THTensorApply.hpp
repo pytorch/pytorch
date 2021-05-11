@@ -146,7 +146,7 @@
        * 2. Calculate the numbers of elements allocated in each thread and the \
        * line index of the first one.                                          \
        * 3. Calculate the memory offset of the first element and the indexes   \
-       * in each dimension of the first one.                                                                    \
+       * in each dimension of the first one.                                   \
        * 4. iterate all elements in each thread. update the indexes in each    \
        * dimension of the rest.                                                \
        */                                                                      \

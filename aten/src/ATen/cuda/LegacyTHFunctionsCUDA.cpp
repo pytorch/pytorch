@@ -691,6 +691,18 @@ std::tuple<Tensor&, Tensor&> _th_gels_out(
     const Tensor& A,
     Tensor& res1,
     Tensor& res2) {
+  TORCH_WARN_ONCE(
+      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
+      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
+      "The unpacking of the solution, as in\n",
+      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
+      "should be replaced with\n",
+      "X = torch.linalg.lstsq(A, B).solution");
   // DeviceGuard omitted
   auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -775,6 +787,18 @@ std::tuple<Tensor&, Tensor&> _th_gels_out(
   return std::tuple<Tensor&, Tensor&>(res1, res2);
 }
 std::tuple<Tensor, Tensor> _th_gels(const Tensor& self, const Tensor& A) {
+  TORCH_WARN_ONCE(
+      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
+      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
+      "The unpacking of the solution, as in\n",
+      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
+      "should be replaced with\n",
+      "X = torch.linalg.lstsq(A, B).solution");
   // DeviceGuard omitted
   auto dispatch_scalar_type = infer_scalar_type(self);
   auto res1_ =

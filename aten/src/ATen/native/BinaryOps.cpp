@@ -82,6 +82,20 @@ CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
 CREATE_BINARY_META_FUNC(nextafter);
 
+TORCH_META_FUNC(maximum)(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      !self.is_complex() && !other.is_complex(),
+      "maximum not implemented for complex tensors.");
+  build_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(minimum)(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      !self.is_complex() && !other.is_complex(),
+      "minimum not implemented for complex tensors.");
+  build_binary_op(maybe_get_output(), self, other);
+}
+
 } // namespace meta
 
 namespace native {
@@ -225,6 +239,8 @@ TORCH_IMPL_FUNC(special_xlog1py_out)
     func##_stub(device_type(), *this);                              \
   }
 
+CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
+CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
@@ -1270,19 +1286,6 @@ Tensor& logical_xor_(Tensor& self, const Scalar& other) {
   return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out));
 }
 
-Tensor& maximum_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  maximum_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor maximum(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  maximum_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
 // binary max, alias for maximum
 Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::maximum_out(result, self, other);
@@ -1310,19 +1313,6 @@ Tensor fmax(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   fmax_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& minimum_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  minimum_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor minimum(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  minimum_stub(iter.device_type(), iter);
   return iter.output();
 }
 

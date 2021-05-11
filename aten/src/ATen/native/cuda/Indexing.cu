@@ -39,9 +39,9 @@ __global__ void indexing_backward_kernel(
   // numel is total number of flattened indices, not expanded to dimensions that
   // are not indexed. stride is the cumulative size of the not-indexed last
   // dimensions stride_before is the stride of the dimension immediately
-  // preceding first indexed dimension if indexing starts from the 0th dimension,
-  // stride_before does not matter because blockIdx.z will be 0 in this case
-  // outer_dim is number of elements in the first unindexed dimensions
+  // preceding first indexed dimension if indexing starts from the 0th
+  // dimension, stride_before does not matter because blockIdx.z will be 0 in
+  // this case outer_dim is number of elements in the first unindexed dimensions
   using accscalar_t = at::acc_type<scalar_t, true>;
 
   // Each warp is responsible for an input into the LookupTable.

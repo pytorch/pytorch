@@ -507,8 +507,9 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
                     std::move(longs_to_serialize));
               },
               [](EmbeddingParamsSerializationType state)
-                  -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__
-                                                                     // call
+                  -> c10::intrusive_ptr<
+                      EmbeddingPackedParamsBase> { // __setstate__
+                                                   // call
                 std::vector<at::Tensor> tensors;
                 std::vector<double> doubles;
                 std::vector<int64_t> longs;

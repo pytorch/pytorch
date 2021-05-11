@@ -365,7 +365,7 @@
                                            next high dimension*/               \
       if (TENSOR##_counter_tmp[TENSOR##_i] ==                                  \
           TENSOR##_sizes[TENSOR##_i]) { /*The next high dimension also carry,  \
-continue to clear and carry*/                                                          \
+continue to clear and carry*/                                                  \
         TENSOR##_data -=                                                       \
             TENSOR##_sizes[TENSOR##_i] * TENSOR##_strides[TENSOR##_i];         \
         TENSOR##_counter_tmp[TENSOR##_i] = 0;                                  \

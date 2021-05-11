@@ -11,7 +11,7 @@
 namespace at {
 namespace native {
 
-void maximum_kernel_cuda(TensorIterator& iter) {
+void maximum_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel_with_scalars(
         iter, [] GPU_LAMBDA(bool a, bool b) -> bool { return a || b; });
@@ -43,7 +43,7 @@ void maximum_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void minimum_kernel_cuda(TensorIterator& iter) {
+void minimum_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel_with_scalars(
         iter, [] GPU_LAMBDA(bool a, bool b) -> bool { return a && b; });

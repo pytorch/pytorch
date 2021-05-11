@@ -168,9 +168,9 @@ struct Vec256 {
   }
   template <typename step_t> // step sometimes requires a higher precision type
                              // (e.g., T=int, step_t=double)
-                             static Vec256<T> arange(
-                                 T base = static_cast<T>(0),
-                                 step_t step = static_cast<step_t>(1)) {
+  static Vec256<T> arange(
+      T base = static_cast<T>(0),
+      step_t step = static_cast<step_t>(1)) {
     Vec256 vec;
     for (int64_t i = 0; i < size(); i++) {
       vec.values[i] = base + i * step;

@@ -5,8 +5,9 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-// NOTE: functions exist here only to support dispatch via Declarations.cwrap.  You probably don't want to put
-// new functions in here, they should probably be un-genericized.
+// NOTE: functions exist here only to support dispatch via Declarations.cwrap.
+// You probably don't want to put new functions in here, they should probably be
+// un-genericized.
 
 TORCH_CUDA_CU_API void THCTensor_(setStorage)(
     THCState* state,

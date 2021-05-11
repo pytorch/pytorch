@@ -89,7 +89,7 @@ __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(
     int width,
     unsigned int mask) {
   //(HIP doesn't support int64_t). Trick from
-  //https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
+  // https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
   int2 a = *reinterpret_cast<int2*>(&value);
   a.x = __shfl_down(a.x, delta);
   a.y = __shfl_down(a.y, delta);

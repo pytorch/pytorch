@@ -35,6 +35,10 @@ MPSTemporaryImage* createTemporaryImage(
     MPSImage* image);
 
 void copyToHost(float* dst, MPSImage* image);
+void copyToMetalBuffer(
+    MetalCommandBuffer* buffer,
+    id<MTLBuffer> dst,
+    MPSImage* image);
 
 std::vector<fp16_t> staticImageToFp16Array(MPSImage* image);
 at::Tensor staticImageToTensor(MPSImage* image);
