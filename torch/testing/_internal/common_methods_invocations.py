@@ -1803,6 +1803,24 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+
+def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
+    shapes_and_args = (
+        ((S, S, S), (1, 2, 2)),
+        ((S, S, S), (-1, 2, 2)),
+        ((S, S, S), (1, 0, 0)),
+        ((S, S, S), (-1, 0, 0)),
+    )
+
+    def generator():
+        for shape, args in shapes_and_args:
+            tensor = make_tensor(shape, device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+            yield SampleInput(tensor, args=args)
+
+    return list(generator())
+
+
 def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_axes = [
         ((3, 4, 5), 0),
@@ -4895,6 +4913,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_comparison_ops),
+    OpInfo('narrow',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_narrow),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -6260,8 +6282,6 @@ def method_tests():
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
-        ('narrow', (S, S, S), (1, 2, 2), 'dim', (), [0]),
-        ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', (), [0]),
         ('squeeze', (S, 1, S, 1), NO_ARGS, '', (True,)),
         ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones', (True,)),
         ('squeeze', (S, 1, S, 1), (1,), '1_dim', (True,), [0]),
