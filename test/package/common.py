@@ -30,7 +30,7 @@ class PackageTestCase(TestCase):
         self.orig_sys_path = sys.path.copy()
         sys.path.append(self.package_test_dir)
         torch.package.package_exporter._gate_torchscript_serialization = False
-        
+
 
     def tearDown(self):
         super().tearDown()
