@@ -30,15 +30,19 @@ class col:
     UNDERLINE = "\033[4m"
 
 
+def should_color() -> bool:
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
 def color(the_color: str, text: str) -> str:
-    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+    if should_color():
         return col.BOLD + the_color + str(text) + col.RESET
     else:
         return text
 
 
 def cprint(the_color: str, text: str) -> None:
-    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+    if should_color():
         print(color(the_color, text))
     else:
         print(text)
@@ -162,6 +166,11 @@ async def run_flake8(files: Optional[List[str]], quiet: bool) -> bool:
 
 
 async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
+    env = os.environ.copy()
+    if should_color():
+        # Secret env variable: https://github.com/python/mypy/issues/7771
+        env["MYPY_FORCE_COLOR"] = "1"
+
     if files is not None:
         # Running quick lint, use mypy-wrapper instead so it checks that the files
         # actually should be linted
@@ -189,6 +198,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
             "Run autogen",
         ],
         redirect=False,
+        env=env,
     )
     passed, _, _ = await shell_cmd(
         [
@@ -202,6 +212,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
             "Run mypy",
         ],
         redirect=False,
+        env=env,
     )
     return passed
 

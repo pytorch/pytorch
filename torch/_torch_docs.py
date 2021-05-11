@@ -3014,6 +3014,25 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
     host-device synchronization.
 
+.. warning::
+
+    :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble`
+    rather than real tensors mimicking complex tensors.
+
+    ``L, _ = torch.eig(A)`` should be replaced with
+
+    .. code :: python
+
+        L_complex = torch.linalg.eigvals(A)
+
+    ``L, V = torch.eig(A, eigenvectors=True)`` should be replaced with
+
+    .. code :: python
+
+        L_complex, V_complex = torch.linalg.eig(A)
+
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -5061,8 +5080,11 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
-.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
-          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+.. warning::
+
+    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
+    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
+    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
 
 Args:
     input (Tensor): the input 2-D tensor
