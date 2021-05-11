@@ -1346,7 +1346,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
-  void init_pyobj(int16_t self_interpreter, PyObject* pyobj, c10::impl::PythonInterpreterTagStatus status) {
+  void init_pyobj(
+      int16_t self_interpreter,
+      PyObject* pyobj,
+      c10::impl::PythonInterpreterTagStatus status) {
     int16_t expected = -1;
     switch (status) {
       case c10::impl::PythonInterpreterTagStatus::DEFINITELY_UNINITIALIZED:
@@ -1360,16 +1363,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       case c10::impl::PythonInterpreterTagStatus::MAYBE_UNINITIALIZED:
         // attempt to claim this TensorImpl with the specified interpreter
         // tag
-        if (pyobj_interpreter_.compare_exchange_strong(expected, self_interpreter, std::memory_order_acq_rel)) {
+        if (pyobj_interpreter_.compare_exchange_strong(
+                expected, self_interpreter, std::memory_order_acq_rel)) {
           break;
         }
         // fallthrough, we lost the race.  We are guaranteed not to lose the
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
       case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_OTHER:
-        TORCH_CHECK(false, "cannot allocate PyObject for Tensor on interpreter ", self_interpreter,
-          " that has already been used by another torch deploy interpreter ",
-          pyobj_interpreter_.load());
+        TORCH_CHECK(
+            false,
+            "cannot allocate PyObject for Tensor on interpreter ",
+            self_interpreter,
+            " that has already been used by another torch deploy interpreter ",
+            pyobj_interpreter_.load());
     }
 
     // we are the ONLY thread that can have gotten to this point.  It is not
@@ -1379,8 +1386,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
-  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged, returns
-  // a nullopt.  If it is definitely invalid, raises an error.
+  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
+  // returns a nullopt.  If it is definitely invalid, raises an error.
   //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
@@ -1398,9 +1405,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // NB: pyobj_ could still be null!
       return c10::make_optional(pyobj_);
     } else {
-      TORCH_CHECK(false, "cannot access PyObject for Tensor on interpreter ", self_interpreter,
-        " that has already been used by another torch deploy interpreter ",
-        pyobj_interpreter_.load());
+      TORCH_CHECK(
+          false,
+          "cannot access PyObject for Tensor on interpreter ",
+          self_interpreter,
+          " that has already been used by another torch deploy interpreter ",
+          pyobj_interpreter_.load());
     }
   }
 
@@ -2103,7 +2113,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
   c10::VariableVersion version_counter_;
-
 
   // This field contains the interpreter tag for this object.  See
   // Note [Python interpreter tag] for general context
