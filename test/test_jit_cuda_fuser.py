@@ -629,6 +629,10 @@ class TestCudaFuser(JitTestCase):
             return o
         x = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
         y = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
+        # Avoid division by zero for integer tensors
+        div_like = [torch.div, torch.fmod, torch.remainder]
+        if operation in div_like and (dtype == torch.int32 or dtype == torch.int64):
+            y[y == 0] = 1
         z = torch.tensor([2], device="cuda").to(dtype)
         o = t(x, y, z)
         t_jit = torch.jit.script(t)
