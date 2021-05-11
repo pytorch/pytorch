@@ -51,6 +51,15 @@ def texpr_reductions_enabled():
     finally:
         torch._C._jit_set_texpr_reductions_enabled(old)
 
+@contextlib.contextmanager
+def inline_fusion_groups():
+    old_inlining = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(True)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old_inlining)
+
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
@@ -1928,6 +1937,24 @@ class TestTEFuser(JitTestCase):
 
         script = self.checkScript(eager, (input, weight, bias))
         FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+    def test_type_as_cat(self):
+        with inline_fusion_groups():
+            def eager(x, y):
+                return torch.cat((x, y.type_as(x)), dim=1)
+            for dtype1, dtype2 in product(self.dtypes, self.dtypes):
+                x = torch.randint(2, (1, 13,)).to(dtype1)
+                zero = torch.tensor([[0]]).to(dtype2)
+                one = torch.tensor([[1]]).to(dtype2)
+                script = torch.jit.trace(eager, (x, zero))
+                for _ in range(3):
+                    torch.testing.assert_allclose(
+                        script(x, zero),
+                        eager(x, zero))
+                    torch.testing.assert_allclose(
+                        script(x, one),
+                        eager(x, one))
+                self.assertAllFused(script.graph_for(x, one))
 
 if __name__ == '__main__':
     run_tests()
