@@ -1322,8 +1322,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
 
-        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm` 
-        when computing vector norms and :func:`torch.linalg.matrix_norm` when 
+        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
+        when computing vector norms and :func:`torch.linalg.matrix_norm` when
         computing matrix norms. Note, however, the signature for these functions
         is slightly different than the signature for torch.norm.
 
