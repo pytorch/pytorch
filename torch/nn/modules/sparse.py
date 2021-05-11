@@ -119,7 +119,9 @@ class Embedding(Module):
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = False, _weight: Optional[Tensor] = None) -> None:
+                 sparse: bool = False, _weight: Optional[Tensor] = None,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -134,7 +136,7 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
@@ -255,9 +257,13 @@ class EmbeddingBag(Module):
                                  supported when ``mode="max"``.
         include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
                                       is equivalent to the size of `indices`. This matches the CSR format.
-        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
-                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
-                                     it is skipped. This allows each bag to be a different logical size.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                     gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                     during training, i.e. it remains as a fixed "pad". For a newly constructed
+                                     EmbeddingBag, the embedding vector at :attr:`padding_idx` will default to all
+                                     zeros, but can be updated to another value to be used as the padding vector.
+                                     Note that the embedding vector at :attr:`padding_idx` is excluded from the
+                                     reduction.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
@@ -307,7 +313,9 @@ class EmbeddingBag(Module):
     def __init__(self, num_embeddings: int, embedding_dim: int,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
-                 include_last_offset: bool = False, padding_idx: Optional[int] = None) -> None:
+                 include_last_offset: bool = False, padding_idx: Optional[int] = None,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -322,7 +330,7 @@ class EmbeddingBag(Module):
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         if _weight is None:
-            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \

@@ -13,7 +13,7 @@ class InflatableArg(NamedTuple):
     """ Helper type for bundled inputs.
 
         'value' is the compressed/deflated input that is stored in the model. Value
-        must be of the same type as the arguments to the function that it is a deflated
+        must be of the same type as the argument to the function that it is a deflated
         input for.
 
         'fmt' is a formatable code string that is executed to inflate the compressed data into
@@ -60,8 +60,7 @@ def augment_model_with_bundled_inputs(
     Inputs can be specified in one of two ways:
 
       - The model can define `_generate_bundled_inputs_for_forward`
-        get_all_bundled_inputs will simply call this method
-        and cache the value. If the user chooses this method inputs should be None
+        If the user chooses this method inputs should be None
 
       - `inputs` is a list of inputs of form List[Tuple[Any, ...]]. A list of tuples where the elements
         of each tuple are the args that make up one input.

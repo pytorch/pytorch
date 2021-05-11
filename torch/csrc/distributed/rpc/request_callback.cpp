@@ -9,7 +9,7 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-std::shared_ptr<JitFuture> RequestCallback::operator()(
+c10::intrusive_ptr<JitFuture> RequestCallback::operator()(
     Message& request,
     std::shared_ptr<LazyStreamContext> ctx) const {
   // NB: cannot clear autograd context id here because the processMessage method

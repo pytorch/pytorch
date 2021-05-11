@@ -35,6 +35,7 @@ from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_ignorable_args import TestIgnorableArgs  # noqa: F401
 from jit.test_hooks import TestHooks  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
@@ -47,6 +48,9 @@ from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
+from jit.test_pdt import TestPDT  # noqa: F401
+from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
+from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1580,7 +1584,6 @@ graph(%Ra, %Rb):
 
         traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
         script = torch.jit.script(outer)
-        fns = [traced, script]
         x, y = torch.randn(10), torch.randn(2)
         for fn in [traced, script]:
             self.assertGraphContains(fn.graph, kind='aten::einsum')
@@ -4181,8 +4184,8 @@ def foo(xyz):
         debug_files = debug_records_from_mod(ft3)
         for debug_file in debug_files:
             for i in range(len(debug_file) - 1):
-                offset, source_range = debug_file[i]
-                offset2, source_range2 = debug_file[i + 1]
+                offset, source_range_tag, source_range = debug_file[i]
+                offset2, source_range_tag2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
 
     def test_circular_dependency(self):
@@ -7567,7 +7570,7 @@ dedent """
         def fn(x):
             return type(x)
 
-        with self.assertRaisesRegex(RuntimeError, "value of type type"):
+        with self.assertRaisesRegex(RuntimeError, "value of type _TensorMeta"):
             fn(torch.tensor(.5))
 
     def test_python_call_annotation(self):
