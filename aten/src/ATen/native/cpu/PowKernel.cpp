@@ -4,12 +4,11 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
-#include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native {
 
-namespace {
+namespace CPU_CAPABILITY {
 
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
@@ -49,9 +48,9 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
   using Vec = Vec256<scalar_t>;
-  if (exp == 0.5) {
-    sqrt_stub(kCPU, iter);
-  } else if (exp == 2.0) {
+  // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
+  // in pow_tensor_scalar_kernel
+  if (exp == 2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
           return base * base;
@@ -65,10 +64,6 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         },
         [](Vec base) -> Vec { return base * base * base; }
     );
-  } else if (exp == -0.5) {
-    rsqrt_stub(kCPU, iter);
-  } else if (exp == -1.0) {
-    reciprocal_stub(kCPU, iter);
   } else if (exp == -2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -87,11 +82,29 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
   }
 }
 
+// Forward declare some unary ops
+void reciprocal_kernel(TensorIteratorBase& iter);
+void rsqrt_kernel(TensorIteratorBase& iter);
+void sqrt_kernel(TensorIteratorBase& iter);
+
 void pow_tensor_scalar_kernel(
     TensorIteratorBase& iter,
     const Scalar& exp_scalar) {
   // prevent multiple calls to iter.common_dtype()
   const auto dtype = iter.common_dtype();
+
+  if (dtype == ScalarType::Float || dtype == ScalarType::Double ||
+      dtype == kBFloat16 || isComplexType(dtype)) {
+    // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
+    if (exp_scalar.equal(.5)) {
+      return sqrt_kernel(iter);
+    } else if (exp_scalar.equal(-0.5)) {
+      return rsqrt_kernel(iter);
+    } else if (exp_scalar.equal(-1.0)) {
+      return reciprocal_kernel(iter);
+    }
+  }
+
   if (dtype == ScalarType::Float || dtype == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(dtype, "pow", [&]() {
       pow_tensor_scalar_optimized_kernel<scalar_t, double>(
@@ -133,8 +146,8 @@ void pow_tensor_scalar_kernel(
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &CPU_CAPABILITY::pow_tensor_tensor_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
+REGISTER_DISPATCH(pow_tensor_scalar_stub, &CPU_CAPABILITY::pow_tensor_scalar_kernel);
 
 }} // namespace at::native
