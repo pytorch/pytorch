@@ -4448,7 +4448,8 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
-add_docstr(torch.linspace, r"""
+add_docstr(torch.linspace,  # type: ignore[attr-defined]
+           r"""
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
@@ -4815,7 +4816,8 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
-add_docstr(torch.logspace, """
+add_docstr(torch.logspace,  # type: ignore[attr-defined]
+           """
 logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
