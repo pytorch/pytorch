@@ -57,7 +57,7 @@ class _Functional(object):
                 num_output = args['num_output']
                 if num_output > schema.max_output or \
                    num_output < schema.min_output or \
-                   not schema.num_outputs_allowed(num_output) or \  # type: ignore[attr-defined]
+                   not schema.num_outputs_allowed(num_output) or \
                    not schema.num_inputs_outputs_allowed(num_input,  # type: ignore[attr-defined]
                                                          num_output):
                     raise ValueError(

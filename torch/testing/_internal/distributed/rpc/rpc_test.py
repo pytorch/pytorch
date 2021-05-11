@@ -2594,7 +2594,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rref_str(self):
-        rref1 = RRef(self.rank)  # type: ignore[var-annotated]
+        rref1 = RRef(self.rank)  # type: ignore[var-annotated, attr-defined]
         id_class = "GloballyUniqueId"
         self.assertEqual(  # type: ignore[attr-defined]
             "OwnerRRef({}(created_on={}, local_id=0))".format(id_class, self.rank), rref1.__str__()  # type: ignore[attr-defined]
@@ -2647,7 +2647,7 @@ class RpcTest(RpcAgentTestFixture):
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
-        rref1 = RRef(self.rank)  # type: ignore[var-annotated]
+        rref1 = RRef(self.rank)  # type: ignore[var-annotated, attr-defined]
 
         # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
@@ -4924,7 +4924,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             args=(torch.zeros(2).to(0), torch.ones(2).to(0))  # type: ignore[call-overload]
         )
         self.assertEqual(ret.device, torch.device(1))  # type: ignore[attr-defined]
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined]
+        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined, call-overload]
         rpc.shutdown()
 
     @staticmethod
@@ -5234,8 +5234,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         self.assertEqual(rets[0].device, torch.device(1))  # type: ignore[attr-defined]
         self.assertEqual(rets[1].device, torch.device(0))  # type: ignore[attr-defined]
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined]
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined]
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined, call-overload]
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined, call-overload]
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(2)
@@ -5279,8 +5279,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rets[0].device, torch.device(1))  # type: ignore[attr-defined]
         self.assertEqual(rets[1].device, torch.device(0))  # type: ignore[attr-defined]
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined]
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined]
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))  # type: ignore[attr-defined, call-overload]
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined, call-overload]
         rpc.shutdown()
 
     def _test_device_maps_return_to_gpu(self, dst):
@@ -5306,10 +5306,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         )
         for i in range(len(rets)):
             self.assertEqual(rets[i].device, torch.device((3 + i) % 4))  # type: ignore[attr-defined]
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(3))  # type: ignore[attr-defined]
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined]
-        self.assertEqual(rets[2], (torch.zeros(2) * torch.ones(2)).to(1))  # type: ignore[attr-defined]
-        self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))  # type: ignore[attr-defined]
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(3))  # type: ignore[attr-defined, call-overload]
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))  # type: ignore[attr-defined, call-overload]
+        self.assertEqual(rets[2], (torch.zeros(2) * torch.ones(2)).to(1))  # type: ignore[attr-defined, call-overload]
+        self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))  # type: ignore[attr-defined, call-overload]
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)
@@ -5444,7 +5444,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         )
 
         self.assertEqual(rref.to_here().device.index, 1)  # type: ignore[attr-defined]
-        self.assertEqual(rref.to_here(), torch.ones(2).to(1))  # type: ignore[attr-defined]
+        self.assertEqual(rref.to_here(), torch.ones(2).to(1))  # type: ignore[attr-defined, call-overload]
 
         rpc.shutdown()
 
@@ -5504,7 +5504,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             )
 
         for i in range(20):
-            self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)  # type: ignore[attr-defined]
+            self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)  # type: ignore[attr-defined, call-overload]
 
     @skip_if_lt_x_gpu(2)
     def test_custom_stream_multi(self):

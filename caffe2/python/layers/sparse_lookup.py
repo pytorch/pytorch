@@ -329,7 +329,7 @@ class SparseLookup(ModelLayer):
             return net.Fused4BitRowwiseQuantizedToFloat(gathered_w, out)
 
         else:
-            raise "Unsupported version of operators in SparseLookup " +\  # type: ignore[misc]
+            raise "Unsupported version of operators in SparseLookup " +\
                 "layer: {0} for sparse feature {1}".format(
                     version, self.sparse_key
                 )
@@ -381,7 +381,7 @@ class SparseLookup(ModelLayer):
             net.__getattr__(layer_name + 'Fused4BitRowwise')(
                 op_input, self.output_schema.field_blobs())
         else:
-            raise "Unsupported version of operator in SparseLookUp " +\  # type: ignore[misc]
+            raise "Unsupported version of operator in SparseLookUp " +\
                 "layer: {0} for sparse feature {1}".format(
                     version, self.sparse_key
                 )
@@ -425,7 +425,7 @@ class SparseLookup(ModelLayer):
                 net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
-                raise "Unsupported version of operator in SparseLookUp " +\  # type: ignore[misc]
+                raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0} for sparse feature {1}".format(
                         version, self.sparse_key
                     )
@@ -500,7 +500,7 @@ class SparseLookup(ModelLayer):
                 net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
-                raise "Unsupported version of operator in SparseLookUp " +\  # type: ignore[misc]
+                raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0} for sparse feature {1}".format(
                         version, self.sparse_key
                     )
@@ -511,7 +511,7 @@ class SparseLookup(ModelLayer):
             self._gather_wrapper(net, version, self.input_record.keys(),
                                  self.output_schema.field_blobs())
         else:
-            raise "Only Sum, Mean, None are supported for IdScoreList input." +\  # type: ignore[misc]
+            raise "Only Sum, Mean, None are supported for IdScoreList input." +\
                 "Trying to create with {} for sparse feature {}".format(
                     self.reducer, self.sparse_key
                 )

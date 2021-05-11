@@ -247,7 +247,7 @@ def Parallelize(
     _ValidateParams(model_helper_obj.params)
 
     # Create parameter map
-    model_helper_obj._device_grouped_blobs =\  # type: ignore[attr-defined]
+    model_helper_obj._device_grouped_blobs =\
         _GroupByDevice(model_helper_obj, devices,
                        model_helper_obj.params, non_datapar_params)
 
@@ -257,9 +257,9 @@ def Parallelize(
                        model_helper_obj.GetComputedParams(''), [])
     model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
 
-    model_helper_obj._param_names =\  # type: ignore[attr-defined]
+    model_helper_obj._param_names =\
         list(viewkeys(model_helper_obj._device_grouped_blobs))
-    model_helper_obj._computed_param_names =\  # type: ignore[attr-defined]
+    model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
 
     if pre_grad_net_transformer_fun:
@@ -549,11 +549,11 @@ def Parallelize_BMUF(
     )
     _ValidateParams(model_helper_obj.params)
 
-    model_helper_obj._device_grouped_blobs =\  # type: ignore[attr-defined]
+    model_helper_obj._device_grouped_blobs =\
         _GroupByDevice(model_helper_obj, devices,
                        model_helper_obj.params, non_datapar_params)
 
-    model_helper_obj._param_names =\  # type: ignore[attr-defined]
+    model_helper_obj._param_names =\
         list(viewkeys(model_helper_obj._device_grouped_blobs))
 
     _AddGradientOperators(

@@ -3162,7 +3162,7 @@ class DistributedTest:
             # DDP training setup
             model_DDP = copy.deepcopy(model)
             model_DDP.cuda(gpu_subset[0])
-            model_DDP = nn.parallel.DistributedDataParallel(  # type: ignore[call-arg]
+            model_DDP = nn.parallel.DistributedDataParallel(  # type: ignore[call-arg, assignment]
                 model_DDP, device_ids=gpu_subset, gradient_as_bucket_view=gradient_as_bucket_view
             )
 
@@ -3204,7 +3204,7 @@ class DistributedTest:
 
             # DDP-CPU training setup
             model_DDP = copy.deepcopy(model_base)
-            model_DDP = nn.parallel.DistributedDataParallel(  # type: ignore[call-arg]
+            model_DDP = nn.parallel.DistributedDataParallel(  # type: ignore[call-arg, assignment]
                 model_DDP, gradient_as_bucket_view=gradient_as_bucket_view)
 
             # dummy data initialization
@@ -4211,7 +4211,7 @@ class DistributedTest:
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()  # type: ignore[operator]
-            self.assertEqual(model_DDP.get_ddp_logging_data().get("static_graph"), True)  # type: ignore[attr-defined]
+            self.assertEqual(model_DDP.get_ddp_logging_data().get("static_graph"), True)  # type: ignore[attr-defined, operator]
             with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):  # type: ignore[attr-defined]
                 local_bs = 2
                 batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
@@ -4379,7 +4379,7 @@ class DistributedTest:
             dataset_tiny = [torch.ones(1).to(self.rank) * i for i in range(dataset_tiny_size)]  # type: ignore[attr-defined]
 
             # Specifying drop_last=True will cause the tail of the data to be dropped.
-            dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)  # type: ignore[var-annotated]
+            dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)  # type: ignore[var-annotated, arg-type]
             local_num_samples, local_dataset_size = (
                 dist_sampler.num_samples,
                 dist_sampler.total_size,
@@ -4410,7 +4410,7 @@ class DistributedTest:
 
             # drop_last=False is the default and will add additional indices to be sampled,
             # increasing the effective dataset size.
-            dist_sampler_added_samples = DistributedSampler(dataset=dataset)  # type: ignore[var-annotated]
+            dist_sampler_added_samples = DistributedSampler(dataset=dataset)  # type: ignore[var-annotated, arg-type]
             local_num_samples, local_dataset_size = (
                 dist_sampler_added_samples.num_samples,
                 dist_sampler_added_samples.total_size,
@@ -4429,7 +4429,7 @@ class DistributedTest:
 
             # Ensure additional samples are padded even when
             # the extremely small dataset is given.
-            dist_sampler_added_samples_tiny = DistributedSampler(dataset=dataset_tiny)  # type: ignore[var-annotated]
+            dist_sampler_added_samples_tiny = DistributedSampler(dataset=dataset_tiny)  # type: ignore[var-annotated, arg-type]
             local_num_samples, local_dataset_size = (
                 dist_sampler_added_samples_tiny.num_samples,
                 dist_sampler_added_samples_tiny.total_size,
@@ -5120,7 +5120,7 @@ class DistributedTest:
                     )
 
             join_config = net.ddp_uneven_inputs_config
-            self.assertFalse(join_config.ddp_join_enabled)  # type: ignore[attr-defined]
+            self.assertFalse(join_config.ddp_join_enabled)  # type: ignore[attr-defined, union-attr]
             self.validate_net_equivalence(net)
 
         @skip_if_lt_x_gpu(2)
@@ -5543,7 +5543,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used.
-                local_used_maps = model.reducer._get_local_used_maps()  # type: ignore[union-attr]
+                local_used_maps = model.reducer._get_local_used_maps()  # type: ignore[union-attr, operator]
                 if i % 2 == 0:
                     expected = torch.tensor([world_size, 0], device=self.rank, dtype=torch.int32)  # type: ignore[attr-defined]
                 else:
@@ -5645,7 +5645,7 @@ class DistributedTest:
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
                 # it is used only on rank 1.
-                local_used_maps = model.reducer._get_local_used_maps()  # type: ignore[union-attr]
+                local_used_maps = model.reducer._get_local_used_maps()  # type: ignore[union-attr, operator]
 
                 if i % 2 == 0:
                     expected = torch.tensor([world_size, 0], device=self.rank, dtype=torch.int32)  # type: ignore[attr-defined]
@@ -6049,6 +6049,65 @@ class DistributedTest:
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)  # type: ignore[operator]
             self.assertDictEqual(expected_mapping, param_to_name_mapping)  # type: ignore[attr-defined]
 
+            # Test errors are raised when DDP and module parameters mismatch.
+            # This generally indicates a bug with DDP and is not expected to
+            # happen in user applications.
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),  # type: ignore[attr-defined]
+                device_ids=[self.rank],  # type: ignore[attr-defined]
+            )
+            net_params, _ = net._build_params_for_reducer()  # type: ignore[operator]
+            if self.rank == 0:  # type: ignore[attr-defined]
+                print(type(net_params[0][0]))
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
+            with self.assertRaisesRegex(  # type: ignore[attr-defined]
+                ValueError,
+                "Expected param to name mapping"
+            ):
+                net._build_param_to_name_mapping(net_params)  # type: ignore[operator]
+
+            net_params[0] = net_params[0][:-3]
+            with self.assertRaisesRegex(ValueError, "Param with name"):  # type: ignore[attr-defined]
+                net._build_param_to_name_mapping(net_params)  # type: ignore[operator]
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_build_param_to_name_mapping_requires_grad(self):
+            class Net(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lin = nn.Linear(10, 10)
+                    # Is not tracked by DDP and should not show up in param to
+                    # name mapping.
+                    self.lin.bias.requires_grad_(False)
+
+                def forward(self, x):
+                    return self.lin(x)
+
+            model = Net()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),  # type: ignore[attr-defined]
+                device_ids=[self.rank]  # type: ignore[attr-defined]
+            )
+            expected_mapping = {
+                0: 'lin.weight',
+            }
+            net_params, _ = net._build_params_for_reducer()  # type: ignore[operator]
+            param_to_name_mapping = net._build_param_to_name_mapping(net_params)  # type: ignore[operator]
+            self.assertEqual(param_to_name_mapping, expected_mapping)  # type: ignore[attr-defined]
+
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
             debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
 
@@ -6138,7 +6197,7 @@ class DistributedTest:
                     except RuntimeError as e:
                         e = str(e)  # type: ignore[assignment]
 
-                        unused_param_substr = e[e.find("did not receive grad") :]  # type: ignore[index]
+                        unused_param_substr = e[e.find("did not receive grad") :]  # type: ignore[index, attr-defined]
                         # Validate that each unused param fully qualified name
                         # shows up in error logs. We do this instead of
                         # constructing a joined string since order of parameters

@@ -23,7 +23,7 @@ class Visitor(object):
         if not(hasattr(cls, 'visitors')):
             cls.visitors = {}  # type: ignore[attr-defined]
         else:
-            assert Type not in cls.visitors, \  # type: ignore[attr-defined]
+            assert Type not in cls.visitors, \
                 '{} already registered!'.format(Type)
 
         def _register(func):

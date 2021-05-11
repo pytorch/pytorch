@@ -106,7 +106,7 @@ class TestHsm(hu.HypothesisTestCase):
                 else:
                     score[score - scores[idx] > beam] = np.inf
 
-                for i, name in enumerate(line[2]):  # type: ignore[var-annotated]
+                for i, name in enumerate(line[2]):  # type: ignore[var-annotated, arg-type]
                     scores.append(score[i])
                     names.append(name)
             scores = np.vstack(scores)  # type: ignore[assignment]

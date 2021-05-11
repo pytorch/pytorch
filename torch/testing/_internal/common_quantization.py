@@ -525,7 +525,7 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(outputs[True], outputs[False])
 
             # non debug graph should produce quantized op
-            FileCheck().check(quantized_op) \  # type: ignore[attr-defined]
+            FileCheck().check(quantized_op) \
                        .run(models[False].graph)
 
         return models[False]

@@ -262,7 +262,7 @@ class Trainer:
                         f"Grads dict has {len(grads_dict)} entries: {grads_dict}"
                     )
         return (
-            tuple(grads_dict[param] for param in self.ddp_params),  # type: ignore[var-annotated]
+            tuple(grads_dict[param] for param in self.ddp_params),  # type: ignore[var-annotated, index]
             tuple(grads_dict[param] for param in self.non_ddp_params),  # type: ignore[index]
         )
 
