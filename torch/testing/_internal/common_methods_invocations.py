@@ -2479,19 +2479,26 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    cases = (((S, S, S), (), 1.5, False, False),
-            ((), 1.5, (), False, False),
-            ((S, S, S), (S, S, S), 1.5, False, False),
-            ((S,), (S, S, S), 1.5, False, True),
-            ((S, S, S), (S,), 1.5, False, True),
-            ((S, 1, S), (S, S), 1.5, False, True),
-            ((), (S, S, S), 1.5, False, True),
-            ((S, S, S), 1.5, (), False, True)
-            )
+    cases = [
+                ((S, S, S), (), 1.5, False), # Scalar
+                ((), 1.5, (), False), # Scalar
+                ((S, S, S), (S, S, S), 1.5, False),
+            ]
+
+    # Sample inputs with broadcasting
+    cases_with_broadcasting = [
+            ((S,), (S, S, S), 1.5, True),
+            ((S, S, S), (S,), 1.5, True),
+            ((S, 1, S), (S, S), 1.5, True),
+            ((), (S, S, S), 1.5, True),
+            ((S, S, S), 1.5, (), True) # Scalar
+            ]
+
+    cases.append(cases_with_broadcasting)
 
     def generator():
         for case in cases:
-            shape, shape_other, add_other, requires_grad, broadcasts_input = case
+            shape, shape_other, add_other, broadcasts_input = case
             if isinstance(shape_other, tuple):
                 arg = make_arg(shape_other, requires_grad=False) + add_other
             else:
@@ -2505,18 +2512,25 @@ def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_remainder(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    cases = (((S, S, S), (), 1.5, False, False),
-            ((), 1.5, (), False, False),
-            ((S, S, S), (S, S, S), 1.5, False, True),
-            ((S,), (S, S, S), 1.5, False, True),
-            ((S, 1, S), (S, S), 1.5, False, True),
-            ((), 1.5, (), False, False),
-            ((), (S, S, S), 1.5, False, True)
-            )
+    cases = [
+                ((S, S, S), (), 1.5, False),
+                ((), 1.5, (), False),
+                ((), 1.5, (), False)
+            ]
+
+    # Sample inputs with broadcasting
+    cases_with_broadcasting = [
+            ((S, S, S), (S, S, S), 1.5, True),
+            ((S,), (S, S, S), 1.5, True),
+            ((S, 1, S), (S, S), 1.5, True),
+            ((), (S, S, S), 1.5, True)
+            ]
+
+    cases.append(cases_with_broadcasting)
 
     def generator():
         for case in cases:
-            shape, shape_other, add_other, requires_grad, broadcasts_input = case
+            shape, shape_other, add_other, broadcasts_input = case
             if isinstance(shape_other, tuple):
                 arg = make_arg(shape_other, requires_grad=False) + add_other
             else:
@@ -6158,7 +6172,7 @@ def method_tests():
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
-        ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'), 
+        ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
