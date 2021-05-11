@@ -1,5 +1,6 @@
 import math
 from typing import TypeVar, Optional, Iterator
+import warnings
 
 import torch
 from . import Sampler, Dataset
@@ -22,7 +23,7 @@ class DistributedSampler(Sampler[T_co]):
         Dataset is assumed to be of constant size.
 
     Args:
-        dataset: Dataset used for sampling.
+        data_source (Dataset): dataset to sample from.
         num_replicas (int, optional): Number of processes participating in
             distributed training. By default, :attr:`world_size` is retrieved from the
             current distributed group.
@@ -38,6 +39,7 @@ class DistributedSampler(Sampler[T_co]):
             tail of the data to make it evenly divisible across the number of
             replicas. If ``False``, the sampler will add extra indices to make
             the data evenly divisible across the replicas. Default: ``False``.
+        dataset (deprecated use data_source instead)
 
     .. warning::
         In distributed mode, calling the :meth:`set_epoch` method at
@@ -56,9 +58,9 @@ class DistributedSampler(Sampler[T_co]):
         ...     train(loader)
     """
 
-    def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None,
+    def __init__(self, data_source: Dataset = None, num_replicas: Optional[int] = None,
                  rank: Optional[int] = None, shuffle: bool = True,
-                 seed: int = 0, drop_last: bool = False) -> None:
+                 seed: int = 0, drop_last: bool = False, dataset: Dataset = None) -> None:
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -71,22 +73,31 @@ class DistributedSampler(Sampler[T_co]):
             raise ValueError(
                 "Invalid rank {}, rank should be in the interval"
                 " [0, {}]".format(rank, num_replicas - 1))
-        self.dataset = dataset
+        self.data_source = data_source
+        if dataset is not None:
+            if self.data_source is not None:
+                raise ValueError('data_source and dataset cannot be assigned at the same time')
+            warnings.warn(
+                "DistributedSampler.dataset will be deprecated, "
+                "please use DistributedSampler.data_source instead",
+                category=PendingDeprecationWarning,
+            )
+            self.data_source = dataset
         self.num_replicas = num_replicas
         self.rank = rank
         self.epoch = 0
         self.drop_last = drop_last
         # If the dataset length is evenly divisible by # of replicas, then there
         # is no need to drop any data, since the dataset will be split equally.
-        if self.drop_last and len(self.dataset) % self.num_replicas != 0:
+        if self.drop_last and len(self.data_source) % self.num_replicas != 0:
             # Split to nearest available length that is evenly divisible.
             # This is to ensure each rank receives the same amount of data when
             # using this Sampler.
             self.num_samples = math.ceil(
-                (len(self.dataset) - self.num_replicas) / self.num_replicas
+                (len(self.data_source) - self.num_replicas) / self.num_replicas
             )
         else:
-            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)
+            self.num_samples = math.ceil(len(self.data_source) / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
@@ -96,18 +107,12 @@ class DistributedSampler(Sampler[T_co]):
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+            indices = torch.randperm(len(self.data_source), generator=g).tolist()
         else:
-            indices = list(range(len(self.dataset)))
-
+            indices = list(range(len(self.data_source)))
         if not self.drop_last:
             # add extra samples to make it evenly divisible
             padding_size = self.total_size - len(indices)
-            if padding_size <= len(indices):
-                indices += indices[:padding_size]
-            else:
-                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
-        else:
             # remove tail of data to make it evenly divisible.
             indices = indices[:self.total_size]
         assert len(indices) == self.total_size
@@ -131,3 +136,12 @@ class DistributedSampler(Sampler[T_co]):
             epoch (int): Epoch number.
         """
         self.epoch = epoch
+
+    @property
+    def dataset(self):
+        warnings.warn(
+            "DistributedSampler.dataset will be deprecated, "
+            "please use DistributedSampler.data_source instead",
+            category=PendingDeprecationWarning,
+        )
+        return self.data_source
