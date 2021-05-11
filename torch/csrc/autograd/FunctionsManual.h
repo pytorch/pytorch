@@ -95,14 +95,11 @@ at::Tensor repeat_backward(at::Tensor grad, at::IntArrayRef repeats, at::IntArra
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
 at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
-at::Tensor var_backward(const at::Tensor & grad, const at::Tensor & self, bool unbiased);
-at::Tensor var_backward(at::Tensor grad, const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
-at::Tensor std_backward(const at::Tensor & result, const at::Tensor & grad, const at::Tensor & self, bool unbiased);
-at::Tensor std_backward(const at::Tensor & result, at::Tensor grad, const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
+at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
+at::Tensor std_backward(const at::Tensor& result, const at::Tensor& grad, const at::Tensor& self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
 at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, at::IntArrayRef dim, bool keepdim);
-at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int numel);
-at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor & self, const at::Tensor & r1, const at::Tensor & r2, at::IntArrayRef dim, bool unbiased, bool keepdim, bool is_std);
-at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor & self, const at::Tensor & r1, const at::Tensor & r2, bool unbiased, bool is_std);
+at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int64_t numel);
+at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor& self, const at::Tensor& r1, const at::Tensor& r2, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim, bool is_std);
 at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & mask, at::IntArrayRef sizes);
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);

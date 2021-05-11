@@ -24,7 +24,6 @@ void NetObserverReporterPrint::report(
     if ((p.first == "NET_DELAY") && (info.size() == 1)) {
       // for Net_delay perf
       caffe2_perf.push_back({{"type", "NET"},
-                             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
@@ -34,7 +33,6 @@ void NetObserverReporterPrint::report(
                                c10::to_string(
                                    p.second.cpuMilliseconds /
                                    p.second.latency *
-                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    100),
                              },
                              {"unit", "percent"},
@@ -45,7 +43,6 @@ void NetObserverReporterPrint::report(
       std::string args_str = get_op_args(p.second);
       std::string type = p.first;
       caffe2_perf.push_back({{"type", type},
-                             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
@@ -55,7 +52,6 @@ void NetObserverReporterPrint::report(
                                c10::to_string(
                                    p.second.cpuMilliseconds /
                                    p.second.latency *
-                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    100),
                              },
                              {"unit", "percent"},
