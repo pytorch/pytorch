@@ -206,6 +206,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         // Note: PyErr_WarnExplicit will disregard Python's warning filter
         // and always appear. This is in contrast to PyErr_WarnEx,
         // which respects the warning filter.
+        wow = 2;
         result = PyErr_WarnExplicit(
             /*category=*/PyExc_UserWarning,
             /*message=*/msg.c_str(),
