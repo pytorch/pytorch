@@ -47,12 +47,6 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
-  // The pickler below might allocate new tensors if RPC arguments contain
-  // Tensor views. Apply stream guard here to include those Tensor allocation
-  // operations to the streams.
-  c10::MultiStreamGuard guard(
-          ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
-
   // Metadata
   buffers.type = std::make_unique<MessageType>(rpcMessage.type());
   buffers.id = std::make_unique<int64_t>(rpcMessage.id());
@@ -73,8 +67,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
-  // Tensors
-  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  {
+    // The function below might allocate new tensors if there are Tensor views.
+    // Apply stream guard here to include those Tensor allocation operations to
+    // the streams.
+    c10::MultiStreamGuard guard(
+        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+    // Tensors
+    buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  }
 
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(
@@ -236,15 +237,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
 Message tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
-    TensorpipeReadBuffers&& buffers,
-    const std::shared_ptr<LazyStreamContext>& ctx) {
-
-  // I believe we don't need this today, as unlike pickling, unpickling does
-  // not insert CUDA ops. But still putting this guard here for safety and
-  // potential future changes.
-  c10::MultiStreamGuard guard(
-        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
-
+    TensorpipeReadBuffers&& buffers) {
   // Tensors
   std::vector<at::Tensor> tensors;
   const char* pickleData = buffers.pickle.data();
