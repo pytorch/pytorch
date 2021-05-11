@@ -13,6 +13,8 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
+#include <set>
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
@@ -187,14 +189,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-  m.def("_add_metadata", [](const std::string& key, const std::string& value) {
-    try {
-      addMetadata(key, value);
-    }
-    catch(const std::runtime_error& e) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-  });
+  m.def("_add_metadata", addMetadata);
 #endif
 
   m.def("kineto_available", []() {
@@ -203,6 +198,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #else
     return false;
 #endif
+  });
+
+  m.def("supported_kineto_activities", []() {
+    std::set<ActivityType> activities;
+#ifdef USE_KINETO
+    activities.insert(ActivityType::CPU);
+#ifndef LIBKINETO_NOCUPTI
+    if (at::getNumGPUs() > 0 && !at::hasHIP()) {
+      activities.insert(ActivityType::CUDA);
+    }
+#endif
+#endif
+    return activities;
   });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
