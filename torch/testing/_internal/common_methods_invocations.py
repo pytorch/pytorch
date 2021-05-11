@@ -4810,6 +4810,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink,
