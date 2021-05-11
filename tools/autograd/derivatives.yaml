@@ -368,9 +368,6 @@
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
 
-- name: _resolve_conj(Tensor(a) self) -> Tensor(a)
-  self: grad
-
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
 

@@ -116,6 +116,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("set_", torch::CppFunction::makeFallthrough());
   m.impl("copy_", torch::CppFunction::makeFallthrough());
+  m.impl("clone", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj_physical", torch::CppFunction::makeFallthrough());

@@ -329,11 +329,6 @@
   dispatch:
     CompositeExplicitAutograd: conj_physical_
 
-- func: _resolve_conj(Tensor(a) self) -> Tensor(a)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: _resolve_conj
-
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
 

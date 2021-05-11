@@ -397,15 +397,10 @@ Tensor& conj_physical_(Tensor& self) {
   return unary_op_impl_out(self, self, conj_physical_stub);
 }
 
-Tensor _resolve_conj(const Tensor& self) {
-  auto result = at::empty_like(self, self.options(), self.suggest_memory_format());
-  // conjugation is handled in `copy_()`
-  return result.copy_(self);
-}
-
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  return at::_resolve_conj(self);
+  // conjugation is handled in `copy_()` that clone ultimately calls into
+  return self.clone(self.suggest_memory_format());
 }
 
 Tensor _conj(const Tensor& self) {
