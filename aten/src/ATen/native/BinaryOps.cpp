@@ -1071,7 +1071,6 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, cons
 TORCH_IMPL_FUNC(heaviside_out) (
   const Tensor& self, const Tensor& other, const Tensor& result
 ) {
-  heaviside_check(self, other, result);
   heaviside_stub(device_type(), *this);
 }
 
