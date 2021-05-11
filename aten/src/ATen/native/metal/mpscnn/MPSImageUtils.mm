@@ -71,8 +71,8 @@ MPSImage* createStaticImage(
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    output,
-                                   @"copy_nchw_to_metal",
-                                   @"copy_nchw_to_metal_nonarray")
+                                   "copy_nchw_to_metal",
+                                   "copy_nchw_to_metal_nonarray")
                      Constants:@[
                        @(output.featureChannels),
                        @(output.height),
@@ -108,7 +108,7 @@ MPSImage* createStaticImage(MPSImage* image) {
   MetalCommandBuffer* cb = [MetalCommandBuffer newBuffer];
   id<MTLComputeCommandEncoder> encoder = [cb.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:mpscnn::kernelFor(image, @"copy", @"copy_nonarray")];
+      pipelineState:mpscnn::kernelFor(image, "copy", "copy_nonarray")];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[image texture] atIndex:0];
   [encoder setTexture:[Y texture] atIndex:1];
@@ -130,7 +130,7 @@ MPSImage* createStaticImage(
   MPSImage* Y = createStaticImage([image sizes]);
   id<MTLComputeCommandEncoder> encoder = [buffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:mpscnn::kernelFor(image, @"copy", @"copy_nonarray")];
+      pipelineState:mpscnn::kernelFor(image, "copy", "copy_nonarray")];
 
   [encoder setComputePipelineState:state];
   [encoder setTexture:[image texture] atIndex:0];
@@ -182,8 +182,8 @@ MPSTemporaryImage* createTemporaryImage(
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    output,
-                                   @"copy_nchw_to_metal",
-                                   @"copy_nchw_to_metal_nonarray")
+                                   "copy_nchw_to_metal",
+                                   "copy_nchw_to_metal_nonarray")
                      Constants:@[
                        @(output.featureChannels),
                        @(output.height),
@@ -209,7 +209,7 @@ MPSTemporaryImage* createTemporaryImage(
   MPSTemporaryImage* Y = createTemporaryImage(buffer, [image sizes]);
   id<MTLComputeCommandEncoder> encoder = [buffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:metal::mpscnn::kernelFor(image, @"copy", @"copy_nonarray")];
+      pipelineState:metal::mpscnn::kernelFor(image, "copy", "copy_nonarray")];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[image texture] atIndex:0];
   [encoder setTexture:[Y texture] atIndex:1];
@@ -234,8 +234,8 @@ void copyToHost(float* dst, MPSImage* image) {
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    image,
-                                   @"copy_metal_to_nchw",
-                                   @"copy_metal_to_nchw_nonarray")
+                                   "copy_metal_to_nchw",
+                                   "copy_metal_to_nchw_nonarray")
                      Constants:@[
                        @(image.featureChannels),
                        @(image.height),
