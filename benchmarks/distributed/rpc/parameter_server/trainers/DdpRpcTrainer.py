@@ -10,7 +10,7 @@ from .RpcTrainerBase import RpcTrainerBase
 
 class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
 
-    PS_CLASS_MAP = {
+    PS_MAP = {
         "AverageParameterServer": AverageParameterServer,
     }
 
@@ -28,7 +28,7 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
             self.hook_gradient_futures[gradient] = fut
 
         def get_key(self):
-            return "{},{}".format(self.batch_number, self.param_loc)
+            return f"{self.batch_number},{self.param_loc}"
 
         def get_futures(self):
             return self.hook_gradient_futures
@@ -43,13 +43,14 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
         self.rank = rank
         self.trainer_count = trainer_count
         self.ps_rref = ps_rref
-        self.ps = self.PS_CLASS_MAP[ps_name]
+        self.ps = self.PS_MAP[ps_name]
         self.backend = backend
         self.use_cuda_rpc = use_cuda_rpc
         self.epochs = epochs
         self.hp_id = hp_id
 
-    def get_tensor_fut(self, bucket):
+    @staticmethod
+    def get_tensor_fut(bucket):
         fut = torch.futures.Future()
         fut.set_result([bucket.get_tensor()])
         return fut
@@ -158,7 +159,7 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
         ddp_parameters = list(ddp_model.parameters())
 
         def epoch_key(epoch, index):
-            return "{},{}".format(epoch, index)
+            return f"{epoch},{index}"
 
         for epoch in range(self.epochs):
             for index, batch in enumerate(data):

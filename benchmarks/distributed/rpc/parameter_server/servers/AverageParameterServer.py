@@ -9,27 +9,52 @@ from .ParameterServerBase import ParameterServerBase
 
 class AverageParameterServer(AverageParameterServerBase):
 
-    lock = threading.Lock()
+    master_lock = threading.Lock()
+    locks = []
 
     def __init__(
         self,
         rank,
         trainer_count,
+        lc,
         use_cuda_rpc
     ):
         super().__init__(rank)
 
         self.rank = rank
         self.trainer_count = trainer_count
+        self.lc = lc
         self.use_cuda_rpc = use_cuda_rpc
 
-        # server state
+        with AverageParameterServer.master_lock:
+            if len(AverageParameterServer.locks) == 0:
+                AverageParameterServer.locks = [None] * lc
+            if AverageParameterServer.locks[rank % lc] is None:
+                AverageParameterServer.locks[rank % lc] = threading.Lock()
+
         self.batch_number = 0
         self.futures = {}
         self.gradient_dict = {}
 
+    @staticmethod
+    def reset_state(ps_rref):
+        self = ps_rref.local_value()
+        self.batch_number = 0
+        self.futures.clear()
+        self.gradient_dict.clear()
+        self.clear_metrics()
+
+    @staticmethod
+    def get_metrics_rpc(ps_rref):
+        self = ps_rref.local_value()
+        return self.get_metrics()
+
     def param_key(self, param_loc):
         return f"{self.batch_number},{param_loc}"
+
+    def clear_batch_state(self):
+        self.futures.clear()
+        self.gradient_dict.clear()
 
     def process_gradient(self, gradient, param_loc):
         if param_loc not in self.gradient_dict:
@@ -45,23 +70,6 @@ class AverageParameterServer(AverageParameterServerBase):
         param_loc_avg / (1.0 * self.trainer_count)
         return param_loc_avg
 
-    def clear_batch_state(self):
-        self.futures.clear()
-        self.gradient_dict.clear()
-
-    @staticmethod
-    def reset_state(ps_rref):
-        self = ps_rref.local_value()
-        self.batch_number = 0
-        self.futures.clear()
-        self.gradient_dict.clear()
-        self.clear_metrics()
-
-    @staticmethod
-    def get_metrics_rpc(ps_rref):
-        self = ps_rref.local_value()
-        return self.get_metrics()
-
     @staticmethod
     @rpc.functions.async_execution
     def average_gradient(
@@ -76,7 +84,7 @@ class AverageParameterServer(AverageParameterServerBase):
         if not self.use_cuda_rpc:
             gradient = gradient.cuda(self.rank)
         fut = torch.futures.Future()
-        with AverageParameterServer.lock:
+        with AverageParameterServer.locks[self.rank % self.lc]:
             if self.batch_number < received_batch_number:
                 self.batch_number = received_batch_number
                 self.clear_batch_state()

@@ -30,31 +30,31 @@ def get_name(rank, config):
         return "master"
 
 
-def get_parameter_server_rank(rank, config):
+def get_ps_rank(rank, config):
     # rank mod parameter server count to get parameter server number
     # add trainer_count to get parameter server rank
     rank_mod_ps_count = rank % config.ps_count
     return rank_mod_ps_count + config.trainer_count
 
 
-def get_ps_rref(parameter_server_rank, config):
+def get_ps_rref(ps_rank, config):
     ps_config = config.ps_config
     ps = get_benchmark_ps_map()[str(ps_config["ps_class"])]
     name = get_name(
-        parameter_server_rank,
+        ps_rank,
         config
     )
     ps_args = ps_config["configurations"].values()
     ps_trainer_count = config.trainer_count / config.ps_count
     rem = config.trainer_count % config.ps_count
-    if parameter_server_rank - config.trainer_count < rem:
+    if ps_rank - config.trainer_count < rem:
         ps_trainer_count += 1
     ps_trainer_count = int(ps_trainer_count)
     return rpc.remote(
         name,
         ps,
         args=(
-            parameter_server_rank,
+            ps_rank,
             ps_trainer_count,
             *ps_args,
         ),
@@ -78,7 +78,7 @@ def run_trainer(
     return [rank, metrics]
 
 
-def call_trainers(config, model, train_data, parameter_server_rrefs):
+def call_trainers(config, model, train_data, ps_rrefs):
     futs = []
     for trainer_rank in range(0, config.trainer_count):
         trainer_name = get_name(
@@ -86,9 +86,9 @@ def call_trainers(config, model, train_data, parameter_server_rrefs):
             config
         )
         ps_rref = None
-        if parameter_server_rrefs:
-            ps_rank = get_parameter_server_rank(trainer_rank, config)
-            ps_rref = parameter_server_rrefs[ps_rank]
+        if ps_rrefs:
+            ps_rank = get_ps_rank(trainer_rank, config)
+            ps_rref = ps_rrefs[ps_rank]
         fut = rpc.rpc_async(
             trainer_name,
             run_trainer,
@@ -106,15 +106,15 @@ def call_trainers(config, model, train_data, parameter_server_rrefs):
 
 
 def benchmark_warmup(
-    config, model, data, parameter_server_rrefs
+    config, model, data, ps_rrefs
 ):
     if config.ps_count > 0:
         ps_config = config.ps_config
         ps = get_benchmark_ps_map()[str(ps_config["ps_class"])]
-    futs = call_trainers(config, model, data, parameter_server_rrefs)
+    futs = call_trainers(config, model, data, ps_rrefs)
     for fut in futs:
         fut.wait()
-    for ps_rref in parameter_server_rrefs.values():
+    for ps_rref in ps_rrefs.values():
         rpc.rpc_sync(
             ps_rref.owner(),
             ps.reset_state,
@@ -209,7 +209,7 @@ def run_benchmark(rank, model, data, config):
             USE_CUDA_RPC in ps_configs and
             ps_configs[USE_CUDA_RPC] and
                 config.ps_count > 0):
-            ps_rank = get_parameter_server_rank(rank, config)
+            ps_rank = get_ps_rank(rank, config)
             ps_name = get_name(
                 ps_rank,
                 config
