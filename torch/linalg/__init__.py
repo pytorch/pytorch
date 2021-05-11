@@ -227,6 +227,59 @@ Examples::
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """.format(**common_notes))
 
+inv_ex = _add_docstr(_linalg.linalg_inv_ex, r"""
+linalg.inv_ex(input, *, check_errors=False, out=None) -> (Tensor, Tensor)
+
+Computes the inverse of a square matrix if it is `invertible`_.
+
+Returns a namedtuple ``(inverse,info)``. ``inverse`` contains the result of inverting the input matrix.
+``info`` stores the LAPACK error codes.
+
+If :attr:`input` is not an invertible matrix, or if it's a batch of matrices
+and one or more of them is not an invertible matrix,
+then ``info`` stores a positive integer for the corresponding matrix.
+The positive integer indicates the diagonal element of the LU decomposition of the input matrix that is exactly zero.
+``info`` filled with zeros indicates that the inversion was successful.
+If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+.. note:: Given inputs on a CUDA device, this function may synchronize that device with the CPU.
+
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
+.. seealso::
+
+        :func:`torch.linalg.inv` is a NumPy compatible variant that always checks for errors.
+
+Args:
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                    consisting of square matrices.
+    check_errors (bool, optional): controls whether to check the content of ``info``. Default: `False`.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> a = torch.randn(3, 3)
+    >>> inverse, info = torch.linalg.inv_ex(a)
+    >>> a
+    tensor([[-0.0464,  0.2302, -1.3568],
+            [-0.5437, -1.2301, -0.6918],
+            [ 0.2328, -1.4910, -0.3003]])
+    >>> l
+    tensor([[ 0.4320, -1.3653,  1.1931],
+            [ 0.2117, -0.2152, -0.4605],
+            [-0.7159,  0.0102, -0.1190]])
+    >>> info
+    tensor(0, dtype=torch.int32)
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(A, *, out=None) -> Tensor
 

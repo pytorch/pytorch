@@ -9579,17 +9579,25 @@
     CPU: _linalg_inv_out_helper_cpu
     CUDA: _linalg_inv_out_helper_cuda
 
-- func: linalg_inv(Tensor self) -> Tensor
+- func: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_inv
+    CompositeExplicitAutograd: linalg_inv_ex
+
+- func: linalg_inv_ex.inverse(Tensor self, *, bool check_errors=False, Tensor(a!) inverse, Tensor(b!) info) -> (Tensor(a!) inverse, Tensor(b!) info)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_inv_ex_out
+
+- func: linalg_inv(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_inv_out
 
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method
