@@ -73,22 +73,6 @@ WORKFLOW_DATA = [
         is_master_only=True,
     ),
     SmoketestJob(
-        "binary_linux_build",
-        ["libtorch", "3.7m", "cpu", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build",
-        is_master_only=False,
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
-        "binary_linux_build",
-        ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
-        "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build",
-        is_master_only=False,
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
         "binary_mac_build",
         ["wheel", "3.7", "cpu"],
         None,
@@ -152,25 +136,7 @@ WORKFLOW_DATA = [
             "resource_class": "gpu.medium",
             "use_cuda_docker_runtime": miniutils.quote((str(1))),
         },
-    ),
-    SmoketestJob(
-        "binary_linux_test",
-        ["libtorch", "3.7m", "cpu", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test",
-        is_master_only=False,
-        requires=["binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build"],
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
-        "binary_linux_test",
-        ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
-        "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test",
-        is_master_only=False,
-        requires=["binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build"],
-        has_libtorch_variant=True,
-    ),
+    )
 ]
 
 
