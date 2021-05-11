@@ -66,8 +66,9 @@ def Caffe2TensorToNumpyArray(tensor):
         return np.asarray(
             tensor.int64_data, dtype=np.int64).reshape(tensor.dims)
     elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
+        # pb.INT32=>np.int use int32_data
         return np.asarray(
-            tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data  # type: ignore[attr-defined]
+            tensor.int32_data, dtype=np.int).reshape(tensor.dims)  # type: ignore[attr-defined]
     elif tensor.data_type == caffe2_pb2.TensorProto.INT16:
         return np.asarray(
             tensor.int32_data, dtype=np.int16).reshape(tensor.dims)  # pb.INT16=>np.int16 use int32_data

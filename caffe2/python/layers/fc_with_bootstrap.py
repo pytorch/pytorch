@@ -167,7 +167,7 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
             output_shape = (output_dims,)
         else:
             output_shape = list(input_record.field_types()[0].shape)[0 : axis - 1]  # type: ignore[assignment]
-            output_shape = tuple(output_shape + [output_dims])  # type: ignore[assignment]
+            output_shape = tuple(output_shape + [output_dims])  # type: ignore[assignment, operator]
 
     def _generate_bootstrapped_indices(self, net, copied_cur_layer, iteration):
         """

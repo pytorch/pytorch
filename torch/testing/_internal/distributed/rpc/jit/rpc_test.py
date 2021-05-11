@@ -390,7 +390,7 @@ class LocalRRefTest:
             return
 
         # Create a local RRef<MyScriptClass>.
-        rref_script_class = rpc.RRef(MyScriptClass(self.rank))  # type: ignore[var-annotated]
+        rref_script_class = rpc.RRef(MyScriptClass(self.rank))  # type: ignore[var-annotated, attr-defined]
         ret = rref_script_class.to_here().get_value()
         self.assertEqual(ret, self.rank)  # type: ignore[attr-defined]
 
@@ -400,7 +400,7 @@ class LocalRRefTest:
             return
 
         # Create a local RRef<MyModuleInterface>.
-        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface)  # type: ignore[var-annotated]
+        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface)  # type: ignore[var-annotated, attr-defined]
         ret = rref_script_module.to_here().forward()
         self.assertEqual(ret, torch.ones(self.rank))  # type: ignore[attr-defined]
 
