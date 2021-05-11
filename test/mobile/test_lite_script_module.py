@@ -1,14 +1,28 @@
 import torch
 import torch.utils.bundled_inputs
-from torch.utils.mobile_optimizer import optimize_for_mobile
 import io
 from typing import Dict, List, NamedTuple
 from collections import namedtuple
+import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestLiteScriptModule(TestCase):
+
+    def getScriptExportImportCopy(self, m, save_mobile_debug_info=True, also_test_file=False):
+        m_scripted = torch.jit.script(m)
+
+        if not also_test_file:
+            buffer = io.BytesIO(m_scripted._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=save_mobile_debug_info))
+            buffer.seek(0)
+            mobile_module = _load_for_lite_interpreter(buffer)
+            return mobile_module
+
+        with TemporaryFileName() as fname:
+            m_scripted._save_for_lite_interpreter(fname, _save_mobile_debug_info=save_mobile_debug_info)
+            mobile_module = _load_for_lite_interpreter(fname)
+            return mobile_module
 
     def test_load_mobile_module(self):
         class MyTestModule(torch.nn.Module):
@@ -41,8 +55,8 @@ class TestLiteScriptModule(TestCase):
             def __init__(self):
                 super(A, self).__init__()
 
-            def forward(self, x):
-                return x + 1
+            def forward(self, x, y):
+                return x * y
 
         class B(torch.nn.Module):
             def __init__(self):
@@ -50,88 +64,34 @@ class TestLiteScriptModule(TestCase):
                 self.A0 = A()
                 self.A1 = A()
 
-            def forward(self, x):
-                return self.A0(x) + self.A1(x)
+            def forward(self, x, y, z):
+                return self.A0(x, y) + self.A1(y, z)
 
-        input = torch.tensor([5])
-        trace_module = torch.jit.trace(B(), input)
-        exported_module = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+        for export_method in ['trace', 'script']:
+            x = torch.rand((2, 3))
+            y = torch.rand((2, 3))
+            z = torch.rand((2, 3))
+            if export_method == 'trace':
+                trace_module = torch.jit.trace(B(), [x, y, z])
+            else:
+                trace_module = torch.jit.script(B())
+            exported_module = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+            buffer = io.BytesIO(exported_module)
+            buffer.seek(0)
 
-        assert(b"mobile_debug.pkl" in exported_module)
-        assert(b"module_debug_info" in exported_module)
-        assert(b"top(B).forward" in exported_module)
-        assert(b"top(B).A0(A).forward" in exported_module)
-        assert(b"top(B).A1(A).forward" in exported_module)
+            assert(b"callstack_debug_map.pkl" in exported_module)
 
-    def test_save_mobile_module_with_debug_info_with_script_duplicate_class(self):
-        class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
-            def forward(self, x):
-                return x + 1
-
-        class B(torch.nn.Module):
-            def __init__(self):
-                super(B, self).__init__()
-                self.A0 = A()
-                self.A1 = A()
-
-            def forward(self, x):
-                return self.A0(x) + self.A1(x)
-
-        input_data = torch.tensor([5])
-        scripted_module = torch.jit.script(B(), input_data)
-        exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-
-        assert(b"mobile_debug.pkl" in exported_module)
-        assert(b"module_debug_info" in exported_module)
-        assert(b"top(B).forward" in exported_module)
-        assert(b"top(B).A0(A).forward" in exported_module)
-        assert(b"top(B).A1(A).forward" in exported_module)
-
-    def test_save_mobile_module_with_debug_info_with_script_nested_call(self):
-        class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
-            def forward(self, x):
-                return x + 1
-
-        class B(torch.nn.Module):
-            def __init__(self):
-                super(B, self).__init__()
-
-            def forward(self, x):
-                return x + 2
-
-        class C(torch.nn.Module):
-            def __init__(self):
-                super(C, self).__init__()
-                self.A0 = A()
-                self.B0 = B()
-
-            def forward(self, x):
-                return self.A0(self.B0(x)) + 1
-
-        input = torch.tensor([5])
-        scripted_module = torch.jit.script(C(), input)
-
-        optimized_scripted_module = optimize_for_mobile(scripted_module)
-
-        exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-        optimized_exported_module = optimized_scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-        assert(b"mobile_debug.pkl" in exported_module)
-        assert(b"module_debug_info" in exported_module)
-        assert(b"top(C).forward" in exported_module)
-        assert(b"top(C).A0(A).forward" in exported_module)
-        assert(b"top(C).B0(B).forward" in exported_module)
-
-        assert(b"mobile_debug.pkl" in optimized_exported_module)
-        assert(b"module_debug_info" in optimized_exported_module)
-        assert(b"top(C).forward" in optimized_exported_module)
-        assert(b"top(C).A0(A).forward" in optimized_exported_module)
-        assert(b"top(C).B0(B).forward" in optimized_exported_module)
+            mobile_module = _load_for_lite_interpreter(buffer)
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
+                x = torch.rand((2, 3))
+                y = torch.rand((8, 10))
+                z = torch.rand((8, 10))
+                mobile_module(x, y, z)
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
+                x = torch.rand((2, 3))
+                y = torch.rand((2, 3))
+                z = torch.rand((8, 10))
+                mobile_module(x, y, z)
 
     def test_load_mobile_module_with_debug_info(self):
         class MyTestModule(torch.nn.Module):
@@ -373,6 +333,103 @@ class TestLiteScriptModule(TestCase):
         }
         actual_ops = _export_operator_list(mobile_module)
         self.assertEqual(actual_ops, expected_ops)
+
+    def test_source_range_simple(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_source_range_raise_exception(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getScriptExportImportCopy(ft)
+            loaded()
+
+    def test_source_range_function_call(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def add_method(self, x, w):
+                return x + w
+
+            @torch.jit.script_method
+            def forward(self, x, y, w):
+                x = x * y
+                x = x + 2
+                return self.add_method(x, w)
+
+        ft = FooTest3()
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest3)
+
+        try:
+            loaded(torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 3) in error_message)
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 9) in error_message)
+        self.assertTrue('top(FooTest3)' in error_message)
+
+    def test_source_range_no_debug_info(self):
+
+        class FooTest4(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest4()
+        loaded = self.getScriptExportImportCopy(ft, save_mobile_debug_info=False)
+
+        try:
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue("test_lite_script_module.py" not in error_message)
+
+    def test_source_range_raise_exc(self):
+        class FooTest5(torch.jit.ScriptModule):
+            def __init__(self, val: int):
+                super(FooTest5, self).__init__()
+                self.val = val
+
+            @torch.jit.script_method
+            def add_method(self, val: int, x, w):
+                if (val == self.val):
+                    raise RuntimeError('self.val and val are same')
+                return x + w
+
+            @torch.jit.script_method
+            def forward(self, val: int, x, y, w):
+                x = x * y
+                x = x + 2
+                return self.add_method(val, x, w)
+
+        ft = FooTest5(42)
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest5)
+
+        try:
+            loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
+        self.assertTrue('top(FooTest5)' in error_message)
 
 if __name__ == '__main__':
     run_tests()
