@@ -4117,7 +4117,7 @@ else:
         def run_test(x, y):
             for p in [0, 1, 2, 3, 4, inf, -inf]:
                 dist_xy = torch.dist(x, y, p)
-                dist_xy_norm = torch.linalg.norm(x - y, p)
+                dist_xy_norm = torch.linalg.vector_norm(x - y, p)
                 self.assertEqual(dist_xy, dist_xy_norm)
 
         run_test(torch.randn(5, device=device), torch.randn(5, device=device))

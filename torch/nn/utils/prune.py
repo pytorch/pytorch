@@ -1345,5 +1345,12 @@ def _compute_norm(t, n, dim):
         dim = dims[dim]
     dims.remove(dim)
 
-    norm = torch.linalg.norm(t, ord=n, dim=dims)
-    return norm
+    # torch.norm computes a matrix_norm only for the following cases
+    if isinstance(n, str) and len(dims) == 2:
+        return torch.linalg.matrix_norm(t, ord=n, dim=dims)
+
+    # otherwise, for ord='fro'torch.norm computes the l2 vector norm
+    if n == 'fro':
+        n = 2
+
+    return torch.linalg.vector_norm(t, ord=n, dim=dims)

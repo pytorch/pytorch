@@ -744,7 +744,7 @@ class LOBPCG(object):
         A_norm = self.fvars['A_norm']
         B_norm = self.fvars['B_norm']
         E, X, R = self.E, self.X, self.R
-        rerr = torch.linalg.norm(R, 2, (0, )) * (torch.linalg.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm)) ** -1
+        rerr = torch.linalg.norm(R, 2, 0) * (torch.linalg.norm(X, 2, 0) * (A_norm + E[:X.shape[-1]] * B_norm)) ** -1
         converged = rerr < tol
         count = 0
         for b in converged:
