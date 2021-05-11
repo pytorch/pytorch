@@ -359,10 +359,6 @@ def use_deterministic_algorithms(mode):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
-    .. warning::
-        This feature is in beta, and its design and implementation may change
-        in the future.
-
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
