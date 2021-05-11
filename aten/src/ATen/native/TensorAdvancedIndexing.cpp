@@ -1362,7 +1362,7 @@ std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   return self.nonzero().unbind(1);
 }
 
-Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
+Tensor& nonzero_out_cpu(const Tensor& self, Tensor& out) {
   TORCH_CHECK(
       self.numel() < std::numeric_limits<int>::max(),
       "nonzero is not supported for tensors with more than INT_MAX elements, \
@@ -1467,7 +1467,7 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
 
 Tensor nonzero_cpu(const Tensor& self) {
   Tensor out = at::empty({0}, self.options().dtype(kLong));
-  return nonzero_out_cpu(out, self);
+  return nonzero_out_cpu(self, out);
 }
 
 Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
