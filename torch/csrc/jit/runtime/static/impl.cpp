@@ -800,9 +800,7 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: "
-            << time_per_iter
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
@@ -826,13 +824,11 @@ void StaticRuntime::benchmark(
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes)"
               << std::endl;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
@@ -985,7 +981,6 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;

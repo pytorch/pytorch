@@ -1003,6 +1003,17 @@ class TestAsserts(TestCase):
                 fn()
 
     @onlyCPU
+    def test_mismatching_values_zero_div_zero(self, device):
+        actual = torch.tensor([1.0, 0.0], device=device)
+        expected = torch.tensor([2.0, 0.0], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
+            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
+            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
+                fn()
+
+    @onlyCPU
     def test_mismatching_values_msg_complex_real(self, device):
         actual = torch.tensor(complex(0, 1), device=device)
         expected = torch.tensor(complex(1, 1), device=device)
@@ -1094,7 +1105,7 @@ class TestAsserts(TestCase):
         expected = actual.tolist()
 
         for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(expected))):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
                 fn()
 
     @onlyCPU
@@ -1117,11 +1128,12 @@ class TestAsserts(TestCase):
 
     @onlyCPU
     def test_scalar(self, device):
-        tensor = torch.rand(1, device=device)
-        actual = expected = tensor.item()
+        number = torch.randint(10, size=(), device=device).item()
+        for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
+            check_dtype = type(actual) is type(expected)
 
-        for fn in self.assert_fns_with_inputs(actual, expected):
-            fn()
+            for fn in self.assert_fns_with_inputs(actual, expected):
+                fn(check_dtype=check_dtype)
 
     @onlyCPU
     def test_msg_str(self, device):
