@@ -437,7 +437,15 @@ You can generate a commit that limits the CI to only run a specific job by using
 # --job: specify one or more times to filter to a specific job + its dependencies
 # --make-commit: commit CI changes to git with a message explaining the change
 python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+
+# Make your changes
+
+ghstack submit
 ```
+
+**NB**: It is not recommended to use this workflow unless you are also using
+[`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
+of very low signal to reviewers.
 
 ## Writing documentation
 
