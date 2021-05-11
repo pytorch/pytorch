@@ -265,9 +265,18 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             # path will not be hit.
             return False
 
+    def input_output_observed(self):
+        # for x + y where x and y are scalars, we do not observe anything
+        return self.num_tensor_args > 0
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+
+        if self.num_tensor_args == 0:
+            # example: x + y, when x and y are scalars
+            return quantizer.quantized_graph.node_copy(
+                node, load_arg(quantized=None))
 
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)

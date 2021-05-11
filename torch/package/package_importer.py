@@ -44,7 +44,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
-    modules: Dict[str, Optional[types.ModuleType]]
+    modules: Dict[str, types.ModuleType]
 
     def __init__(
         self,
@@ -343,7 +343,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore[union-attr]
+                path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None

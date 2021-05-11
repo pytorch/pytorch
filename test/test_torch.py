@@ -7458,6 +7458,49 @@ class TestDevicePrecision(TestCase):
         x.copy_(y)
         self.assertEqual(x[3], y)
 
+    @dtypes(torch.int64, torch.float32, torch.float64)
+    def test_clamp(self, device, dtype):
+        test_args = [
+            *product(
+                [(100, 50), (10, 64), (97,)],  # shape
+                (True, False),  # non-contiguous
+            )
+        ]
+
+        for shape, noncontig in test_args:
+            x = make_tensor(shape, device=device, dtype=dtype,
+                            noncontiguous=noncontig)
+            ub = make_tensor(shape, device=device, dtype=dtype,
+                             noncontiguous=noncontig)
+            lb = make_tensor(shape, device=device, dtype=dtype,
+                             noncontiguous=noncontig)
+
+            expect = x.max(lb).min(ub)
+            actual = x.clamp(lb, ub)
+            self.assertEqual(expect, actual)
+
+            expect = np.clip(x.cpu().numpy(), lb.cpu().numpy(), ub.cpu().numpy())
+            self.assertEqual(expect, actual)
+
+            expect = x.max(lb)
+            actual = x.clamp(min=lb)
+            self.assertEqual(expect, actual)
+
+            expect = x.min(ub)
+            actual = x.clamp(max=ub)
+            self.assertEqual(expect, actual)
+
+            # Test broadcasting min & max
+            expect = x.max(lb[0]).min(ub[..., :1])
+            actual = x.clamp(lb[0], ub[..., :1])
+            self.assertEqual(expect, actual)
+
+            # Test broadcasting x
+            expect = x[..., :1].max(lb).min(ub)
+            actual = x[..., :1].clamp(lb, ub)
+            self.assertEqual(expect, actual)
+
+
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
 # the results. In-place variants of the ops can also be run.
@@ -8020,13 +8063,25 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
 
     def test_tensor_base_init(self):
         # Direct construction not OK
-        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+        self.assertRaises(RuntimeError, lambda: torch._C._TensorBase())
 
         # But construction of subclass is OK
         class T(torch._C._TensorBase):
             pass
 
         T()
+
+    def test_tensor_base_new(self):
+
+        # OK to call super().__new__, see
+        # https://github.com/pytorch/pytorch/issues/57421
+        class TestTensor(torch._C._TensorBase):
+            @staticmethod
+            def __new__(cls, x, *args, **kwargs):
+                return super().__new__(cls, x, *args, **kwargs)
+
+        x = torch.ones(5)
+        test_tensor = TestTensor(x)
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
