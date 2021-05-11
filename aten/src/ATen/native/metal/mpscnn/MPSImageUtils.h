@@ -9,13 +9,13 @@ namespace at {
 namespace native {
 namespace metal {
 
-MPSImage* createStaticImage(const std::vector<int64_t>& sizes);
+MPSImage* createStaticImage(IntArrayRef sizes);
 MPSImage* createStaticImage(
     const fp16_t* src,
-    const std::vector<int64_t>& sizes);
+    const IntArrayRef sizes);
 MPSImage* createStaticImage(
     const float* src,
-    const std::vector<int64_t>& sizes);
+    const IntArrayRef sizes);
 MPSImage* createStaticImage(const at::Tensor& tensor);
 MPSImage* createStaticImage(MPSImage* image);
 MPSImage* createStaticImage(
@@ -25,10 +25,10 @@ MPSImage* createStaticImage(
 
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes);
+    const IntArrayRef sizes);
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes,
+    const IntArrayRef sizes,
     const float* src);
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
