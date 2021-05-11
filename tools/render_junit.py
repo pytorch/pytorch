@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import os
-import typing
+from typing import Any, List, Union
 
 try:
-    import junitparser
+    from junitparser import JUnitXml, TestSuite, TestCase, Error, Failure  # type: ignore[import]
 except ImportError:
     raise ImportError(
         "junitparser not found, please install with 'pip install junitparser'"
@@ -16,35 +16,37 @@ try:
 except ImportError:
     print("rich not found, for color output use 'pip install rich'")
 
-def parse_junit_reports(path_to_reports: str) -> typing.List[junitparser.TestCase]:
+def parse_junit_reports(path_to_reports: str) -> List[TestCase]:
+    def parse_file(path: str) -> List[TestCase]:
+        try:
+            return convert_junit_to_testcases(JUnitXml.fromfile(path))
+        except Exception as err:
+            rich.print(f":Warning: [yellow]Warning[/yellow]: Failed to read {path}: {err}")
+            return []
+
     if not os.path.exists(path_to_reports):
         raise FileNotFoundError(f"Path '{path_to_reports}', not found")
-    ret_xml = ""
     # Return early if the path provided is just a file
     if os.path.isfile(path_to_reports):
-        ret_xml = junitparser.JUnitXml.fromfile(path_to_reports)
-    elif os.path.isdir(path_to_reports):
-        ret_xml = junitparser.JUnitXml()
+        return parse_file(path_to_reports)
+    ret_xml = []
+    if os.path.isdir(path_to_reports):
         for root, _, files in os.walk(path_to_reports):
-            for file in [f for f in files if f.endswith("xml")]:
-                ret_xml += junitparser.JUnitXml.fromfile(os.path.join(root, file))
-    return convert_junit_to_testcases(ret_xml)
+            for fname in [f for f in files if f.endswith("xml")]:
+                ret_xml += parse_file(os.path.join(root, fname))
+    return ret_xml
 
 
-def convert_junit_to_testcases(
-    xml: typing.Union[junitparser.JUnitXml, junitparser.TestSuite, typing.Literal[""]]
-) -> typing.List[junitparser.TestCase]:
-    testcases = list()
+def convert_junit_to_testcases(xml: Union[JUnitXml, TestSuite]) -> List[TestCase]:
+    testcases = []
     for item in xml:
-        if isinstance(item, junitparser.TestSuite):
+        if isinstance(item, TestSuite):
             testcases.extend(convert_junit_to_testcases(item))
         else:
             testcases.append(item)
     return testcases
 
-def render_tests(
-    testcases: typing.List[junitparser.TestCase],
-) -> None:
+def render_tests(testcases: List[TestCase]) -> None:
     num_passed = 0
     num_skipped = 0
     num_failed = 0
@@ -53,10 +55,10 @@ def render_tests(
             num_passed += 1
             continue
         for result in testcase.result:
-            if isinstance(result, junitparser.Error):
+            if isinstance(result, Error):
                 icon = ":rotating_light: [white on red]ERROR[/white on red]:"
                 num_failed += 1
-            elif isinstance(result, junitparser.Failure):
+            elif isinstance(result, Failure):
                 icon = ":x: [white on red]Failure[/white on red]:"
                 num_failed += 1
             else:
@@ -70,7 +72,7 @@ def render_tests(
 
 
 
-def parse_args():
+def parse_args() -> Any:
     parser = argparse.ArgumentParser(
         description="Render xunit output for failed tests",
     )
@@ -81,7 +83,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     options = parse_args()
     testcases = parse_junit_reports(options.report_path)
     render_tests(testcases)

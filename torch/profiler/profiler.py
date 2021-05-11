@@ -81,6 +81,12 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
 
+def supported_activities():
+    """
+    Returns a set of supported profiler activities
+    """
+    return torch.autograd.supported_kineto_activities()
+
 
 class profile(object):
     """Profiler context manager.
@@ -194,9 +200,7 @@ class profile(object):
         if activities:
             self.activities = set(activities)
         else:
-            self.activities = set([ProfilerActivity.CPU])
-            if torch.cuda.is_available():
-                self.activities.add(ProfilerActivity.CUDA)
+            self.activities = supported_activities()
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -205,9 +209,11 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
-        assert len(self.activities) > 0, "No profiler activities specified"
-        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
-            "CUDA activity specified, but CUDA is not available"
+        for activity in self.activities:
+            if activity not in supported_activities():
+                warn("Unsupported profiler activity specified (" + str(activity) + ")")
+        self.activities = self.activities.intersection(supported_activities())
+        assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
             self.schedule = schedule
@@ -385,11 +391,11 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace()
+        self.profiler._prepare_trace()
 
     def _start_trace(self):
         assert self.profiler is not None
-        self.profiler._start_kineto_trace()
+        self.profiler._start_trace()
 
     def _stop_trace(self):
         assert self.profiler is not None
