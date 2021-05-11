@@ -874,24 +874,50 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
-static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
-                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto p = opt_p.value_or(2.0).to<double>();
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "norm only supports CPU and CUDA device types, but got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "norm only supports strided layout, but got: ", self.layout());
+// torch.norm implementation
+namespace {
 
-  ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+void norm_deprecation_warning() {
+  TORCH_WARN_ONCE(
+      "torch.norm is deprecated and may be removed in a future PyTorch release.\n",
+      "Use torch.linalg.norm, instead, or torch.linalg.vector_norm when computing ",
+      "vector norms and torch.linalg.matrix_norm when computing matrix norms.\n",
+      "Note, however, the signature for these functions is slightly different than ",
+      "the signature for torch.norm.");
+}
+
+Tensor& norm_out(
+    Tensor& result,
+    const Tensor& self,
+    const optional<Scalar>& opt_p,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  auto p = opt_p.value_or(2.0).to<double>();
+  TORCH_CHECK(
+      self.device().is_cpu() || self.is_cuda(),
+      "norm only supports CPU and CUDA device types, but got: ",
+      self.device().type());
+  TORCH_CHECK(
+      self.layout() == Layout::Strided,
+      "norm only supports strided layout, but got: ",
+      self.layout());
+
+  ScalarType in_dtype =
+      opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
       "Can only calculate the norm of floating point and complex dtypes. Got ",
       toString(in_dtype),
       " instead.");
 
-  ScalarType out_dtype = result.defined() ? result.scalar_type() : (opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type()));
+  ScalarType out_dtype = result.defined()
+      ? result.scalar_type()
+      : (opt_dtype.has_value() ? opt_dtype.value()
+                               : toValueType(self.scalar_type()));
 
-  auto iter = make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
+  auto iter =
+      make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
 
   if (iter.numel() == 0) {
     result.zero_();
@@ -901,61 +927,80 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
   return result;
 }
 
-static inline Tensor _norm(const Tensor &self, const Scalar& p) {
+Tensor _norm(const Tensor& self, const Scalar& p) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
     return at::native_norm(self, p);
   } else {
-    TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-                "norm only supports CPU AND CUDA device type, got: ", self.device().type());
-    TORCH_CHECK(self.layout() == Layout::Strided,
-                "norm only supports strided layout, got: ", self.layout());
-    TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-                "norm only supports floating-point dtypes");
+    TORCH_CHECK(
+        self.device().is_cpu() || self.is_cuda(),
+        "norm only supports CPU AND CUDA device type, got: ",
+        self.device().type());
+    TORCH_CHECK(
+        self.layout() == Layout::Strided,
+        "norm only supports strided layout, got: ",
+        self.layout());
+    TORCH_CHECK(
+        at::isFloatingType(self.scalar_type()) ||
+            at::isComplexType(self.scalar_type()),
+        "norm only supports floating-point dtypes");
 
     ScalarType dtype = toValueType(self.scalar_type());
     Tensor result = create_reduction_result(self, IntArrayRef{}, false, dtype);
-    return at::native::norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
+    return norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
   }
 }
 
-Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype, Tensor& result) {
-  return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
-}
-
-Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, Tensor& result) {
-  return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
-}
-
-static Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim,
-            optional<ScalarType> opt_dtype) {
+Tensor norm(
+    const Tensor& self,
+    const optional<Scalar>& p,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
     return at::native_norm(self, p, dim, keepdim, opt_dtype);
   } else {
-    ScalarType out_dtype = value_or_else(opt_dtype, [&] {return toValueType(self.scalar_type());});
+    ScalarType out_dtype = value_or_else(
+        opt_dtype, [&] { return toValueType(self.scalar_type()); });
     Tensor result = create_reduction_result(self, dim, keepdim, out_dtype);
-    return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+    return norm_out(result, self, p, dim, keepdim, opt_dtype);
   }
 }
 
+} // namespace
+
+Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype, Tensor& result) {
+  norm_deprecation_warning();
+  return norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
+}
+
+Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, Tensor& result) {
+  norm_deprecation_warning();
+  return norm_out(result, self, p, dim, keepdim, c10::nullopt);
+}
+
 Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
-  return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
+  norm_deprecation_warning();
+  return norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
 Tensor norm(const Tensor& self, const optional<Scalar>& p, ScalarType dtype) {
-  return at::native::norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
+  norm_deprecation_warning();
+  return norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
 }
 
 Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
-  return at::native::norm(self, p, dim, keepdim, c10::nullopt);
+  norm_deprecation_warning();
+  return norm(self, p, dim, keepdim, c10::nullopt);
 }
 
 // leave it so we support sparse tensors
 Tensor norm(const Tensor& self, const Scalar& p) {
-  return at::native::_norm(self, p);
+  norm_deprecation_warning();
+  return _norm(self, p);
 }
 
 // Note [all, any : uint8 compatibility]:
