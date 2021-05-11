@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <c10/util/complex.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 
 __device__ __forceinline__ unsigned int ACTIVE_MASK()
 {
@@ -86,6 +87,12 @@ template<>
 __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
   return c10::Half(WARP_SHFL_DOWN<unsigned short>(value.x, delta, width, mask), c10::Half::from_bits_t{});
+}
+
+template<>
+__device__ __forceinline__ c10::BFloat16 WARP_SHFL_DOWN<c10::BFloat16>(c10::BFloat16 value, unsigned int delta, int width, unsigned int mask)
+{
+  return c10::BFloat16(WARP_SHFL_DOWN<unsigned short>(value.x, delta, width, mask), c10::BFloat16::from_bits_t{});
 }
 
 template <typename T>
