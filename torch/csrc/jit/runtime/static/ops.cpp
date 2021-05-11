@@ -373,11 +373,9 @@ struct TEWrapper {
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
     cg = std::move(cg_);
   }
-  template <typename... Ts>
-  void operator()(const Ts&... ts) {
-    std::vector<tensorexpr::CodeGen::CallArg> args(
-        {tensorexpr::CodeGen::CallArg(ts)...});
-    cg->call(args);
+
+  void call(const std::vector<void*>& args) {
+    cg->call_raw(args);
   }
 
   inline bool supports(const at::Tensor& t) {
@@ -424,6 +422,9 @@ struct TEWrapper {
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    DCHECK(0 && "Invalid call");
+  }
+  void call(const std::vector<void*>& args) {
     DCHECK(0 && "Invalid call");
   }
 
@@ -519,7 +520,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -538,7 +540,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       at::cpu::tanh_out(out_t, in0_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -560,34 +563,40 @@ REGISTER_OPERATOR_FUNCTOR(
           at::cpu::sigmoid_out(out_t, in0_t);
         } else {
           at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-          (*te)(
-              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+          int64_t nn = in0_t.numel();
+          te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
         }
       };
     });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
-  c10::optional<float> clamp;
-  if (n->inputs().size() > 1) {
-    TORCH_CHECK(n->inputs().at(1)->node()->kind() == prim::Constant);
-    clamp = toIValue(n->inputs().at(1))->toDouble();
+  if (n->inputs().size() != 2) {
+    return nullptr;
   }
-  auto te = createLogit(clamp);
+  c10::optional<float> clamp = c10::nullopt;
+  if (n->inputs()[1]->node()->kind() == prim::Constant) {
+    auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
+    clamp = clamp_d
+        ? c10::make_optional<float>(static_cast<float>(clamp_d.value()))
+        : c10::nullopt;
+  }
+  auto te = clamp ? createLogit(clamp) : nullptr;
   return [te](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te || !te->supports(in0_t)) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
