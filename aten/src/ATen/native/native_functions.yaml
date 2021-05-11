@@ -3482,7 +3482,8 @@
     CompositeExplicitAutograd: silu_
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  structured_delegate: silu.out
+  structured: True
+  structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
     CPU, CUDA: silu_out
