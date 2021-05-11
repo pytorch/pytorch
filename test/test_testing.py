@@ -969,6 +969,16 @@ class TestAsserts(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
                 fn()
 
+    def test_mismatching_values_zero_div_zero(self):
+        actual = torch.tensor([1.0, 0.0])
+        expected = torch.tensor([2.0, 0.0])
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
+            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
+            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
+                fn()
+
     def test_mismatching_values_msg_complex_real(self):
         actual = torch.tensor(complex(0, 1))
         expected = torch.tensor(complex(1, 1))

@@ -545,6 +545,18 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
 
     return result
 
+def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
+    sizes = ((2, 2), (2, 3, 2))
+    ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
+    dims = ((-2, -1), (-1, 0))
+
+    inputs: List[SampleInput] = []
+    for size, ord, dim, keepdim in product(sizes, ords, dims, [True, False]):
+        t = make_tensor(size, device, dtype, requires_grad=requires_grad)
+        inputs.append(SampleInput(t, args=(ord, dim, keepdim)))
+
+    return inputs
+
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [
         (S,),
@@ -563,8 +575,6 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
-
-    is_dtype_half = dtype in [torch.float16, torch.bfloat16]
 
     for test_size in test_sizes:
         is_vector_norm = len(test_size) == 1
@@ -3343,6 +3353,23 @@ def sample_inputs_view_as(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (1, 2)),
+             ((S, S, S), (-1, 2)),
+             ((S, S, S), (-1, -1)),
+             ((S, S, S), (1, -1)),
+             ((S,), (0, 2))
+             )
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
 def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -4545,6 +4572,15 @@ op_db: List[OpInfo] = [
                # linalg.norm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('linalg.matrix_norm',
+           aten_name='linalg_matrix_norm',
+           dtypes=floating_and_complex_types(),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_matrix_norm,
+           skips=(
+               # linalg.matrix_norm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('linalg.qr',
            aten_name='linalg_qr',
            op=torch.linalg.qr,
@@ -5075,6 +5111,10 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
+    OpInfo('select',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_select,
+           supports_out=False),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
@@ -6192,9 +6232,6 @@ def method_tests():
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
-        ('select', (S, S, S), (1, 2), 'dim', (), [0]),
-        ('select', (S, S, S), (1, -1), 'wrap_dim', (), [0]),
-        ('select', (S,), (0, 2), '1d'),
         ('narrow', (S, S, S), (1, 2, 2), 'dim', (), [0]),
         ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', (), [0]),
         ('squeeze', (S, 1, S, 1), NO_ARGS, '', (True,)),

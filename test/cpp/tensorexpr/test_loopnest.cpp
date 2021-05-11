@@ -32,9 +32,7 @@ void checkIR(Stmt* s, const std::string& pattern) {
 TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{16, "X"}, {5, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -54,9 +52,7 @@ TEST(LoopNest, ExprSimple01) {
 TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{16, "x"}, {5, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2682,9 +2678,7 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{8, "X"}, {8, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -3374,10 +3368,7 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
-      i,
-      0,
-      10,
-      Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
   auto par = Block::make({outer_for});
   HashProvider hasher;
   auto hash_before = hasher.hash(par);
@@ -3510,19 +3501,15 @@ TEST(LoopNest, CacheReadsSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3583,19 +3570,15 @@ TEST(LoopNest, CacheReadsOuter) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3636,19 +3619,15 @@ TEST(LoopNest, CacheReadsInternal) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3688,20 +3667,16 @@ TEST(LoopNest, CacheReadsInner) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   // note im changing the offset of the first arg of the first call to A.
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 34, j + 40) + A->load(i + 30, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3741,19 +3716,15 @@ TEST(LoopNest, CacheWritesSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3966,9 +3937,7 @@ TEST(LoopNest, CompoundTensorUsed) {
 
   Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
-      "B",
-      {{10, "i"}, {3, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i, j + 1) + A->load(i, j + 2);
       });
 
@@ -4217,9 +4186,7 @@ TEST(LoopNest, VectorizeUse) {
   Tensor* b = Compute(
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
-      "c",
-      {{N, "n"}},
-      [&](const VarHandle& n) { return b->load(n) + 2.0f; });
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
@@ -4748,15 +4715,9 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j,
-      0,
-      100,
-      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
-      n,
-      0,
-      100,
-      Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
+      n, 0, 100, Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* fused_loop;
@@ -5295,10 +5256,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j,
-      0,
-      100,
-      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
       n,
       0,
@@ -5332,9 +5290,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -5362,9 +5318,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forK, forJ});
