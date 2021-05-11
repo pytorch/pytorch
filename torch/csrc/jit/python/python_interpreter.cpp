@@ -77,6 +77,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
   return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({Operator(
     prim::PythonOp,
     createPythonOperation,

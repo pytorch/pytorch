@@ -52,6 +52,7 @@ void max_pool1d_impl(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_pool1d_stub, &max_pool1d_impl);
 
 } // namespace native
