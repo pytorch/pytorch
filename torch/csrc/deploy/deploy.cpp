@@ -124,7 +124,6 @@ int LoadBalancer::acquire() {
     }
     uint64_t prev = 0;
     bool acquired = __atomic_compare_exchange_n(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         &uses_[8 * last],
         &prev,
         1ULL,
@@ -146,13 +145,11 @@ int LoadBalancer::acquire() {
   // we failed to find a completely free interpreter. heuristically use the
   // one with the least number of user (note that this may have changed since
   // then, so this is only a heuristic).
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __atomic_fetch_add(&uses_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
   return min_idx;
 }
 
 void LoadBalancer::free(int where) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
 }
 

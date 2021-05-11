@@ -95,14 +95,11 @@ struct TORCH_API RpcRetryOptions {
   // sendWithRetries function.
   RpcRetryOptions() = default;
   // Maximum number of times we will retry the RPC
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int maxRetries{5};
   // Initial duration between consecutive RPC send attempts
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
   // Constant for exponential backoff used while calculating future wait
   // durations
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float retryBackoff{1.5};
 };
 

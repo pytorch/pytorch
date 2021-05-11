@@ -537,11 +537,9 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
     nodes.emplace_back(node);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TestRandom random(517);
   for (int i = 0; i < numPatterns; i++) {
     std::vector<int> nodeIdx;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int k = 0; k < 5; k++) {
       // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       nodeIdx.emplace_back(random.nextInt() % numNodes);
