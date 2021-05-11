@@ -9827,6 +9827,8 @@
 
 - func: flatten_dense_tensors(Tensor[] tensors) -> Tensor
   variants: function
+  python_module: nn
 
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
+  python_module: nn
