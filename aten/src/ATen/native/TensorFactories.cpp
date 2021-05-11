@@ -515,20 +515,20 @@ namespace {
 TensorOptions linspace_logspace_infer_options(
     const Scalar& start,
     const Scalar& end,
-    const TensorOptions& options, const char* api_name) {
-  auto result_options = options;
+    const TensorOptions& options,
+    const char* fn_name) {
   if (start.isComplex() || end.isComplex()) {
     const auto default_complex_dtype = c10::get_default_complex_dtype();
     if (options.has_dtype()) {
       auto dtype = c10::typeMetaToScalarType(options.dtype());
       TORCH_CHECK(at::isComplexType(dtype),
-          api_name, ": inferred dtype ", default_complex_dtype, " can't be safely casted to passed dtype ", dtype);
+          fn_name, ": inferred dtype ", default_complex_dtype, " can't be safely cast to passed dtype ", dtype);
     } else {
-      result_options = result_options.dtype(default_complex_dtype);
+      return options.dtype(default_complex_dtype);
     }
   }
 
-  return result_options;
+  return options;
 }
 } // anonymous namespace
 
