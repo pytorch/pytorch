@@ -581,20 +581,11 @@ inline static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_worki
 }
 
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
-// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
-// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
-// if cuda version is >= 11.3
-#if CUSOLVER_VERSION >= 11101
-  constexpr bool use_cusolver_potrf_batched = true;
-#else
-  constexpr bool use_cusolver_potrf_batched = false;
-#endif
-
   if (input.numel() == 0) {
     return;
   }
 
-  if (use_cusolver_potrf_batched && batchCount(input) > 1) {
+  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
       apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
     });

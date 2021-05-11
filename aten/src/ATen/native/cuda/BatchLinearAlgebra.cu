@@ -1700,7 +1700,11 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  cholesky_helper_cusolver(input, upper, info);
+  if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
+    cholesky_helper_cusolver(input, upper, info);
+  } else {
+    cholesky_helper_magma(input, upper, info);
+  }
 #else
   cholesky_helper_magma(input, upper, info);
 #endif // USE_CUSOLVER
