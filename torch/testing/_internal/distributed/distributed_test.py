@@ -6049,6 +6049,65 @@ class DistributedTest:
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
+            # Test errors are raised when DDP and module parameters mismatch.
+            # This generally indicates a bug with DDP and is not expected to
+            # happen in user applications.
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            net_params, _ = net._build_params_for_reducer()
+            if self.rank == 0:
+                print(type(net_params[0][0]))
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Expected param to name mapping"
+            ):
+                net._build_param_to_name_mapping(net_params)
+
+            net_params[0] = net_params[0][:-3]
+            with self.assertRaisesRegex(ValueError, "Param with name"):
+                net._build_param_to_name_mapping(net_params)
+
+            net_params[0].extend([
+                torch.nn.Parameter(torch.ones(1)),
+                torch.nn.Parameter(torch.ones(1)),
+            ])
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_build_param_to_name_mapping_requires_grad(self):
+            class Net(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lin = nn.Linear(10, 10)
+                    # Is not tracked by DDP and should not show up in param to
+                    # name mapping.
+                    self.lin.bias.requires_grad_(False)
+
+                def forward(self, x):
+                    return self.lin(x)
+
+            model = Net()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank]
+            )
+            expected_mapping = {
+                0: 'lin.weight',
+            }
+            net_params, _ = net._build_params_for_reducer()
+            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            self.assertEqual(param_to_name_mapping, expected_mapping)
+
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
             debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
 
