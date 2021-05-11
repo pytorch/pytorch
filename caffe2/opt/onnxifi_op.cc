@@ -707,7 +707,6 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxStatus eventStatus;
     std::string message;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     size_t messageLength = 512;
     message.resize(messageLength);
 

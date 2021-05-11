@@ -108,7 +108,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     # Mapping from node in original module to node in created submodule.
     node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
 
-    # Mapping from node in orignal module or created submodules to
+    # Mapping from node in original module or created submodules to
     # corresponding component.
     node_to_component: Dict[torch.fx.Node, Component] = {}
 
@@ -185,7 +185,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
                 return comp.getattr_maps[x]
 
             # If input is not a placeholder, it should have been put into a component
-            # already. If it's the current component then we return the correcspoding
+            # already. If it's the current component then we return the corresponding
             # node in the component.
             if x.op != "placeholder" and node_to_component[x] == comp:
                 return node_remapping[x]
@@ -212,7 +212,15 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         raise RuntimeError("Graph had no output node!")
 
     for x in flatten(output_node.args[0]):
-        used_in_main.add(x)
+        if x.op == "get_attr":
+            # We don't need components mapping for nodes of type "get_attr"
+            # that are consumed by the output. Only need to make sure we create
+            # corresponding counterparts in the resulting graph.
+            main_remapping[x] = main_g.get_attr(x.name, type_expr=x.type)
+        else:
+            # All component results consumed by the output node should be
+            # marked as "used in main".
+            used_in_main.add(x)
 
     # If a node is used in main graph then we mark it as an output in the component
     # it belongs to.
@@ -230,7 +238,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # ((output_0, output_1, ...)).
         comp.graph.output(outs[0] if len(outs) == 1 else outs)
 
-        # Loop through all module calls (call_module) and param feteches (get_attr)
+        # Loop through all module calls (call_module) and param fetches (get_attr)
         # in this component, creating HolderModules as necessary to match the path.
         # e.g. if in the original module there's a get_attr node fetches "conv.weight".
         # We create a HolderModule as root -> add a HolderModule named "conv" ->
@@ -278,5 +286,11 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     main_g.output(map_arg(output_node.args[0], main_remapping.__getitem__))
     main_root = HolderModule({comp.name: comp.gm for comp in all_components})
+
+    # If the output nodes consumes get_attr directly in the original graph,
+    # then we need to make sure get_attr is copied to the new graph.
+    for x in flatten(output_node.args[0]):
+        if x.op == "get_attr":
+            setattr(main_root, x.name, getattr(gm, x.name))
 
     return torch.fx.GraphModule(main_root, main_g)
