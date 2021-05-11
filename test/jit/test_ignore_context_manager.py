@@ -1,5 +1,6 @@
 import os
 import sys
+import unittest
 
 import torch
 
@@ -81,4 +82,19 @@ class TestIgnoreContextManager(JitTestCase):
         model = A()
         s = torch.jit.script(model)
         self.assertEqual(s(), 4)
+        self.assertEqual(s(), model())
+
+    def test_with_ignore_context_manager_with_just_out(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self):
+                with torch.jit._IgnoreContextManager(c="out:List[int]"):
+                    c = [2 for i in range(7) if i > 2]
+                c[0] = 3
+                return c[0] + c[1]
+        model = A()
+        s = torch.jit.script(model)
+        self.assertEqual(s(), 5)
         self.assertEqual(s(), model())
