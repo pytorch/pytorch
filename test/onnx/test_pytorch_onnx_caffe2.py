@@ -1083,6 +1083,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_gru_constant_folding(self):
         class GruNet(nn.Module):
@@ -2254,6 +2255,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_dynamic_loop(self):
         class LoopModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2268,6 +2270,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nested_loops(self):
         class NestedLoopsModel(torch.jit.ScriptModule):
