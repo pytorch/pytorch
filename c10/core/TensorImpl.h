@@ -462,8 +462,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
  public:
   TensorImpl(const TensorImpl&) = delete;
   TensorImpl& operator=(const TensorImpl&) = delete;
-  TensorImpl(TensorImpl&&) = default;
-  TensorImpl& operator=(TensorImpl&&) = default;
+  TensorImpl(TensorImpl&&) = delete;
+  TensorImpl& operator=(TensorImpl&&) = delete;
 
   /**
    * Release (decref) storage, and any other external allocations.  This
