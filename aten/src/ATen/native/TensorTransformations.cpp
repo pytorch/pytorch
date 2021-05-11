@@ -10,6 +10,7 @@
 
 namespace at {
 namespace native {
+namespace {
 
 constexpr size_t dim_bitset_size = 64;
 
@@ -109,6 +110,7 @@ void flip_cpu_kernel(TensorIterator& iter) {
 
   iter.for_each(loop, index_parallel_grain_size);
 }
+} // anonymous namespace
 
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   if(dims.size() == 0) {
