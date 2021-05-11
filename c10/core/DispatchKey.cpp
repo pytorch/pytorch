@@ -66,8 +66,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Meta:
       return "Meta";
 
-    case DispatchKey::InplaceOrView:
-      return "InplaceOrView";
+    case DispatchKey::ADInplaceOrView:
+      return "ADInplaceOrView";
 
     case DispatchKey::Autograd:
       return "Autograd";

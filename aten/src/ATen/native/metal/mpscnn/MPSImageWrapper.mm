@@ -48,7 +48,7 @@ namespace native {
 namespace metal {
 
 MPSImageWrapper::MPSImageWrapper(IntArrayRef sizes) {
-  _textureSizes = computeTextureSize(sizes);
+  _imageSizes = computeImageSize(sizes);
   _delegate = [MPSImageWrapperTrampoline newWithMPSImageWrapper:this];
 }
 
@@ -60,7 +60,7 @@ void MPSImageWrapper::copyDataFromHost(const float* inputData) {
   TORCH_CHECK(inputData);
   _commandBuffer = [MetalCommandBuffer currentBuffer];
   [_commandBuffer addSubscriber:_delegate];
-  _image = createTemporaryImage(_commandBuffer, _textureSizes, inputData);
+  _image = createTemporaryImage(_commandBuffer, _imageSizes, inputData);
 }
 
 void MPSImageWrapper::copyDataToHost(float* hostData) {
@@ -79,36 +79,25 @@ void MPSImageWrapper::setCommandBuffer(MetalCommandBuffer* commandBuffer) {
   _commandBuffer = commandBuffer;
   [_commandBuffer addSubscriber:_delegate];
 }
+
 MetalCommandBuffer* MPSImageWrapper::commandBuffer() const {
   return _commandBuffer;
 }
 
-IntArrayRef MPSImageWrapper::textureSizes() const {
-  return _textureSizes;
+void MPSImageWrapper::allocateStorage(IntArrayRef sizes) {
+  _imageSizes = computeImageSize(sizes);
+  _image = createStaticImage(_imageSizes);
 }
 
-void MPSImageWrapper::allocateTextureStorage(IntArrayRef sizes) {
-  _textureSizes = computeTextureSize(sizes);
-  _image = createStaticImage(_textureSizes);
-}
-
-void MPSImageWrapper::allocateTemporaryTextureStorage(
+void MPSImageWrapper::allocateTemporaryStorage(
     IntArrayRef sizes,
     MetalCommandBuffer* commandBuffer) {
   setCommandBuffer(commandBuffer);
-  _textureSizes = computeTextureSize(sizes);
-  _image = createTemporaryImage(commandBuffer, _textureSizes);
+  _imageSizes = computeImageSize(sizes);
+  _image = createTemporaryImage(commandBuffer, _imageSizes);
 }
 
-void MPSImageWrapper::copyFromTexture(MPSImage* image) {
-  if ([image isTemporaryImage]) {
-    _image = createTemporaryImage(_commandBuffer, image);
-  } else {
-    _image = createStaticImage(image);
-  }
-}
-
-void MPSImageWrapper::setTexture(MPSImage* image) {
+void MPSImageWrapper::setImage(MPSImage* image) {
   TORCH_CHECK(image);
   if(image.isTemporaryImage) {
     TORCH_CHECK(_commandBuffer && _commandBuffer.valid);
