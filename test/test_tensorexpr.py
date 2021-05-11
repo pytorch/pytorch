@@ -175,7 +175,7 @@ class TestTensorExprFuser(BaseTestClass):
                 npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
                 np.testing.assert_allclose(npr, x.cpu().numpy())
 
-            test_configs = [[36, 17, 63, 33], [32, 32, 32, 32]]
+            test_configs = [[5, 2, 7, 3], [8, 8, 8, 8]]
             for test_config in test_configs:
                 test_body(*test_config)
 
@@ -1021,7 +1021,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.zeros(1024, 1024)))
 
-        a = torch.zeros(1024, 1024)
+        a = torch.zeros(32, 32)
         x = warmup_and_run_forward(traced, a)
         self.assertLastGraphAllFused()
         npr = a.numpy()
