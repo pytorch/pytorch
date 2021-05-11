@@ -93,7 +93,7 @@ class _InternalRPCPickler:
         generated_methods,
         module_rref_fork_data,
     ):
-        m = object.__new__(dist.nn.RemoteModule)
+        m = object.__new__(dist.nn.RemoteModule)  # type: ignore[attr-defined]
         m.on = on
         m.device = device
         m.is_device_map_set = is_device_map_set
@@ -116,10 +116,10 @@ class _InternalRPCPickler:
             # Pickling the attribute `module_rref` must invoke RRef's `_serialize()` method.
             if k == "module_rref":
                 pickled_attrs[k] = v._serialize()
-            elif k in dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES:
+            elif k in dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES:  # type: ignore[attr-defined]
                 pickled_attrs[k] = v
             # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
-            elif k not in dist.nn._REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
+            elif k not in dist.nn._REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:  # type: ignore[attr-defined]
                 print(
                     "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
                     "To pickle this attribute, it must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
@@ -156,7 +156,7 @@ class _InternalRPCPickler:
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
         # Ignore type error because dispatch_table is defined in third-party package
-        p.dispatch_table[dist.nn.RemoteModule] = self._remote_module_reducer  # type: ignore[index]
+        p.dispatch_table[dist.nn.RemoteModule] = self._remote_module_reducer  # type: ignore[attr-defined, index]
         # Add dispatch pickling for ScriptModule if needed.
         if isinstance(obj, torch.jit.ScriptModule):
             # Ignore type error because dispatch_table is defined in third-party package
