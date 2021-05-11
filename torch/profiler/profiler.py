@@ -375,23 +375,6 @@ class profile(object):
             "world_size": dist.get_world_size()
         }
 
-    def _get_cuda_devices_info(self):
-        if not torch.cuda.is_available():
-            return None
-
-        devices = []
-        device_count = torch.cuda.device_count()
-        for idx in range(device_count):
-            device_prop = torch.cuda.get_device_properties(idx)
-            devices.append({
-                "id": idx,
-                "name": device_prop.name,
-                "multi_processor_count": device_prop.multi_processor_count,
-                "total_memory": device_prop.total_memory
-            })
-
-        return devices
-
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -430,10 +413,7 @@ class profile(object):
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
-            devices_info = self._get_cuda_devices_info()
-            if devices_info:
-                self.add_metadata("devicesProperties", json.dumps(devices).replace('"', '\\"'))
 
-    def _stop_trace(self):
+def _stop_trace(self):
         assert self.profiler is not None
         self.profiler.__exit__(None, None, None)
