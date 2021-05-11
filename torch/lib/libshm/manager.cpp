@@ -1,5 +1,6 @@
 #include <sys/mman.h>
 #include <poll.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -33,9 +34,12 @@ struct ClientSession {
 };
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<struct pollfd> pollfds;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::set<std::string> used_objects;
 
 
@@ -57,8 +61,11 @@ void unregister_fd(int fd) {
 
 
 void print_init_message(const char *message) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t unused;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   unused = write(1, message, strlen(message));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   unused = write(1, "\n", 1);
 }
 
@@ -81,32 +88,40 @@ void free_used_object(const std::string &name) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  const auto tempfile =
-      c10::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
+  c10::optional<c10::TempDir> tempdir;
   try {
-    if (!tempfile.has_value()) {
+    tempdir =
+      c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
+    if (!tempdir.has_value()) {
       throw std::runtime_error(
-          "could not generate a random filename for manager socket");
+          "could not generate a random directory for manager socket");
     }
-    // TODO: better strategy for generating tmp names
-    // TODO: retry on collisions - this can easily fail
-    srv_socket.reset(new ManagerServerSocket(tempfile->name));
+    std::string tempfile = tempdir->name + "/manager.sock";
+    // NOLINTNEXTLINE(modernize-make-unique)
+    srv_socket.reset(new ManagerServerSocket(tempfile));
     register_fd(srv_socket->socket_fd);
-    print_init_message(tempfile->name.c_str());
-    DEBUG("opened socket %s", tempfile->name.c_str());
+    print_init_message(tempfile.c_str());
+    DEBUG("opened socket %s", tempfile.c_str());
+  } catch (const std::exception& e) {
+    std::string message("ERROR: ");
+    message += e.what();
+    print_init_message(message.c_str());
+    return 1;
   } catch (...) {
-    print_init_message("ERROR");
-    throw;
+    print_init_message("ERROR: unhandled exception");
+    return 1;
   }
 
   int timeout = -1;
   std::vector<int> to_add;
   std::vector<int> to_remove;
   for (;;) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int nevents;
     if (client_sessions.size() == 0)
       timeout = SHUTDOWN_TIMEOUT;
