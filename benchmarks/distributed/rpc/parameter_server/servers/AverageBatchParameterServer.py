@@ -1,13 +1,8 @@
-import threading
-
 from .AverageParameterServer import AverageParameterServer
 from .ParameterServerBase import ParameterServerBase
 
 
 class AverageBatchParameterServer(AverageParameterServer):
-
-    master_lock = threading.Lock()
-    locks = []
 
     def __init__(
         self,
