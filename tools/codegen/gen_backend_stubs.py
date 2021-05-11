@@ -234,29 +234,5 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                 )),
             })
 
-        fm.write('aten_xla_type_default.h', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            'dispatch_aten_fallback_declarations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
-
-        fm.write('aten_xla_type_default.cpp', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            # TODO: after cpu fallbacks are moved to a boxed kernel,
-            # merge registrations / definitions into RegisterDispatchKey
-            'dispatch_aten_fallback_definitions': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-            'dispatch_registrations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
-
 if __name__ == '__main__':
     main()

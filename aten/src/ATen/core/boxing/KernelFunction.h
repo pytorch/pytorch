@@ -219,6 +219,12 @@ public:
   static KernelFunction makeAmbiguousAutogradOther();
   static KernelFunction makeNamedNotSupported();
 
+  template<BoxedKernelFunction* func>
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+
+  template<BoxedKernelFunction_withDispatchKeys* func>
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+
   /**
    * Create a KernelFunction from an unboxed lambda.
    *
@@ -239,12 +245,6 @@ public:
 private:
 
   explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
-
-  template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
-
-  template<BoxedKernelFunction_withDispatchKeys* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   OperatorKernel* getFunctor_() const;
 
