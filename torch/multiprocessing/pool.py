@@ -34,7 +34,7 @@ class Pool(multiprocessing.pool.Pool):
                     self._initializer,  # type: ignore[attr-defined]
                     self._initargs, self._maxtasksperchild)  # type: ignore[attr-defined]
             if hasattr(self, '_wrap_exception'):
-                args += (self._wrap_exception,)  # type: ignore[assignment]
+                args += (self._wrap_exception,)  # type: ignore[assignment, attr-defined]
             w = self.Process(target=clean_worker, args=args)  # type: ignore[attr-defined]
             self._pool.append(w)  # type: ignore[attr-defined]
             w.name = w.name.replace('Process', 'PoolWorker')

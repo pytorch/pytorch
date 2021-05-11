@@ -2136,7 +2136,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         to = _NUMPY_TYPE_TO_ENUM[dst]
         if use_name:
-            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()  # type: ignore[assignment]
+            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()  # type: ignore[assignment, arg-type]
         op = core.CreateOperator('Cast', ["X"], ["Y"], to=to)
         self.assertDeviceChecks(dc, op, [a], [0])
         out, = self.assertReferenceChecks(gc, op, [a], ref)

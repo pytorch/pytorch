@@ -154,7 +154,7 @@ class TestBindings(test_util.TestCase):
 
     def test_match_graph_node(self):
         mg = ng.NNMatchGraph()
-        mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined, call-arg]
         nn = ng.NNModule()
         test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
         x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
@@ -170,7 +170,7 @@ class TestBindings(test_util.TestCase):
 
     def test_match_graph_node_strict(self):
         mg = ng.NNMatchGraph()
-        mg.createNode(ng.NeuralNetOperator("test"), strict=True)  # type: ignore[attr-defined]
+        mg.createNode(ng.NeuralNetOperator("test"), strict=True)  # type: ignore[attr-defined, call-arg]
         nn = ng.NNModule()
         test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))  # type: ignore[call-arg]
         x = nn.dataFlow.createNode(ng.NeuralNetData("X"))  # type: ignore[call-arg]
@@ -186,9 +186,9 @@ class TestBindings(test_util.TestCase):
 
     def test_match_graph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
-        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined, call-arg]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined, call-arg]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined, call-arg]
         mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
         mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
@@ -208,9 +208,9 @@ class TestBindings(test_util.TestCase):
 
     def test_delete_subgraph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
-        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined, call-arg]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined, call-arg]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined, call-arg]
         mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
         mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
@@ -228,9 +228,9 @@ class TestBindings(test_util.TestCase):
 
     def test_replace_subraph(self):
         mg = ng.NNMatchGraph()
-        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined]
-        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined]
-        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined]
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)  # type: ignore[attr-defined, call-arg]
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)  # type: ignore[attr-defined, call-arg]
+        testm = mg.createNode(ng.NeuralNetOperator("test"))  # type: ignore[attr-defined, call-arg]
         mg.createEdge(test2m, xm)  # type: ignore[attr-defined]
         mg.createEdge(xm, testm)  # type: ignore[attr-defined]
 
