@@ -92,7 +92,7 @@ struct alignas(2) BFloat16 {
 
 #if defined(__CUDACC_VER_MAJOR__) && __CUDACC_VER_MAJOR__ >= 11
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
-  explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
+  inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
 };
 
