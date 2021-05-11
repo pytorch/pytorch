@@ -86,24 +86,17 @@ class _InternalRPCPickler:
     @classmethod
     def _remote_module_receiver(
         cls,
-        on,
-        device,
-        is_device_map_set,
-        is_scriptable,
-        generated_methods,
-        module_rref_fork_data,
+        *remote_module_pickled_attrs,
     ):
+        serialized_remote_module = RemoteModule._make(remote_module_pickled_attrs)
         m = object.__new__(dist.nn.RemoteModule)  # type: ignore[attr-defined]
-        m.on = on
-        m.device = device
-        m.is_device_map_set = is_device_map_set
-        m.is_scriptable = is_scriptable
-        m.generated_methods = generated_methods
+        m.__dict__.update(serialized_remote_module._asdict())
+
         # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
-        m.module_rref = dist.rpc.PyRRef._deserialize(module_rref_fork_data)
+        m.module_rref = dist.rpc.PyRRef._deserialize(m.module_rref)
 
         # Install generated methods when unpickled.
-        for method in generated_methods:
+        for method in m.generated_methods:
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(m, method_name, types.MethodType(method, m))
@@ -310,3 +303,14 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])
 RemoteException = collections.namedtuple("RemoteException", ["msg", "exception_type"])
+# FIXME: The following cannot be referenced due to AttributeError: module 'torch.distributed' has no attribute 'nn'
+# RemoteModule = collections.namedtuple("RemoteModule", list(dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES))
+_REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST = [
+    "on",
+    "device",
+    "is_device_map_set",
+    "is_scriptable",
+    "generated_methods",
+    "module_rref",
+]
+RemoteModule = collections.namedtuple("RemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST)
