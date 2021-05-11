@@ -34,12 +34,9 @@ def main():
 
     cols = df_a.columns
 
-    for row_a, row_b in zip(df_a.iterrows(), df_b.iterrows()):
-        i = row_a[0]
-        row_a = row_a[1]
-        row_b = row_b[1]
+    for i, _ in df_a.iterrows():
         for col in cols[1:]:
-            df_a.at[i, col] = df_a.at[i, col] - df_b.at[i, col]
+            df_a.at[i, col] -= df_b.at[i, col]
 
     print(df_a)
     df_a.to_csv(args.output_name, encoding='utf-8', index=False)
