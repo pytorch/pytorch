@@ -42,11 +42,14 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void expm1_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::expm1(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "expm1_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::expm1(a);
+        });
+      });
 }
 
 // We manually overload rsqrt because std::rsqrt does not work with complex types.
@@ -63,12 +66,15 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
 }
 
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-      return rsqrt_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "rsqrt_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
+          return rsqrt_wrapper(a);
+        });
+      });
 }
 
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
