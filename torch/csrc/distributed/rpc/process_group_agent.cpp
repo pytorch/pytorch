@@ -131,7 +131,9 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   TORCH_CHECK(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
+      id >= 0 && id < allWorkerInfo_.size(),
+      "Invalid destination: ",
+      id);
   return allWorkerInfo_[id];
 }
 
@@ -264,11 +266,11 @@ void ProcessGroupAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
 }
 
-std::shared_ptr<JitFuture> ProcessGroupAgent::send(
+c10::intrusive_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -297,7 +299,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<JitFuture>(at::AnyClassType::get());
+  auto future = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
@@ -495,11 +497,11 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
     ++serverActiveCalls_;
-    std::shared_ptr<JitFuture> futureResponse;
+    c10::intrusive_ptr<JitFuture> futureResponse;
     try {
       futureResponse = cb_->operator()(message, {});
     } catch (const std::exception& e) {
-      futureResponse = std::make_shared<JitFuture>(at::AnyClassType::get());
+      futureResponse = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
       futureResponse->setError(std::current_exception());
     }
     if (futureResponse->completed()) {
@@ -518,33 +520,27 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
-      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
       futureResponse->addCallback(
-          [this,
-           fromId,
-           requestId,
-           weak = std::weak_ptr<JitFuture>(futureResponse)]() {
-            auto futureResponse = weak.lock();
-            TORCH_INTERNAL_ASSERT(futureResponse);
+          [this, fromId, requestId](JitFuture& futureResponse) {
             --serverActiveCalls_;
             --serverActiveAsyncCalls_;
-            if (!futureResponse->hasError()) {
+            if (!futureResponse.hasError()) {
               send(
                   getWorkerInfo(fromId),
-                  std::move(*futureResponse->value().toCustomClass<Message>()));
+                  std::move(*futureResponse.value().toCustomClass<Message>()));
             } else {
               send(
                   getWorkerInfo(fromId),
                   createExceptionResponse(
-                      futureResponse->tryRetrieveErrorMessage(), requestId));
+                      futureResponse.tryRetrieveErrorMessage(), requestId));
             }
           });
     }
   } else if (message.isResponse()) {
     auto id = message.id();
-    std::shared_ptr<JitFuture> jitFuture = nullptr;
+    c10::intrusive_ptr<JitFuture> jitFuture;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
@@ -631,7 +627,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
-  std::shared_ptr<JitFuture> jitFuture = nullptr;
+  c10::intrusive_ptr<JitFuture> jitFuture;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);
