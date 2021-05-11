@@ -462,7 +462,7 @@ c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
 }
 
 void returnFutureWithOutput(
-    c10::intrusive_ptr<c10::ivalue::Future> future,
+    c10::intrusive_ptr<c10::ivalue::Future>& future,
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
   if (outputTensors.size() == 0) {
     future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
