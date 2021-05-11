@@ -93,17 +93,8 @@ def commit_ci(files: List[str], message: str):
 
 
     # Make the commit
-    print(files)
     subprocess.run(["git", "add", CONFIG_YML, ".github/workflows/."])
     subprocess.run(["git", "commit", "-m", message])
-    # for line in stdout.split("\n"):
-    #     for filename in files:
-    #         if filename in line:
-                
-
-
-    # subprocess.run(["git", 
-    # subprocess.run(["git", "add", "
 
 
 if __name__ == "__main__":
@@ -120,9 +111,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     touched_files = [CONFIG_YML]
-    # config_yml = yaml.safe_load(open(CONFIG_YML, "r").read())
-    # config_yml["workflows"] = get_filtered_circleci_config(config_yml["workflows"], args.job)
-    # yaml.dump(config_yml, open(CONFIG_YML, "w"))
+    config_yml = yaml.safe_load(open(CONFIG_YML, "r").read())
+    config_yml["workflows"] = get_filtered_circleci_config(config_yml["workflows"], args.job)
+    yaml.dump(config_yml, open(CONFIG_YML, "w"))
 
     if not args.keep_gha:
         for f in os.listdir(WORKFLOWS_DIR):
