@@ -16,6 +16,7 @@ from torch.distributed.elastic.metrics.api import (
     _get_metric_name,
     prof,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 def foo_1():
@@ -63,6 +64,10 @@ class MetricsApiTest(unittest.TestCase):
         pass
 
     def test_get_metric_name(self):
+        # Note: since pytorch uses main method to launch tests,
+        # the module will be different between fb and oss, this
+        # allows keeping the module name consistent.
+        foo_1.__module__ = "api_test"
         self.assertEqual("api_test.foo_1", _get_metric_name(foo_1))
         self.assertEqual("MetricsApiTest.foo_2", _get_metric_name(self.foo_2))
 
@@ -106,3 +111,7 @@ class MetricsApiTest(unittest.TestCase):
 
             self.assertEqual(1, handler.metric_data["Child.func.success"].value)
             self.assertIn("Child.func.duration.ms", handler.metric_data)
+
+
+if __name__ == "__main__":
+    run_tests()

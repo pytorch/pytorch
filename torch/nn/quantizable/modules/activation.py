@@ -59,18 +59,17 @@ class MultiheadAttention(nn.MultiheadAttention):
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None, batch_first: bool = False):
+                 kdim: int = None, vdim: int = None, batch_first: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first)
-        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
-
-        # TODO: The use of the `_LinearWithBias` increases the quantization noise
-        # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
-        # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
+                                                 add_zero_attn, kdim, vdim, batch_first,
+                                                 **factory_kwargs)
+        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -355,8 +354,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
+
+                # Explicitly assert that bias_k and bias_v are not None
+                # in a way that TorchScript can understand.
+                bias_k = self.bias_k
+                assert bias_k is not None
+                bias_v = self.bias_v
+                assert bias_v is not None
+
+                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
                     attn_mask = nnF.pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:

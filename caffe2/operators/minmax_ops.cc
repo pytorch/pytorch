@@ -2,9 +2,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Min, MinOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Max)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -83,6 +86,7 @@ Max:
         "Contains the maximum valued element at each location.")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Min)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)

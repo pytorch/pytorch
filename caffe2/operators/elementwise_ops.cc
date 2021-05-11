@@ -5,9 +5,11 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Not,
     UnaryElementwiseOp<BoolTypes, CPUContext, NotFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Sign,
     UnaryElementwiseOp<NumericTypes, CPUContext, SignFunctor<CPUContext>>);
@@ -21,11 +23,17 @@ REGISTER_CPU_OPERATOR(
           Op##Functor<CPUContext>,                            \
           FixedType<bool>>)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(EQ);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(NE);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(LT);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(LE);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(GT);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_COMPARE_OPERATOR(GE);
 
 #undef REGISTER_CPU_COMPARE_OPERATOR
@@ -34,8 +42,11 @@ REGISTER_CPU_COMPARE_OPERATOR(GE);
   REGISTER_CPU_OPERATOR(                         \
       Op, BinaryElementwiseOp<BoolTypes, CPUContext, Op##Functor<CPUContext>>)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_LOGICAL_BINARY_OPERATOR(And);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_LOGICAL_BINARY_OPERATOR(Or);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_LOGICAL_BINARY_OPERATOR(Xor);
 
 #undef REGISTER_CPU_LOGICAL_BINARY_OPERATOR
@@ -45,8 +56,11 @@ REGISTER_CPU_LOGICAL_BINARY_OPERATOR(Xor);
       Op,                                        \
       BinaryElementwiseOp<IntBoolTypes, CPUContext, Op##Functor<CPUContext>>)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_BITWISE_BINARY_OPERATOR(BitwiseAnd);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_BITWISE_BINARY_OPERATOR(BitwiseOr);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_BITWISE_BINARY_OPERATOR(BitwiseXor);
 
 #undef REGISTER_CPU_BITWISE_BINARY_OPERATOR
@@ -108,6 +122,7 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
     auto count = A.numel();
     SRLHelper::sum2one<T>(Adata, Cdata, count);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t pre, n, post;
     std::tie(pre, n, post) =
         elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
@@ -122,6 +137,7 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumReduceLike, SumReduceLikeOp<CPUContext>);
 
 } // namespace caffe2
