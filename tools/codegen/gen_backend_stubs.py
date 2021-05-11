@@ -21,7 +21,8 @@ except ImportError:
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
 # Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping)
-ParsedExternalYaml = namedtuple('ParsedExternalYaml', ['backend_key', 'autograd_key', 'cpp_namespace', 'backend_indices'])
+ParsedExternalYaml = namedtuple('ParsedExternalYaml', [
+    'backend_key', 'autograd_key', 'cpp_namespace', 'external_backend_headers', 'backend_indices'])
 def parse_backend_yaml(
         backend_yaml_path: str,
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
@@ -37,13 +38,34 @@ def parse_backend_yaml(
         yaml_values = yaml.load(f, Loader=Loader)
     assert isinstance(yaml_values, dict)
 
-    valid_keys = ['backend', 'cpp_namespace', 'supported', 'autograd']
+    valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd']
 
     backend = yaml_values.pop('backend', None)
     assert backend is not None, 'You must provide a value for "backend"'
 
     cpp_namespace = yaml_values.pop('cpp_namespace', None)
     assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
+
+    external_backend_headers = yaml_values.pop('extra_headers', '')
+    assert isinstance(external_backend_headers, str), \
+        f'expected "external_backend_headers" to be a string, but got: \
+{external_backend_headers} (of type {type(external_backend_headers)})'
+    external_backend_headers = external_backend_headers.replace('#include', '\n#include')
+
+    per_op_log = yaml_values.pop('per_op_log', None)
+    if per_op_log is not None:
+        assert isinstance(per_op_log, str), \
+            f'expected "per_op_log" to be a string, but got: {per_op_log} (of type {type(per_op_log)})'
+
+    per_argument_log = yaml_values.pop('per_argument_log', None)
+    if per_argument_log is not None:
+        assert isinstance(per_argument_log, str), \
+            f'expected "per_argument_log" to be a string, but got: {per_argument_log} (of type {type(per_argument_log)})'
+
+    cpu_fallback_ctr = yaml_values.pop('cpu_fallback_counter', None)
+    if cpu_fallback_ctr is not None:
+        assert isinstance(cpu_fallback_ctr, str), \
+            f'expected "cpu_fallback_ctr" to be a string, but got: {cpu_fallback_ctr} (of type {type(cpu_fallback_ctr)})'
 
     supported = yaml_values.pop('supported', [])
     if supported is None:
@@ -69,7 +91,14 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             metadata[op_name] = m
         # TODO: currently hardcoding the fact that XLA implements out/inplace in terms of functional ops,
         # this should eventually be toggleable per-backend.
-        return BackendIndex(dispatch_key=dispatch_key, use_out_as_primary=False, external=True, index=metadata)
+        return BackendIndex(
+            dispatch_key=dispatch_key,
+            use_out_as_primary=False,
+            external=True,
+            index=metadata,
+            per_op_log=per_op_log,
+            per_argument_log=per_argument_log,
+            cpu_fallback_counter=cpu_fallback_ctr)
 
     backend_key: Optional[DispatchKey] = None
     if len(supported) > 0:
@@ -109,7 +138,7 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! \
 {forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
 
-    return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
+    return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, external_backend_headers, backend_indices)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
@@ -145,6 +174,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     autograd_key = parsed_backend_yaml.autograd_key
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     backend_indices = parsed_backend_yaml.backend_indices
+    external_backend_headers = parsed_backend_yaml.external_backend_headers
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -159,7 +189,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             'cpp_namespace': cpp_namespace,
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
-            'dispatch_xla_declarations': list(set(concatMap(
+            'dispatch_declarations': list(set(concatMap(
                 lambda f: dest.compute_native_function_declaration(f, backend_indices[backend_dispatch_key]),
                 grouped_native_functions
             ))) + list(set(concatMap(
@@ -167,14 +197,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                 grouped_native_functions
             ))),
         })
-
-        external_backend_headers = '''\
-#include <tensorflow/compiler/xla/xla_client/debug_macros.h>
-#include <tensorflow/compiler/xla/xla_client/metrics.h>
-#include <tensorflow/compiler/xla/xla_client/tf_logging.h>
-#include <torch_xla/csrc/function_call_tracker.h>
-#include <torch_xla/csrc/aten_xla_type.h>
-#include <torch_xla/csrc/aten_xla_type_default.h>'''
 
         for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {

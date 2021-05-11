@@ -73,6 +73,18 @@ autograd:
         # so there's no reason to parse the backend
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
+    def test_valid_with_external_headers_multline(self):
+        yaml_str = '''\
+backend: XLA
+cpp_namespace: torch_xla
+external_headers: >
+    #include header1
+    #include header2
+supported:
+- abs'''
+        # External headers are optional.
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
     def test_missing_backend(self):
         yaml_str = '''\
 cpp_namespace: torch_xla
@@ -190,6 +202,19 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".''')  # noqa: B950
 
+    def test_external_headers_invalid(self):
+        yaml_str = '''\
+backend: XLA
+cpp_namespace: torch_xla
+external_headers:
+    #include header1
+    #include header2
+supported:
+- abs'''
+        # You need the '>' if you want a multiline yaml string
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(output_error, ''' contains unexpected keys: external_headers. Only the following keys are supported: backend, cpp_namespace, extra_headers, supported, autograd''')  # noqa: B950
+
     # unrecognized extra yaml key
     def test_unrecognized_key(self):
         yaml_str = '''\
@@ -199,7 +224,7 @@ supported:
 - abs
 invalid_key: invalid_val'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, cpp_namespace, supported, autograd''')  # noqa: B950
+        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, cpp_namespace, extra_headers, supported, autograd''')  # noqa: B950
 
 
 if __name__ == '__main__':
