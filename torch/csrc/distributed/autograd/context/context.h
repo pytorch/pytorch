@@ -115,7 +115,7 @@ class TORCH_API DistAutogradContext {
   // streams. Without synchronization, it is possible that gradients are
   // consumed before they are ready.
   void recordGradEvent(c10::Device device);
-
+	void waitGradEvent(c10::Device device);
   const int64_t contextId_;
 
   // Set containing known worker IDs, used in cleaning up autograd context.
