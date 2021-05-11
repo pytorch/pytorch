@@ -303,14 +303,17 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])
 RemoteException = collections.namedtuple("RemoteException", ["msg", "exception_type"])
-# FIXME: The following cannot be referenced due to AttributeError: module 'torch.distributed' has no attribute 'nn'
-# RemoteModule = collections.namedtuple("RemoteModule", list(dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES))
-_REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST = [
+# FIXME: Directly referencing `dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES` here can cause
+# "AttributeError: module 'torch.distributed' has no attribute 'nn'".
+# RemoteModule = collections.namedtuple("RemoteModule", dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES)
+_REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST = (
     "on",
     "device",
     "is_device_map_set",
     "is_scriptable",
     "generated_methods",
     "module_rref",
-]
-RemoteModule = collections.namedtuple("RemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST)
+)
+RemoteModule = collections.namedtuple(
+    "RemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES_LIST  # type: ignore[misc]
+)
