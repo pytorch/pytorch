@@ -17,7 +17,7 @@ class TestMypyWrapper(unittest.TestCase):
         },
     }
 
-    trie = {
+    trie: mypy_wrapper.Trie = {
         'file1.abc': {None: {'foo.ini', 'bar/baz.ini'}},
         'dir2': {
             None: {'foo.ini'},
