@@ -968,6 +968,9 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
   return result;
 }
 
+// The 'apply_' word is used for templated by dtype functions that call an API routine
+// underneath. Since the cusolver API has a slightly different structure we do not prepend
+// apply_ to this function.
 void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   auto infos_data = infos.data_ptr<int>();
 
