@@ -176,6 +176,94 @@ class RegisterSchema:
         return f'm.def({cpp_string(str(f.func))});\n'
 
 
+def _num_leading_spaces(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+# Unindents all lines in code. Each line gets unindented the same amount;
+# that amount is equal to the smallest number of leading spaces across all lines
+def deindent(code: str) -> str:
+    lines = code.split('\n')
+    min_leading_spaces = min(map(_num_leading_spaces, lines))
+    lines = [line[min_leading_spaces:] for line in lines]
+    return '\n'.join(lines)
+
+
+# Generates UnambiguousTorchOperators.h and UnambiguousTorchOperators.cpp.
+# These provide macros that, given an operator and overload name, allow users
+# to access an "un-overloaded" function version of the operator. This
+# is useful for extension writers who want to (1) want to decltype the operator
+# and (2) don't want to worry about method-only operators.
+@dataclass(frozen=True)
+class UnambiguousTorchOperators:
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        unambiguous_name = self.unambiguous_function_name(f)
+        # NB: requires_grad is the only exception to the rule because
+        # its const correctness is questionable.
+        if unambiguous_name in set(['requires_grad_']):
+            return None
+
+        if self.target is Target.DECLARATION:
+            return self.gen_declaration(f)
+
+        if self.target is not Target.DEFINITION:
+            assert_never(self.target)
+
+        return self.gen_definition(f)
+
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_function_name(self, f: NativeFunction) -> str:
+        base_name = str(f.func.name.name)
+        overload_name = f.func.name.overload_name
+        if overload_name:
+            return f'{base_name}_{overload_name}'
+        return base_name
+
+    def gen_declaration(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
+        args = dispatcher.arguments(f.func)
+        args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
+        return f"TORCH_API {returns_type} {unambiguous_name}({args_str});\n"
+
+    def most_faithful_name(self, f: NativeFunction) -> str:
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
+        sig = sig_group.most_faithful_signature()
+        return sig.name()
+
+    def gen_definition(self, f: NativeFunction) -> str:
+        faithful_op_name = self.most_faithful_name(f)
+        unambiguous_name = self.unambiguous_function_name(f)
+        returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
+        args = dispatcher.arguments(f.func)
+        args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
+
+        # Method-only operator
+        if Variant.function not in f.variants:
+            arg0_name = args[0].name
+            other_arg_names = ', '.join(a.name for a in args[1:])
+            return deindent(f"""\
+                {returns_type} {unambiguous_name}({args_str}) {{
+                  return {arg0_name}.{faithful_op_name}({other_arg_names});
+                }}\
+            """)
+
+        args_names = ', '.join(a.name for a in args)
+        return deindent(f"""\
+            {returns_type} {unambiguous_name}({args_str}) {{
+              return at::{faithful_op_name}({args_names});
+            }}\
+        """)
+
+
 # Generates Function.cpp and Function.h.  These files provide the
 # functional public C++ API, and the scaffolding to call into
 # the dispatcher from these functions.  See also compute_tensor_method.
@@ -958,6 +1046,15 @@ def main() -> None:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+    })
+
+    cpu_fm.write('UnambiguousTorchOperators.cpp', lambda: {
+        'definitions': list(mapMaybe(UnambiguousTorchOperators(
+            Target.DEFINITION), native_functions)),
+    })
+    cpu_fm.write('UnambiguousTorchOperators.h', lambda: {
+        'declarations': list(mapMaybe(UnambiguousTorchOperators(
+            Target.DECLARATION), native_functions)),
     })
 
     cpu_fm.write('Functions.h', lambda: {
