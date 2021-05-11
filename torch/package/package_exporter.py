@@ -273,7 +273,7 @@ class PackageExporter:
         """
         self.dependency_graph.add_node(
             module_name,
-            src=src,
+            source=src,
             is_package=is_package,
             provided=True,
             action=_ModuleProviderAction.INTERN,
@@ -410,10 +410,6 @@ node [shape=box];
         dependencies: bool,
     ):
         module_obj = self._import_module(module_name)
-        self.dependency_graph.add_node(module_name, provided=True)
-
-        if not dependencies:
-            return
 
         # Find dependencies of this module and require them as well.
         is_package = hasattr(module_obj, "__path__")
@@ -426,10 +422,15 @@ node [shape=box];
             )
             return
 
-        deps = self._get_dependencies(source, module_name, is_package)
-        for dep in deps:
-            self.dependency_graph.add_edge(module_name, dep)
-            self.require_module_if_not_provided(dep)
+        self.dependency_graph.add_node(
+            module_name, is_package=is_package, source=source, provided=True
+        )
+
+        if dependencies:
+            deps = self._get_dependencies(source, module_name, is_package)
+            for dep in deps:
+                self.dependency_graph.add_edge(module_name, dep)
+                self.require_module_if_not_provided(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -557,6 +558,8 @@ node [shape=box];
         It should have the following signature::
 
             hook(exporter: PackageExporter, module_name: str) -> None
+
+        Hooks will be called in order of registration.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -799,17 +802,9 @@ node [shape=box];
                 if attrs.get("is_pickle") is True:
                     # This node came from save_source_pickle, we don't need to write any source for it.
                     continue
-                elif attrs.get("src") is not None:
-                    # This node came from save_source_string, write out the user-provided source.
-                    source = attrs["src"]
-                    is_package = attrs["is_package"]
-                else:
-                    # Otherwise import the module normally and use its source.
-                    module_obj = self._import_module(module_name)
-                    is_package = hasattr(module_obj, "__path__")
-                    source = self._get_source_of_module(module_obj)
-                    if source is None:
-                        raise AssertionError(module_name)
+
+                is_package = attrs["is_package"]
+                source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
 
             else:
