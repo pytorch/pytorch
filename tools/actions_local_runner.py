@@ -12,9 +12,8 @@ import re
 import fnmatch
 import shlex
 import configparser
-from typing import List, Dict, Any, Optional, Tuple, Union
 
-from . import mypy_wrapper
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -175,13 +174,16 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
         # Running quick lint, use mypy-wrapper instead so it checks that the files
         # actually should be linted
 
-        exit_code, mypy_issues = mypy_wrapper.run(args=[], files=[
-            os.path.join(REPO_ROOT, f) for f in files
-        ])
-        passed = exit_code == 0
+        passed, stdout, stderr = await shell_cmd(
+            [sys.executable, "tools/mypy_wrapper.py"] + [
+                os.path.join(REPO_ROOT, f) for f in files
+            ],
+            env=env,
+        )
 
         print_results("mypy (skipped typestub generation)", passed, [
-            "".join([f"{issue}\n" for issue in mypy_issues]),
+            stdout + "\n",
+            stderr + "\n",
         ])
         return passed
 
