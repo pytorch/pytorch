@@ -1480,13 +1480,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
   include_directories(${FOXI_INCLUDE_DIRS})
-
-  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/optimizer)
-  add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/onnx_optimizer"
-                   "${CONFU_DEPENDENCIES_BINARY_DIR}/onnx_optimizer")
-  caffe2_interface_library(onnx_optimizer optimizer_library)
-  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader onnx_optimizer)
+  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()

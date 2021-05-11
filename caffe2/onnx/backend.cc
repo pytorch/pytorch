@@ -8,7 +8,6 @@
 
 #ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "onnxoptimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
@@ -25,7 +24,6 @@ namespace caffe2 {
 namespace onnx {
 
 namespace {
-
 
 bool AlmostEqual(double a, double b) {
   constexpr static double kEps = 1e-15;
@@ -70,21 +68,6 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   d.set_device_id(onnx_device.device_id);
   return d;
 }
-
-#ifndef C10_MOBILE
-ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
-  std::vector<std::string> passes{"fuse_consecutive_transposes",
-                                  "eliminate_nop_transpose",
-                                  "fuse_transpose_into_gemm"};
-
-  if (init) {
-    passes.emplace_back("split_init");
-  } else {
-    passes.emplace_back("split_predict");
-  }
-  return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
-}
-#endif
 
 template <class T, class U>
 U LookUpWithDefault(
@@ -1537,14 +1520,9 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#ifndef C10_MOBILE
-  ModelProto init_model = OptimizeOnnx(onnx_model, true);
-  ModelProto pred_model = OptimizeOnnx(onnx_model, false);
-#else
   ModelProto init_model = ModelProto();
   ModelProto pred_model = onnx_model;
   pred_model.mutable_graph()->mutable_initializer()->Clear();
-#endif
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");
