@@ -62,8 +62,8 @@ Args:
 
 Examples::
 
-    >>> filters = torch.randn(33, 16, 3)
-    >>> inputs = torch.randn(20, 16, 50)
+    >>> inputs = torch.randn(33, 16, 30)
+    >>> filters = torch.randn(20, 16, 5)
     >>> F.conv1d(inputs, filters)
 """,
 )
@@ -112,8 +112,8 @@ Args:
 Examples::
 
     >>> # With square kernels and equal stride
-    >>> filters = torch.randn(8,4,3,3)
-    >>> inputs = torch.randn(1,4,5,5)
+    >>> filters = torch.randn(8, 4, 3, 3)
+    >>> inputs = torch.randn(1, 4, 5, 5)
     >>> F.conv2d(inputs, filters, padding=1)
 """,
 )  # noqa: E501
@@ -4656,7 +4656,7 @@ def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
     return out
 
 #
-# mha
+# multihead attention
 #
 
 def _in_projection_packed(
@@ -4686,7 +4686,7 @@ def _in_projection_packed(
         - q: :math:`(..., E)` where E is the embedding dimension
         - k: :math:`(..., E)` where E is the embedding dimension
         - v: :math:`(..., E)` where E is the embedding dimension
-        - w: :math:`(E * 3, E) where E is the embedding dimension
+        - w: :math:`(E * 3, E)` where E is the embedding dimension
         - b: :math:`E * 3` where E is the embedding dimension
 
         Output:
@@ -4783,8 +4783,8 @@ def _scaled_dot_product_attention(
 
     Args:
         q, k, v: query, key and value tensors. See Shape section for shape details.
-        attn_mask: optional float tensor containing mask values to be added to
-            calculated attention. May be 2D or 3D; see Shape section for details.
+        attn_mask: optional tensor containing mask values to be added to calculated
+            attention. May be 2D or 3D; see Shape section for details.
         dropout_p: dropout probability. If greater than 0.0, dropout is applied.
 
     Shape:

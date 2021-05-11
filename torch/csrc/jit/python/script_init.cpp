@@ -4,7 +4,9 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -1683,6 +1685,45 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return _load_for_mobile(in, optional_device);
+      });
+  m.def(
+      "_backport_for_mobile",
+      [](const std::string& filename_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        return _backport_for_mobile(filename_input, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer",
+      [](const std::string& buffer_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        std::istringstream in(buffer_input);
+        return _backport_for_mobile(in, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_to_buffer",
+      [](const std::string& filename_input, const int64_t version) {
+        std::ostringstream buffer_output;
+        bool success =
+            _backport_for_mobile(filename_input, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer_to_buffer",
+      [](const std::string& buffer_input, const int64_t version) {
+        std::istringstream in(buffer_input);
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(in, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def("_get_model_bytecode_version", [](const std::string& filename) {
+    return _get_model_bytecode_version(filename);
+  });
+  m.def(
+      "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
+        std::istringstream in(buffer);
+        return _get_model_bytecode_version(in);
       });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
