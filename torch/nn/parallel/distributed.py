@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
+from torch.autograd import Variable, Function
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -105,6 +106,19 @@ class _DDPUnevenInputsConfig(NamedTuple):
     ddp_join_divide_by_initial_world_size: bool
     ddp_join_throw_on_early_termination: bool
 
+# Add a DDPSink to queue call back of out-most backward/graph task,
+# this helps call back is fired after all gradients' calculation
+# is completed.
+class DDPSink(Function):
+    @staticmethod
+    def forward(ctx, input, reducer):
+        ctx.reducer = reducer
+        return input
+
+    @staticmethod
+    def backward(ctx, input):
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return input, None
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
@@ -425,6 +439,7 @@ class DistributedDataParallel(Module):
         else:
             self.process_group = process_group
 
+        self.static_graph = False
         self.dim = dim
         self.module = module
         self.device = list(self.module.parameters())[0].device
@@ -507,6 +522,7 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -567,6 +583,8 @@ class DistributedDataParallel(Module):
             param_to_name_mapping = {}
         # Builds reducer
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        if self.static_graph:
+            self._set_static_graph()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -650,10 +668,11 @@ class DistributedDataParallel(Module):
                 fqn = f"{module_name}.{param_name}"
                 # Bypass ignored parameters since those are not reduced by DDP
                 # to begin with.
-                if fqn not in self.parameters_to_ignore:
+                if fqn not in self.parameters_to_ignore and param.requires_grad:
                     if param not in param_set:
                         raise ValueError(
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
+                            " This indicates a bug in DDP, please report an issue to PyTorch."
                         )
                     param_index = param_to_param_index[param]
                     param_index_to_param_fqn[param_index] = fqn
@@ -664,7 +683,8 @@ class DistributedDataParallel(Module):
                 (
                     "Expected param to name mapping to cover all parameters, but"
                     f" got conflicting lengths: {len(param_set)} vs "
-                    f"{len(param_index_to_param_fqn)}"
+                    f"{len(param_index_to_param_fqn)}. This indicates a bug in DDP"
+                    ", please report an issue to PyTorch."
                 )
             )
 
@@ -733,6 +753,7 @@ class DistributedDataParallel(Module):
             self.reducer.save_thread_local_state()
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
+                self.num_iterations += 1
                 self.reducer.prepare_for_forward()
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
@@ -791,6 +812,11 @@ class DistributedDataParallel(Module):
             else:
                 self.require_forward_param_sync = False
 
+            # TODO. Right now we add this sink for static_graph training only. once
+            # this feature is stable, we will add this sink for all cases. E.g.
+            # This sink can help capture more accuracte backward start time as well.
+            if self.static_graph and self.num_iterations == 1:
+                output = DDPSink.apply(output, self.reducer)
             return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -958,11 +984,14 @@ class DistributedDataParallel(Module):
         modifications to the model or data loading is required.
 
         .. warning::
-            If the model or training loop this context manager is wrapepd around
+            If the model or training loop this context manager is wrapped around
             has additional distributed collective operations, such as
             ``SyncBatchNorm`` in the model's forward pass, then the flag
             ``throw_on_early_termination`` must be enabled. This is because this
             context manager is not aware of non-DDP collective communication.
+            This flag will cause all ranks to throw when any one rank
+            exhausts inputs, allowing these errors to be caught and recovered
+            from across all ranks.
 
         Args:
             divide_by_initial_world_size (bool): If ``True``, will divide
@@ -993,7 +1022,8 @@ class DistributedDataParallel(Module):
                 of data. If ``False``, will continue training with a smaller
                 effective world size until all ranks are joined. Note that if
                 this flag is specified, then the flag
-                ``divide_by_initial_world_size`` would be ignored.
+                ``divide_by_initial_world_size`` would be ignored. Default
+                is ``False``.
 
 
         Example::
@@ -1336,7 +1366,7 @@ class DistributedDataParallel(Module):
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
-    def get_ddp_logging_data(self):
+    def _get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
@@ -1349,7 +1379,7 @@ class DistributedDataParallel(Module):
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
-    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
+    def _set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
@@ -1392,5 +1422,14 @@ class DistributedDataParallel(Module):
             for i in range(n):
                 .....
         """
+        self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()
+        if self.find_unused_parameters:
+            warnings.warn(
+                "You passed find_unused_parameters=true to DistributedDataParallel, "
+                "`_set_static_graph` will detect unused parameters automatically, so "
+                "you do not need to set find_unused_parameters=true, just be sure these "
+                "unused parameters will not change during training loop while calling "
+                "`_set_static_graph`."
+            )
