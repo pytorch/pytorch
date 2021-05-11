@@ -238,6 +238,10 @@ class _RemoteModule(nn.Module):
 
             # Create the module on the remote side.
             fut.wait()  # Ensure remote_module_cls is available on remote side.
+
+            # TODO: We need to change this to rpc.remote, and make it async (see the else branch below).
+            # For that we need to be able to apply _module_interface_cls to the RRef returned by rpc.remote
+            # See https://github.com/pytorch/pytorch/issues/58098 for more context.
             self.module_rref = rpc.rpc_sync(
                 self.on,
                 _create_module_with_interface,
