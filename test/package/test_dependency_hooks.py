@@ -33,7 +33,7 @@ class TestDependencyHooks(PackageTestCase):
 
         self.assertEqual(my_externs, set(["module_a"]))
 
-    def test_multiple_hooks(self):
+    def test_multiple_extern_hooks(self):
         buffer = BytesIO()
 
         my_externs = set()
@@ -41,6 +41,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook(package_exporter, module_name):
             my_externs.add(module_name)
 
+        # This also checks ordering, since `remove()` will fail if the value is not in the set.
         def my_extern_hook2(package_exporter, module_name):
             my_externs.remove(module_name)
 
@@ -51,6 +52,26 @@ class TestDependencyHooks(PackageTestCase):
             exporter.save_source_string("foo", "import module_a")
 
         self.assertEqual(my_externs, set())
+
+    def test_multiple_mock_hooks(self):
+        buffer = BytesIO()
+
+        my_mocks = set()
+
+        def my_mock_hook(package_exporter, module_name):
+            my_mocks.add(module_name)
+
+        # This also checks ordering, since `remove()` will fail if the value is not in the set.
+        def my_mock_hook2(package_exporter, module_name):
+            my_mocks.remove(module_name)
+
+        with PackageExporter(buffer, verbose=False) as exporter:
+            exporter.mock(["package_a.subpackage", "module_a"])
+            exporter.register_mock_hook(my_mock_hook)
+            exporter.register_mock_hook(my_mock_hook2)
+            exporter.save_source_string("foo", "import module_a")
+
+        self.assertEqual(my_mocks, set())
 
     def test_remove_hooks(self):
         buffer = BytesIO()
