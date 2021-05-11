@@ -196,7 +196,6 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   for (auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return diff.abs().max().item<float>() < 2e-6 * maxValue;
 }
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
