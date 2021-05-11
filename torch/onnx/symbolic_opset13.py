@@ -150,7 +150,7 @@ def _reduce_op_symbolic(onnx_op_name):
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=1)
         else:
-            print('=== op_name (9): ', onnx_op_name)
+            print('=== op_name (13): ', onnx_op_name)
             keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
             return g.op(onnx_op_name, self, dim, keepdims_i=keepdim)
     return symbolic
