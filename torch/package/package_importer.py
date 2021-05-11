@@ -180,7 +180,7 @@ class PackageImporter(Importer):
             dtype = data_type(0).dtype
 
             if storage_context.has_storage(name):
-                storage = storage_context.get_storage(name, size, dtype).storage()
+                storage = storage_context.get_storage(name, dtype).storage()
             else:
                 tensor = self.zip_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
