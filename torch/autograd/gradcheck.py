@@ -805,13 +805,7 @@ def _real_and_imag(fn, sample_outputs):
             return tuple(fn_to_apply(o) if o.is_complex() else o for o in outs)
         return wrapped_fn
 
-    # TODO(@anjali411): remove this workaround once neg bit is added.
-    def torch_imag(x):
-        if x.is_conj():
-            return x.resolve_conj().imag
-        else:
-            return x.imag
-    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch_imag)
+    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch.imag)
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
@@ -880,8 +874,9 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         # For sparse, create a random sparse vec with random values in the same
         # indices. Make sure size is set so that it isn't inferred to be smaller.
         x_values = x._values()
+        dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
         values = torch.rand(x_values.numel(), generator=generator) \
-            .to(dtype=x.dtype, device=x.device) \
+            .to(dtype=dtype, device=x.device) \
             .reshape(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_coo_tensor(x._indices(), values, x.size())

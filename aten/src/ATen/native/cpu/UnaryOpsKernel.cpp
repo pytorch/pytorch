@@ -432,7 +432,6 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
     const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
     cpu_kernel(iter, [=](scalar_t a){
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
     });
   });

@@ -9,10 +9,10 @@ namespace at {
 
 struct MathOpFallback {
   MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(op_name_) {}
-  virtual bool is_bit_set(c10::TensorImpl&) = 0;
-  virtual void set_bit(Tensor&, bool) = 0;
+  virtual bool is_bit_set(const Tensor&) = 0;
+  virtual void set_bit(const Tensor&, bool) = 0;
   virtual Tensor resolve_bit(const Tensor&) = 0;
-  virtual Tensor& math_op_(Tensor&) = 0;
+  virtual Tensor& math_op_(const Tensor&) = 0;
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     // This fallback can be used for lazy math operations for which tensors maintain a corresponding dispatch key.
     // At the time of writing, there are two bits that can be set on a tensor: conj and neg. The explanation below uses
@@ -77,8 +77,7 @@ struct MathOpFallback {
         mut_arg = true;
       }
       if (ivalue.isTensor()) {
-        auto* impl = ivalue.unsafeToTensorImpl();
-        if (!is_bit_set(*impl)) {
+        if (!is_bit_set(ivalue.toTensor())) {
           continue;
         }
 

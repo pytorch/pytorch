@@ -101,8 +101,15 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', '_view_as_real_physical', '_conj_physical', 'conj_physical_',
-    '_resolve_conj_neg', 'neg_view'
+    '_neg_view'
 }
+
+GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
+    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    'sparse_mask_helper_cuda', '_sparse_addmm',
+}
+
+GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {

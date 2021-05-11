@@ -33,12 +33,12 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("set_", torch::CppFunction::makeFallthrough());
   m.impl("copy_", torch::CppFunction::makeFallthrough());
+  m.impl("clone", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj_physical", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
-  m.impl("_resolve_conj_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
   m.impl("empty.memory_format", torch::CppFunction::makeFallthrough());

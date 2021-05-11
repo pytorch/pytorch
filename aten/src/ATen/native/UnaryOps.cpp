@@ -367,7 +367,7 @@ Tensor real(const Tensor& self) {
   }
 }
 
-Tensor neg_view(const Tensor& self) {
+Tensor _neg_view(const Tensor& self) {
   Tensor self_;
   auto impl = c10::make_intrusive<TensorImpl>(
     Storage(self.storage()), self.key_set(), self.dtype());
@@ -382,7 +382,7 @@ Tensor neg_view(const Tensor& self) {
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
     auto real_tensor = at::_view_as_real_physical(self);
-    auto true_real_tensor = self.is_conj() ? at::neg_view(real_tensor) : real_tensor;
+    auto true_real_tensor = self.is_conj() ? at::_neg_view(real_tensor) : real_tensor;
     return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
@@ -410,22 +410,18 @@ Tensor& conj_physical_(Tensor& self) {
   return unary_op_impl_out(self, self, conj_physical_stub);
 }
 
-Tensor _resolve_conj_neg(const Tensor& self) {
-  auto result = at::empty_like(self, self.options());
-  // conjugation and negation are handled in `copy_()`
-  return result.copy_(self);
-}
-
 // No op if the neg bit is not set
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
-  return at::_resolve_conj_neg(self);
+  return self.clone();
 }
 
+// No op if the conj bit is not set
+// else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  return at::_resolve_conj_neg(self);
+  return self.clone();
 }
 
 Tensor _conj(const Tensor& self) {

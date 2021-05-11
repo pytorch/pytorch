@@ -63,7 +63,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
                       context.dilation,
                       context.groups};
   MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.conv2dOp);
-  NeuronType nt = neuronType(context);
+  NeuronType nt = neuronType(context.output_min, context.output_max);
   if (!op) {
     float* w = context.weight.data_ptr<float>();
     float* b = context.bias.has_value() ? ((*context.bias).data_ptr<float>())
