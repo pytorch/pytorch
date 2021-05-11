@@ -19,6 +19,7 @@ hash_t SingleShapeHash(const Shape& shape, hash_t seed) {
 
 }  // namespace
 
+// The hash is deterministic to enable easier debugging between separate runs.
 hash_t ShapeHash(const Shape& shape) {
   hash_t hash = 0xa5d2d6916;
   ShapeUtil::ForEachSubshape(shape,

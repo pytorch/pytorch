@@ -50,7 +50,9 @@ class Shape {
 
   bool IsTuple() const { return element_type_ == PrimitiveType::TUPLE; }
 
-  bool is_dynamic_dimension(int dimension) const { return false; }
+  bool is_dynamic_dimension(int dimension) const {
+    return dynamic_dimensions_.at(dimension);
+  }
 
   void set_dynamic_dimension(int dimension, bool is_dynamic) {
     dynamic_dimensions_[dimension] = is_dynamic;
@@ -60,6 +62,8 @@ class Shape {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
+  // Removes the dimension at index dim_to_delete entirely, reducing the rank
+  // by 1.
   void DeleteDimension(int64 dim_to_delete);
 
   PrimitiveType element_type() const { return element_type_; }

@@ -21,6 +21,8 @@ Status ForEachSubshapeHelper(const Shape& shape,
   TF_RETURN_IF_ERROR(func(shape, *index));
   if (shape.IsTuple()) {
     for (int64 i = 0; i < ShapeUtil::TupleElementCount(shape); ++i) {
+      // Track the sub-shape position, which can be used by the visitor
+      // function.
       index->push_back(i);
       TF_RETURN_IF_ERROR(ForEachSubshapeHelper(
           ShapeUtil::GetTupleElementShape(shape, i), func, index));
@@ -35,6 +37,8 @@ Status ForEachSubshapeHelper(const Shape& shape,
 void ShapeUtil::ForEachSubshape(const Shape& shape,
                                 const VisitorFunction& func) {
   ShapeIndex index;
+  // Can safely ignore error since the visitor closure always returns
+  // Status::OK().
   ForEachSubshapeHelper(
       shape,
       [&func](const Shape& subshape, const ShapeIndex& index) {

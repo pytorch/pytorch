@@ -19,6 +19,9 @@ uint64 DecodeFixed64(const char* ptr) {
 
 }  // namespace
 
+// Same as:
+// https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/platform/hash.cc
+
 uint64 Hash64(const char* data, size_t n, uint64 seed) {
   const uint64 m = 0xc6a4a7935bd1e995;
   const int r = 47;
