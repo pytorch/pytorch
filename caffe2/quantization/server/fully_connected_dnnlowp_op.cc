@@ -815,7 +815,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           b_dequantized_.resize(N);
           for (int j = 0; j < N; ++j) {
             b_dequantized_[j] = fbgemm::Dequantize<int32_t>(
-                b_quantized_data_[j], in_qparams_[2]);
+                b_quantized_data_[j],
+                filter_qparams_[quantize_channelwise_ ? j : 0]);
           }
           b_dequantized_data_ = b_dequantized_.data();
         }
@@ -827,7 +828,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
             (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[j],
                 0,
-                in_qparams_[0].scale * filter_qparams_[0].scale,
+                in_qparams_[0].scale *
+                    filter_qparams_[quantize_channelwise_ ? j : 0].scale,
                 32);
           }
           b_quantized_data_ = b_quantized_->data();
