@@ -239,6 +239,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     at::clearCallbacks();
   });
 
+  py::class_<c10::InferenceMode>(_C_m, "InferenceMode")
+      .def(py::init<bool>());
+
   Py_RETURN_TRUE;
 }
 
@@ -303,16 +306,6 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * set_inference_mode_enabled(PyObject* _unused, PyObject *arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  c10::InferenceMode::set_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * is_inference_mode_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -369,7 +362,6 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
-  {"_set_inference_mode_enabled", set_inference_mode_enabled, METH_O, nullptr},
   {"is_inference_mode_enabled", is_inference_mode_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},

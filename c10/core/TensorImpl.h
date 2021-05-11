@@ -308,7 +308,7 @@ struct C10_API VariableVersion {
   // accessed.
   uint32_t current_version() const {
     TORCH_CHECK(
-        version_counter_, "Inference tensor do not track version counter.");
+        version_counter_, "Inference tensors do not track version counter.");
     return version_counter_->version_;
   }
 };

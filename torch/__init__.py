@@ -35,14 +35,13 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn',
+    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
     'are_deterministic_algorithms_enabled', 'is_deterministic',
-    'inference_mode', 'set_inference_mode',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -682,7 +681,6 @@ from torch.autograd import (
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
     inference_mode as inference_mode,
-    set_inference_mode as set_inference_mode,
 )
 from torch import fft as fft
 from torch import futures as futures
