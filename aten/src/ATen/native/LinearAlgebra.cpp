@@ -2492,7 +2492,8 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
     } else {
       result = s_max / s_min;
     }
-    return result;
+    // squeeze the result for NumPy compatibility
+    return result.squeeze(-1);
   }
 
   // ord == ±1 ord == ±inf

@@ -1565,6 +1565,7 @@ class TestLinalg(TestCase):
             result = torch.linalg.cond(input, p)
             result_numpy = np.linalg.cond(input.cpu().numpy(), p)
             self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
+            self.assertEqual(result.shape, result_numpy.shape)
 
             # test out= variant
             out = torch.empty_like(result)
