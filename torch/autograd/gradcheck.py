@@ -966,16 +966,15 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
         for i, n_per_out in enumerate(numerical):
             for j, n in enumerate(n_per_out):
                 a = analytical_forward[j][i]
-                if not torch.allclose(a, n, rtol, atol):
+                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
                     raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag,
                                                               is_forward_ad=True))
     else:
         for i, o in enumerate(outputs):
             analytical = _check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, check_grad_dtypes)
-            inp_tensors = _iter_tensors(tupled_inputs, True)
 
-            for j, (a, n, inp) in enumerate(zip(analytical, numerical[i], inp_tensors)):
-                if not torch.allclose(a, n, rtol, atol):
+            for j, (a, n) in enumerate(zip(analytical, numerical[i])):
+                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
                     raise GradcheckError(_get_notallclose_msg(a, n, i, j, complex_indices, test_imag))
 
     return True
@@ -1140,7 +1139,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, outputs, all_u, all_v, eps, is_forward_ad=use_forward_ad)
     if use_forward_ad:
         assert all_v is None
-        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, outputs, all_u=all_u)
+        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, outputs, all_u=all_u, check_grad_dtypes=check_grad_dtypes)
     else:
         if not outputs:
             _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, eps, nondet_tol)
