@@ -622,6 +622,16 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
             mod(inp).sum().backward()
 
+    def test_hook_last_arg_requires_grad(self):
+        mod = nn.L1Loss()
+        inp = torch.rand(1, requires_grad=True)
+        mod.register_full_backward_hook(lambda m, gI, gO: None)
+
+        try:
+            mod(inp.detach(), inp)
+        except Exception as ex:
+            self.fail("Unexpected exception: %s" % ex)
+
     def test_hook_extra_input(self):
         class MyModule(nn.Module):
             def forward(self, non_tensor, tensor):
