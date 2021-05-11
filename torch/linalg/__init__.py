@@ -177,7 +177,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
         :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
 
-        It is always prefered to use :func:`torch.linalg.solve` when possible, as it is
+        It is always preferred to use :func:`torch.linalg.solve` when possible, as it is
         faster and more stable than computing the inverse and then multiplying.
 
 Args:
@@ -842,7 +842,7 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
 
         :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
 
-        It is always prefered to use :func:`~matrix_power` with :attr:`n`\ `> 0` followed
+        It is always preferred to use :func:`~matrix_power` with :attr:`n`\ `> 0` followed
         by :func:`torch.linalg.solve` when possible, rather than
         :func:`~matrix_power` with :attr:`n`\ `< 0`. The former method is
         faster and more stable than computing :math:`A^{-n}` explicitly.
@@ -1003,8 +1003,8 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
         :func:`torch.linalg.matrix_norm` computes a matrix norm.
 
-        It is always prefered to use the above operators instead of :func:`torch.linalg.norm` as they
-        remove potential ambiguities. For example, `torch.linalg.norm(A, ord=1, dim=(0, 1))` always
+        The above functions are often clearer and more flexible than using :func:`torch.linalg.norm`. 
+        For example, `torch.linalg.norm(A, ord=1, dim=(0, 1))` always
         computes a matrix norm, but with `torch.linalg.vector_norm(A, ord=1, dim=(0, 1))` it is possible
         to compute a vector norm over the two dimensions.
 
