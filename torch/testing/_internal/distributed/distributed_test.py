@@ -5923,9 +5923,9 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
             base_model = self._test_different_graph_across_ranks(find_unused_parameters=True)
-            self.assertFalse(base_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            self.assertFalse(base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0))
             static_model = self._test_different_graph_across_ranks(static_graph=True)
-            self.assertTrue(static_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            self.assertTrue(static_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0))
             for i, j in zip(base_model.parameters(), static_model.parameters()):
                 self.assertEqual(i, j)
 
