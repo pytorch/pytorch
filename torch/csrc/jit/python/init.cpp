@@ -1053,7 +1053,6 @@ void initJITBindings(PyObject* module) {
           "get_storage",
           [](StorageContext& self,
              const std::string& name,
-             size_t numel,
              py::object data_type_obj) {
             c10::Storage storage = self.getStorage(name);
             auto scalar_type =

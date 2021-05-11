@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 try:
     from torchvision.models import resnet18
@@ -69,7 +69,7 @@ class PackageScriptModuleTest(PackageTestCase):
         self.assertEqual(loaded_mod(input), scripted_mod(input))
 
     @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
+        IS_FBCODE or IS_SANDCASTLE or IS_WINDOWS,
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_save_scriptmodule_directory(self):
