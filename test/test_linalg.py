@@ -7431,9 +7431,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             torch.symeig(a, out=(out_w, out_v))
-            # Check warning occurs
-            # Now it gets 4 warnings, 2 coming from the deprecation
-            self.assertEqual(len(w), 4)
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
