@@ -4902,7 +4902,7 @@ Example::
 
 add_docstr(torch.lstsq,
            r"""
-lstsq(input, A, *, out=None) -> Tensor
+lstsq(input, A, *, out=None) -> (Tensor, Tensor)
 
 Computes the solution to the least squares and least norm problems for a full
 rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
@@ -4928,6 +4928,22 @@ Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :ma
 rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
 for the solution in each column is given by the sum of squares of elements in the
 remaining :math:`m - n` rows of that column.
+
+.. warning::
+
+    :func:`torch.lstsq` is deprecated in favor of :func:`torch.linalg.lstsq`
+    and will be removed in a future PyTorch release. :func:`torch.linalg.lstsq`
+    has reversed arguments and does not return the QR decomposition in the returned tuple,
+    (it returns other information about the problem).
+    The returned `solution` in :func:`torch.lstsq` stores the residuals of the solution in the
+    last `m - n` columns in the case `m > n`. In :func:`torch.linalg.lstsq`, the residuals
+    are in the field 'residuals' of the returned named tuple.
+
+    Unpacking the solution as``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.lstsq(A, B).solution
 
 .. note::
     The case when :math:`m < n` is not supported on the GPU.
