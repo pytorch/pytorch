@@ -100,6 +100,18 @@ Tensor & _th_nonzero_out(const Tensor & self, Tensor & result) {
             THBFloat16Tensor_nonzero(result_, self_);
             break;
         }
+        case ScalarType::ComplexDouble: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
         default:
             AT_ERROR("_th_nonzero_out not supported on CPUType for ", dispatch_scalar_type);
     }
@@ -161,47 +173,38 @@ Tensor _th_nonzero(const Tensor & self) {
             THBFloat16Tensor_nonzero(result_, self_);
             break;
         }
+        case ScalarType::ComplexDouble: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
         default:
             AT_ERROR("_th_nonzero not supported on CPUType for ", dispatch_scalar_type);
     }
     return result;
 }
-Tensor _th_var(const Tensor & self, bool unbiased) {
+Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THDoubleTensor_var_all(self_, unbiased)), options(ScalarType::Double));
+            return convert<double>(THDoubleTensor_std_var_all(self_, correction, take_sqrt));
             break;
         }
         case ScalarType::Float: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THFloatTensor_var_all(self_, unbiased)), options(ScalarType::Float));
+            return convert<float>(THFloatTensor_std_var_all(self_, correction, take_sqrt));
             break;
         }
         default:
             AT_ERROR("_th_var not supported on CPUType for ", dispatch_scalar_type);
-    }
-}
-Tensor _th_std(const Tensor & self, bool unbiased) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THDoubleTensor_std_all(self_, unbiased)), options(ScalarType::Double));
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THFloatTensor_std_all(self_, unbiased)), options(ScalarType::Float));
-            break;
-        }
-        default:
-            AT_ERROR("_th_std not supported on CPUType for ", dispatch_scalar_type);
     }
 }
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result) {

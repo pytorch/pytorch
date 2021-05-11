@@ -545,6 +545,18 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
 
     return result
 
+def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
+    sizes = ((2, 2), (2, 3, 2))
+    ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
+    dims = ((-2, -1), (-1, 0))
+
+    inputs: List[SampleInput] = []
+    for size, ord, dim, keepdim in product(sizes, ords, dims, [True, False]):
+        t = make_tensor(size, device, dtype, requires_grad=requires_grad)
+        inputs.append(SampleInput(t, args=(ord, dim, keepdim)))
+
+    return inputs
+
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [
         (S,),
@@ -563,8 +575,6 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
-
-    is_dtype_half = dtype in [torch.float16, torch.bfloat16]
 
     for test_size in test_sizes:
         is_vector_norm = len(test_size) == 1
@@ -2280,6 +2290,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(tensor_nd, kwargs=dict(dim=1, unbiased=True, keepdim=True)),
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=True, keepdim=True)),
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
+
+        SampleInput(tensor_nd, kwargs=dict(dim=(1,), correction=S // 2)),
+        SampleInput(tensor_nd, kwargs=dict(dim=None, correction=0, keepdim=True)),
     ]
 
 
@@ -4542,6 +4555,15 @@ op_db: List[OpInfo] = [
                # linalg.norm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('linalg.matrix_norm',
+           aten_name='linalg_matrix_norm',
+           dtypes=floating_and_complex_types(),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_matrix_norm,
+           skips=(
+               # linalg.matrix_norm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('linalg.qr',
            aten_name='linalg_qr',
            op=torch.linalg.qr,
@@ -5086,16 +5108,14 @@ op_db: List[OpInfo] = [
            # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('std',
-           dtypes=floating_types_and(),
+           dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            # std doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
+           backward_dtypesIfCPU=floating_types_and(torch.half),
            backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: std does support out in some signatures
            supports_out=False,
-           # std has only partial support for complex and half (#51127)
-           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
            assert_autodiffed=True,
            ),
     UnaryUfuncInfo('tan',
@@ -5722,16 +5742,14 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_unsqueeze),
     OpInfo('var',
-           dtypes=floating_types_and(),
+           dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            # var doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
+           backward_dtypesIfCPU=floating_types_and(torch.half),
            backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: revisit, some var signatures do support out (see std, too)
            supports_out=False,
-           # var has only partial support for complex and half (#51127)
-           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
            assert_autodiffed=True,
            ),
     OpInfo('xlogy',

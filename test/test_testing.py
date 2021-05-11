@@ -1094,7 +1094,7 @@ class TestAsserts(TestCase):
         expected = actual.tolist()
 
         for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(expected))):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
                 fn()
 
     @onlyCPU
