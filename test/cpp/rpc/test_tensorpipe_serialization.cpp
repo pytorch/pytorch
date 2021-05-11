@@ -93,8 +93,7 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::Message recvingRpcMessage =
       torch::distributed::rpc::tensorpipeDeserialize(
           std::move(recvingTpDescriptor),
-          std::move(recvingTpBuffers),
-          lazyStreamCtx);
+          std::move(recvingTpBuffers));
 
   // Data is ready
   EXPECT_EQ(mtype, recvingRpcMessage.type());
