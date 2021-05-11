@@ -4,6 +4,16 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         ("cuda", [
+            ("10.2", [
+                ("3.6", [
+                    ("shard_test", [XImportant(True)]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
             ("11.1", [
                 ("3.8", [
                     X(True),
