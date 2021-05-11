@@ -175,6 +175,44 @@ struct C10_API AutogradMetaFactoryRegisterer {
   }
 };
 
+// Note [Python interpreter tag]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// We store a PyObject on TensorImpl so that we can efficiently translate
+// tensors into the Python representations.  However, in some situations
+// (torchdeploy) there may be multiple Python interpreters in a single process
+// and we must take care not to accidentally mix up PyObjects with the wrong
+// interpreters.
+//
+// With torchdeploy, we have these invariants:
+//  - Any given TensorImpl can be associated with AT MOST one Python interpreter
+//  - A given TensorImpl's interpreter tag can only go from uninitialized to
+//    tagged; once tagged, this is a quiescent state (once tagged to an
+//    interpreter, ALWAYS tagged to that interpreter)
+//  - A thread may mutate the PyObject field of a TensorImpl if and only if it
+//    holds the GIL for the interpreter tagged on the TensorImpl.  (If the
+//    TensorImpl is not tagged, it must first atomically claim its tag before it
+//    can validly write)
+//
+// PythonInterpreterTagStatus describes what the state of its interpreter tag
+// is, relative to the thread currently holding the GIL.
+enum class PythonInterpreterTagStatus {
+  // We just allocated the Tensor, it hasn't escaped to other threads,
+  // we know that it definitely hasn't been tagged to be associated
+  // with an interpreter.
+  DEFINITELY_UNINITIALIZED,
+  // We queried the interpreter field and it looked uninitialized.  But
+  // another thread may have raced with us to tag it with some other
+  // interpreter id.  So we will have to do a CEX to make sure we can
+  // actually nab it.
+  MAYBE_UNINITIALIZED,
+  // We queried the interpreter field and it was tagged to belong to us.
+  // This means we have sole write access (as we hold the GIL for this
+  // interpreter)
+  TAGGED_BY_US,
+  // Someone else tagged this.  We can't use this TensorImpl from Python.
+  TAGGED_BY_OTHER,
+};
+
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
@@ -1301,12 +1339,76 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     version_counter_.bump();
   }
 
-  // TODO: safer version
-  std::atomic<PyObject*>& mut_pyobj() noexcept {
-    return pyobj_;
+  // Associate the TensorImpl with the specified PyObject, and, if necessary,
+  // also tag the interpreter.
+  //
+  // NB: This lives in a header so that we can inline away the switch on status
+  //
+  // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
+  // PyObject if necessary!
+  void init_pyobj(int16_t self_interpreter, PyObject* pyobj, c10::impl::PythonInterpreterTagStatus status) {
+    int16_t expected = -1;
+    switch (status) {
+      case c10::impl::PythonInterpreterTagStatus::DEFINITELY_UNINITIALIZED:
+        // caller guarantees there is no multithreaded access; if there is
+        // no data race OK to do a relaxed store
+        pyobj_interpreter_.store(self_interpreter, std::memory_order_relaxed);
+        break;
+      case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_US:
+        // no tagging is necessary, the tag is already correct
+        break;
+      case c10::impl::PythonInterpreterTagStatus::MAYBE_UNINITIALIZED:
+        // attempt to claim this TensorImpl with the specified interpreter
+        // tag
+        if (pyobj_interpreter_.compare_exchange_strong(expected, self_interpreter, std::memory_order_acq_rel)) {
+          break;
+        }
+        // fallthrough, we lost the race.  We are guaranteed not to lose the
+        // race with ourself, as calls to init_pyobj with the same interpreter
+        // ID must be sequentialized by the GIL
+      case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_OTHER:
+        TORCH_CHECK(false, "cannot allocate PyObject for Tensor on interpreter ", self_interpreter,
+          " that has already been used by another torch deploy interpreter ",
+          pyobj_interpreter_.load());
+    }
+
+    // we are the ONLY thread that can have gotten to this point.  It is not
+    // possible to conflict with another zero interpreter as access is protected
+    // by GIL
+    pyobj_ = pyobj;
   }
-  std::atomic<int16_t>& mut_pyobj_interpreter() noexcept {
-    return pyobj_interpreter_;
+
+  // Test the interpreter tag.  If tagged for the current interpreter, return
+  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged, returns
+  // a nullopt.  If it is definitely invalid, raises an error.
+  //
+  // NB: this lives in header so that we can avoid actually creating the
+  // c10::optional
+  c10::optional<PyObject*> check_pyobj(int16_t self_interpreter) noexcept {
+    // Note [Memory ordering on Python interpreter tag]
+    int16_t interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter == -1) {
+      // NB: This never returns DEFINITELY_UNINITIALIZED because there is
+      // always the possibility that another thread races to initialize
+      // after we query here.  The only time when we can conclude a tensor
+      // is definitely uninitialized is when we have just allocated it and
+      // it cannot have escaped to other threads yet
+      return c10::nullopt;
+    } else if (interpreter == self_interpreter) {
+      // NB: pyobj_ could still be null!
+      return c10::make_optional(pyobj_);
+    } else {
+      TORCH_CHECK(false, "cannot access PyObject for Tensor on interpreter ", self_interpreter,
+        " that has already been used by another torch deploy interpreter ",
+        pyobj_interpreter_.load());
+    }
+  }
+
+  // Clear the PyObject field for an interpreter, in situations where we
+  // statically know the tensor is tagged with our interpreter.
+  void unchecked_clear_pyobj(int16_t interpreter) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
+    pyobj_ = nullptr;
   }
 
  private:
@@ -2002,39 +2104,52 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::VariableVersion version_counter_;
 
-  // This field contains a weak reference to a PyObject representing
-  // this Tensor.  It MUST NOT be a strong reference, as that would
-  // create a reference cycle between Tensor and the PyObject.  If
-  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
-  // a new PyObject for it and set this field.  This is thread safe
-  // because all Python code is protected under the GIL.  This design does
-  // NOT WORK for Tensors which are shared across multiple Python
-  // subinterpreters (introduced in Python 3.8) since you don't have
-  // enough space to store the separate PyObject per subinterpreter.
-  // When a PyObject dies, you are obligated to clear this field
-  // (otherwise, you will try to use-after-free the pyobj); this currently
-  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
 
-  // TODO: collapse these into a single field on 64-bit
-  // NB: interpreter tag is 16-bits, even though as an atomic it has to take
-  // up an entire word, to ensure that we can safely fold it into pyobj
-  // for the packed pointer optimization
+  // This field contains the interpreter tag for this object.  See
+  // Note [Python interpreter tag] for general context
   //
-  // What memory_order do we need?  pyobj_interpreter_ is monotonic: it
-  // moves from -1 to some positive integer and can never change afterwards
-  // (this is the poisoning invariant).  Furthemore, it is OK to attempt to
-  // allocate a PyObject and then fail to write it later, we can just lose
-  // the PyObject, no biggy.  Finally, the circumstance we are allowed read
-  // the object are only when the tag matches, which implies an external
-  // synchronization with the write (because you take out the GIL for
-  // that interpreter before doing anything with the object).  Pretty sure
-  // relaxed is good enough for this case.
+  // Note [Memory ordering on Python interpreter tag]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // What memory_order do we need when accessing this atomic?  We don't
+  // need a single total modification order (as provided by
+  // memory_order_seq_cst) as pyobj_interpreter_ is monotonic: it can only
+  // transition from -1 to some positive integer and never changes afterwards.
+  // Because there is only one modification, it trivially already has a total
+  // modification order (e.g., we don't need fences or locked instructions on
+  // x86)
+  //
+  // In fact, one could make a reasonable argument that relaxed reads are OK,
+  // due to the presence of external locking (GIL) to ensure that interactions
+  // with other data structures are still correctly synchronized, so that
+  // we fall in the "Single-Location Data Structures" case as described in
+  // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2055r0.pdf
+  // However, on x86, it doesn't matter if I use acquire or relaxed on the load
+  // as I get the same assembly in both cases.  So I just use the more
+  // conservative acquire (which will impede compiler optimizations but I don't
   //
   // pyobj_interpreter_ == 0 is distinguished for the main process Python
   // interpreter (it is picked to be 0 so we can avoid masking in the packed
   // 64-bit case in the common case).
+  //
+  // NB: interpreter tag is 16-bits, even though as an atomic it has to take
+  // up an entire word, to ensure that we can safely fold it into pyobj
+  // for the packed pointer optimization
   std::atomic<int16_t> pyobj_interpreter_;
-  std::atomic<PyObject*> pyobj_;
+
+  // This field contains a weak reference to a PyObject representing
+  // this Tensor.  It MUST NOT be a strong reference, as that would
+  // create a reference cycle between Tensor and the PyObject.  If
+  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
+  // a new PyObject for it and set this field.  This field does not
+  // have to be protected by an atomic as it is only allowed to be
+  // accessed when you hold the GIL.
+  //
+  // When a PyObject dies, you are obligated to clear this field
+  // (otherwise, you will try to use-after-free the pyobj); this currently
+  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  PyObject* pyobj_;
+
+  // TODO: collapse pyobj_ and pyobj_interpreter_ into single field on 64-bit
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
