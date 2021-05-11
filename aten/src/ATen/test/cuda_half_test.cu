@@ -51,7 +51,7 @@ __device__ void test(){
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
-  assert(::abs(::atanh(Half(1.0)) - ::atanh(1.0f)) <= threshold);
+  assert(::abs(::atanh(Half(0.5)) - ::atanh(0.5f)) <= threshold);
   assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(Half(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);

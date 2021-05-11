@@ -14,7 +14,6 @@
 using namespace at;
 
 __device__ void test(){
-// #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   // test bfloat16 construction and implicit conversions in device
   assert(BFloat16(3) == BFloat16(3.0f));
   assert(static_cast<BFloat16>(3.0f) == BFloat16(3.0f));
@@ -54,7 +53,7 @@ __device__ void test(){
   assert(::abs(::acosh(BFloat16(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::acosh(BFloat16(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::asinh(BFloat16(1.0)) - ::asinh(1.0f)) <= threshold);
-  assert(::abs(::atanh(BFloat16(1.0)) - ::atanh(1.0f)) <= threshold);
+  assert(::abs(::atanh(BFloat16(0.5)) - ::atanh(0.5f)) <= threshold);
   assert(::abs(::asin(BFloat16(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(BFloat16(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(BFloat16(1.0)) - ::asinh(1.0f)) <= threshold);
@@ -78,7 +77,6 @@ __device__ void test(){
   assert(::abs(::isnan(BFloat16(0.0)) - ::isnan(0.0f)) <= threshold);
   assert(::abs(::isinf(BFloat16(0.0)) - ::isinf(0.0f)) <= threshold);
 #endif
-// #endif
 }
 
 __global__ void kernel(){
