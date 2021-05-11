@@ -40,7 +40,9 @@ class ConstantValueMap {
   ~ConstantValueMap() = default;
 
  private:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ConstantValueMap(){};
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ConstantValueMap& operator=(const ConstantValueMap&) = delete;
 
   std::unordered_map<std::string, size_t> rankMap;

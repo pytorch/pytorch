@@ -97,6 +97,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t ndim = input.ndimension();
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");

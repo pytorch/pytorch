@@ -17,6 +17,7 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_float) {
   KernelScope kernel_scope;
 
@@ -80,6 +81,7 @@ TEST(ExternalCall, Conv2d_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
   KernelScope kernel_scope;
@@ -144,6 +146,7 @@ TEST(ExternalCall, Conv2d_int) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_nobias_noargs) {
   KernelScope kernel_scope;
 
@@ -191,6 +194,62 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ExternalCall, Addmm_float) {
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {100, 300});
+  Placeholder Mat1("Mat1", kFloat, {100, 200});
+  Placeholder Mat2("Mat2", kFloat, {200, 300});
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+  int64_t beta = 2;
+  int64_t alpha = 2;
+
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_addmm",
+          {BufHandle(Input.data()),
+           BufHandle(Mat1.data()),
+           BufHandle(Mat2.data())},
+          {beta, alpha}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({100, 300}, options) * 5.f;
+  at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
+  at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
+  at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(100 * 300, 5.f);
+  std::vector<float> mat1_buf(100 * 200, 6.f);
+  std::vector<float> mat2_buf(200 * 300, 11.f);
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  ir_eval.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
@@ -240,6 +299,7 @@ TEST(ExternalCall, BinaryFloat) {
     at::Tensor ref = torchFunc(a, b);
 
     auto prod = [](std::vector<int64_t> v) {
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
     };
 
@@ -265,6 +325,7 @@ TEST(ExternalCall, BinaryFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, UnaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
@@ -279,20 +340,20 @@ TEST(ExternalCall, UnaryFloat) {
       std::string,
       std::vector<ExprHandle>>;
   std::vector<Test> tests = {};
-  tests.push_back(Test{
-      {1, 64, 8, 9},
-      {1, 64, 5, 7},
-      [](at::Tensor x) {
-        return at::adaptive_avg_pool2d(x, {5, 7});
-      },
-      "nnc_aten_adaptive_avg_pool2d",
-      toExprHandleVec({5, 7})});
-  tests.push_back(Test{
-      {100, 200},
-      {100},
-      [](at::Tensor x) { return at::mean(x, {1}); },
-      "nnc_aten_mean",
-      toExprHandleVec({1})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {1, 64, 8, 9},
+                       {1, 64, 5, 7},
+                       [](at::Tensor x) {
+                         return at::adaptive_avg_pool2d(x, {5, 7});
+                       },
+                       "nnc_aten_adaptive_avg_pool2d",
+                       toExprHandleVec({5, 7})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {100, 200},
+                       {100},
+                       [](at::Tensor x) { return at::mean(x, {1}); },
+                       "nnc_aten_mean",
+                       toExprHandleVec({1})});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;
@@ -320,6 +381,7 @@ TEST(ExternalCall, UnaryFloat) {
     at::Tensor ref = torchFunc(a);
 
     auto prod = [](std::vector<int64_t> v) {
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
     };
 
@@ -344,6 +406,7 @@ TEST(ExternalCall, UnaryFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
@@ -437,6 +500,7 @@ TEST(ExternalCall, ComputeInterop) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.
