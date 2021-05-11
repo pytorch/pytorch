@@ -4,9 +4,13 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
-#include <ATen/native/UnaryOps.h>
 
 namespace at { namespace native {
+
+// Forward declare some unary kernels
+void rsqrt_kernel_cuda(TensorIteratorBase& iter);
+void sqrt_kernel_cuda(TensorIteratorBase& iter);
+void reciprocal_kernel_cuda(TensorIteratorBase& iter);
 
 namespace {
 
@@ -94,12 +98,13 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   }
 }
 
+
 template<typename Base_type, typename Exp_type>
 void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
   if (d_exp == 0.5) {
-    sqrt_stub(kCUDA, iter);
+    sqrt_kernel_cuda(iter);
   } else if (d_exp == 2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base;
@@ -109,9 +114,9 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
       return base * base * base;
     });
   } else if (d_exp == -0.5) {
-    rsqrt_stub(kCUDA, iter);
+    rsqrt_kernel_cuda(iter);
   } else if (d_exp == -1) {
-    reciprocal_stub(kCUDA, iter);
+    reciprocal_kernel_cuda(iter);
   } else if (d_exp == -2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return 1.0 / (base * base);
