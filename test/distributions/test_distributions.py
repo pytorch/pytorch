@@ -3053,7 +3053,7 @@ class TestRsample(TestCase):
         t = torch.tensor([93909.5078125, 93909.5078125], dtype=dtype)
 
         expected = torch._dirichlet_grad(x, c, t)
-        actual = torch._dirichlet_grad(x.to('cuda'), c.to('cuda'), t.to('cuda'))
+        actual = torch._dirichlet_grad(x.to('cuda'), c.to('cuda'), t.to('cuda')).cpu()
         self.assertAlmostEqual(expected, actual, 4) 
 
     def test_dirichlet_tangent_field(self):
