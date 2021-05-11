@@ -62,8 +62,8 @@ Args:
 
 Examples::
 
-    >>> filters = torch.randn(33, 16, 3)
-    >>> inputs = torch.randn(20, 16, 50)
+    >>> inputs = torch.randn(33, 16, 30)
+    >>> filters = torch.randn(20, 16, 5)
     >>> F.conv1d(inputs, filters)
 """,
 )
@@ -112,8 +112,8 @@ Args:
 Examples::
 
     >>> # With square kernels and equal stride
-    >>> filters = torch.randn(8,4,3,3)
-    >>> inputs = torch.randn(1,4,5,5)
+    >>> filters = torch.randn(8, 4, 3, 3)
+    >>> inputs = torch.randn(1, 4, 5, 5)
     >>> F.conv2d(inputs, filters, padding=1)
 """,
 )  # noqa: E501
