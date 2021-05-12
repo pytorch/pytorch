@@ -79,17 +79,11 @@ class ScriptModuleSerializer {
       const Module& module,
       const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
-  void writeArchive(
-      const IValue& value,
-      const std::string& archive_name,
-      bool use_tensors_archive_table = false);
+  void writeArchive(const IValue& value, const std::string& archive_name);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
-
-  // key: tensor, value: pair(arhive_name, index)
-  TensorIndexMap tensors_archive_table_;
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
