@@ -6442,6 +6442,9 @@ class DistributedTest:
                     loss = get_loss(out)
                     loss.backward()
                     self._model_step(model)
+                    # Test non 1:1 calls to fwd/backward to ensure
+                    # https://github.com/pytorch/pytorch/issues/58111 is fixed.
+                    model_static_graph(inp, output_type=output_type)
                     out_static = model_static_graph(inp, output_type=output_type)
                     self.assertTrue(isinstance(out_static, type_mapping[output_type]))
                     loss_static = get_loss(out_static)
@@ -6453,8 +6456,6 @@ class DistributedTest:
                         self.assertEqual(p, p_static)
 
         def _test_ddp_bwd_with_retain_graph(self, static_graph):
-            # TODO: test with unused parameters, and different sets of unused parameters,
-            # and compare with local model.
             # Test adapted from https://github.com/pytorch/pytorch/issues/47260.
             class ToyModel(nn.Module):
                 def __init__(self):
@@ -6493,9 +6494,7 @@ class DistributedTest:
 
             for i in range(3):
                 if i < 2:
-                    print(f"Starting bwd for iteration {i} rank {rank}")
                     loss_fn(outputs[str(i)], labels).backward(retain_graph=True)
-                    print(f"Done with backward for iteration {i} rank {rank}")
                     loss_fn(outputs_local[str(i)], labels).backward(retain_graph=True)
                 else:
                     loss_fn(outputs[str(i)], labels).backward()
