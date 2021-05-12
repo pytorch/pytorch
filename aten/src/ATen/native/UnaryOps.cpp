@@ -56,6 +56,7 @@ CREATE_UNARY_FLOAT_META_FUNC(log1p)
 CREATE_UNARY_FLOAT_META_FUNC(log2)
 CREATE_UNARY_FLOAT_META_FUNC(reciprocal)
 CREATE_UNARY_FLOAT_META_FUNC(rsqrt)
+CREATE_UNARY_FLOAT_META_FUNC(sgn)
 CREATE_UNARY_FLOAT_META_FUNC(sigmoid)
 CREATE_UNARY_FLOAT_META_FUNC(sin)
 CREATE_UNARY_FLOAT_META_FUNC(sinc)
@@ -407,16 +408,13 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
-Tensor& sgn_out(const Tensor& self, Tensor& result) {
+TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
-    return unary_op_impl_out(result, self, sgn_stub);
+    unary_op_impl_out(const_cast<Tensor&>(result), self, sgn_stub);
   } else {
-    return unary_op_impl_out(result, self, sign_stub);
+    unary_op_impl_out(const_cast<Tensor&>(result), self, sign_stub);
   }
 }
-
-Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
-Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
