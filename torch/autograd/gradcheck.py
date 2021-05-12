@@ -1139,7 +1139,8 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, outputs, all_u, all_v, eps, is_forward_ad=use_forward_ad)
     if use_forward_ad:
         assert all_v is None
-        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, outputs, all_u=all_u, check_grad_dtypes=check_grad_dtypes)
+        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, outputs, all_u=all_u,
+                                                             check_grad_dtypes=check_grad_dtypes)
     else:
         if not outputs:
             _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, eps, nondet_tol)
