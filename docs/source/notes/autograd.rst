@@ -330,22 +330,22 @@ How is Wirtinger Calculus useful in optimization?
 Researchers in audio and other fields, more commonly, use gradient
 descent to optimize real valued loss functions with complex variables.
 Typically, these people treat the real and imaginary values as separate
-channels that can be updated. For a step size :math:`s/2` and loss
+channels that can be updated. For a step size :math:`\alpha/2` and loss
 :math:`L`, we can write the following equations in :math:`ℝ^2`:
 
     .. math::
         \begin{aligned}
-            x_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x}  \\
-            y_{n+1} &= y_n - (s/2) * \frac{\partial L}{\partial y}
+            x_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x}  \\
+            y_{n+1} &= y_n - (\alpha/2) * \frac{\partial L}{\partial y}
         \end{aligned}
 
 How do these equations translate into complex space :math:`ℂ`?
 
     .. math::
         \begin{aligned}
-            z_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y}) \\
-                    &= z_n - s * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}) \\
-                    &= z_n - s * \frac{\partial L}{\partial z^*}
+            z_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (\alpha/2) * \frac{\partial L}{\partial y}) \\
+                    &= z_n - \alpha * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}) \\
+                    &= z_n - \alpha * \frac{\partial L}{\partial z^*}
         \end{aligned}
 
 Something very interesting has happened: Wirtinger calculus tells us

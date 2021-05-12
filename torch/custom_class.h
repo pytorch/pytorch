@@ -5,7 +5,6 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
-#include <ATen/core/overloaded_function.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
@@ -455,10 +454,9 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_unique<jit::OverloadedFunction>(
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualMethodName,
         std::move(schema),
-        classTypePtr,
         std::move(wrapped_func),
         std::move(doc_string));
 

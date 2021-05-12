@@ -1,11 +1,12 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
+#include <c10/util/Optional.h>
 #include <iostream>
 
 namespace c10 {
@@ -124,7 +125,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 }
 
 AnyTypePtr AnyType::get() {
-  static auto value = AnyType::create();
+  static AnyTypePtr value(new AnyType());
   return value;
 }
 
@@ -135,63 +136,63 @@ TensorTypePtr TensorType::get() {
 }
 
 NumberTypePtr NumberType::get() {
-  static auto value = NumberType::create();
+  static NumberTypePtr value(new NumberType());
   return value;
 }
 IntTypePtr IntType::get() {
-  static auto value = IntType::create();
+  static IntTypePtr value(new IntType());
   return value;
 }
 FloatTypePtr FloatType::get() {
-  static auto value = FloatType::create();
+  static FloatTypePtr value(new FloatType());
   return value;
 }
 ComplexTypePtr ComplexType::get() {
-  static auto value = ComplexType::create();
+  static ComplexTypePtr value(new ComplexType());
   return value;
 }
 BoolTypePtr BoolType::get() {
-  static auto value = BoolType::create();
+  static BoolTypePtr value(new BoolType());
   return value;
 }
 StorageTypePtr StorageType::get() {
-  static auto value = StorageType::create();
+  static StorageTypePtr value(new StorageType());
   return value;
 }
 NoneTypePtr NoneType::get() {
-  static auto value = NoneType::create();
+  static NoneTypePtr value(new NoneType());
   return value;
 }
 GeneratorTypePtr GeneratorType::get() {
-  static auto value = GeneratorType::create();
+  static GeneratorTypePtr value(new GeneratorType());
   return value;
 }
 QuantizerTypePtr QuantizerType::get() {
-  static auto value = QuantizerType::create();
+  static QuantizerTypePtr value(new QuantizerType());
   return value;
 }
 QSchemeTypePtr QSchemeType::get() {
-  static auto value = QSchemeType::create();
+  static QSchemeTypePtr value(new QSchemeType());
   return value;
 }
 StringTypePtr StringType::get() {
-  static auto value = StringType::create();
+  static StringTypePtr value(new StringType());
   return value;
 }
 DeviceObjTypePtr DeviceObjType::get() {
-  static auto value = DeviceObjType::create();
+  static DeviceObjTypePtr value(new DeviceObjType());
   return value;
 }
 StreamObjTypePtr StreamObjType::get() {
-  static auto value = StreamObjType::create();
+  static StreamObjTypePtr value(new StreamObjType());
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
-static auto value = ScalarTypeType::create();
+static ScalarTypeTypePtr value(new ScalarTypeType());
 return value;
 }
 LayoutTypePtr LayoutType::get() {
-static auto value = LayoutType::create();
+static LayoutTypePtr value(new LayoutType());
 return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
@@ -199,11 +200,11 @@ OptionalTypePtr OptionalType::ofTensor() {
   return value;
 }
 PyObjectTypePtr PyObjectType::get() {
-  static auto value = PyObjectType::create();
+  static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
 CapsuleTypePtr CapsuleType::get() {
-  static auto value = CapsuleType::create();
+  static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
 ListTypePtr ListType::ofTensors() {
@@ -232,22 +233,22 @@ ListTypePtr ListType::ofStrings() {
 }
 
 AnyListTypePtr AnyListType::get() {
-  static auto value = AnyListType::create();
+  static AnyListTypePtr value(new AnyListType());
   return value;
 }
 
 AnyTupleTypePtr AnyTupleType::get() {
-  static auto value = AnyTupleType::create();
+  static AnyTupleTypePtr value(new AnyTupleType());
   return value;
 }
 
 AnyClassTypePtr AnyClassType::get() {
-  static auto value = AnyClassType::create();
+  static AnyClassTypePtr value(new AnyClassType());
   return value;
 }
 
 AnyEnumTypePtr AnyEnumType::get() {
-  static auto value = AnyEnumType::create();
+  static AnyEnumTypePtr value(new AnyEnumType());
   return value;
 }
 
@@ -390,6 +391,7 @@ MatchTypeReturn matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -415,6 +417,7 @@ MatchTypeReturn matchTypeVariables(
         const auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
+          // NOLINTNEXTLINE(performance-no-automatic-move)
           return result;
         }
       }
@@ -429,6 +432,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -442,6 +446,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -455,6 +460,7 @@ MatchTypeReturn matchTypeVariables(
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
     } else if (!actual->isSubtypeOf(NoneType::get())) {
@@ -870,6 +876,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   return ss.str();
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static std::vector<bool> findContiguous(
     const at::IntArrayRef& sizes,
     const at::IntArrayRef& strides) {
@@ -941,6 +948,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   return VaryingShape<Stride>{stride_properties};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
 template struct VaryingShape<c10::ShapeSymbol>;
@@ -951,6 +959,7 @@ template struct VaryingShape<int64_t>;
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
@@ -1086,15 +1095,17 @@ void ClassType::addOverloadedMethod(torch::jit::Function* method) {
       return;
     }
   }
+
   auto it = overloaded_methods_.insert(
-      std::pair<std::string, std::vector<torch::jit::Function*>>(
-          method->name(), std::vector<torch::jit::Function*>()));
+      std::pair<std::string, std::vector<std::string>>(
+          method->name(), std::vector<std::string>()));
   // create a mangled name for this function and bookkeep
   // the mangled name and its' corresponding function.
   const std::string& mangled_name =
       method->name() + "__" + std::to_string(it.first->second.size());
-  it.first->second.push_back(method);
-  mangled_to_function_[mangled_name] = method;
+  it.first->second.push_back(mangled_name);
+  // registers where this overloaded function is stored in the methods map.
+  mangled_to_function_[mangled_name] = methods_.size();
   methods_.push_back(method);
 }
 
@@ -1425,18 +1436,19 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
   return *method;
 }
 
-std::vector<torch::jit::Function*> ClassType::findOverloadedMethod(
+c10::optional<std::vector<std::string>> ClassType::findOverloadedMethod(
     const std::string& name) const {
   if (overloaded_methods_.find(name) != overloaded_methods_.end()) {
     return overloaded_methods_.find(name)->second;
   }
-  return std::vector<torch::jit::Function*>();
+  return c10::nullopt;
 }
 
 torch::jit::Function* ClassType::getMangledOverloadedMethod(
     const std::string& name) const {
   if (mangled_to_function_.find(name) != mangled_to_function_.end()) {
-    return mangled_to_function_.find(name)->second;
+    auto actual_method_idx = mangled_to_function_.find(name)->second;
+    return methods_[actual_method_idx];
   }
   return nullptr;
 }
@@ -1544,6 +1556,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
         return false;
       }
       if (!self_method->getSchema().isSubtypeOf(
+              // NOLINTNEXTLINE(bugprone-argument-comment)
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
@@ -1585,6 +1598,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
@@ -1672,6 +1686,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < attributes_.size(); ++i) {
     TORCH_CHECK(
         name != attributes_[i].getName(),

@@ -57,15 +57,12 @@
 namespace torch {
 namespace jit {
 
-// NB: Need VISIBILITY_HIDDEN for silencing compiler error
-struct VISIBILITY_HIDDEN PythonArguments {
-  PythonArguments(
-      const struct tuple_slice& args_,
-      const pybind11::kwargs& kwargs_)
-      : args(args_), kwargs(kwargs_) {}
-  const struct tuple_slice& args;
-  const pybind11::kwargs& kwargs;
-};
+// find the overloaded method for Torchbind using python arguments
+c10::optional<Method> match_overloaded_methods(
+    Module method_owner,
+    const std::string& method_name,
+    const struct tuple_slice& args,
+    const pybind11::kwargs& kwargs);
 
 void clear_registered_instances(void* ptr);
 
@@ -164,7 +161,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
-        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+        [pyFut(this->getPtr()),
+         pf(std::move(pf))](c10::ivalue::Future& /* unused */) -> IValue {
           try {
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
@@ -263,12 +261,11 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
 inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(
-        ConstantString::create(py::cast<std::string>(key)),
-        StringType::create());
+        ConstantString::create(py::cast<std::string>(key)), StringType::get());
   } else if (py::isinstance<py::int_>(key)) {
-    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+    return TypedIValue(py::cast<int64_t>(key), IntType::get());
   } else if (py::isinstance<py::float_>(key)) {
-    return TypedIValue(py::cast<double>(key), FloatType::create());
+    return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
@@ -579,7 +576,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }

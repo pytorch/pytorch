@@ -12,6 +12,7 @@ CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
@@ -21,11 +22,14 @@ C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 class MiniDBCursor : public Cursor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit MiniDBCursor(FILE* f, std::mutex* mutex)
       : file_(f), lock_(*mutex), valid_(true) {
     // We call Next() to read in the first entry.
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Next();
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~MiniDBCursor() override {}
 
   void Seek(const string& /*key*/) override {
@@ -96,6 +100,7 @@ class MiniDBTransaction : public Transaction {
   explicit MiniDBTransaction(FILE* f, std::mutex* mutex)
       : file_(f), lock_(*mutex) {}
   ~MiniDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
 
@@ -143,6 +148,7 @@ class MiniDB : public DB {
     VLOG(1) << "Opened MiniDB " << source;
   }
   ~MiniDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Close();
   }
 
@@ -170,7 +176,9 @@ class MiniDB : public DB {
   std::mutex file_access_mutex_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(MiniDB, MiniDB);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
 void DBReaderSerializer::Serialize(
@@ -204,7 +212,9 @@ void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
 
 namespace {
 // Serialize TensorCPU.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()), DBReaderSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(DBReader, DBReaderDeserializer);
 } // namespace
 

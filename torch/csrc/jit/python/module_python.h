@@ -1,4 +1,5 @@
 #pragma once
+#include "c10/util/Optional.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/api/module.h>

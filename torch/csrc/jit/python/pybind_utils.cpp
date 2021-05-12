@@ -5,19 +5,21 @@
 namespace torch {
 namespace jit {
 
-c10::optional<Method> Method::matchOverloadedMethods(
-    const struct PythonArguments& args) {
-  auto methods = owner().get_overloaded_methods(name());
-  for (auto method : methods) {
-    try {
-      createStackForSchema(
-          method.function().getSchema(),
-          args.args,
-          args.kwargs,
-          owner()._ivalue());
-      return method;
-    } catch (schema_match_error& error) {
-      continue;
+c10::optional<Method> match_overloaded_methods(
+    Module owner,
+    const std::string& method_name,
+    const struct tuple_slice& args,
+    const pybind11::kwargs& kwargs) {
+  auto methods = owner.get_overloaded_methods(method_name);
+  if (methods.has_value()) {
+    for (auto method : methods.value()) {
+      try {
+        createStackForSchema(
+            method.function().getSchema(), args, kwargs, owner._ivalue());
+        return method;
+      } catch (schema_match_error& error) {
+        continue;
+      }
     }
   }
   return c10::nullopt;

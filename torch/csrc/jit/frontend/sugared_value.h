@@ -155,6 +155,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
@@ -459,26 +460,14 @@ struct MethodValue : public SugaredValue {
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function* method = class_type->findMethod(method_name);
-        if (auto overloaded_method =
-                dynamic_cast<OverloadedFunction*>(method)) {
-          auto matched = overloaded_method->matchOverloadedSchemas(
-              loc, *f.graph(), argsWithSelf, kwargs);
-          auto mangled_name =
-              method_name + "__" + std::to_string(matched.first);
-          Value* output =
-              f.graph()->insertMethodCall(mangled_name, matched.second);
-          output->node()->setSourceRange(loc);
-          return std::make_shared<SimpleValue>(output);
-        } else {
-          try {
-            method->ensure_defined();
-          } catch (const RecursiveMethodCallError&) {
-            throw ErrorReport(loc)
-                << " method '" << method->name() << "' is called recursively. "
-                << "Recursive calls are not supported";
-          }
-          schemas.push_back(&(method->getSchema()));
+        try {
+          method->ensure_defined();
+        } catch (const RecursiveMethodCallError&) {
+          throw ErrorReport(loc)
+              << " method '" << method->name() << "' is called recursively. "
+              << "Recursive calls are not supported";
         }
+        schemas.push_back(&(method->getSchema()));
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
