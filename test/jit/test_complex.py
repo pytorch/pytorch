@@ -303,17 +303,6 @@ class TestComplex(JitTestCase):
         self.checkScript(fn3, (x1, y1))
         self.checkScript(fn4, (x1, y1))
 
-        def fn5(a: complex, b: int):
-            return a == b
-
-        def fn6(a: complex, b: int):
-            return a != b
-
-        with self.assertRaises(RuntimeError):
-            self.checkScript(fn5, (x1, 1))
-        with self.assertRaises(RuntimeError):
-            self.checkScript(fn6, (x1, 1))
-
     def test_div(self):
         def fn1(a: complex, b: complex):
             return a / b
