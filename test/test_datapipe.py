@@ -824,7 +824,7 @@ class TestTyping(TestCase):
                 with runtime_validation_disabled():
                     self.assertEqual(list(d for d in dp), ds)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(d for d in dp)
 
 

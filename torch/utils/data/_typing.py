@@ -373,7 +373,7 @@ def _reinforce_type(self, expected_type):
     is required to be a subtype of the original type hint. It's useful for users to
     apply a more strict requirement for data type.
     """
-    if "@runtime_validation" not in inspect.getsource(self.__iter__):
+    if not getattr(self.__iter__, '_runtime_validation', False):
         warnings.warn("The type of data generated from `DataPipe` instance won't be validated "
                       "at runtime. Decorator of `runtime_validation` is required to be attached "
                       "to `__iter__` method of {} for runtime type validation".format(self.__class__))
