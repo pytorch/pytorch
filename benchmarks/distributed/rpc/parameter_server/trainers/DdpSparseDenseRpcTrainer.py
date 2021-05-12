@@ -9,7 +9,7 @@ class DdpSparseDenseRpcTrainer(DdpSparseRpcTrainer):
     @staticmethod
     def hook(state, bucket):
         cref = state.cref
-        cref.process_bucket(state, bucket)
+        return cref.process_bucket(state, bucket)
 
     def get_hook(self):
         return DdpSparseDenseRpcTrainer.hook
