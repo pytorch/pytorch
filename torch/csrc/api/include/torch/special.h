@@ -182,6 +182,14 @@ inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& oth
   return torch::special_xlog1py_out(result, self, other);
 }
 
+inline Tensor ndtr(const Tensor& self) {
+  return torch::special_ndtr(self);
+}
+
+inline Tensor ndtr_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtr_out(result, self);
+}
+
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///

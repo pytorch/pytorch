@@ -290,3 +290,11 @@ Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))
+
+ndtr = _add_docstr(_special.special_ndtr,
+                   r"""
+ndtr(input, *, out=None) -> Tensor
+
+TODO: Add documentation
+
+""".format(**common_args))
