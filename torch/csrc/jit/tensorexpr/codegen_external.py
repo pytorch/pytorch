@@ -46,31 +46,31 @@ def gen_external(native_functions_path):
 
         # print(tensor_decls, name, arg_names)
         func_decl = f"""
-    void nnc_aten_{name}(
-        int64_t bufs_num,
-        void** buf_data,
-        int64_t* buf_ranks,
-        int64_t* buf_dims,
-        int8_t* buf_dtypes,
-        int64_t args_num,
-        int64_t* extra_args) {{
-    std::vector<at::Tensor> tensors =
-            constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-    at::Tensor& r = tensors[0];
-    {nl.join(tensor_decls)}
-    try {{
-        at::{name}_out({', '.join(['r'] + arg_names)});
-    }} catch(...) {{
-    }}
-    }}
-    const static RegisterNNCExternalFunction nnc_{name}(
-        "nnc_aten_{name}",
-        nnc_aten_{name});
-    """
+void nnc_aten_{name}(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {{
+std::vector<at::Tensor> tensors =
+        constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+at::Tensor& r = tensors[0];
+{nl.join(tensor_decls)}
+try {{
+    at::{name}_out({', '.join(['r'] + arg_names)});
+}} catch(...) {{
+}}
+}}
+const static RegisterNNCExternalFunction nnc_{name}(
+    "nnc_aten_{name}",
+    nnc_aten_{name});
+"""
         func_decls.append(func_decl)
-    external_path = "external_functions_template.cpp"
+    external_path = "external_functions_codegen_template.cpp"
     code_template = CodeTemplate.from_file(external_path)
-    with open('external_functions.cpp', 'w') as f:
+    with open('external_functions_codegen.cpp', 'w') as f:
         f.write(code_template.substitute(external_functions=func_decls))
 
 
