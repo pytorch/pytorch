@@ -2278,6 +2278,31 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     return list(generate_samples())
 
 
+def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
+    # not needed once OpInfo tests support Iterables
+    def generate_samples():
+        for lu_sample in sample_inputs_lu(op_info, device, dtype, requires_grad, **kwargs):
+            lu_data, pivots = lu_sample.input.lu()
+            yield SampleInput(lu_data, args=(pivots,))
+
+            # generate rectangular inputs
+            lu_data_shape = lu_data.shape
+            batch_shape = lu_data_shape[:-2]
+            n = lu_data_shape[-2]
+
+            for shape_inc in ((1, 0), (0, 1)):
+                lu_data, pivots = make_tensor(
+                    batch_shape + (n + shape_inc[0], n + shape_inc[1]),
+                    device, dtype,
+                    requires_grad=False,
+                    low=None, high=None
+                ).lu()
+                lu_data.requires_grad_(requires_grad)
+                yield SampleInput(lu_data, args=(pivots,))
+
+    return list(generate_samples())
+
+
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3346,7 +3371,7 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
-def sample_inputs_view(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (((S, S, S), (S * S, S)),
@@ -3363,7 +3388,7 @@ def sample_inputs_view(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
-def sample_inputs_view_as(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
 
     cases = (((S, S, S), (S * S, S)),
@@ -4774,6 +4799,21 @@ op_db: List[OpInfo] = [
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
+    OpInfo('lu_unpack',
+           op=torch.lu_unpack,
+           dtypes=floating_and_complex_types(),
+           supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This cases vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
+           supports_out=True,
+           sample_inputs_func=sample_inputs_lu_unpack,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+           )),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -5628,33 +5668,41 @@ op_db: List[OpInfo] = [
                                 active_if=TEST_WITH_ROCM),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
     OpInfo('ravel',
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_ravel,
            ),
+    OpInfo('reshape',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_view_reshape,
+           supports_out=False,
+           ),
+    OpInfo('reshape_as',
+           op=lambda x, other: x.reshape_as(other),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_view_as_reshape_as,
+           skips=(
+               # Because reshape_as does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           supports_out=False,
+           ),
     OpInfo('view',
            op=lambda x, shape: x.view(shape),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
                # Because view does not have a function variant.
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
-           sample_inputs_func=sample_inputs_view,
+           sample_inputs_func=sample_inputs_view_reshape,
            ),
     OpInfo('view_as',
            op=lambda x, other: x.view_as(other),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
                # Because view_as does not have a function variant.
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
-           sample_inputs_func=sample_inputs_view_as,
+           sample_inputs_func=sample_inputs_view_as_reshape_as,
            ),
     OpInfo('pinverse',
            op=torch.pinverse,
@@ -6173,14 +6221,6 @@ def method_tests():
         ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
         ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
-        ('reshape', (S, S, S), (S * S, S), '', (False,)),
-        ('reshape', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
-        ('reshape', (S,), (S,), '1d', (False,)),
-        ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
-        ('reshape', (), (1,), 'scalar_to_1d', (False,)),
-        ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
-        ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
-        ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
