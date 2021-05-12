@@ -12,7 +12,14 @@
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
+
 #include <limits>
+#include <chrono>
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
@@ -55,6 +62,14 @@ struct ConvParams {
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_te_eager(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef pad,
+    IntArrayRef dilation,
+    int64_t groups) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -307,6 +322,47 @@ auto ConvParams::use_xnnpack(
   }
 #endif
   return false;
+}
+
+auto ConvParams::use_te_eager(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef pad,
+    IntArrayRef dilation,
+    int64_t groups) const -> bool {
+  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sizes();
+  auto bias_sizes = bias.sizes();
+
+  if (!input.is_floating_point() || !weight.is_floating_point()) {
+    return false;
+  }
+  if (input_sizes.size() != 4 || weight_sizes.size() != 4 || bias_sizes.size() != 1) {
+    return false;
+  }
+  // Check if this is depthwise
+  if ((input_sizes[1] != weight_sizes[0]) ||
+      (input_sizes[1] != groups) ||
+      (weight_sizes[1] != 1)) {
+    return false;
+  }
+  // Check if this 3x3
+  if (weight_sizes[2] != 3 || weight_sizes[3] != 3) {
+    return false;
+  }
+  if (is_strided() && (stride.size() != 2 || stride[0] != stride[1])) {
+    return false;
+  }
+  if (pad.size() != 2 || pad[0] != pad[1]) {
+    return false;
+  }
+  if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
+    return false;
+  }
+
+  return true;
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -821,6 +877,225 @@ at::Tensor convolution_overrideable(
   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
+namespace {
+
+namespace te = torch::jit::tensorexpr;
+
+std::vector<te::ExprHandle> toExpr(IntArrayRef val) {
+  std::vector<te::ExprHandle> expr;
+  expr.reserve(val.size());
+  for (auto v : val) {
+    expr.emplace_back(v);
+  }
+  return expr;
+}
+
+te::KernelArena kernel_arena;
+
+bool dynamic_conv_found = false;
+int gR;
+int gS;
+int gStride;
+int gPad;
+te::LLVMCodeGen* gCG = nullptr;
+
+bool is_te_eager_convolution_dynamic(IntArrayRef weight_sizes,
+      int stride, int pad) {
+  if (!dynamic_conv_found) {
+    return true;
+  }
+  if(weight_sizes[2] == gR &&
+        weight_sizes[3] == gS &&
+        stride == gStride &&
+        pad == gPad) {
+    return true;
+  }
+  return false;
+}
+
+at::Tensor te_eager_convolution_dynamic(const at::Tensor& input,
+    const at::Tensor& weight,
+    IntArrayRef stride,
+    IntArrayRef pad,
+    IntArrayRef dilation,
+    int64_t groups) {
+  std::cout << "&kernel_arena = " << &kernel_arena << std::endl;
+  te::KernelScope ks(&kernel_arena);
+  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sizes();
+  if (!dynamic_conv_found) {
+    // Codegen the first time this function is called.
+    te::BufHandle I("input", toExpr(input_sizes), te::kFloat);
+    te::BufHandle W("weight", toExpr(weight_sizes), te::kFloat);
+    te::VarHandle N_var("N", te::kInt);
+    te::VarHandle C_var("C", te::kInt);
+    te::VarHandle H_var("H", te::kInt);
+    te::VarHandle W_var("W", te::kInt);
+    te::VarHandle K_var("K", te::kInt);
+    te::VarHandle CperG_var("CperG", te::kInt);
+    int S = stride[0];
+    int P = pad[0];
+    te::VarHandle kGroups_var("kGroups", te::kInt);
+    auto result = te::conv2d_depthwise(I, W, N_var, C_var, H_var, W_var, K_var, CperG_var, S, P, kGroups_var);
+
+    te::LoopNest ln({result});
+    ln.prepareForCodegen();
+    te::Stmt* s = ln.root_stmt();
+    s = te::IRSimplifier::simplify(s);
+
+    std::vector<te::CodeGen::BufferArg> buffer_args = {
+        I, W, N_var, C_var, H_var, W_var, K_var, CperG_var, kGroups_var, result};
+    auto start = std::chrono::high_resolution_clock::now();
+    gCG = new te::LLVMCodeGen(s, buffer_args);
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "Codegen time = " << duration.count() << "us" << std::endl;
+
+    dynamic_conv_found = true;
+    gR = weight_sizes[2];
+    gS = weight_sizes[3];
+    gStride = S;
+    gPad = P;
+  } else {
+    std::cout << "Reusing existing dynamic conv codegen" << std::endl;
+  }
+
+  auto output_size = conv_output_size(input_sizes, weight_sizes, pad, stride, dilation);
+  auto output = input.new_empty(output_size);
+  int N = input_sizes[0];
+  int C = input_sizes[1];
+  int H = input_sizes[2];
+  int W = input_sizes[3];
+  int K = weight_sizes[0];
+  int CperG = weight_sizes[1];
+  auto kGroups = static_cast<int>(groups);
+  std::vector<void*> call_args;
+  call_args.push_back(input.data_ptr());
+  call_args.push_back(weight.data_ptr());
+  call_args.push_back(&N);
+  call_args.push_back(&C);
+  call_args.push_back(&H);
+  call_args.push_back(&W);
+  call_args.push_back(&K);
+  call_args.push_back(&CperG);
+  call_args.push_back(&groups);
+  call_args.push_back(output.data_ptr());
+  std::cout << "Before call" << std::endl;
+  gCG->call_raw(call_args);
+  std::cout << "LLVMCodeGen::call_raw() completed successfully" << std::endl;
+  return output;
+}
+
+at::Tensor te_eager_convolution_no_bias(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    IntArrayRef stride,
+    IntArrayRef pad,
+    IntArrayRef dilation,
+    int64_t groups) {
+  te::KernelScope ks(&kernel_arena);
+
+  te::BufHandle I("input", toExpr(input.sizes()), te::kFloat);
+  te::BufHandle W("weight", toExpr(weight.sizes()), te::kFloat);
+  int S = stride[0];
+  int P = pad[0];
+  int G = static_cast<int>(groups);
+  std::cout << "input sizes: " << input.sizes() << std::endl;
+  std::cout << "weight sizes: " << weight.sizes() << std::endl;
+  std::cout << "stride = " << S << std::endl;
+  std::cout << "padding = " << P << std::endl;
+  std::cout << "groups = " << G << std::endl;
+
+  if(is_te_eager_convolution_dynamic(weight.sizes(), S, P)) {
+    return te_eager_convolution_dynamic(input, weight, S, P, dilation, groups);
+  }
+
+  std::function<te::Tensor()> call_conv2d;
+  auto result = te::conv2d_depthwise(I, W, S, P, G);
+
+  te::LoopNest ln({result});
+  ln.prepareForCodegen();
+  te::Stmt* s = ln.root_stmt();
+  s = te::IRSimplifier::simplify(s);
+
+  std::vector<te::CodeGen::BufferArg> buffer_args;
+  buffer_args.push_back(I);
+  buffer_args.push_back(W);
+  buffer_args.push_back(result);
+  auto start = std::chrono::high_resolution_clock::now();
+  te::LLVMCodeGen cg(s, buffer_args);
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = duration_cast<std::chrono::microseconds>(stop - start);
+  std::cout << "Codegen time = " << duration.count() << "us" << std::endl;
+
+  // auto output = at::empty_like(input);
+  auto output_size = conv_output_size(input.sizes(), weight.sizes(), pad, stride, dilation);
+  auto output = input.new_empty(output_size);
+  std::vector<te::CodeGen::CallArg> call_args;
+  call_args.push_back(input.data_ptr<float>());
+  call_args.push_back(weight.data_ptr<float>());
+  call_args.push_back(output.data_ptr<float>());
+  std::cout << "Before call\n";
+  cg.call(call_args);
+  std::cout << "After call\n";
+  return output;
+}
+
+at::Tensor te_eager_convolution(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef pad,
+    IntArrayRef dilation,
+    int64_t groups) {
+  std::cout << "In te_eager_convolution\n";
+  std::cout << "-- is bias defined: " << bias.defined() << std::endl;
+  if (!bias.defined()) {
+    return te_eager_convolution_no_bias(input, weight, stride, pad, dilation, groups);
+  }
+  std::cout << "bias: " << bias.sizes() << std::endl;
+
+  te::KernelScope ks(&kernel_arena);
+
+  te::BufHandle I("input", toExpr(input.sizes()), te::kFloat);
+  te::BufHandle W("weight", toExpr(weight.sizes()), te::kFloat);
+  te::BufHandle B("bias", toExpr(bias.sizes()), te::kFloat);
+  // auto S = VarHandle("S", kInt);
+  // auto P = VarHandle("P", kInt);
+  // auto G = VarHandle("G", kInt);
+  int S = stride[0];
+  int P = pad[0];
+  int G = static_cast<int>(groups);
+  auto result = te::conv2d_depthwise(I, W, B, S, P, G);
+
+  te::LoopNest ln({result});
+  ln.prepareForCodegen();
+  te::Stmt* s = ln.root_stmt();
+  s = te::IRSimplifier::simplify(s);
+
+  std::vector<te::CodeGen::BufferArg> buffer_args;
+  buffer_args.push_back(I);
+  buffer_args.push_back(W);
+  buffer_args.push_back(B);
+  buffer_args.push_back(result);
+  te::LLVMCodeGen cg(s, buffer_args);
+
+  auto output_size = conv_output_size(input.sizes(), weight.sizes(), pad, stride, dilation);
+  auto output = input.new_empty(output_size);
+  std::vector<te::CodeGen::CallArg> call_args;
+  call_args.push_back(input.data_ptr<float>());
+  call_args.push_back(weight.data_ptr<float>());
+  call_args.push_back(bias.data_ptr<float>());
+  call_args.push_back(output.data_ptr<float>());
+  std::cout << "Before call\n";
+  cg.call(call_args);
+  std::cout << "After call\n";
+  return output;
+}
+
+}  // namespace
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -829,7 +1104,6 @@ at::Tensor _convolution(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
-
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
@@ -968,6 +1242,8 @@ at::Tensor _convolution(
           input.contiguous(), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
+  } else if (params.use_te_eager(input, weight, bias, params.stride, params.padding, params.dilation, params.groups)) {
+    output = te_eager_convolution(input, weight, bias, params.stride, params.padding, params.dilation, params.groups);
   } else if (params.use_mkldnn(input, weight)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options())

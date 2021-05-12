@@ -55,8 +55,13 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 
   template <typename T>
   T value(void** args) {
+    std::cout << "In LLVMCodeGen::value() - before getKernelAddress"
+              << std::endl;
     T (*fp)(void**) = (T(*)(void**))getKernelAddress(impl_.get());
+    std::cout << "-- Before calling function using the pointer" << std::endl;
+    std::cout << "fp = " << (void*)fp << std::endl;
     T rv = fp(args);
+    std::cout << "-- After calling function using the pointer" << std::endl;
     return rv;
   }
 

@@ -327,7 +327,12 @@ static void* argToPtr(
 }
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  std::cout << "In call_raw" << std::endl;
+  for (auto a : args) {
+    std::cout << "-- arg: " << a << std::endl;
+  }
   value<float>(const_cast<void**>(args.data()));
+  std::cout << "After call_raw executes call" << std::endl;
   USE_TRIGGER(llvm_codegen_executed);
 }
 
