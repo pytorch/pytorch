@@ -27,6 +27,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/util/DeadlockDetection.h>
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -77,8 +78,15 @@ PyObject* pyobj(const Variable& self) {
   return it == impl_to_pyobj.end() ? nullptr : it->second;
 }
 #else
-using torch::autograd::impl::pyobj;
-using torch::autograd::impl::set_pyobj;
+void set_pyobj(const Variable& self, PyObject* pyobj) {
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
+  self.unsafeGetTensorImpl()->set_pyobj(pyobj);
+}
+
+PyObject* pyobj(const Variable& self) {
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
+  return self.unsafeGetTensorImpl()->pyobj();
+}
 #endif
 
 // Creates a new Python object for a Variable. The Variable must not already
@@ -171,14 +179,7 @@ static void THPVariable_dealloc(THPVariable* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
-{
-  HANDLE_TH_ERRORS
-  jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
-  return THPVariable_NewWithVar(type, std::move(tensor));
-  END_HANDLE_TH_ERRORS
-}
+PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs);
 
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObject* kwargs) {
@@ -565,6 +566,33 @@ PyObject *THPVariable_get_base(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef USE_DEPLOY
+// This code is only used for asserts, so it is OK to skip it entirely from
+// deploy interpreters (in which case we will just skip the safety check).  For
+// a more precise check, it would be necessary to test that we are not holding
+// the GIL for *all* active torch deploy interpreters.  There is not really any
+// reason to do this.
+struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
+  bool check_python_gil() const override {
+    return Py_IsInitialized() && PyGILState_Check();
+  };
+};
+// During process destruction, python_gil_hooks will get destructed, making
+// further virtual calls on the object invalid.  By the ordering of declarations
+// in this file, the registerer will get destructed first, removing the
+// externally visible reference to the object.  Assuming at this point in time,
+// there aren't other threads racing to read out the hooks, subsequent calls
+// into GIL hooks will hit a nullptr and gracefully no-op the asserts (as
+// desired, since at process shutdown time the Python interpreter is definitely
+// dead).
+//
+// An alternative way to reduce the risk of python_gil_hooks going prematurely
+// dead would be to leak it at destruction time.  I didn't do that because
+// it's annoying to write the Registerer class for this case.
+ConcretePythonGILHooks python_gil_hooks;
+static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
+#endif
+
 PyObject *THPVariable_get_shape(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -869,7 +897,7 @@ PyTypeObject THPVariableMetaType = {
   0,                                           /* tp_dictoffset */
   THPVariableMetaType_init,                    /* tp_init */
   nullptr,                                     /* tp_alloc */
-  nullptr                                      /* tp_new */
+  nullptr,                                     /* tp_new */
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -912,19 +940,27 @@ PyTypeObject THPVariableType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  // NB: It is illegal to directly create a _TensorBase.  Instead,
-  // subclass it first (the metaclass will initialize tp_new) and
-  // then construct it
-  nullptr,                                     /* tp_new */
+  // Although new is provided here, it is illegal to call this with cls ==
+  // THPVariableMeta.  Instead, subclass it first and then construct it
+  THPVariable_pynew,                           /* tp_new */
 };
+
+PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(type != &THPVariableType, "Cannot directly construct _TensorBase; subclass it and then construct that");
+  jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
+  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
+  return THPVariable_NewWithVar(type, std::move(tensor));
+  END_HANDLE_TH_ERRORS
+}
+
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
-  if (((PyTypeObject*)cls)->tp_base == &THPVariableType) {
-    ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
-  }
+  // TODO: put in custom tp_dealloc
   return 0;
 }
 

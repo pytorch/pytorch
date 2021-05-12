@@ -142,12 +142,9 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
-  void set_per_iteration_param_outputs_unused(const std::vector<size_t>& indices) {
-    TORCH_INTERNAL_ASSERT(per_iteration_param_outputs_unused_.empty());
-    for (auto & idx : indices) {
-      per_iteration_param_outputs_unused_.insert(idx);
-    }
-  }
+  // Sets any parameters that won't get gradient due to being unused in loss
+  // computation.
+  void set_per_iteration_param_outputs_unused(const std::vector<size_t>& indices);
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
@@ -187,6 +184,8 @@ class Reducer {
   const bool find_unused_parameters_;
   const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
+  // List of param indices that won't get gradient due to outputs being unused
+  // in loss computation.
   std::unordered_set<size_t> per_iteration_param_outputs_unused_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -470,6 +469,9 @@ class Reducer {
   void initialize_local_used_map();
   // get current cuda stream
   const c10::Stream get_current_stream();
+  bool dynamic_graph_find_unused();
+  bool static_graph_first_iteration();
+  bool static_graph_after_first_iteration();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
