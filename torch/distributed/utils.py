@@ -19,8 +19,10 @@ def _parse_remote_device(remote_device: str):
         A workername/rank and a device.
     """
 
-    PARSE_ERROR = f"Could not parse remote_device: {remote_device}. The valid format is "
-    "'<workername>/<device>' or 'rank:<rank>/<device>"
+    PARSE_ERROR = (
+        f"Could not parse remote_device: {remote_device}. The valid format is "
+        "'<workername>/<device>' or 'rank:<rank>/<device>'"
+    )
 
     fields = remote_device.split("/")
     if len(fields) == 2:
@@ -31,17 +33,14 @@ def _parse_remote_device(remote_device: str):
     else:
         raise ValueError(PARSE_ERROR)
 
-    # Validate the device.
-    try:
-        torch.device(device)
-    except RuntimeError:
-        raise ValueError(f"Invalid device: {device}")
-
     # Since the workername in the input remote device won't be validated until the created remote module is executed,
     # only do some very basic sanity check on workername at the module creation time.
     # As currently there is no regex to describe the format of workername, just check whether the workername is empty.
     if not on:
         raise ValueError(PARSE_ERROR)
+
+    # Validate the device.
+    torch.device(device)
 
     # Check for rank based format
     fields = on.split(':')
