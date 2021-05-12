@@ -24,7 +24,7 @@ env:
 
 jobs:
   calculate-docker-image:
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
