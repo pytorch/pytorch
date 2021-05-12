@@ -88,11 +88,13 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
 // TODO (possible optimization):
 // Move cast_cache to an inline function in a header with cached_casts declared as
 // extern thread_local in the header.
-Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
+Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_type) {
+  if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
-    bool can_try_cache = (to_type == get_autocast_dtype() && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf() && !arg.is_view());
+    bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
+                         arg.scalar_type() == at::kFloat && arg.requires_grad() &&
+                         arg.is_leaf() && !arg.is_view());
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
@@ -149,7 +151,7 @@ template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, cla
 struct WrapFunction_<CastPolicy::lower_precision_fp, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
-    return (*F)(cached_cast(get_lower_precision_fp_from_device_type(device_type), args)...);
+    return (*F)(cached_cast(get_lower_precision_fp_from_device_type(device_type), args, device_type)...);
   }
 };
 
@@ -158,7 +160,7 @@ template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, cla
 struct WrapFunction_<CastPolicy::fp32, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
-    return (*F)(cached_cast(at::kFloat, args)...);
+    return (*F)(cached_cast(at::kFloat, args, device_type)...);
   }
 };
 
@@ -192,8 +194,8 @@ template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, cla
 struct WrapFunction_<CastPolicy::promote, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
-    auto to_type = promote_type(get_lower_precision_fp_from_device_type(device_type), args...);
-    return (*F)(cached_cast(to_type, args)...);
+    auto to_type = promote_type(get_lower_precision_fp_from_device_type(device_type), device_type, args...);
+    return (*F)(cached_cast(to_type, args, device_type)...);
   }
 };
 
@@ -526,8 +528,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor,Tensor> (const Tensor &, int64_t, at::Dimname, bool),
                                  &ADD_NS(kthvalue)>::type::call)));
 }
-
-}
-
+} // namespace
 } // namespace autocast
 } // namespace at
