@@ -10,7 +10,6 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
-from torch.testing import all_types_and
 
 # TODO: remove this
 SIZE = 100
