@@ -419,6 +419,6 @@ class profile(object):
             if dist_info:
                 self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
 
-def _stop_trace(self):
+    def _stop_trace(self):
         assert self.profiler is not None
         self.profiler.__exit__(None, None, None)
