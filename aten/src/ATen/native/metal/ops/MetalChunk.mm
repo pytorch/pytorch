@@ -37,9 +37,8 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   mt2.texture()->allocateTemporaryStorage(outputSize2, commandBuffer);
   MPSImage* Y1 = mt1.texture()->image();
   MPSImage* Y2 = mt2.texture()->image();
-  NSString* kernelFunc = @"split_channels";
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:kernelFunc
+      specializedPipelineState:"split_channels"
                      Constants:@[
                          @(X.featureChannels),
                          @(Y1.featureChannels),
