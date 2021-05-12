@@ -1152,7 +1152,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // cudaEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
       work->future_->addCallback(
-          [work]() { work->recordFunctionEndCallback_(); });
+          [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
     }
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
@@ -1261,7 +1261,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   // cudaEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
     work->future_->addCallback(
-        [work]() { work->recordFunctionEndCallback_(); });
+        [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
   }
 
   return work;
