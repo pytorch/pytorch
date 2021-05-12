@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -22,6 +24,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -1685,6 +1688,37 @@ void initJitScriptBindings(PyObject* module) {
         }
         return _load_for_mobile(in, optional_device);
       });
+  m.def(
+      "_backport_for_mobile",
+      [](const std::string& filename_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        return _backport_for_mobile(filename_input, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer",
+      [](const std::string& buffer_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        std::istringstream in(buffer_input);
+        return _backport_for_mobile(in, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_to_buffer",
+      [](const std::string& filename_input, const int64_t version) {
+        std::ostringstream buffer_output;
+        bool success =
+            _backport_for_mobile(filename_input, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer_to_buffer",
+      [](const std::string& buffer_input, const int64_t version) {
+        std::istringstream in(buffer_input);
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(in, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
   m.def("_get_model_bytecode_version", [](const std::string& filename) {
     return _get_model_bytecode_version(filename);
   });
@@ -2004,6 +2038,53 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  torch::class_<SourceRef>("profiling", "SourceRef")
+      .def(
+          "starting_lineno",
+          [](const c10::intrusive_ptr<SourceRef>& self) {
+            return static_cast<int64_t>((*self)->starting_line_no());
+          })
+      .def("text", [](const c10::intrusive_ptr<SourceRef>& self) {
+        return (*self)->text();
+      });
+
+  torch::class_<InstructionStats>("profiling", "InstructionStats")
+      .def(
+          "count",
+          [](const c10::intrusive_ptr<InstructionStats>& self) {
+            return self->count;
+          })
+      .def("duration_ns", [](const c10::intrusive_ptr<InstructionStats>& self) {
+        return self->duration.count();
+      });
+
+  torch::class_<SourceStats>("profiling", "SourceStats")
+      .def(
+          "source",
+          [](const c10::intrusive_ptr<SourceStats>& self) {
+            return c10::make_intrusive<SourceRef>(self->getSourceRef());
+          })
+      .def("line_map", &SourceStats::getLineMap);
+
+  torch::class_<ScriptProfile>("profiling", "_ScriptProfile")
+      .def(torch::init<>())
+      .def("enable", &ScriptProfile::enable)
+      .def("disable", &ScriptProfile::disable)
+      .def("_dump_stats", [](const c10::intrusive_ptr<ScriptProfile>& self) {
+        const auto& stats = self->dumpStats();
+        c10::List<c10::intrusive_ptr<SourceStats>> ret;
+        for (const auto& source : stats) {
+          SourceStats::LineMap lineMap;
+          for (const auto& line : source.second) {
+            lineMap.insert(
+                line.first, c10::make_intrusive<InstructionStats>(line.second));
+          }
+          ret.push_back(c10::make_intrusive<SourceStats>(
+              source.first, std::move(lineMap)));
+        }
+        return ret;
+      });
 }
 } // namespace jit
 } // namespace torch
