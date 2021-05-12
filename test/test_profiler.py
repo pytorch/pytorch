@@ -580,8 +580,8 @@ class TestProfiler(TestCase):
                 assert "test_key2" in metadata
                 assert metadata["test_key2"] == "test_value2"
 
-    def test_profiler_tracing(self):
-        with _profile(use_kineto=kineto_available()) as prof:
+    def _test_profiler_tracing(self, use_kineto):
+        with _profile(use_kineto=use_kineto) as prof:
             t1, t2 = torch.ones(1), torch.ones(1)
             torch.add(t1, t2)
 
@@ -592,13 +592,20 @@ class TestProfiler(TestCase):
             with io.open(fname, 'r') as f:
                 json.load(f)
 
+        # test empty trace
+        with _profile(use_kineto=use_kineto) as prof:
+            pass
+        # saving an empty trace
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+
         # Same test but for cuda.
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         if not use_cuda:
             return
 
         device = torch.device("cuda:0")
-        with _profile(use_cuda=True, use_kineto=kineto_available()) as prof:
+        with _profile(use_cuda=True, use_kineto=use_kineto) as prof:
             t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
             torch.add(t1, t2)
 
@@ -607,6 +614,11 @@ class TestProfiler(TestCase):
             # Now validate the json
             with io.open(fname, 'r') as f:
                 json.load(f)
+
+    def test_profiler_tracing(self):
+        self._test_profiler_tracing(False)
+        if kineto_available():
+            self._test_profiler_tracing(True)
 
 if __name__ == '__main__':
     run_tests()
