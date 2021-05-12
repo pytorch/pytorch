@@ -4047,15 +4047,15 @@
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: threshold_out
-    CUDA: threshold_out_cuda
+    CPU, CUDA: threshold_out
 
 - func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: threshold_backward_out
-    CUDA: threshold_backward_out_cuda
+    CPU, CUDA: threshold_backward_out
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
