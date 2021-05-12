@@ -12,6 +12,8 @@
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 
 namespace torch {
 namespace jit {
@@ -352,6 +354,19 @@ Module freeze(
   auto graph = module.get_method("forward").graph();
   OptimizeFrozenGraph(graph, optimize_numerics);
   return out_mod;
+}
+
+
+Module optimize_for_inference(Module& module) {
+  // not frozen yet
+  if (module._ivalue()->type()->hasAttribute("training")) {
+    module = freeze(module, {}, true);
+  }
+
+  auto graph = module.get_method("forward").graph();
+  FuseFrozenConvAddRelu(graph);
+  ConvertFrozenOpsToMKLDNN(graph);
+  return module;
 }
 
 buffer_list Module::buffers(bool recurse) const {

@@ -48,7 +48,7 @@ from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
-from torch.jit._freeze import freeze, optimize_frozen_module
+from torch.jit._freeze import freeze, prepare_for_inference
 
 # For backwards compatibility
 _fork = fork

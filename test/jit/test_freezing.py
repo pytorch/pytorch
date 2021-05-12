@@ -1964,6 +1964,15 @@ class TestFrozenOptimizations(JitTestCase):
                         # and we aren't testing aten impls anyways
                         self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_optimize_for_inference(self):
+        with set_default_dtype(torch.float):
+            mod = nn.Linear(20, 30).eval()
+            scripted_mod = torch.jit.script(mod)
+
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
