@@ -1825,13 +1825,12 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
 # Creates matrices with a positive nonzero determinant
 def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     def make_nonzero_det(A, *, sign=1, min_singular_value=0.1, **kwargs):
-        u, s, v = A.svd()
+        u, s, vh = torch.linalg.svd(A, full_matrices=False)
         s.clamp_(min=min_singular_value)
-        A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+        A = (u * s.unsqueeze(-2)) @ vh
         det = A.det()
         if sign is not None:
             if A.dim() == 2:
-                det = det.item()
                 if (det < 0) ^ (sign < 0):
                     A[0, :].neg_()
             else:
