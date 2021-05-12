@@ -3,6 +3,34 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
+        ("gcc", [
+            ("5.4", [  # All this subtree rebases to master and then build
+                ("3.6", [
+                    ("important", [X(True)]),
+                    ("parallel_tbb", [X(True)]),
+                    ("parallel_native", [X(True)]),
+                    ("pure_torch", [X(True)]),
+                ]),
+            ]),
+            # TODO: bring back libtorch test
+            ("7", [X("3.6")]),
+        ]),
+        ("clang", [
+            ("5", [
+                ("3.6", [
+                    ("asan", [
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            ("7", [
+                ("3.6", [
+                    ("onnx", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
         ("cuda", [
             ("10.2", [
                 ("3.6", [
@@ -27,6 +55,17 @@ CONFIG_TREE_DATA = [
         ]),
     ]),
     ("bionic", [
+        ("clang", [
+            ("9", [
+                XImportant("3.6"),
+            ]),
+            ("9", [
+                ("3.6", [
+                    ("xla", [XImportant(True)]),
+                    ("vulkan", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
         ("gcc", [
             ("9", [
                 ("3.8", [

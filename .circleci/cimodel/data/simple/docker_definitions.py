@@ -11,6 +11,7 @@ IMAGE_NAMES = [
     "pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9",
     "pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9",
+    "pytorch-linux-bionic-py3.6-clang9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",
     "pytorch-linux-bionic-py3.8-gcc9",
     "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7",
@@ -19,6 +20,10 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-py3.8",
+    "pytorch-linux-xenial-py3.6-clang7",
+    "pytorch-linux-xenial-py3.6-gcc5.4",  # this one is used in doc builds
+    "pytorch-linux-xenial-py3.6-gcc7.2",
+    "pytorch-linux-xenial-py3.6-gcc7",
 ]
 
 
