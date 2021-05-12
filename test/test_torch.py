@@ -2931,19 +2931,6 @@ class TestTorchDeviceType(TestCase):
         return tuple(shape)
 
     @onlyCPU
-    def test_use_deterministic_algorithms_beta_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Ensures setting to false does not throw a warning
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                torch.use_deterministic_algorithms(False)
-                self.assertEqual(len(w), 0)
-
-            # Setting use_deterministic_algorithms(True) throws a warning once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
-                torch.use_deterministic_algorithms(True)
-
-    @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Calling set_deterministic throws a warning about deprecation once
