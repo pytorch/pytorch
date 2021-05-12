@@ -185,10 +185,12 @@ struct C10_API AutogradMetaFactoryRegisterer {
 // it corresponds to.
 //
 // With torchdeploy, we have these invariants:
-//  - Any given TensorImpl can be associated with AT MOST one Python interpreter.
+//  - Any given TensorImpl can be associated with AT MOST one Python
+//  interpreter.
 //    We represent the interpreter tag as a memory address to an instance of
 //    a virtual class that is allocated once per interpreter (this is so that
-//    we can request the interpreter to perform operations for us, if necessary).
+//    we can request the interpreter to perform operations for us, if
+//    necessary).
 //  - A given TensorImpl's interpreter tag can only go from uninitialized to
 //    tagged; once tagged, this is a quiescent state (once tagged to an
 //    interpreter, ALWAYS tagged to that interpreter)
@@ -1455,9 +1457,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
-  c10::optional<PyObject*> check_pyobj(impl::PyInterpreter* self_interpreter) noexcept {
+  c10::optional<PyObject*> check_pyobj(
+      impl::PyInterpreter* self_interpreter) noexcept {
     // Note [Memory ordering on Python interpreter tag]
-    impl::PyInterpreter* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    impl::PyInterpreter* interpreter =
+        pyobj_interpreter_.load(std::memory_order_acquire);
     if (interpreter == nullptr) {
       // NB: This never returns DEFINITELY_UNINITIALIZED because there is
       // always the possibility that another thread races to initialize
