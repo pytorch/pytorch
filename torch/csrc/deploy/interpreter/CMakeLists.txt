@@ -14,6 +14,7 @@ ExternalProject_Add(
   GIT_REPOSITORY https://github.com/python/cpython.git
   GIT_TAG v3.8.6
   UPDATE_COMMAND ""
+  PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/cpython_patch.diff
   BUILD_IN_SOURCE True
   CONFIGURE_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC <SOURCE_DIR>/configure --prefix ${PYTHON_INSTALL_DIR}
   BUILD_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
@@ -83,23 +84,18 @@ target_include_directories(torch_python_obj BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 # Build the interpreter lib, designed to be standalone and dlopened
 # We bake the python and torch_python binding objs into libinterpreter
-set(LINKER_SCRIPT "${INTERPRETER_DIR}/hide_symbols.script")
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter_impl.cpp
+  ${INTERPRETER_DIR}/linker.cpp
   ${FROZEN_FILES}
   ${LINKER_SCRIPT}
 )
 add_library(torch_deployinterpreter ${INTERPRETER_LIB_SOURCES} ${LINKER_SCRIPT})
-set_property(TARGET torch_deployinterpreter APPEND_STRING PROPERTY
-             LINK_FLAGS " -Wl,--version-script=${LINKER_SCRIPT}")
 # need to ensure headers are present before any .cpp in interpreter are compiled,
 # but cpp themselves don't clearly depend on cpython so there is a race otherwise
 add_dependencies(torch_deployinterpreter cpython)
 add_dependencies(torch_python_obj cpython)
-target_compile_options(
-    torch_deployinterpreter PRIVATE
-    -fvisibility=hidden
-)
+
 target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
 target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)

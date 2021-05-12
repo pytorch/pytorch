@@ -11,7 +11,6 @@
 // instance of python.
 extern "C" char _binary_libtorch_deployinterpreter_so_start[];
 extern "C" char _binary_libtorch_deployinterpreter_so_end[];
-
 namespace torch {
 namespace deploy {
 
@@ -88,7 +87,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
       size ==
       fwrite(_binary_libtorch_deployinterpreter_so_start, 1, size, dst));
   fclose(dst);
-  handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
+  handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY | RTLD_DEEPBIND);
   if (!handle_) {
     throw std::runtime_error(dlerror());
   }
@@ -97,9 +96,12 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // new_intepreter_impl, comment out this line so that the so lasts long enough
   // for the debugger to see it.
   unlink(library_name_.c_str());
+  auto deploy_set_self_ptr = (void (*)(void*))dlsym(handle_, "deploy_set_self");
+  AT_ASSERT(deploy_set_self_ptr);
+  deploy_set_self_ptr(handle_);
 
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
-  assert(new_interpreter_impl);
+  AT_ASSERT(new_interpreter_impl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
       // NOLINTNEXTLINE(modernize-redundant-void-arg)
       ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
@@ -109,6 +111,9 @@ Interpreter::~Interpreter() {
   if (handle_) {
     // ensure python uninitialization runs before we dlclose the library
     pImpl_.reset();
+    auto deploy_flush_python_libs =
+        (void (*)(void))dlsym(handle_, "deploy_flush_python_libs");
+    deploy_flush_python_libs();
     dlclose(handle_);
   }
 }
