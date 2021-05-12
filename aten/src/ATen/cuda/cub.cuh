@@ -28,8 +28,10 @@
 
 #ifdef __HIP_PLATFORM_HCC__
 #define NO_ROCM(x)
+#define HACK_NAMESPACE_NAME(x) hipcub
 #else
 #define NO_ROCM(x) x
+#define HACK_NAMESPACE_NAME(x) cub
 
 namespace at { namespace native {
 
@@ -63,7 +65,7 @@ struct cuda_type<c10::BFloat16> {
 #else
 
 template <>
-struct cub::FpLimits<c10::BFloat16>
+struct HACK_NAMESPACE_NAME(cub)::FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -76,7 +78,7 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+template <> struct HACK_NAMESPACE_NAME(cub)::NumericTraits<c10::BFloat16>: HACK_NAMESPACE_NAME(cub)::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
 
 #endif
 
