@@ -62,6 +62,7 @@ CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(square)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
@@ -433,7 +434,10 @@ Tensor& arctanh_out(const Tensor& self, Tensor& result) { return at::atanh_out(r
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
-Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
+// FIXME: remove const_cast once pow_out is ported to structured
+TORCH_IMPL_FUNC(square_out)
+(const Tensor& self, const Tensor& result) { at::pow_out(const_cast<Tensor&>(result), self, 2); }
+
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return self.pow_(2); }
 
