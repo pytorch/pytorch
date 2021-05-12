@@ -209,6 +209,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kMKLDNN);
+#endif
     return engines;
   }();
   return supported_qengines;
