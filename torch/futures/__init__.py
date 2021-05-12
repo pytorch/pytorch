@@ -21,6 +21,8 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
+
+    .. warning:: GPU support is a beta feature, subject to changes.
     """
 
     def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
@@ -45,12 +47,28 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         r"""
         Return ``True`` if this ``Future`` is done. A ``Future`` is done if it
         has a result or an exception.
+
+        If the value contains tensors that reside on GPUs, ``Future.done()``
+        will return ``True`` even if the asynchronous kernels that are
+        populating those tensors haven't yet completed running on the device,
+        because at such stage the result is already usable, provided one
+        performs the appropriate synchronizations (see :meth:`wait`).
         """
         return super().done()
 
     def wait(self) -> T:
         r"""
         Block until the value of this ``Future`` is ready.
+
+        If the value contains tensors that reside on GPUs, then an additional
+        synchronization is performed with the kernels (executing on the device)
+        which may be asynchronously populating those tensors. Such sync is
+        non-blocking, which means that ``wait()`` will insert the necessary
+        instructions in the current streams to ensure that further operations
+        enqueued on those streams will be properly scheduled after the async
+        kernels but, once that is done, ``wait()`` will return, even if those
+        kernels are still running. No further synchronization is required when
+        accessing and using the values, as long as one doesn't change streams.
 
         Returns:
             The value held by this ``Future``. If the function (callback or RPC)
@@ -59,16 +77,56 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().wait()
 
+    def value(self) -> T:
+        r"""
+        Obtain the value of an already-completed future.
+
+        This method should only be called after a call to :meth:`wait` has
+        completed, or inside a callback function passed to :meth:`then`. In
+        other cases this ``Future`` may not yet hold a value and calling
+        ``value()`` could fail.
+
+        If the value contains tensors that reside on GPUs, then this method will
+        *not* perform any additional synchronization. This should be done
+        beforehand, separately, through a call to :meth:`wait` (except within
+        callbacks, for which it's already being taken care of by :meth:`then`).
+
+        Returns:
+            The value held by this ``Future``. If the function (callback or RPC)
+            creating the value has thrown an error, this ``value()`` method will
+            also throw an error.
+        """
+        return super().value()
+
     # Have to use string annotations because  PEP-0563 is not available in 3.6
     def then(self, callback):  # type: (Callable[[Future[T]], S]) -> Future[S]
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
-        the same ``Future``, and will be invoked in the same order as they were
-        added. The callback must take one argument, which is the reference to
-        this ``Future``. The callback function can use the ``Future.wait()`` API
-        to get the value. Note that if this ``Future`` is already completed, the
-        given callback will be run immediately inline.
+        the same ``Future``, but the order in which they will be executed cannot
+        be guaranteed (to enforce a certain order consider chaining:
+        ``fut.then(cb1).then(cb2)``). The callback must take one argument, which
+        is the reference to this ``Future``. The callback function can use the
+        :meth:`value` method to get the value. Note that if this ``Future`` is
+        already completed, the given callback will be run immediately inline.
+
+        If the ``Future``'s value contains tensors that reside on GPUs, the
+        callback might be invoked while the async kernels that are populating
+        those tensors haven't yet finished executing on the device. However, the
+        callback will be invoked with some dedicated streams set as current
+        (fetched from a global pool) which will be synchronized with those
+        kernels. Hence any operation performed by the callback on these tensors
+        will be scheduled on the device after the kernels complete. In other
+        words, as long as the callback doesn't switch streams, it can safely
+        manipulate the result without any additional synchronization. This is
+        similar to the non-blocking behavior of :meth:`wait`.
+
+        Similarly, if the callback returns a value that contains tensors that
+        reside on a GPU, it can do so even if the kernels that are producing
+        these tensors are still running on the device, as long as the callback
+        didn't change streams during its execution. If one wants to change
+        streams, one must be careful to re-synchronize them with the original
+        streams, that is, those that were current when the callback was invoked.
 
         Args:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
@@ -110,21 +168,24 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         return cast(Future[S], super().then(callback))
 
     # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def _add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
+    def add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
-        the same ``Future``, and will be invoked in the same order as they were
-        added. The callback must take one argument, which is the reference to
-        this ``Future``. The callback function can use the ``Future.wait()`` API
-        to get the value. Note that if this ``Future`` is already completed, the
-        given callback will be run inline.
+        the same ``Future``, but the order in which they will be executed cannot
+        be guaranteed. The callback must take one argument, which is the
+        reference to this ``Future``. The callback function can use the
+        :meth:`value` method to get the value. Note that if this ``Future`` is
+        already completed, the given callback will be run inline.
 
-        We recommend that you use the ``then`` API as it provides a way to synchronize
-        after your callback has completed. ``add_done_callback`` can be cheaper if your
-        callback does not return anything. But both ``then`` and ``add_done_callback``
-        use the same callback registration API under the hood, and thus the order of
-        their callbacks will be maintained even if their calls are interleaved.
+        We recommend that you use the :meth:`then` method as it provides a way
+        to synchronize after your callback has completed. ``add_done_callback``
+        can be cheaper if your callback does not return anything. But both
+        :meth:`then` and ``add_done_callback`` use the same callback
+        registration API under the hood.
+
+        With respect to GPU tensors, this method behaves in the same way as
+        :meth:`then`.
 
         Args:
             callback(``Future``): a ``Callable`` that takes in one argument,
@@ -160,6 +221,17 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         Set the result for this ``Future``, which will mark this ``Future`` as
         completed and trigger all attached callbacks. Note that a ``Future``
         cannot be marked completed twice.
+
+        If the result contains tensors that reside on GPUs, this method can be
+        called even if the asynchronous kernels that are populating those
+        tensors haven't yet completed running on the device, provided that the
+        streams on which those kernels were enqueued are set as the current ones
+        when this method is called. Put simply, it's safe to call this method
+        immediately after launching those kernels, without any additional
+        synchronization, as long as one doesn't change streams in between. This
+        method will record events on all the relevant current streams and will
+        use them to ensure proper scheduling for all the consumers of this
+        ``Future``.
 
         Args:
             result (object): the result object of this ``Future``.
