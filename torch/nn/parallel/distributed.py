@@ -123,7 +123,7 @@ class _DDPSink(Function):
     def backward(ctx, *grad_outputs):
         state_dict = ctx.state_dict
         if state_dict['grad_enabled_in_fwd_pass'] and state_dict['require_backward_grad_sync']:
-            if state_dict['find_unused_parameters']:
+            if state_dict['find_unused_parameters'] and not state_dict['static_graph']:
                 used_inputs = []
                 outputs_unused_indices = []
                 for idx, inp in enumerate(ctx.inputs):
@@ -824,15 +824,6 @@ class DistributedDataParallel(Module):
             grad_enabled = torch.is_grad_enabled()
             if grad_enabled and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
-                # We'll return the output object verbatim since it is a freeform
-                # object. We need to find any tensors in this object, though,
-                # because we need to figure out which parameters were used during
-                # this forward pass, to ensure we short circuit reduction for any
-                # unused parameters. Only if `find_unused_parameters` is set.
-                if self.find_unused_parameters:
-                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
-                else:
-                    self.reducer.prepare_for_backward([])
             else:
                 self.require_forward_param_sync = False
 
