@@ -1197,6 +1197,38 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   }
 }
 
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cusolver", [&]{
+    int n = cuda_int_cast(lu.size(-2), "n");
+    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
+    int lda = std::max<int>(1, n);
+    auto batch_size = batchCount(lu);
+    auto infos = at::zeros(batch_size, lu.options().dtype(kInt));
+    auto infos_data = infos.data_ptr<int>();
+    auto b_data = b.data_ptr<scalar_t>();
+    auto lu_data = lu.data_ptr<scalar_t>();
+    auto pivots_data = pivots.data_ptr<int>();
+    auto pivots_stride = cuda_int_cast(pivots_data.size(-1), "pivots_stride");
+    auto lu_stride = matrixStride(lu);
+    auto b_stride = matrixStride(b);
+    int ldb = std::max<int>(1, nrhs);
+
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+      at::cuda::solver::getrs<scalar_t>(
+        handle,
+        n,
+        nrhs,
+        lu_data + batch * lu_stride,
+        lda,
+        pivots_data + batch * pivots_stride,
+        b_data + batch * b_stride,
+        ldb,
+        infos_data + batch);
+    }
+  });
+}
+
 #endif  // USE_CUSOLVER
 
 }} // namespace at::native
