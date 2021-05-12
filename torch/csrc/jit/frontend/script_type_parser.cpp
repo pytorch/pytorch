@@ -27,7 +27,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     std::string& typeName,
     const Subscript& subscript) const {
   if (typeName.rfind("typing.", 0) == 0) {
-    size_t pos = 7;   // length of "typing."
+    size_t pos = 7; // length of "typing."
     typeName = typeName.substr(pos);
   }
   if (typeName == "Tuple" || typeName == "tuple") {
