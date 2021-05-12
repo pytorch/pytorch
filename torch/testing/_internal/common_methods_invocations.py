@@ -5236,6 +5236,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,),
     OpInfo('select',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_select,
            supports_out=False),
     UnaryUfuncInfo('signbit',
