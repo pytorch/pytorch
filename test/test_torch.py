@@ -3966,25 +3966,6 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
-    # Ensures that index_put throws nondeterministic alerts in the correct cases
-    @onlyOnCPUAndCUDA
-    def test_nondeterministic_alert_index_put(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device)
-            indices = (torch.tensor([0, 0], device=device), )
-            values = torch.tensor([0, 1], device=device)
-
-            @expectedAlertNondeterministic('index_put_ with accumulate=False')
-            def forward_func(slf, device):
-                op_call(a, indices, values, accumulate=False)
-
-            forward_func(self, device)
-
-        test_func(torch.index_put)
-        test_func(torch.Tensor.index_put)
-        test_func(torch.index_put_)
-        test_func(torch.Tensor.index_put_)
-
     @onlyOnCPUAndCUDA
     def test_nondeterministic_alert_put(self, device):
         def test_func(op_call):
@@ -5305,6 +5286,25 @@ else:
                 for _ in range(3):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
+
+    @onlyOnCPUAndCUDA
+    def test_index_put_non_accumulate_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            for i in range(3):
+                m = random.randint(10, 20)
+                elems = random.randint(20000, 30000)
+                values = torch.rand(elems, device=device)
+                indices = torch.randint(m, (elems,), device=device)
+                input = torch.rand(m, device=device)
+                output = input.index_put((indices,), values, accumulate=False)
+
+                input_list = input.tolist()
+                indices_list = indices.tolist()
+                values_list = values.tolist()
+                for i, v in zip(indices_list, values_list):
+                    input_list[i] = v
+
+                self.assertEqual(output, input_list)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_fill(self, device, dtype):
