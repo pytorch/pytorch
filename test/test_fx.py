@@ -2258,6 +2258,14 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    def test_annotations_empty_tuple(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x : Tuple[str, Tuple[()]]):
+                return x[0]
+
+        traced = torch.fx.symbolic_trace(Foo())
+        scripted = torch.jit.script(traced)
+
     @skipIfNoTorchVision
     def test_cpatcher(self):
 

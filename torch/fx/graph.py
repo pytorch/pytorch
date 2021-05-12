@@ -15,7 +15,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule
+    from .graph_module import GraphModule  # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -836,6 +836,10 @@ class Graph:
             add_global(name, obj)
 
         def type_repr(o : Any):
+            if o is ():
+                # Empty tuple is used for empty tuple type annotation Tuple[()]
+                return '()'
+
             typename = _type_repr(o)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
@@ -845,6 +849,7 @@ class Graph:
 
                 # Assign global names for each of the inner type variables.
                 args = [type_repr(arg) for arg in o.__args__]
+
                 return f'{origin_typename}[{",".join(args)}]'
 
             # Common case: this is a regular module name like 'foo.bar.baz'
