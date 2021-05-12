@@ -978,5 +978,14 @@ class TestIterator(TestCase):
         self.assertIs(type(next(it)), SubTensor2)
         self.assertIs(type(next(it)), SubTensor2)
 
+
+class TestRNN(TestCase):
+    # Regression test for gh-55868
+    def test_rnn(self):
+        model = torch.nn.RNN(10, 20, 2)
+        input = Wrapper(torch.randn(1, 5, 10))
+        model(input)
+
+
 if __name__ == '__main__':
     run_tests()
