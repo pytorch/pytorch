@@ -387,7 +387,6 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = [
-    'astunparse',
     'typing_extensions',
     'dataclasses; python_version < "3.7"'
 ]

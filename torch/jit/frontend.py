@@ -1,7 +1,6 @@
 import torch
 import sys
 import ast
-import astunparse  # type: ignore
 import inspect
 import string
 from collections import namedtuple
@@ -22,6 +21,12 @@ from torch._utils_internal import get_source_lines_and_file
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
+
+_IS_ASTUNPARSE_INSTALLED = True
+try:
+    import astunparse  # type: ignore
+except ImportError:
+    _IS_ASTUNPARSE_INSTALLED = False
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -662,6 +667,8 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
+            if not _IS_ASTUNPARSE_INSTALLED:
+                raise RuntimeError("torch.jit._IgnoreContextManager is not supported in this platform")
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))

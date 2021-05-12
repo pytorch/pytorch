@@ -1,5 +1,6 @@
 import os
 import sys
+import unittest
 
 import torch
 
@@ -7,6 +8,7 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.jit.frontend import _IS_ASTUNPARSE_INSTALLED
 
 if __name__ == "__main__":
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -14,6 +16,7 @@ if __name__ == "__main__":
                        "instead.")
 
 class TestIgnoreContextManager(JitTestCase):
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_inp_out(self):
         class A(torch.nn.Module):
             def __init__(self):
@@ -67,6 +70,7 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), 6)
         self.assertEqual(s(), model())
 
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_inp(self):
         class A(torch.nn.Module):
             def __init__(self):
@@ -83,6 +87,7 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), 4)
         self.assertEqual(s(), model())
 
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_out(self):
         class A(torch.nn.Module):
             def __init__(self):
