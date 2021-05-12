@@ -948,9 +948,9 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
             toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
-        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNE, value_, zero);
         value_ = irb_.CreateICmpEQ(
-            value_, llvm::ConstantInt::get(value_->getType(), 0));
+            value_, llvm::ConstantInt::get(value_->getType(), 1));
         value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
         return;
       }
