@@ -80,7 +80,58 @@ TEST(Conv, DepthwiseConv2DNoBias) {
   ASSERT_TRUE(at::allclose(ref, ot));
 }
 
-TEST(Conv, DepthwiseConv2DDynamicShapes) {
+TEST(Conv, DepthwiseConv2DDynamicShapeOnInput) {
+  te::KernelScope kernel_scope;
+  te::VarHandle N_var("N", te::kInt);
+  te::VarHandle C_var("C", te::kInt);
+  te::VarHandle H_var("H", te::kInt);
+  te::VarHandle W_var("W", te::kInt);
+
+  constexpr int K = 72, R = 3, S = 3;
+  constexpr int kPad = 1, kStride = 2, kGroups = 72;
+  constexpr int CperG = 1;
+
+  te::Placeholder input("input", te::kFloat, {N_var, C_var, H_var, W_var});
+  te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
+  te::Tensor* output = te::conv2d_depthwise(
+      input.handle(),
+      weight.handle(),
+      N_var,
+      C_var,
+      H_var,
+      W_var,
+      kStride,
+      kPad,
+      kGroups);
+
+  te::LoopNest loop({output});
+  loop.simplify();
+  loop.prepareForCodegen();
+  std::vector<te::CodeGen::BufferArg> buffer_args = {
+      input, weight, N_var, C_var, H_var, W_var, output};
+  te::LLVMCodeGen cg(loop.root_stmt(), buffer_args);
+
+  constexpr int N = 1, C = 72, H = 56, W = 56;
+
+  auto it = genTestData({N, C, H, W});
+  auto wt = genTestData({K, CperG, R, S});
+  auto ref =
+      at::conv2d(it, wt, at::Tensor(), kStride, kPad, /*dilation=*/1, kGroups);
+  auto ot = at::zeros_like(ref);
+  std::vector<te::CodeGen::CallArg> call_args = {
+      it.data_ptr<float>(),
+      wt.data_ptr<float>(),
+      N,
+      C,
+      H,
+      W,
+      ot.data_ptr<float>()};
+  cg.call(call_args);
+
+  ASSERT_TRUE(at::allclose(ref, ot));
+}
+
+TEST(Conv, DepthwiseConv2DAllDynamicShapes) {
   te::KernelScope kernel_scope;
   te::VarHandle N_var("N", te::kInt);
   te::VarHandle C_var("C", te::kInt);
