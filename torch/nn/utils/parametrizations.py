@@ -1,5 +1,3 @@
-import warnings
-
 import torch
 from ..utils import parametrize
 from ..modules import Module
@@ -22,15 +20,11 @@ class SpectralNorm(Module):
                              'got n_power_iterations={}'.format(n_power_iterations))
         self.n_power_iterations = n_power_iterations
         self.eps = eps
-        # randomly initialize `u` and `v`
-        with torch.no_grad():
-            weight_mat = self._reshape_weight_to_matrix(weight)
-            h, w = weight_mat.size()
-            u = F.normalize(weight.new_empty(h).normal_(0, 1), dim=0, eps=self.eps)
-            v = F.normalize(weight.new_empty(w).normal_(0, 1), dim=0, eps=self.eps)
-        self.register_buffer('u', u)
-        self.register_buffer('v', v)
-        self.buffers_initialized = False
+        self.register_buffer('u', None)
+        self.register_buffer('v', None)
+
+        weight_mat = self._reshape_weight_to_matrix(weight)
+        self._update_vectors(weight_mat)
 
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         weight_mat = weight
@@ -41,7 +35,8 @@ class SpectralNorm(Module):
         height = weight_mat.size(0)
         return weight_mat.reshape(height, -1)
 
-    def forward(self, weight: torch.Tensor) -> torch.Tensor:
+    @torch.autograd.no_grad()
+    def _update_vectors(self, weight_mat: torch.Tensor) -> None:
         # See original note at torch/nn/utils/spectral_norm.py
         # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
         #     updated in power iteration **in-place**. This is very important
@@ -72,30 +67,28 @@ class SpectralNorm(Module):
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
+        if self.u is None or self.v is None:  # type: ignore[has-type]
+            # randomly initialize `u` and `v`
+            h, w = weight_mat.size()
+            self.u = F.normalize(weight_mat.new_empty(h).normal_(0, 1), dim=0, eps=self.eps)
+            self.v = F.normalize(weight_mat.new_empty(w).normal_(0, 1), dim=0, eps=self.eps)
+
+        for _ in range(self.n_power_iterations):
+            # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
+            # are the first left and right singular vectors.
+            # This power iteration produces approximations of `u` and `v`.
+            self.u = F.normalize(torch.mv(weight_mat, self.v),
+                                 dim=0, eps=self.eps, out=self.u)   # type: ignore[has-type]
+            self.v = F.normalize(torch.mv(weight_mat.t(), self.u),  # type: ignore[has-type]
+                                 dim=0, eps=self.eps, out=self.v)   # type: ignore[has-type]
+        # See above on why we need to clone
+        self.u = self.u.clone(memory_format=torch.contiguous_format)
+        self.v = self.v.clone(memory_format=torch.contiguous_format)
+
+    def forward(self, weight: torch.Tensor) -> torch.Tensor:
         weight_mat = self._reshape_weight_to_matrix(weight)
-
         if self.training:
-            self.buffers_initialized = True
-            with torch.no_grad():
-                for _ in range(self.n_power_iterations):
-                    # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
-                    # are the first left and right singular vectors.
-                    # This power iteration produces approximations of `u` and `v`.
-                    self.v = F.normalize(torch.mv(weight_mat.t(), self.u),  # type: ignore[has-type]
-                                         dim=0, eps=self.eps, out=self.v)   # type: ignore[has-type]
-                    self.u = F.normalize(torch.mv(weight_mat, self.v),
-                                         dim=0, eps=self.eps, out=self.u)   # type: ignore[has-type]
-                # See above on why we need to clone
-                self.u = self.u.clone(memory_format=torch.contiguous_format)
-                self.v = self.v.clone(memory_format=torch.contiguous_format)
-        else:
-            # https://github.com/pytorch/pytorch/issues/51800
-            if not self.buffers_initialized:
-                warnings.warn("SpectralNorm's `forward` called for the first time, but "
-                              "is in eval mode. SpectralNorm may need to be computed "
-                              "at least once in training mode for its buffers to "
-                              "initialize.")
-
+            self._update_vectors(weight_mat)
         sigma = torch.dot(self.u, torch.mv(weight_mat, self.v))
         return weight / sigma
 

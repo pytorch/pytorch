@@ -3756,14 +3756,12 @@ class TestNN(NNTestCase):
 
         # If we remove the parametrization on bias, weight is still parametrized
         # Removing a parametrization runs forward in eval mode if leave_parametrized=True
-        with self.assertWarnsRegex(UserWarning, "SpectralNorm's `forward` called for the first time"):
-            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'bias')
+        m = torch.nn.utils.parametrize.remove_parametrizations(m, 'bias')
         self.assertTrue('bias' in m._parameters)
         self.assertTrue(hasattr(m, 'parametrizations'))
         self.assertFalse('weight' in m._parameters)
 
-        with self.assertWarnsRegex(UserWarning, "SpectralNorm's `forward` called for the first time"):
-            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+        m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
         # Neither weight and bias are parametrized
         self.assertFalse(hasattr(m, 'parametrizations'))
         self.assertTrue('weight' in m._parameters)
@@ -3939,8 +3937,7 @@ class TestNN(NNTestCase):
             snm.load_state_dict(state_dict)
             with torch.no_grad():
                 snm.eval()
-                with self.assertWarnsRegex(UserWarning, "SpectralNorm's `forward` called for the first time"):
-                    out0_eval = snm(inp)
+                out0_eval = snm(inp)
                 snm.train()
                 out1_train = snm(inp)
                 out2_train = snm(inp)
@@ -3955,8 +3952,7 @@ class TestNN(NNTestCase):
             snm.load_state_dict(state_dict)
             with torch.no_grad():
                 snm.eval()
-                with self.assertWarnsRegex(UserWarning, "SpectralNorm's `forward` called for the first time"):
-                    self.assertEqual(out0_eval, snm(inp))
+                self.assertEqual(out0_eval, snm(inp))
                 snm.train()
                 self.assertEqual(out1_train, snm(inp))
                 self.assertEqual(out2_train, snm(inp))
@@ -4103,12 +4099,12 @@ class TestNN(NNTestCase):
         snm = m.parametrizations.weight[0]
         # naive forward
         _weight = m.parametrizations.weight.original
-        _bias, _u = m.bias, snm.u
+        _bias, _v = m.bias, snm.v
         _weight_mat = _weight.view(_weight.size(0), -1)
-        _v = torch.mv(_weight_mat.t(), _u)
-        _v = F.normalize(_v, dim=0, eps=1e-12)
         _u = torch.mv(_weight_mat, _v)
         _u = F.normalize(_u, dim=0, eps=1e-12)
+        _v = torch.mv(_weight_mat.t(), _u)
+        _v = F.normalize(_v, dim=0, eps=1e-12)
         _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
         out_hat = torch.nn.functional.linear(input, _weight, _bias)
         expect_out = m(input)
