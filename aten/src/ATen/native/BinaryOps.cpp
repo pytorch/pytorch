@@ -66,7 +66,11 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  native::heaviside_check(self, other);
+  if (maybe_get_output().defined()) {
+    native::heaviside_check(self, other, maybe_get_output());
+  } else {
+    native::heaviside_check(self, other);
+  }
   build_binary_op(maybe_get_output(), self, other);
 }
 
@@ -1071,7 +1075,6 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, cons
 TORCH_IMPL_FUNC(heaviside_out) (
   const Tensor& self, const Tensor& other, const Tensor& result
 ) {
-  TORCH_CHECK(!result.is_complex(), "heaviside is not yet implemented for complex tensors.");
   heaviside_stub(device_type(), *this);
 }
 
