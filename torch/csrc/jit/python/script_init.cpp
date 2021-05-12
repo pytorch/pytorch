@@ -462,9 +462,17 @@ static TypePtr inferShapeAndTypeForInput(
   }
 }
 
-static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
+static void setInputTensorTypes(
+    Graph& g,
+    const Stack& stack,
+    bool complete,
+    const std::vector<int>& param_count_list = {}) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
+  size_t list_idx = 0;
+  if (!param_count_list.empty()) {
+    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+  }
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
     // Leave packed param types alone. This is needed for downstream passes
@@ -473,13 +481,19 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     if (auto named_type = v->type()->cast<c10::NamedType>()) {
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
-          s_iter++;
+          if (param_count_list.empty()) {
+            s_iter++;
+          } else {
+            s_iter += param_count_list[list_idx];
+          }
+          list_idx++;
           continue;
         }
       }
     }
     v->setType(
         inferShapeAndTypeForInput(v->type(), s_iter, stack.end(), complete));
+    list_idx++;
   }
 }
 
@@ -497,10 +511,12 @@ static std::shared_ptr<Graph> _propagate_shapes(
 static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     Graph& graph,
     const std::vector<at::Tensor>& inputs,
+    const std::vector<int>& param_count_list,
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
-  setInputTensorTypes(*retval, fmap<IValue>(inputs), /*complete=*/true);
+  setInputTensorTypes(
+      *retval, fmap<IValue>(inputs), /*complete=*/true, param_count_list);
   if (propagate) {
     PropagateInputShapes(retval);
   }
