@@ -1285,6 +1285,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& self = p_node->Input(0).toTensor();
     const auto repeats = p_node->Input(1).toIntVector();
