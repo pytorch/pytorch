@@ -35,7 +35,7 @@ class TORCH_API ScriptTypeParser {
 
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
   at::TypePtr subscriptToType(
-      const std::string& typeName,
+      std::string& typeName,
       const Subscript& subscript) const;
   std::vector<IValue> evaluateDefaults(
       const SourceRange& r,

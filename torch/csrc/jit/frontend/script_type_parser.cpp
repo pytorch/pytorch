@@ -24,8 +24,12 @@ std::string collectQualname(const Select& select) {
 } // namespace
 
 TypePtr ScriptTypeParser::subscriptToType(
-    const std::string& typeName,
+    std::string& typeName,
     const Subscript& subscript) const {
+  if (typeName.rfind("typing.", 0) == 0) {
+    size_t pos = 7;   // length of "typing."
+    typeName = typeName.substr(pos);
+  }
   if (typeName == "Tuple" || typeName == "tuple") {
     if (subscript.subscript_exprs().size() == 1 &&
         subscript.subscript_exprs()[0].kind() == TK_TUPLE_LITERAL) {

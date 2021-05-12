@@ -52,7 +52,6 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
-
     module_name, attr_name = importer.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
 
@@ -60,6 +59,10 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
 def _format_import_block(globals: Dict[str, Any], importer: Importer):
     import_strs: Set[str] = set()
     for name, obj in globals.items():
+
+        if name.startswith("typing."):
+            name = name.partition("typing.")[2]
+
         import_strs.add(_format_import_statement(name, obj, importer))
     return '\n'.join(import_strs)
 

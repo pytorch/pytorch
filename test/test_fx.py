@@ -1797,7 +1797,7 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
-        self.assertIn("-> typing_List[str]", traced._code)
+        self.assertIn("-> typing.List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
@@ -2260,11 +2260,20 @@ class TestFX(JitTestCase):
 
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
-            def forward(self, x : Tuple[str, Tuple[()]]):
-                return x[0]
+            def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
+                return "foo"
 
         traced = torch.fx.symbolic_trace(Foo())
+
+        FileCheck().check("typing.Tuple[()]")   \
+                   .check("typing.Tuple[str,typing.Tuple[()]]") \
+                   .run(traced.code)
+
         scripted = torch.jit.script(traced)
+
+        FileCheck().check("Tuple[()]")   \
+            .check("Tuple[str, Tuple[()]]")    \
+            .run(scripted.code)
 
     @skipIfNoTorchVision
     def test_cpatcher(self):
