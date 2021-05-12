@@ -137,8 +137,14 @@ def spectral_norm(module: Module,
 
     .. note::
         This function is implemented using the new parametrization functionality
-        in :func:`torch.nn.utils.parameterize.register_parametrization`. It is a
+        in :func:`torch.nn.utils.parametrize.register_parametrization`. It is a
         reimplementation of :func:`torch.nn.utils.spectral_norm`.
+
+    .. note::
+        If the `SpectralNorm` module, i.e., `module.parametrization.weight[idx]`,
+        is in training mode on removal, it will perform another power iteration.
+        If you'd like to avoid this iteration, set the module to eval mode
+        before its removal.
 
     Example::
 

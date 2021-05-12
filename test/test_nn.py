@@ -2478,31 +2478,6 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "changes the dtype"):
             parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
-    def test_parametrization_eval_mode_on_remove(self):
-        r"""Test forward runs in eval mode when parametrization is removed"""
-        training = [True]
-        n_forward_runs = [0]
-
-        class CheckTraining(nn.Module):
-            def forward(self, X):
-                training[0] = self.training
-                n_forward_runs[0] += 1
-                return X
-
-        module = nn.Linear(4, 4)
-        module.train()
-        parametrize.register_parametrization(module, "weight", CheckTraining())
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        self.assertEqual(n_forward_runs[0], 0)
-        self.assertTrue(training[0])
-
-        parametrize.register_parametrization(module, "weight", CheckTraining())
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
-        self.assertEqual(n_forward_runs[0], 1)
-        self.assertFalse(training[0])
-        # The actual module's train/eval was not affected
-        self.assertTrue(module.training)
-
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_validate_pruning_amount_init(self):
@@ -3827,14 +3802,24 @@ class TestNN(NNTestCase):
                 gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
+                # spectral norm module needs to be in eval mode if we'd like to
+                # avoid doing another power iteration
                 m, wrapped_m, _ = get_modules()
                 pre_remove_out = wrapped_m(input)
+                m.eval()
                 m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
                 torch.nn.utils.parametrizations.spectral_norm(m)
+                pre_remove_out = wrapped_m(input)
+                self.assertTrue(m.parametrizations.weight[0].training)
+                m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+                self.assertNotEqual(wrapped_m(input), pre_remove_out)
+
+                torch.nn.utils.parametrizations.spectral_norm(m)
                 for _ in range(3):
                     pre_remove_out = wrapped_m(input)
+                m.eval()
                 m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
