@@ -375,6 +375,7 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=False``
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
@@ -415,7 +416,6 @@ def use_deterministic_algorithms(mode):
           ``mode='max'``
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
         * :func:`torch.Tensor.index_copy` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
