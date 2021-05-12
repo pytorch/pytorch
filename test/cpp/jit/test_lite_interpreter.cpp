@@ -723,6 +723,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
+  // Ballpark estimate of the minimal number of ops; just used to
+  // verify API returns a reasonably large number.
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
