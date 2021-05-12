@@ -2,16 +2,18 @@ import torch
 import torch.distributed as c10d
 import torch.nn as nn
 from servers.AverageParameterServer import AverageParameterServer
+from servers.AverageBatchParameterServer import AverageBatchParameterServer
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .DdpTrainerBase import DdpTrainerBase
 from .RpcTrainerBase import RpcTrainerBase
 
 
-class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
+class DdpSparseRpcTrainer(DdpTrainerBase, RpcTrainerBase):
 
     PS_MAP = {
         "AverageParameterServer": AverageParameterServer,
+        "AverageBatchParameterServer": AverageBatchParameterServer
     }
 
     class HookState:
@@ -38,7 +40,7 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
             self.batch_number += 1
             self.hook_gradient_futures.clear()
 
-    def __init__(self, rank, trainer_count, ps_rref, ps_name, backend, use_cuda_rpc, epochs, hp_id):
+    def __init__(self, rank, trainer_count, ps_rref, ps_name, backend, use_cuda_rpc, epochs):
         super().__init__(rank)
         self.rank = rank
         self.trainer_count = trainer_count
@@ -47,7 +49,6 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
         self.backend = backend
         self.use_cuda_rpc = use_cuda_rpc
         self.epochs = epochs
-        self.hp_id = hp_id
 
     @staticmethod
     def get_tensor_fut(bucket):
@@ -89,7 +90,7 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
         return cref.get_tensor_fut(bucket)
 
     @staticmethod
-    def sparse_rpc_dense_nccl_allreduce(state, bucket):
+    def hook(state, bucket):
         cref = state.cref
         tensor = bucket.get_tensor()
         tensors_count = len(cref.bucket_to_parameters(bucket))
@@ -108,13 +109,8 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
 
             return fut.then(callback)
 
-    @staticmethod
-    def hook(state, bucket):
-        cref = state.cref
-        if cref.hp_id == 1:
-            return cref.sparse_rpc_dense_nccl_allreduce(state, bucket)
-        else:
-            raise RuntimeError(f"hp_id {cref.hp_id} not found")
+    def get_hook(self):
+        return DdpSparseRpcTrainer.hook
 
     def process_gradient_futs(self, ddp_parameters, hook_gradient_futures):
         param_gradient_map = {}
@@ -147,13 +143,9 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
             process_group = c10d.ProcessGroupNCCL(store, self.rank, process_group_size)
 
         ddp_model = DDP(model, device_ids=[self.rank], process_group=process_group)
-
         hook_state = self.HookState(self, process_group)
-
-        ddp_model.register_comm_hook(hook_state, DdpRpcTrainer.hook)
-
+        ddp_model.register_comm_hook(hook_state, self.get_hook())
         criterion = nn.CrossEntropyLoss().cuda(self.rank)
-
         optimizer = torch.optim.SGD(ddp_model.parameters(), 1e-4)
 
         ddp_parameters = list(ddp_model.parameters())
@@ -166,28 +158,17 @@ class DdpRpcTrainer(DdpTrainerBase, RpcTrainerBase):
                 hook_state.next_batch_state()
                 input = batch[0]
                 target = batch[1]
-
                 self.record_batch_start(epoch_key(epoch, index))
-
                 optimizer.zero_grad()
-
                 self.record_forward_start(epoch_key(epoch, index))
-
                 out = ddp_model(input)
-
                 self.record_forward_end(epoch_key(epoch, index))
-
                 loss = criterion(out, target)
-
                 self.record_backward_start(epoch_key(epoch, index))
-
                 loss.backward()
                 self.process_gradient_futs(ddp_parameters, hook_state.get_futures())
-
                 self.record_backward_end(epoch_key(epoch, index))
-
                 optimizer.step()
-
                 self.record_batch_end(epoch_key(epoch, index))
 
         torch.cuda.synchronize(self.rank)
