@@ -1021,7 +1021,7 @@ static void addmm_impl_cpu_(
 
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
-      result.scalar_type(), "addmm_out_cpu",
+      result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
             transpose_a ? cpublas::Transpose : cpublas::NoTranspose,
