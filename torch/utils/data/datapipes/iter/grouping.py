@@ -8,6 +8,20 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, 
 T_co = TypeVar('T_co', covariant=True)
 
 
+@functional_datapipe('unbatch')
+class UnBatchIterDataPipe(IterDataPipe):
+    def __init__(self, datapipe):
+        self.datapipe = datapipe
+
+    def __iter__(self):
+        for element in self.datapipe:
+            if isinstance(element, list):
+                for i in element:
+                    yield i
+            else:
+                yield element
+
+
 @functional_datapipe('batch')
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BatchIterDataPipe`.
