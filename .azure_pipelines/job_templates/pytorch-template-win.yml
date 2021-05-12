@@ -1,0 +1,49 @@
+# PyTorch build steps template with Windows images Azure DevOps Instances
+#
+# This build depends on 5 parameters set as an environment variables in the pipeline:
+#   - AZURE_DEVOPS_CLI_PAT: Secret var for authenticating to Azure DevOps
+#   - AZURE_STORAGE_KEY: Secret var for authenticating to Azure Storage
+#   - _TS_CLONE_P, _TS_P, _TS_SM_P: Secret vars for specific unit tests
+
+parameters:
+  name: ''
+  pool: ''
+  customMatrixes: ''
+
+jobs:
+- job: ${{parameters.name}}
+  timeoutInMinutes: 600
+  strategy:
+    matrix:
+      ${{ insert }}: ${{parameters.customMatrixes}}
+  pool:
+    name: ${{ parameters.pool}}
+
+  steps:
+  # Don't checkout repo contents to save time and CPU compute. Environment variables
+  # related to checkout branch such as $(BUILD_SOURCEBRANCH) are still available.
+  - checkout: none
+
+  # Delete pytorch_tests repo from previous builds if exists
+  - script: if exist "pytorch_tests/" rmdir "pytorch_tests/" /q /s
+    displayName: Delete pytorch_tests repo from previous builds if exists
+
+  # Clone PyTorch Tests repository
+  - powershell: |
+      $env:B64Pat = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$env:_ADOTOKEN"))
+      git -c http.extraHeader="Authorization: Basic $env:B64Pat" clone $env:AZURE_DEVOPS_pytorch_tests_REPO_URL
+      cd pytorch_tests
+      git checkout $(PYTORCH_TESTS_CHECKOUT_BRANCH)
+    env:
+      _ADOTOKEN: $(AZURE_DEVOPS_CLI_PAT)
+    displayName: Clone PyTorch Tests repo
+
+  # Run PyTorch Unit Tests
+  - script: call $(Build.SourcesDirectory)\pytorch_tests\scripts\windows\run.bat
+    env:
+      _ADOTOKEN: $(AZURE_DEVOPS_CLI_PAT)
+      _AZURE_STORAGE_KEY: $(AZURE_STORAGE_KEY)
+      _TS_CLONE_P: $(TS_CLONE_PASSWORD)
+      _TS_P: $(TS_PAT)
+      _TS_SM_P: $(TS_SM_PAT)
+    displayName: Run PyTorch Unit Tests
