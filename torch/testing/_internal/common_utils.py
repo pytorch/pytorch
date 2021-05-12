@@ -856,8 +856,11 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-        slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
+            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+        else:
+            slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
