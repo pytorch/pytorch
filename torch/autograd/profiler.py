@@ -1178,6 +1178,7 @@ def parse_kineto_results(result):
                     fe.name,
                     fe.device_index,
                     cuda_time)
+                fe.is_legacy = True
         function_events.append(fe)
         corr_id = kineto_event.linked_correlation_id()
         if corr_id > 0:
