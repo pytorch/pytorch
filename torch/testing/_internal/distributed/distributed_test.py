@@ -248,6 +248,21 @@ class EmbeddingNet(nn.Module):
         x = self.embedding(x)
         return self.lin(x)
 
+class ControlFlowToyModel(nn.Module):
+    def __init__(self):
+        super(ControlFlowToyModel, self).__init__()
+        self.lin1 = nn.Linear(10, 10, bias=False)
+        self.lin2 = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        # Second layer is used dependent on input x.
+        use_second_layer = torch.equal(
+            x, torch.ones(20, 10, device=x.device)
+        )
+        if use_second_layer:
+            return self.lin2(F.relu(self.lin1(x)))
+        else:
+            return F.relu(self.lin1(x))
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
@@ -3148,7 +3163,12 @@ class DistributedTest:
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
-        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None, gradient_as_bucket_view=False):
+        def _test_DistributedDataParallel(self,
+                                          gpu_subset,
+                                          rank,
+                                          output_device=None,
+                                          gradient_as_bucket_view=False,
+                                          static_graph=False):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
@@ -3165,6 +3185,8 @@ class DistributedTest:
             model_DDP = nn.parallel.DistributedDataParallel(
                 model_DDP, device_ids=gpu_subset, gradient_as_bucket_view=gradient_as_bucket_view
             )
+            if static_graph:
+                model_DDP._set_static_graph()
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
@@ -3655,32 +3677,19 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             gpus = list(rank_to_GPU[rank])
-            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank)
 
-            # test output_device
-            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+            for use_bucket_view, static_graph in itertools.product((False, True), (False, True)):
+                self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, gradient_as_bucket_view=use_bucket_view,
+                                                   static_graph=static_graph)
 
-            # test device_ids
-            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
-            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+                # test output_device
+                self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'),
+                                                   gradient_as_bucket_view=use_bucket_view, static_graph=static_graph)
 
-        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                         "Only Nccl & Gloo backend support DistributedDataParallel")
-        @skip_if_no_gpu
-        def test_DistributedDataParallel_with_grad_is_view(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = self._init_multigpu_helper()
-            gpus = list(rank_to_GPU[rank])
-            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, gradient_as_bucket_view=True)
-
-            # test output_device
-            self._test_DistributedDataParallel(
-                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
-
-            # test device_ids
-            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
-            self._test_DistributedDataParallel(
-                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+                # test device_ids
+                gpus_list = [torch.device('cuda:' + str(i)) for i in gpus]
+                self._test_DistributedDataParallel(gpu_subset=gpus_list, rank=rank, output_device=torch.device('cuda'),
+                                                   gradient_as_bucket_view=use_bucket_view, static_graph=static_graph)
 
         def _test_DistributedDataParallel_with_amp(self, grad_is_view=False):
             torch.manual_seed(31415)
@@ -5186,10 +5195,7 @@ class DistributedTest:
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_ignore_params_arg(self):
+        def _test_ddp_ignore_params_arg(self, static_graph=False):
             class TestModel(nn.Module):
                 def __init__(self, rank):
                     self.rank = rank
@@ -5242,6 +5248,8 @@ class DistributedTest:
                     find_unused_parameters=find_unused,
                     broadcast_buffers=broadcast_buffers,
                 )
+                if static_graph:
+                    ddp._set_static_graph()
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
@@ -5272,6 +5280,13 @@ class DistributedTest:
                 # Synchronize since we run multiple iterations of this test, to
                 # isolate failure hangs.
                 torch.cuda.synchronize(device=self.rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_ignore_params_arg(self):
+            self._test_ddp_ignore_params_arg(static_graph=False)
+            self._test_ddp_ignore_params_arg(static_graph=True)
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
@@ -5509,26 +5524,10 @@ class DistributedTest:
             batch = 20
             dim = 10
 
-            class ToyModel(nn.Module):
-                def __init__(self):
-                    super(ToyModel, self).__init__()
-                    self.lin1 = nn.Linear(10, 10, bias=False)
-                    self.lin2 = nn.Linear(10, 10, bias=False)
-
-                def forward(self, x):
-                    # Second layer is used dependent on input x.
-                    use_second_layer = torch.equal(
-                        x, torch.ones(batch, dim, device=x.device)
-                    )
-                    if use_second_layer:
-                        return self.lin2(F.relu(self.lin1(x)))
-                    else:
-                        return F.relu(self.lin1(x))
-
             world_size = dist.get_world_size()
             torch.cuda.set_device(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
-                ToyModel().cuda(self.rank),
+                ControlFlowToyModel().cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
@@ -5556,7 +5555,7 @@ class DistributedTest:
             # Validate appropriate error message when DDP is used with
             # find_unused_parameters=False.
             model = torch.nn.parallel.DistributedDataParallel(
-                ToyModel().cuda(self.rank),
+                ControlFlowToyModel().cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=False,
             )
@@ -5597,6 +5596,48 @@ class DistributedTest:
                         self.assertFalse(True, "DDP error not raised")
 
             dist.barrier()
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_invalid_static_graph(self):
+            world_size = dist.get_world_size()
+            torch.cuda.set_device(self.rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                ControlFlowToyModel().cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            model._set_static_graph()
+            random_input = torch.randn(20, 10, device=self.rank)
+            ones_input = torch.ones(20, 10, device=self.rank)
+            # unused parameter in the first iteration got used
+            # in second iteration.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Your training graph has changed in this iteration",
+            ):
+                for i in range(2):
+                    if i % 2 == 0:
+                        out = model(random_input)
+                    else:
+                        out = model(ones_input)
+                    loss = out.sum()
+                    loss.backward()
+            # used parameter in the first iteration got unused
+            # in second iteration.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected to have finished reduction in the prior iteration "
+                "before starting a new one. This error indicates that your "
+                "training graph has changed in this iteration",
+            ):
+                for i in range(2):
+                    if i % 2 != 0:
+                        out = model(random_input)
+                    else:
+                        out = model(ones_input)
+                    loss = out.sum()
+                    loss.backward()
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
@@ -5841,6 +5882,52 @@ class DistributedTest:
                             self.assertFalse(True, "DDP error not raised")
 
             dist.barrier()
+
+        def _test_different_graph_across_ranks(self,
+                                               find_unused_parameters=False,
+                                               static_graph=False):
+            class ToyModel(nn.Module):
+                def __init__(self, rank):
+                    super(ToyModel, self).__init__()
+                    self.lin1 = nn.Linear(10, 10, bias=False)
+                    self.lin2 = nn.Linear(10, 10, bias=False)
+                    self.rank = rank
+
+                def forward(self, x):
+                    if self.rank == 0:
+                        return self.lin2(F.relu(self.lin1(x)))
+                    else:
+                        return F.relu(self.lin1(x))
+
+            torch.manual_seed(31415)
+            world_size = dist.get_world_size()
+            torch.cuda.set_device(self.rank)
+            model = ToyModel(self.rank).cuda(self.rank)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+                find_unused_parameters=find_unused_parameters,
+                gradient_as_bucket_view=True,
+            )
+            if static_graph:
+                ddp_model._set_static_graph()
+            random_input = torch.randn(20, 10, device=self.rank)
+            for i in range(10):
+                out = ddp_model(random_input)
+                loss = out.sum()
+                loss.backward()
+            return ddp_model
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_different_graph_across_ranks(self):
+            base_model = self._test_different_graph_across_ranks(find_unused_parameters=True)
+            self.assertFalse(base_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            static_model = self._test_different_graph_across_ranks(static_graph=True)
+            self.assertTrue(static_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            for i, j in zip(base_model.parameters(), static_model.parameters()):
+                self.assertEqual(i, j)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
