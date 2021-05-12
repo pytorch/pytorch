@@ -2476,7 +2476,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
                                                      requires_grad=requires_grad),)))
     return tuple(samples)
 
-def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = [
@@ -2494,45 +2494,12 @@ def sample_inputs_fmod(op_info, device, dtype, requires_grad, **kwargs):
             ((S, S, S), 1.5, (), True) # Scalar
             ]
 
-    cases.append(cases_with_broadcasting)
+    cases.extend(cases_with_broadcasting)
 
     def generator():
-        for case in cases:
-            shape, shape_other, add_other, broadcasts_input = case
+        for shape, shape_other, add_other, broadcasts_input in cases:
             if isinstance(shape_other, tuple):
-                arg = make_arg(shape_other, requires_grad=False) + add_other
-            else:
-                # shape_other is scalar
-                arg = shape_other
-            yield(SampleInput(make_arg(shape), args=(arg,),
-                broadcasts_input=broadcasts_input))
-
-    return list(generator())
-
-def sample_inputs_remainder(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    cases = [
-                ((S, S, S), (), 1.5, False), # Scalar
-                ((), 1.5, (), False), # Scalar
-                ((), 1.5, (), False) # Scalar
-            ]
-
-    # Sample inputs with broadcasting
-    cases_with_broadcasting = [
-            ((S, S, S), (S, S, S), 1.5, True),
-            ((S,), (S, S, S), 1.5, True),
-            ((S, 1, S), (S, S), 1.5, True),
-            ((), (S, S, S), 1.5, True)
-            ]
-
-    cases.append(cases_with_broadcasting)
-
-    def generator():
-        for case in cases:
-            shape, shape_other, add_other, broadcasts_input = case
-            if isinstance(shape_other, tuple):
-                arg = make_arg(shape_other, requires_grad=False) + add_other
+                arg = make_arg(shape_other, requires_grad=False, include_zero=False) + add_other
             else:
                 # shape_other is scalar
                 arg = shape_other
@@ -4282,7 +4249,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('fmod',
            dtypes=all_types_and(torch.float16, torch.bool),
-           sample_inputs_func=sample_inputs_fmod,
+           sample_inputs_func=sample_inputs_fmod_remainder,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
@@ -4290,7 +4257,7 @@ op_db: List[OpInfo] = [
     OpInfo('remainder',
             dtypesIfCPU=all_types_and(torch.float16, torch.bool),
             dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
-            sample_inputs_func=sample_inputs_remainder,
+            sample_inputs_func=sample_inputs_fmod_remainder,
             skips=(
                 SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                 SkipInfo('TestCommon', 'test_variant_consistency_eager'),

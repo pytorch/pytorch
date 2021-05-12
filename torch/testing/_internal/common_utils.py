@@ -1720,7 +1720,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
+        requires_grad: bool = False, noncontiguous: bool = False, include_zero: bool = True) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1753,7 +1753,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+            result = (torch.zeros(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
             result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
@@ -1770,10 +1770,17 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
+    if not include_zero and dtype not in complex_types():
+        if dtype in integral_types() or dtype is torch.bool:
+            replace_with = torch.tensor(1, device=device, dtype=dtype)
+        elif dtype in floating_types_and(torch.half, torch.bfloat16):
+            replace_with = torch.tensor(sys.float_info.epsilon, device=device, dtype=dtype)
+        result[result == 0] = replace_with 
+
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():
         result.requires_grad = requires_grad
-
+ 
     return result
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
