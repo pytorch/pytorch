@@ -46,6 +46,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
+                 batch_level: bool = False,
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -56,10 +57,15 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
+        self.batch_level = batch_level
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            yield self.fn(data, *self.args, **self.kwargs)
+            if self.batch_level or not isinstance(data, list):
+                yield self.fn(data, *self.args, **self.kwargs)
+            else:
+                result = [self.fn(item, *self.args, **self.kwargs) for item in data]
+                yield result
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
@@ -120,16 +126,17 @@ class CollateIterDataPipe(MapIterDataPipe):
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  collate_fn: Callable = _utils.collate.default_collate,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
-        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, batch_level=True)
 
 
-@functional_datapipe('transforms')
+@functional_datapipe('legacy_transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 
@@ -139,6 +146,7 @@ class TransformsIterDataPipe(MapIterDataPipe):
         datapipe: Iterable DataPipe being transformed
         transforms: A transform or a sequence of transforms from torchvision or torchaudio.
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  transforms: Callable,
