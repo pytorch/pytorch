@@ -2842,7 +2842,7 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+static void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
 #ifdef USE_CUSOLVER
   if (b.dim() == 2) {
     lu_solve_looped_cusolver(b, lu, pivots);
@@ -2874,7 +2874,7 @@ static void lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
 //   }
 // }
 
-REGISTER_DISPATCH(lu_solve_stub, &lu_solve);
+REGISTER_DISPATCH(lu_solve_stub, &apply_lu_solve);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
