@@ -247,10 +247,10 @@ class EventList(list):
                                                evt.thread, next_id))
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
-
-            # remove trailing whitespace and comma
-            f.seek(f.tell() - 2, os.SEEK_SET)
-            f.truncate()
+            if len(self) > 0:
+                # remove trailing whitespace and comma
+                f.seek(f.tell() - 2, os.SEEK_SET)
+                f.truncate()
             f.write("]")
 
     def supported_export_stacks_metrics(self):
