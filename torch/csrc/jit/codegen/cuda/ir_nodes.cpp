@@ -465,6 +465,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 // TODO(kir): review if this is still needed in the Fusion IR
 Val* IterDomain::extent() const {
   if (isThread()) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (extent_->getValType() == ValType::Scalar)
       if (extent_->as<Int>()->isConst())
         return extent_;

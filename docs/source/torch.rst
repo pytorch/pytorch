@@ -313,6 +313,7 @@ Pointwise Ops
     fmod
     frac
     frexp
+    gradient
     imag
     ldexp
     lerp
@@ -340,6 +341,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real

@@ -1,7 +1,7 @@
 import math
 import warnings
 import numbers
-from typing import List, Tuple, Optional, overload, Union
+from typing import List, Tuple, Optional, overload, Union, cast
 
 import torch
 from torch import Tensor
@@ -244,14 +244,13 @@ class RNNBase(Module):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
         else:
-            assert isinstance(input, Tensor)
+            input = cast(Tensor, input)
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
-
-        assert isinstance(input, Tensor)
         if hx is None:
+            input = cast(Tensor, input)
             num_directions = 2 if self.bidirectional else 1
             hx = torch.zeros(self.num_layers * num_directions,
                              max_batch_size, self.hidden_size,
@@ -262,6 +261,7 @@ class RNNBase(Module):
             hx = self.permute_hidden(hx, sorted_indices)
 
         assert hx is not None
+        input = cast(Tensor, input)
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
@@ -299,6 +299,11 @@ class RNNBase(Module):
         super(RNNBase, self).__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
+        # In PyTorch 1.8 we added a proj_size member variable to LSTM.
+        # LSTMs that were serialized via torch.save(module) before PyTorch 1.8
+        # don't have it, so to preserve compatibility we set proj_size here.
+        if 'proj_size' not in d:
+            self.proj_size = 0
 
         if isinstance(self._all_weights[0][0], str):
             return

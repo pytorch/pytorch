@@ -8,6 +8,7 @@ on:
     - Lint
     - Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
     - Test tools
+    - TorchBench CI (pytorch-linux-py3.7-cu102)
     - clang-format
 jobs:
   cancel:
