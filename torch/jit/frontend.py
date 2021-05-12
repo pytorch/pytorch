@@ -1,7 +1,7 @@
 import torch
 import sys
 import ast
-import astunparse
+import astunparse # type: ignore
 import inspect
 import string
 from collections import namedtuple
@@ -456,11 +456,11 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_function = ast.parse(ignore_function_str).body[0]
 
     # dump the body of context manager to dummy function
-    ignore_function.body = stmt.body
+    ignore_function.body = stmt.body # type: ignore[attr-defined]
 
     # insert return statement to the function
     return_stmt = ast.parse(return_stmt).body[0]
-    ignore_function.body.append(return_stmt)
+    ignore_function.body.append(return_stmt) # type: ignore[attr-defined]
 
     # registers the custom function in the global context
     ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
