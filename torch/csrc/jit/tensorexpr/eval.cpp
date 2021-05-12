@@ -974,6 +974,16 @@ SimpleIREvaluator::SimpleIREvaluator(
 SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
+  std::vector<void*> raw_args(args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    auto const& bufferArg = buffer_args()[i];
+    auto const& callArg = args[i];
+    raw_args[i] = argToPtr(bufferArg, callArg);
+  }
+  call_raw(raw_args);
+}
+
+void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("bad args in IREvaluator call");
   }
@@ -985,22 +995,20 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(simple_ir_eval_executed);
 }
 
-void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
-  throw std::runtime_error(
-      "SimpleIREvaluator::call_raw is not implemented yet");
-}
-
-void SimpleIREvaluator::bindArg(const BufferArg& bufArg, const CallArg& data) {
+void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
   if (!bufArg.isVar()) {
-    impl_->bindBuf(bufArg.buf(), data.data());
+    impl_->bindBuf(bufArg.buf(), data);
     return;
   }
 
   switch (bufArg.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                        \
-  case ScalarType::Name:                             \
-    impl_->bindVar(bufArg.var(), *data.Name##Ptr()); \
-    break;
+#define TYPE_CASE(Type, Name)                 \
+  case ScalarType::Name: {                    \
+    Type typed_data;                          \
+    memcpy(&typed_data, data, sizeof(Type));  \
+    impl_->bindVar(bufArg.var(), typed_data); \
+    break;                                    \
+  }
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
