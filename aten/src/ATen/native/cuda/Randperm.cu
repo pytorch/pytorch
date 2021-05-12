@@ -67,16 +67,9 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
 
-#if !defined(_MSC_VER)
   constexpr bool is_reduced_bits = true;
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
-#else
-  // For some unknown reason, randperm_handle_duplicate_keys is causing test failures.
-  // Without this additional permutation kernel, we should sort on as much bits as we can.
-  constexpr bool is_reduced_bits = false;
-  int bits = 64;
-#endif
 
   if (n == 0) {
     return result;
@@ -91,11 +84,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
 
-      if (is_reduced_bits) {
-        // This causes failing tests on MSVC for unknown reason.
-        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-      }
-
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 16) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
@@ -109,11 +98,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
 
-      if (is_reduced_bits) {
-        // This causes failing tests on MSVC for unknown reason.
-        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-      }
-
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 32) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
@@ -127,11 +112,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
 
-      if (is_reduced_bits) {
-        // This causes failing tests on MSVC for unknown reason.
-        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-      }
-
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
@@ -145,11 +126,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
 
-      if (is_reduced_bits) {
-        // This causes failing tests on MSVC for unknown reason.
-        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-      }
-
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   }
 

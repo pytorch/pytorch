@@ -43,19 +43,6 @@ def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
 def get_default_output_activation_post_process_map() -> Dict[Pattern, torch.quantization.observer.ObserverBase]:
     return DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP
 
-# a set of QuantizeHandler classes that are not observed
-# we'll skip inserting observers for input and output for these QuantizeHandlers
-# used for ops that only supports dynamic/weight only quantization
-DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER = set()
-def mark_input_output_not_observed():
-    def insert(fn):
-        DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER.add(fn)
-        return fn
-    return insert
-
-def input_output_observed(qh):
-    return type(qh) not in DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER
-
 
 class MatchAllNode:
     """ A node pattern that matches all nodes

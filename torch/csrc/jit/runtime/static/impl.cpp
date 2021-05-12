@@ -283,12 +283,13 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
   // these need to be removed from "can_reuse" after analyzing all nodes
   std::unordered_set<const Value*> cannot_reuse;
   for (auto* n : graph->nodes()) {
+    bool can_reuse_inputs_outputs = canReuseInputsOutputs(n);
     for (const auto* v : n->inputs()) {
       if (!seen_values.count(v)) {
         all_values.emplace_back(v);
         seen_values.insert(v);
       }
-      if (canReuseInputsOutputs(n)) {
+      if (can_reuse_inputs_outputs) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -297,7 +298,7 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
     for (const auto* v : n->outputs()) {
       all_values.emplace_back(v);
       seen_values.insert(v);
-      if (canReuseInputsOutputs(n)) {
+      if (can_reuse_inputs_outputs) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -799,9 +800,7 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: "
-            << time_per_iter
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
@@ -825,13 +824,11 @@ void StaticRuntime::benchmark(
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes)"
               << std::endl;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
@@ -984,7 +981,6 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;
@@ -1088,7 +1084,7 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<const Value*> leaked_values;
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
-      if (canReuseInputsOutputs(pnode.node())) {
+      if (pnode.has_out_variant()) {
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (auto i = 0; i < pnode.outputs().size(); ++i) {
           const Value* out_v = pnode.node()->outputs()[i];
@@ -1229,14 +1225,18 @@ ProcessedNode::ProcessedNode(
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variant && canRunOutOfPlace(node)) {
-    fn_ = getOutOfPlaceOperation(node);
+  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
     VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-  } else if (canRunNatively(node)) {
+    return;
+  }
+  if (!fn_ && mayRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
-    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-  } else if (
-      node->kind() != prim::ListConstruct &&
+    if (native_fn_) {
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
+  }
+  if (node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
       node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
     const Operator& op = node->getOperator();
