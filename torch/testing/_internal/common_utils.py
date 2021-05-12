@@ -1737,7 +1737,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         it is not possible to create a noncontiguous Tensor with a single element.
 
         If include_zero=False (default is True), all the zeros in the created tensor are replaced with an
-        epsilon value (if floating type) else 1 (if integer/boolean type).
+        epsilon value if floating type, [`eps` + `eps`.j] if complex type and 1 if integer/boolean type.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1780,7 +1780,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         if dtype in integral_types() or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
-            replace_with = torch.tensor(sys.float_info.epsilon, device=device, dtype=dtype)
+            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
+        else:
+            # An assert is required? It's already done above (L1766)
+            # assert dtype in complex_types()
+            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            replace_with = torch.complex(real, imag)
         result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
