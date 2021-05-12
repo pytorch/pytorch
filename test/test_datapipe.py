@@ -7,6 +7,7 @@ import warnings
 import tarfile
 import zipfile
 import numpy as np
+import sys
 from PIL import Image
 from unittest import skipIf
 
@@ -17,7 +18,9 @@ from torch.utils.data import \
     (IterDataPipe, RandomSampler, DataLoader,
      construct_time_validation, runtime_validation)
 
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
+from typing import \
+    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
+     TypeVar, Set, Union)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -573,6 +576,15 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
+# Metaclass conflict for Python 3.6
+# Multiple inheritance with NamedTuple is not supported for Python 3.9
+_generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
+if _generic_namedtuple_allowed:
+    class InvalidData(Generic[T_co], NamedTuple):
+        name: str
+        data: T_co
+
+
 class TestTyping(TestCase):
     def test_subtype(self):
         from torch.utils.data._typing import issubtype
@@ -676,6 +688,11 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
+        if _generic_namedtuple_allowed:
+            with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
+                class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
+                    pass
+
         class DP1(IterDataPipe[Tuple[int, str]]):
             def __init__(self, length):
                 self.length = length
@@ -691,7 +708,7 @@ class TestTyping(TestCase):
         self.assertEqual(dp1.type, dp2.type)
 
         with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
-            class InvalidDP4(DP1[tuple]):  # type: ignore[type-arg]
+            class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
