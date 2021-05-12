@@ -1310,6 +1310,7 @@ class TestNormalizeOperators(JitTestCase):
         op_skip = {'einsum',
                    'expand',
                    'expand_as',
+                   'gradient',
                    'index_put',
                    'polygamma',
                    'repeat',
