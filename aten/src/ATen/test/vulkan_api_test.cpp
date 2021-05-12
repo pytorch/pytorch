@@ -922,15 +922,15 @@ TEST(VulkanAPITest, hardsigmoid_) {
     return;
   }
 
-  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
-  auto vulkan = cpu.vulkan();
+  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  auto vulkan = a_cpu.vulkan();
 
-  at::cpu::hardsigmoid_(cpu);
+  at::cpu::hardsigmoid_(a_cpu);
   at::hardsigmoid_(vulkan);
 
-  const auto check = almostEqual(cpu, vulkan.cpu());
+  const auto check = almostEqual(a_cpu, vulkan.cpu());
   if (!check) {
-    showRtol(cpu, vulkan.cpu());
+    showRtol(a_cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
