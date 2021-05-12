@@ -1,3 +1,4 @@
+// ${generated_comment}
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
 #include <ATen/Functions.h>
@@ -13,9 +14,13 @@ namespace tensorexpr {
 extern "C" {
 #endif
 
-#ifndef C10_MOBILE
 $ {
   external_functions
+}
+
+#ifndef C10_MOBILE
+$ {
+  external_registrations
 }
 #endif
 
