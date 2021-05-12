@@ -189,8 +189,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-  m.def("_add_metadata", addMetadata);
 #endif
+
+  m.def("_add_metadata", [](const std::string& key, const std::string& value) {
+#ifdef USE_KINETO
+      addMetadata(key, value);
+#else
+      LOG(WARNING) << "Adding profiling metadata requires using "
+                   << "torch.profiler with Kineto support (USE_KINETO=1)";
+#endif
+  });
 
   m.def("kineto_available", []() {
 #ifdef USE_KINETO
