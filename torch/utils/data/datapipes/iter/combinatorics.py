@@ -74,25 +74,85 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *,
-                 buffer_size: int) -> None:
+                 buffer_size: int = 10000,
+                 batch_level: bool = False,
+                 cross_shuffle: bool = True) -> None:
         super().__init__()
         assert buffer_size > 0, "buffer_size should be larger than 0"
         self.datapipe = datapipe
         self.buffer_size = buffer_size
         self._buffer = []
+        self._sizes = []
+        self.batch_level = batch_level
+        self.cross_shuffle = cross_shuffle
+        
+        
+    def buffer_replace(self, x):
+        idx = random.randint(0, self.buffer_size - 1)
+        val = self._buffer[idx]
+        self._buffer[idx] = x
+        return val
 
     def __iter__(self) -> Iterator[T_co]:
-        for x in self.datapipe:
-            if len(self._buffer) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield self._buffer[idx]
-                self._buffer[idx] = x
-            else:
-                self._buffer.append(x)
-        random.shuffle(self._buffer)
-        while self._buffer:
-            yield self._buffer.pop()
+        # TODO: Buffer is global, should be per __iter__ !!!
+        # TODO: Works bad with size = 0 batches
+        if self.cross_shuffle or self.batch_level:
+            batch_level = self.batch_level    
+            check_first = True
+            response = []
+            for x in self.datapipe:
+                if check_first and not isinstance(x, list):
+                    batch_level = True
+                check_first = False
+                if batch_level:
+                    if len(self._buffer) == self.buffer_size:
+                        yield self.buffer_replace(x)
+                    else:
+                        self._buffer.append(x)
+                else:
+                    if len(x) > 0:
+                        
+                        self._sizes.append(len(x))
+                        # print('sizes',self._sizes)
+                        for i in x:
+                            if len(self._buffer) == self.buffer_size:
+                                response.append(self.buffer_replace(i))
+                                if len(response) == self._sizes[0]:
+                                    yield response
+                                    response = []
+                                    self._sizes.pop(0)
+                                    # print('sizes',self._sizes)
 
+                            else:
+                                self._buffer.append(i)
+
+            random.shuffle(self._buffer)
+
+            if batch_level:    
+                while self._buffer:
+                    yield self._buffer.pop()
+            else:
+                for i in self._buffer:
+                    response.append(i)
+                    if len(response) == self._sizes[0]:
+                        yield response
+                        response = []
+                        self._sizes.pop(0)
+                        # print('sizes',self._sizes)
+
+                    else:
+                        # print('meed', self._sizes[0])
+                        pass
+        else:
+            for x in self.datapipe:
+                if isinstance(x, list):
+                    l = [ i for i in x]
+                    random.shuffle(l)
+                    yield l
+                else:
+                    yield x
+
+    
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
             return len(self.datapipe)
