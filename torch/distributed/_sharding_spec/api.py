@@ -12,7 +12,7 @@ class PlacementSpec(ABC):
     """
     pass
 
-class DevicePlacement(PlacementSpec):
+class DevicePlacementSpec(PlacementSpec):
     """
     Associates placement of an entity with a single device. The device can be a
     local device or a remote device specified by one of the following remote
@@ -25,7 +25,7 @@ class DevicePlacement(PlacementSpec):
         device(str, :class:`torch.device`): The device to place the entity on.
     """
     def __init__(self, device: Device):
-        super(DevicePlacement, self).__init__()
+        super(DevicePlacementSpec, self).__init__()
         if not is_valid_device(device):
             raise ValueError(f'{device} is not a valid device')
         self._device = device

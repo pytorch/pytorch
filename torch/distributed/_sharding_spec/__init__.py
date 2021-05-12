@@ -1,6 +1,6 @@
 from .api import (
     ChunkShardingSpec,
-    DevicePlacement,
+    DevicePlacementSpec,
     GenericShardingSpec,
     PlacementSpec,
 )

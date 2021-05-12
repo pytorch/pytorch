@@ -2,7 +2,7 @@ import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
-    DevicePlacement,
+    DevicePlacementSpec,
     GenericShardingSpec,
 )
 
@@ -10,20 +10,22 @@ class TestShardingSpec(TestCase):
 
     def test_device_placement(self):
         # valid devices
-        DevicePlacement("cuda:0")
-        DevicePlacement(0)
-        DevicePlacement(torch.device("cuda:0"))
-        DevicePlacement("rank:0/cuda:0")
-        DevicePlacement("rank:0/cpu")
-        DevicePlacement("rank:0")
+        DevicePlacementSpec("cuda:0")
+        DevicePlacementSpec(0)
+        DevicePlacementSpec(torch.device("cuda:0"))
+        DevicePlacementSpec("rank:0/cuda:0")
+        DevicePlacementSpec("rank:0/cpu")
+        DevicePlacementSpec("rank:0")
 
         # invalid devices
         with self.assertRaisesRegex(ValueError, "not a valid device"):
-            DevicePlacement("cuda:foo")
+            DevicePlacementSpec("cuda:foo")
         with self.assertRaisesRegex(ValueError, "not a valid device"):
-            DevicePlacement("foo:0")
+            DevicePlacementSpec("foo:0")
         with self.assertRaisesRegex(ValueError, "not a valid device"):
-            DevicePlacement("rank:0/cuda:foo")
+            DevicePlacementSpec("rank:0/cuda:foo")
+        with self.assertRaisesRegex(ValueError, "not a valid device"):
+            DevicePlacementSpec("rank:0/cpu2")
 
     def test_chunked_sharding_spec(self):
         # Test valid specs.
