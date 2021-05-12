@@ -135,6 +135,8 @@ class _DDPSink(Function):
                 ctx.reducer.prepare_for_backward(used_inputs)
                 ctx.reducer.set_per_iteration_param_outputs_unused(outputs_unused_indices)
             else:
+                it = ctx.state_dict['num_iterations']
+                print(f"Calling prepare_for_backward: {it}")
                 ctx.reducer.prepare_for_backward([])
         # In static graph training, enqueue delay_all_reduce for the first
         # iteration. This will allow DDP to bake in assumptions about how many
