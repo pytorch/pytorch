@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
+from torch.autograd import Variable, Function
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -105,6 +106,19 @@ class _DDPUnevenInputsConfig(NamedTuple):
     ddp_join_divide_by_initial_world_size: bool
     ddp_join_throw_on_early_termination: bool
 
+# Add a DDPSink to queue call back of out-most backward/graph task,
+# this helps call back is fired after all gradients' calculation
+# is completed.
+class DDPSink(Function):
+    @staticmethod
+    def forward(ctx, input, reducer):
+        ctx.reducer = reducer
+        return input
+
+    @staticmethod
+    def backward(ctx, input):
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return input, None
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
@@ -425,6 +439,7 @@ class DistributedDataParallel(Module):
         else:
             self.process_group = process_group
 
+        self.static_graph = False
         self.dim = dim
         self.module = module
         self.device = list(self.module.parameters())[0].device
@@ -507,6 +522,7 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -567,6 +583,8 @@ class DistributedDataParallel(Module):
             param_to_name_mapping = {}
         # Builds reducer
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        if self.static_graph:
+            self._set_static_graph()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -735,6 +753,7 @@ class DistributedDataParallel(Module):
             self.reducer.save_thread_local_state()
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
+                self.num_iterations += 1
                 self.reducer.prepare_for_forward()
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
@@ -793,6 +812,11 @@ class DistributedDataParallel(Module):
             else:
                 self.require_forward_param_sync = False
 
+            # TODO. Right now we add this sink for static_graph training only. once
+            # this feature is stable, we will add this sink for all cases. E.g.
+            # This sink can help capture more accuracte backward start time as well.
+            if self.static_graph and self.num_iterations == 1:
+                output = DDPSink.apply(output, self.reducer)
             return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -1398,5 +1422,14 @@ class DistributedDataParallel(Module):
             for i in range(n):
                 .....
         """
+        self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()
+        if self.find_unused_parameters:
+            warnings.warn(
+                "You passed find_unused_parameters=true to DistributedDataParallel, "
+                "`_set_static_graph` will detect unused parameters automatically, so "
+                "you do not need to set find_unused_parameters=true, just be sure these "
+                "unused parameters will not change during training loop while calling "
+                "`_set_static_graph`."
+            )
