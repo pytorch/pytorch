@@ -21,6 +21,14 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
+namespace impl {
+
+std::string noop_name_fn(const PyInterpreter*) {
+  return "<unloaded interpreter>";
+}
+
+} // namespace impl
+
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -85,7 +93,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-      pyobj_interpreter_(-1),
+      pyobj_interpreter_(nullptr),
       pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
@@ -113,7 +121,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-      pyobj_interpreter_(-1),
+      pyobj_interpreter_(nullptr),
       pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),

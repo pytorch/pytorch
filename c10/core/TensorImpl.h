@@ -181,10 +181,14 @@ struct C10_API AutogradMetaFactoryRegisterer {
 // tensors into the Python representations.  However, in some situations
 // (torchdeploy) there may be multiple Python interpreters in a single process
 // and we must take care not to accidentally mix up PyObjects with the wrong
-// interpreters.
+// interpreters.  Thus, we also tag every TensorImpl with the Python interpreter
+// it corresponds to.
 //
 // With torchdeploy, we have these invariants:
-//  - Any given TensorImpl can be associated with AT MOST one Python interpreter
+//  - Any given TensorImpl can be associated with AT MOST one Python interpreter.
+//    We represent the interpreter tag as a memory address to an instance of
+//    a virtual class that is allocated once per interpreter (this is so that
+//    we can request the interpreter to perform operations for us, if necessary).
 //  - A given TensorImpl's interpreter tag can only go from uninitialized to
 //    tagged; once tagged, this is a quiescent state (once tagged to an
 //    interpreter, ALWAYS tagged to that interpreter)
@@ -192,10 +196,69 @@ struct C10_API AutogradMetaFactoryRegisterer {
 //    holds the GIL for the interpreter tagged on the TensorImpl.  (If the
 //    TensorImpl is not tagged, it must first atomically claim its tag before it
 //    can validly write)
+
+// The PyInterpreter object itself is a class that contains some function
+// pointers for interacting with the interpreter.  For now this is just for
+// debugging, but if a Tensor can own a PyObject, the interpreter can be used to
+// free it.
 //
-// PythonInterpreterTagStatus describes what the state of its interpreter tag
+// WARNING: This class has to be written very carefully, because it may be
+// possible for a Tensor to have a reference an interpreter corresponding to
+// a shared library that has ALREADY BEEN UNLOADED.  This makes blindly calling
+// virtual methods very dangerous, because the vtable may be garbage at that
+// point (on a good day, you might get "pure virtual method called").
+//
+// The idea to solve this problem is we always leak PyInterpreters (so they
+// always stay live even after dlclose), and disarm the "virtual methods" by
+// replacing them with function pointers that just no-op.  This can't be done
+// with a traditional C++ vtable, so we have to roll our own.
+//
+// NB: The downside with representing PyInterpreter tags as full objects is that
+// it takes an extra word on TensorImpl.  If tags were instead just integer
+// indices, on 64-bit architectures we could pack the tag and PyObject together
+// into a single atomic word.  On 32-bit architectures we could simply say that
+// only one Python interpreter is supported (erroring if a nontrivial
+// interpreter tag is attempted to be set).
+//
+// The difficulty with this scheme is we need to maintain an out-of-line table
+// to get at the PyInterpreters so that we can do virtual method calls on them,
+// and registration/deregistration to this table must be done in a thread safe
+// manner.  This can be easily done if the number of possible PyInterpreters is
+// small enough (e.g., 8-bit integer) by simply preallocating an array of
+// sufficient size to hold all possible interpreters.  Surely 128 threads is
+// more than enough for anyone!
+//
+// I didn't decide to do this technique at the moment, because the extra word
+// added by the PyInterpreter tag takes us to 24 words, which means that we
+// still fit inside three eight word cache lines.  If you need to penny pinch
+// another word consider doing this!
+
+struct PyInterpreter;
+C10_API std::string noop_name_fn(const PyInterpreter*);
+struct C10_API PyInterpreter {
+  using name_sig = std::string(const PyInterpreter*);
+
+  PyInterpreter(name_sig* name_fn) : name_fn_(name_fn) {}
+
+  // For debugging purposes only
+  name_sig* name_fn_;
+
+  std::string name() const {
+    return (*name_fn_)(this);
+  }
+
+  // Disarm this PyInterpreter, making all of its methods noops.
+  // This is not really thread safe, but the hope is that long lived tensors
+  // will die after a synchronization even from the dlclose, typically when
+  // the main process begins shutdown.
+  void disarm() noexcept {
+    name_fn_ = &noop_name_fn;
+  }
+};
+
+// PyInterpreterStatus describes what the state of its interpreter tag
 // is, relative to the thread currently holding the GIL.
-enum class PythonInterpreterTagStatus {
+enum class PyInterpreterStatus {
   // We just allocated the Tensor, it hasn't escaped to other threads,
   // we know that it definitely hasn't been tagged to be associated
   // with an interpreter.
@@ -1347,20 +1410,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
   void init_pyobj(
-      int16_t self_interpreter,
+      impl::PyInterpreter* self_interpreter,
       PyObject* pyobj,
-      c10::impl::PythonInterpreterTagStatus status) {
-    int16_t expected = -1;
+      c10::impl::PyInterpreterStatus status) {
+    impl::PyInterpreter* expected = nullptr;
     switch (status) {
-      case c10::impl::PythonInterpreterTagStatus::DEFINITELY_UNINITIALIZED:
+      case impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED:
         // caller guarantees there is no multithreaded access; if there is
         // no data race OK to do a relaxed store
         pyobj_interpreter_.store(self_interpreter, std::memory_order_relaxed);
         break;
-      case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_US:
+      case impl::PyInterpreterStatus::TAGGED_BY_US:
         // no tagging is necessary, the tag is already correct
         break;
-      case c10::impl::PythonInterpreterTagStatus::MAYBE_UNINITIALIZED:
+      case impl::PyInterpreterStatus::MAYBE_UNINITIALIZED:
         // attempt to claim this TensorImpl with the specified interpreter
         // tag
         if (pyobj_interpreter_.compare_exchange_strong(
@@ -1371,7 +1434,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
         C10_FALLTHROUGH;
-      case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_OTHER:
+      case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
         TORCH_CHECK(
             false,
             "cannot allocate PyObject for Tensor on interpreter ",
@@ -1392,10 +1455,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
-  c10::optional<PyObject*> check_pyobj(int16_t self_interpreter) noexcept {
+  c10::optional<PyObject*> check_pyobj(impl::PyInterpreter* self_interpreter) noexcept {
     // Note [Memory ordering on Python interpreter tag]
-    int16_t interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter == -1) {
+    impl::PyInterpreter* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter == nullptr) {
       // NB: This never returns DEFINITELY_UNINITIALIZED because there is
       // always the possibility that another thread races to initialize
       // after we query here.  The only time when we can conclude a tensor
@@ -1409,15 +1472,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           false,
           "cannot access PyObject for Tensor on interpreter ",
-          self_interpreter,
+          self_interpreter->name(),
           " that has already been used by another torch deploy interpreter ",
-          pyobj_interpreter_.load());
+          pyobj_interpreter_.load()->name());
     }
   }
 
   // Clear the PyObject field for an interpreter, in situations where we
   // statically know the tensor is tagged with our interpreter.
-  void unchecked_clear_pyobj(int16_t interpreter) {
+  void unchecked_clear_pyobj(impl::PyInterpreter* interpreter) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
     pyobj_ = nullptr;
   }
@@ -2136,15 +2199,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // However, on x86, it doesn't matter if I use acquire or relaxed on the load
   // as I get the same assembly in both cases.  So I just use the more
   // conservative acquire (which will impede compiler optimizations but I don't
-  //
-  // pyobj_interpreter_ == 0 is distinguished for the main process Python
-  // interpreter (it is picked to be 0 so we can avoid masking in the packed
-  // 64-bit case in the common case).
-  //
-  // NB: interpreter tag is 16-bits, even though as an atomic it has to take
-  // up an entire word, to ensure that we can safely fold it into pyobj
-  // for the packed pointer optimization
-  std::atomic<int16_t> pyobj_interpreter_;
+  std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
 
   // This field contains a weak reference to a PyObject representing
   // this Tensor.  It MUST NOT be a strong reference, as that would
@@ -2158,8 +2213,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
   PyObject* pyobj_;
-
-  // TODO: collapse pyobj_ and pyobj_interpreter_ into single field on 64-bit
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
@@ -2304,7 +2357,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    autograd metadata pointer
 //    named tensor metadata pointer
 //    version counter pointer
-//    interpreter header
+//    Python interpreter pointer
 //    PyObject pointer
 //    SizesAndStrides size/pointer
 //    SizesAndStrides sizes (pre-allocated 0)

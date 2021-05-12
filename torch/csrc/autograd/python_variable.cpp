@@ -37,36 +37,32 @@
 #include <utility>
 #include <vector>
 #include <cstdint>
+#include <iostream>
 
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
 
 namespace {
-// The *dynamic* torch deploy interpreter id associated with this copy
-// of the interpreter.  This is initialized immediately after dlopen by
-// set_python_interpreter_id.  For the base interpreter (no torchdeploy),
-// the ID is always zero, and we constexpr it for easier optimization
-#ifdef USE_DEPLOY
-int16_t self_interpreter = INT16_MIN;
-#else
-constexpr int16_t self_interpreter = 0;
-#endif
+
+std::string concrete_name_fn(const c10::impl::PyInterpreter* self) {
+  std::stringstream ss;
+  ss << self;
+  return ss.str();
 }
 
-namespace torch {
-namespace impl {
+class PyInterpreterHolder {
+public:
+  PyInterpreterHolder() : impl_(new c10::impl::PyInterpreter(&concrete_name_fn)) {}
+  // NB: intentionally leaks the memory
+  ~PyInterpreterHolder() { impl_->disarm(); }
+  c10::impl::PyInterpreter* get() const noexcept { return impl_; }
+private:
+  c10::impl::PyInterpreter* impl_;
+};
+PyInterpreterHolder self_interpreter;
 
-void set_python_interpreter_id(int16_t id) {
-#ifdef USE_DEPLOY
-  self_interpreter = id;
-#else
-  TORCH_INTERNAL_ASSERT(false, "cannot set interpreter id for non-torchdeploy python bindings");
-#endif
-}
-
-} // namespace impl
-} // namespace torch
+} // anonymous namespace
 
 namespace py = pybind11;
 
@@ -87,14 +83,14 @@ static const char* VOLATILE_WARNING =
 // be already tagged by another interpreter.  If unchecked, then we assume that
 // our interpreter has already tagged this Varible, and we can do a direct
 // setter.
-static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var, c10::impl::PythonInterpreterTagStatus status)
+static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var, c10::impl::PyInterpreterStatus status)
 {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
     // cannot use var as it is moved out of
-    THPVariable_Unpack(v).unsafeGetTensorImpl()->init_pyobj(self_interpreter, obj, status);
+    THPVariable_Unpack(v).unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
   }
   return obj;
 }
@@ -105,8 +101,8 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  c10::optional<PyObject*> mb_obj = var.unsafeGetTensorImpl()->check_pyobj(self_interpreter);
-  c10::impl::PythonInterpreterTagStatus status;
+  c10::optional<PyObject*> mb_obj = var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
+  c10::impl::PyInterpreterStatus status;
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -115,9 +111,9 @@ PyObject * THPVariable_Wrap(Variable var)
     }
     // TODO: a better invariant is that if we tagged, we MUST have a valid
     // PyObject.  That's PyObject preservation
-    status = c10::impl::PythonInterpreterTagStatus::TAGGED_BY_US;
+    status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   } else {
-    status = c10::impl::PythonInterpreterTagStatus::MAYBE_UNINITIALIZED;
+    status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
   }
   return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var), status);
 }
@@ -171,7 +167,7 @@ static int THPVariable_clear(THPVariable *self)
     // objects stay live, buster!  See
     // https://github.com/pytorch/pytorch/issues/22884 for an example of
     // this actually showing up.
-    tensor.unsafeGetTensorImpl()->unchecked_clear_pyobj(self_interpreter);
+    tensor.unsafeGetTensorImpl()->unchecked_clear_pyobj(self_interpreter.get());
   }
   self->cdata.reset();
   return 0;
@@ -200,7 +196,7 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  return THPVariable_NewWithVar((PyTypeObject*)cls, self.alias(), c10::impl::PythonInterpreterTagStatus::DEFINITELY_UNINITIALIZED);
+  return THPVariable_NewWithVar((PyTypeObject*)cls, self.alias(), c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -227,7 +223,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   auto var = data.set_requires_grad(r.toBool(2));
-  return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var), c10::impl::PythonInterpreterTagStatus::DEFINITELY_UNINITIALIZED);
+  return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var), c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -959,7 +955,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
   auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
-  return THPVariable_NewWithVar(type, std::move(tensor), c10::impl::PythonInterpreterTagStatus::MAYBE_UNINITIALIZED);
+  return THPVariable_NewWithVar(type, std::move(tensor), c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
