@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 
 // TODO: These functions should move to a common place.
 
@@ -922,15 +923,15 @@ TEST(VulkanAPITest, hardsigmoid_) {
     return;
   }
 
-  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
-  auto vulkan = a_cpu.vulkan();
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  auto vulkan = cpu.vulkan();
 
-  at::cpu::hardsigmoid_(a_cpu);
+  at::cpu::hardsigmoid_(cpu);
   at::hardsigmoid_(vulkan);
 
-  const auto check = almostEqual(a_cpu, vulkan.cpu());
+  const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
-    showRtol(a_cpu, vulkan.cpu());
+    showRtol(cpu, vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
