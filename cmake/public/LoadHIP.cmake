@@ -131,7 +131,7 @@ else()
 endif()
 
 if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
-  set(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
+  set(PYTORCH_ROCM_ARCH gfx900;gfx906;gfx908;gfx90a;gfx1030)
 else()
   set(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
 endif()
