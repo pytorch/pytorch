@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import tempfile
 from enum import Enum
@@ -80,6 +81,16 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
+
+def supported_activities():
+    """
+    Returns a set of supported profiler activities
+    """
+    activities = [ProfilerActivity.CPU]
+    # CUPTI profiling is not supported on ROCm
+    if torch.cuda.is_available() and torch.version.hip is None:
+        activities.append(ProfilerActivity.CUDA)
+    return set(activities)
 
 
 class profile(object):
@@ -194,9 +205,7 @@ class profile(object):
         if activities:
             self.activities = set(activities)
         else:
-            self.activities = set([ProfilerActivity.CPU])
-            if torch.cuda.is_available():
-                self.activities.add(ProfilerActivity.CUDA)
+            self.activities = supported_activities()
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -205,9 +214,11 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
+        for activity in self.activities:
+            if activity not in supported_activities():
+                warn("Unsupported profiler activity specified (" + str(activity) + ")")
+        self.activities = self.activities.intersection(supported_activities())
         assert len(self.activities) > 0, "No profiler activities specified"
-        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
-            "CUDA activity specified, but CUDA is not available"
 
         if schedule:
             self.schedule = schedule
@@ -357,6 +368,34 @@ class profile(object):
         """
         torch.autograd._add_metadata(key, value)
 
+    def get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
+
+    def get_cuda_devices(self):
+        if not torch.cuda.is_available():
+            return None
+
+        devices = []
+        device_count = torch.cuda.device_count()
+        for i in range(device_count):
+            device_prop = torch.cuda.get_device_properties(i)
+            devices.append({
+                "id": i,
+                "name": device_prop.name,
+                "multi_processor_count": device_prop.multi_processor_count,
+                "total_memory": device_prop.total_memory
+            })
+
+        return devices
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -385,11 +424,18 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace()
+        self.profiler._prepare_trace()
 
     def _start_trace(self):
         assert self.profiler is not None
-        self.profiler._start_kineto_trace()
+        self.profiler._start_trace()
+
+        dist_info = self.get_distributed_info()
+        if dist_info:
+            self.add_metadata("distributed", json.dumps(dist_info).replace('"', '\\"'))
+        devices = self.get_cuda_devices()
+        if devices:
+            self.add_metadata("devices", json.dumps(devices).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None

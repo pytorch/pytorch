@@ -426,43 +426,10 @@ static void nan_to_num_kernel(
   });
 }
 
-static void clamp_kernel(TensorIteratorBase& iter, const Scalar& min_scalar, const Scalar& max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    auto min = min_scalar.to<scalar_t>();
-    auto max = max_scalar.to<scalar_t>();
-    auto min_vec = Vec256<scalar_t>(min);
-    auto max_vec = Vec256<scalar_t>(max);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
-  });
-}
-
-static void clamp_max_kernel(TensorIteratorBase& iter, const Scalar& max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    auto max = max_scalar.to<scalar_t>();
-    auto max_vec = Vec256<scalar_t>(max);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(a, max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
-  });
-}
-
-static void clamp_min_kernel(TensorIteratorBase& iter, const Scalar& min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    auto min = min_scalar.to<scalar_t>();
-    auto min_vec = Vec256<scalar_t>(min);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::max(a, min); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
-  });
-}
-
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
     const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
     cpu_kernel(iter, [=](scalar_t a){
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
     });
   });
@@ -770,12 +737,6 @@ REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

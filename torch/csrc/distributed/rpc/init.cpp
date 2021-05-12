@@ -145,6 +145,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_device_map",
+              &RpcAgent::getDeviceMap,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
@@ -175,18 +179,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               value (object): The value to be wrapped by this RRef.
               type_hint (Type, optional): Python type that should be passed to
                   ``TorchScript`` compiler as type hint for ``value``.
-              devices (List[int], optional): CUDA devices used by the
-                  ``value``. When this is provided, this ``RRef`` will inspect
-                  the ``value``, get Tensor devices, and record an
-                  ``CUDAEvent`` for each device used by the ``value``. Later,
-                  when ``local_value()`` is called, this ``RRef`` will use
-                  recorded ``CUDAEvent`` objects to block current CUDA streams.
-                  Only use this argument when it is necessary for this ``RRef``
-                  to perform CUDA stream synchronizations. Note that
-                  ``CUDAEvent`` objects are only recorded once at ``RRef``
-                  construction time. If the ``value`` is later changed
-                  in-place, CUDA stream synchronizations need to be performed
-                  in application code.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -223,14 +215,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
-              py::init<
-                  const py::object&,
-                  const py::object&,
-                  std::vector<c10::DeviceIndex>>(),
+              py::init<const py::object&, const py::object&>(),
               py::arg("value"),
-              py::arg("type_hint") = py::none(),
-              py::kw_only(),
-              py::arg("devices") = std::vector<c10::DeviceIndex>())
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -600,6 +587,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_get_device_map",
+          (DeviceMap(ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
+              ProcessGroupAgent::getDeviceMap,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "join",
           &ProcessGroupAgent::join,
           py::call_guard<py::gil_scoped_release>(),
@@ -625,16 +617,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               optional<std::vector<std::string>>,
               float,
               std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>,
-              std::vector<c10::DeviceIndex>>(),
+              std::unordered_map<std::string, DeviceMap>,
+              std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
-          py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>(),
-          py::arg("devices") = std::vector<c10::DeviceIndex>())
+          py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
+          py::arg("devices") = std::vector<c10::Device>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -709,6 +700,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_device_map",
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
+              TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_reverse_device_maps",
