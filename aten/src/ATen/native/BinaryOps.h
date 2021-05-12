@@ -43,13 +43,6 @@ inline void heaviside_check(const Tensor& self, const Tensor& other) {
               "heaviside is not yet implemented for tensors with different dtypes.");
 }
 
-inline void heaviside_check(const Tensor& self, const Tensor& other, const Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !other.is_complex(),
-              "heaviside is not yet implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == other.dtype() && result.dtype() == self.dtype(),
-              "heaviside is not yet implemented for tensors with different dtypes.");
-}
-
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 

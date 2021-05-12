@@ -1071,6 +1071,7 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, cons
 TORCH_IMPL_FUNC(heaviside_out) (
   const Tensor& self, const Tensor& other, const Tensor& result
 ) {
+  TORCH_CHECK(!result.is_complex(), "heaviside is not yet implemented for complex tensors.");
   heaviside_stub(device_type(), *this);
 }
 
