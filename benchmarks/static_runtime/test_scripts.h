@@ -163,6 +163,16 @@ const auto flatten_script_2 = R"JIT(
       return torch.flatten(b, start_dim, end_dim)
 )JIT";
 
+const auto clone_script_0 = R"JIT(
+  def forward(self, input):
+      return torch.clone(input)
+)JIT";
+
+const auto clone_script_1 = R"JIT(
+  def forward(self, input: Tensor, memory_format: int):
+      return torch.clone(input, memory_format=memory_format)
+)JIT";
+
 const auto aten_sum = R"JIT(
   def forward(self, input):
       return torch.sum(input)
@@ -321,4 +331,9 @@ const auto norm_5arg = R"JIT(
 const auto aten_matmul = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.matmul(a, b)
+)JIT";
+
+const std::string repeat = R"JIT(
+  def forward(self, a: Tensor, repeats: List[int]):
+      return torch.repeat(a, repeats)
 )JIT";
