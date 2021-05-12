@@ -12,6 +12,7 @@
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
+#include <ATen/native/mkldnn/Gelu.h>
 
 namespace at {
 namespace meta {
@@ -305,16 +306,35 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  return (input.is_mkldnn()) || // input is mkldnn Tensor
+    (input.device().is_cpu() && (input.scalar_type() == kBFloat16)); // input is dense layout and bfloat16
+#endif
+  return false;
+}
+
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
-  GeluKernel(kCPU, *this);
+  if (use_mkldnn(self)) {
+    at::native::_mkldnn_gelu(self.contiguous(), result);
+  } else {
+    GeluKernel(kCPU, *this);
+  }
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
-  GeluBackwardKernel(kCPU, *this);
+  if (use_mkldnn(self)) {
+    at::native::_mkldnn_gelu_backward(grad.contiguous(), self.contiguous(), grad_input);
+  } else {
+    GeluBackwardKernel(kCPU, *this);
+  }
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
