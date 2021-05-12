@@ -52,7 +52,7 @@ run it. Ensuring that the inputs and outputs of your FX transform are a
         import torch
         import torch.fx
 
-        def transform(m : nn.Module) -> nn.Module):
+        def transform(m : nn.Module) -> nn.Module:
             gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
 
             # Modify gm.graph
@@ -831,9 +831,9 @@ FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
 overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
-functions or those in the ``math`` module, are things that are not
-covered by ``__torch_function__``, but we would still like to capture
-them in symbolic tracing. For example:
+functions or those in the ``math`` module, are not covered by
+``__torch_function__``, but we would still like to capture them in
+symbolic tracing. For example:
 
 ::
 
