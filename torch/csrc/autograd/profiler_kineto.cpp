@@ -414,7 +414,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       std::move(trace));
 }
 
-void addMetadata(const std::string& key, const std::string& value) {
+void addMetadataJson(const std::string& key, const std::string& value) {
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().addMetadata(key, value);
   } else {
