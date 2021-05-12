@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import tempfile
 from enum import Enum
@@ -7,7 +8,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
+from torch.autograd import kineto_available, ProfilerActivity
 
 
 class ProfilerAction(Enum):
@@ -363,6 +364,17 @@ class profile(object):
         """
         torch.autograd._add_metadata(key, value)
 
+    def _get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -396,6 +408,11 @@ class profile(object):
     def _start_trace(self):
         assert self.profiler is not None
         self.profiler._start_trace()
+
+        if kineto_available():
+            dist_info = self._get_distributed_info()
+            if dist_info:
+                self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None
