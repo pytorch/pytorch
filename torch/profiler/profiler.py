@@ -8,7 +8,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
+from torch.autograd import kineto_available, ProfilerActivity
 
 
 class ProfilerAction(Enum):
@@ -21,16 +21,20 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callable:
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0) -> Callable:
     """
-    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
-    do the warmup for the next ``warmup`` steps, then
-    do the active recording for the next ``active`` steps and then
-    repeat the cycle starting with the next step. The number of cycles is specified by the ``repeat`` parameter.
-    When the parameter's value is zero, the cycles will continue until the profiling is finished.
+    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
+    the first ``skip_first`` steps, then wait for ``wait`` steps, then do the warmup for the next ``warmup`` steps,
+    then do the active recording for the next ``active`` steps and then repeat the cycle starting with ``wait`` steps.
+    The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
+    the cycles will continue until the profiling is finished.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
+        if step < skip_first:
+            return ProfilerAction.NONE
+        else:
+            step -= skip_first
         num_steps = wait + warmup + active
         if repeat > 0 and step / num_steps >= repeat:
             return ProfilerAction.NONE
@@ -42,8 +46,8 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callabl
         else:
             return ProfilerAction.RECORD if mod_step < num_steps - 1 \
                 else ProfilerAction.RECORD_AND_SAVE
-    assert wait >= 0 and warmup >= 0 and active > 0, \
-        "Invalid profiler schedule arguments"
+    assert wait >= 0 and warmup >= 0 and active > 0 and \
+           repeat >= 0 and skip_first >= 0, "Invalid profiler schedule arguments"
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
@@ -86,11 +90,7 @@ def supported_activities():
     """
     Returns a set of supported profiler activities
     """
-    activities = [ProfilerActivity.CPU]
-    # CUPTI profiling is not supported on ROCm
-    if torch.cuda.is_available() and torch.version.hip is None:
-        activities.append(ProfilerActivity.CUDA)
-    return set(activities)
+    return torch.autograd.supported_kineto_activities()
 
 
 class profile(object):
@@ -218,7 +218,7 @@ class profile(object):
             if activity not in supported_activities():
                 warn("Unsupported profiler activity specified (" + str(activity) + ")")
         self.activities = self.activities.intersection(supported_activities())
-        assert len(self.activities) > 0, "No profiler activities specified"
+        assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
             self.schedule = schedule
@@ -368,7 +368,7 @@ class profile(object):
         """
         torch.autograd._add_metadata(key, value)
 
-    def get_distributed_info(self):
+    def _get_distributed_info(self):
         import torch.distributed as dist
         if not dist.is_available() or not dist.is_initialized():
             return None
@@ -378,23 +378,6 @@ class profile(object):
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size()
         }
-
-    def get_cuda_devices(self):
-        if not torch.cuda.is_available():
-            return None
-
-        devices = []
-        device_count = torch.cuda.device_count()
-        for i in range(device_count):
-            device_prop = torch.cuda.get_device_properties(i)
-            devices.append({
-                "id": i,
-                "name": device_prop.name,
-                "multi_processor_count": device_prop.multi_processor_count,
-                "total_memory": device_prop.total_memory
-            })
-
-        return devices
 
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
@@ -430,12 +413,10 @@ class profile(object):
         assert self.profiler is not None
         self.profiler._start_trace()
 
-        dist_info = self.get_distributed_info()
-        if dist_info:
-            self.add_metadata("distributed", json.dumps(dist_info).replace('"', '\\"'))
-        devices = self.get_cuda_devices()
-        if devices:
-            self.add_metadata("devices", json.dumps(devices).replace('"', '\\"'))
+        if kineto_available():
+            dist_info = self._get_distributed_info()
+            if dist_info:
+                self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None
