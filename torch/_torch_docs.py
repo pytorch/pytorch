@@ -3504,6 +3504,32 @@ greater_equal(input, other, *, out=None) -> Tensor
 Alias for :func:`torch.ge`.
 """)
 
+add_docstr(torch.gradient,
+           r"""
+gradient(input, *, spacing=None, dim=None, edge_order=1) -> List of Tensors
+
+This function is analogous to NumPy's gradient function.
+
+Args:
+    {input}
+
+Keyword args:
+    spacing (scalar, list of scalar, list of Tensor, optional): implicitly or explicitly represents
+    the coordinates the function is evaluated at
+    dim (int, list of int, optional): the dimension or dimensions to approximate the gradient over.
+    edge_order (int, optional): unsupported (must be equal to its default value which is 1.)
+
+Example:
+
+    >>> t = torch.tensor([1, 2, 4, 7, 11, 16], dtype=torch.float)
+    >>> torch.gradient(t)
+    tensor([1. , 1.5, 2.5, 3.5, 4.5, 5. ])
+    >>> coords = torch.tensor([0., 1., 1.5, 3.5, 4., 6.], dtype=torch.float)
+    >>> torch.gradient(t, spacing=(coords,))
+    tensor([1. ,  3. ,  3.5,  6.7,  6.9,  2.5])
+
+""")
+
 add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
@@ -8506,9 +8532,23 @@ Supports :attr:`input` of float, double, cfloat and cdouble data types.
 The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: :func:`torch.svd` is deprecated. Please use
-             :func:`torch.linalg.svd` instead, which is similar to NumPy's
-             `numpy.linalg.svd`.
+.. warning::
+
+    :func:`torch.svd` is deprecated in favor of :func:`torch.linalg.svd`
+    and will be removed in a future PyTorch release.
+
+    ``U, S, V = torch.svd(A, some=some, compute_uv=True)`` (default) should be replaced with
+
+    .. code:: python
+
+        U, S, Vh = torch.linalg.svd(A, full_matrices=not some)
+        V = Vh.transpose(-2, -1).conj()
+
+    ``_, S, _ = torch.svd(A, some=some, compute_uv=False)`` should be replaced with
+
+    .. code:: python
+
+        S = torch.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
