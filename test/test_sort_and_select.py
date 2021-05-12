@@ -119,7 +119,7 @@ class TestSortAndSelect(TestCase):
                                  'random with NaNs')
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
@@ -189,7 +189,7 @@ class TestSortAndSelect(TestCase):
         self._test_sort_discontiguous(device, dtype)
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in torch.testing.floating_types_and(torch.float16):
             inf = float('inf')
@@ -249,7 +249,7 @@ class TestSortAndSelect(TestCase):
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)

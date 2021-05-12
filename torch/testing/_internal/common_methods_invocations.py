@@ -5790,9 +5790,9 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
-           dtypes=all_types_and(torch.bool, torch.float16),
-           dtypesIfCUDA=all_types_and(torch.float16),
-           dtypesIfROCM=all_types_and(torch.float16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfROCM=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            skips=(
                # sort does not correctly warn when resizing out= inputs
