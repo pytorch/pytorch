@@ -1415,7 +1415,7 @@ class TestFreezing(JitTestCase):
         output_eager = model(inp)
         self.assertEqual(model(inp), script_model(inp))
         FileCheck().check_not("GetAttr").run(script_model.graph)
-        
+
     def test_freeze_module_with_tupleoutput_submodule(self):
         class SubModule(nn.Module):
             def __init__(self):
@@ -1439,7 +1439,7 @@ class TestFreezing(JitTestCase):
         inp = torch.randn(2, 2)
         expected = m.forward(inp)
         output = mf.forward(inp)
-        # Check if prim::TupleConstruct and prim::TupleUnpack 
+        # Check if prim::TupleConstruct and prim::TupleUnpack
         # Don't exist in frozen graph
         FileCheck().check_not("prim::TupleConstruct").run(mf.graph)
         FileCheck().check_not("prim::TupleUnpack").run(mf.graph)
