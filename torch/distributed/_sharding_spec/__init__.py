@@ -1,5 +1,5 @@
 from .api import (
     PlacementSpec,
-    DevicePlacement,
+    DevicePlacementSpec,
     ChunkShardingSpec
 )

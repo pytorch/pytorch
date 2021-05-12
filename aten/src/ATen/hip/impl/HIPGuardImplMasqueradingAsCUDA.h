@@ -88,7 +88,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Stream getDefaultStream(Device d) const override {
     return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
   }
-  Stream getStreamFromPool(Device d, bool isHighPriority) const override {
+  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
     return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
   Stream exchangeStream(Stream s) const noexcept override {

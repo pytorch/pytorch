@@ -405,6 +405,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
           py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -436,6 +440,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_set_uneven_input_join",
           &::c10d::Logger::set_uneven_input_join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
