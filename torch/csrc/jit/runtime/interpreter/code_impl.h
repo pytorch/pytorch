@@ -712,8 +712,10 @@ struct MobileCodeImpl : CodeImpl {
   MobileCodeImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
+      bool emit_default_input_instructions,
       size_t remaining_bailout_depth)
-      : CodeImpl(graph, function_name, remaining_bailout_depth, false) {
+      : CodeImpl(graph, function_name, remaining_bailout_depth, false),
+        emit_default_input_instructions_(emit_default_input_instructions) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -751,27 +753,34 @@ struct MobileCodeImpl : CodeImpl {
   }
 
   void emitOperator(Node* node) override {
-    CodeImpl::emitOperator(node);
-    // const Operator& op = node->getOperator();
-    // if (op.hasOperation() && op.schema().is_vararg()) {
-    //   emitLoadInputs(node->inputs());
-    //   insertInstruction(OPN, operator_table_.size(), node->inputs().size());
-    // } else {
-    //   auto unique_op_name = op.schema().overload_name() != ""
-    //     ? op.schema().name() + "." + op.schema().overload_name()
-    //     : op.schema().name();
-    //   auto num_include = node->inputs().size();
-    //   // make sure we only do this for mobile code
-    //   if (op_to_num_specified_args_.find(unique_op_name) !=
-    //           op_to_num_specified_args_.end()) {
-    //     num_include = op_to_num_specified_args_[unique_op_name];
-    //   }
-    //   emitLoadInputs(node->inputs(), num_include);
-    //   insertInstruction(OP, operator_table_.size());
-    // }
+    if (!emit_default_input_instructions_) {
+      const Operator& op = node->getOperator();
+      if (op.hasOperation() && op.schema().is_vararg()) {
+        emitLoadInputs(node->inputs());
+        insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+      } else {
+        auto unique_op_name = op.schema().overload_name() != ""
+            ? op.schema().name() + "." + op.schema().overload_name()
+            : op.schema().name();
+        auto num_include = node->inputs().size();
+        // make sure we only do this for mobile code
+        if (op_to_num_specified_args_.find(unique_op_name) !=
+            op_to_num_specified_args_.end()) {
+          num_include = op_to_num_specified_args_[unique_op_name];
+        }
+        emitLoadInputs(node->inputs(), num_include);
+        insertInstruction(OP, operator_table_.size());
+      }
 
-    // operator_table_.emplace_back(op.getOperation(node));
+      operator_table_.emplace_back(op.getOperation(node));
+
+    } else {
+      CodeImpl::emitOperator(node);
+    }
   }
+
+ private:
+  bool emit_default_input_instructions_;
 };
 
 } // namespace interpreter
