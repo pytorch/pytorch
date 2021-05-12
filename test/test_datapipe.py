@@ -7,6 +7,7 @@ import warnings
 import tarfile
 import zipfile
 import numpy as np
+import sys
 from PIL import Image
 from unittest import skipIf
 
@@ -15,9 +16,11 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import \
     (IterDataPipe, RandomSampler, DataLoader,
-     construct_time_validation, runtime_validation)
+     argument_validation, runtime_validation_disabled, runtime_validation)
 
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
+from typing import \
+    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
+     TypeVar, Set, Union)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -182,16 +185,24 @@ class TestIterableDataPipeBasic(TestCase):
         img.save(temp_pngfile_pathname)
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.RoutedDecoder(datapipe2, handlers=[decoder_imagehandler('rgb')])
-        datapipe3.add_handler(decoder_basichandlers)
 
-        for rec in datapipe3:
-            ext = os.path.splitext(rec[0])[1]
-            if ext == '.png':
-                expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
-                self.assertTrue(np.array_equal(rec[1], expected))
-            else:
-                self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+        def _helper(dp, channel_first=False):
+            for rec in dp:
+                ext = os.path.splitext(rec[0])[1]
+                if ext == '.png':
+                    expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+                    if channel_first:
+                        expected = expected.transpose(2, 0, 1)
+                    self.assertEqual(rec[1], expected)
+                else:
+                    self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+
+        datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
+        datapipe3.add_handler(decoder_basichandlers)
+        _helper(datapipe3)
+
+        datapipe4 = dp.iter.RoutedDecoder(datapipe2)
+        _helper(datapipe4, channel_first=True)
 
 
     def test_groupbykey_iterable_datapipe(self):
@@ -565,6 +576,15 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
+# Metaclass conflict for Python 3.6
+# Multiple inheritance with NamedTuple is not supported for Python 3.9
+_generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
+if _generic_namedtuple_allowed:
+    class InvalidData(Generic[T_co], NamedTuple):
+        name: str
+        data: T_co
+
+
 class TestTyping(TestCase):
     def test_subtype(self):
         from torch.utils.data._typing import issubtype
@@ -668,6 +688,11 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
+        if _generic_namedtuple_allowed:
+            with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
+                class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
+                    pass
+
         class DP1(IterDataPipe[Tuple[int, str]]):
             def __init__(self, length):
                 self.length = length
@@ -683,7 +708,7 @@ class TestTyping(TestCase):
         self.assertEqual(dp1.type, dp2.type)
 
         with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
-            class InvalidDP4(DP1[tuple]):  # type: ignore[type-arg]
+            class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
 
@@ -742,7 +767,7 @@ class TestTyping(TestCase):
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe):
                 self.dp = dp
 
@@ -751,7 +776,7 @@ class TestTyping(TestCase):
                     yield d, str(d)
 
         class DP1(IterDataPipe[int]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe[Tuple[int, str]]):
                 self.dp = dp
 
@@ -767,12 +792,6 @@ class TestTyping(TestCase):
         dp = DP0(IDP(range(10)))
         with self.assertRaisesRegex(TypeError, r"Expected type of argument 'dp' as a subtype"):
             dp = DP1(dp)
-
-        with self.assertRaisesRegex(TypeError, r"Can not decorate"):
-            class InvalidDP1(IterDataPipe[int]):
-                @construct_time_validation
-                def __iter__(self):
-                    yield 0
 
     def test_runtime(self):
         class DP(IterDataPipe[Tuple[int, T_co]]):
@@ -797,6 +816,14 @@ class TestTyping(TestCase):
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+                list(d for d in dp)
+
+            with runtime_validation_disabled():
+                self.assertEqual(list(d for d in dp), ds)
+                with runtime_validation_disabled():
+                    self.assertEqual(list(d for d in dp), ds)
+
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
                 list(d for d in dp)
 

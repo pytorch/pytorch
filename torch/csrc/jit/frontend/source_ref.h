@@ -36,21 +36,8 @@ class TORCH_API SourceRef {
   }
 
  private:
-  friend class std::hash<SourceRef>;
-
   std::shared_ptr<Source> source_;
 };
 
 } // namespace jit
 } // namespace torch
-
-namespace std {
-
-template <>
-struct hash<torch::jit::SourceRef> {
-  size_t operator()(const torch::jit::SourceRef& sr) const noexcept {
-    return std::hash<decltype(sr.source_)>{}(sr.source_);
-  }
-};
-
-} // namespace std
