@@ -409,7 +409,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_set_static_graph",
           &::c10d::Reducer::set_static_graph,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_delay_all_reduce",
+          &::c10d::Reducer::delay_all_reduce,
+          py::call_guard<py::gil_scoped_release>()) ;
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -1441,7 +1445,8 @@ Example::
                 >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports NCCL, GLOO and MPI backends.
+                ``get_future`` API supports NCCL, and partially GLOO and MPI backends
+                (support is limited to non peer-to-peer operations).
                 The ``torch._C.Future`` object returned by this API can be used in
                 ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
                 features on top of ``torch.futures.Future``.
@@ -1459,7 +1464,10 @@ Example::
 
                 For CPU work, ``fut.done()`` returns true when work has been complted and value()
                 tensors are ready.
-                For GPU work, ``fut.done()`` returns only whether the operation has been enqueued.
+                For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
+                For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
+                true when tensors have arrived on respective nodes, but not yet necessarily syched on
+                respective GPUs (similarly to GPU work).
            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
