@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerActivity
+    DeviceType, ProfilerAction, ProfilerActivity
 )
 
 try:
@@ -475,6 +475,31 @@ class TestProfiler(TestCase):
         output = p.key_averages().table(
             sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total", row_limit=-1)
         # print(output)
+
+        test_schedule = torch.profiler.schedule(
+            skip_first=2,
+            wait=1,
+            warmup=1,
+            active=2,
+            repeat=2)
+        test_schedule_expected_outputs = [
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.WARMUP,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            ProfilerAction.NONE,
+            ProfilerAction.WARMUP,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+        ]
+        for step in range(len(test_schedule_expected_outputs)):
+            self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
     def test_export_stacks(self):
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
