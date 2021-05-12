@@ -64,18 +64,20 @@ def get_approximate_basis(A: Tensor,
 
     R = torch.randn(n, q, dtype=dtype, device=A.device)
 
+    # The following code could be made faster using torch.geqrf + torch.ormqr
+    # but geqrf is not differentiable
     A_H = _utils.transjugate(A)
     if M is None:
-        (Q, _) = matmul(A, R).qr()
+        Q = torch.linalg.qr(matmul(A, R)).Q
         for i in range(niter):
-            (Q, _) = matmul(A_H, Q).qr()
-            (Q, _) = matmul(A, Q).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q)).Q
     else:
         M_H = _utils.transjugate(M)
-        (Q, _) = (matmul(A, R) - matmul(M, R)).qr()
+        Q = torch.linalg.qr(matmul(A, R) - matmul(M, R)).Q
         for i in range(niter):
-            (Q, _) = (matmul(A_H, Q) - matmul(M_H, Q)).qr()
-            (Q, _) = (matmul(A, Q) - matmul(M, Q)).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q) - matmul(M_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q) - matmul(M, Q)).Q
 
     return Q
 
