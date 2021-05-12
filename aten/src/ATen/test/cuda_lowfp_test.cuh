@@ -1,6 +1,6 @@
 #pragma once
 
-template<template T>
+template<typename T>
 __device__ void test(){
   // test half construction and implicit conversions in device
   assert(T(3) == T(3.0f));
