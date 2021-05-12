@@ -15,21 +15,23 @@ jobs:
         name:
           - flake8-py3
           - clang-tidy
-    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
       - name: Download artifact
         uses: actions/github-script@v3
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          LINT_NAME: ${{ matrix.name }}
         with:
           # https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
           script: |
             const artifacts = await github.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              run_id: ${{ github.event.workflow_run.id }},
+              run_id: process.env.RUN_ID,
             });
             const filteredArtifacts = artifacts.data.artifacts.filter(artifact => {
-              return artifact.name == '${{ matrix.name }}';
+              return artifact.name == process.env.LINT_NAME;
             });
             if (filteredArtifacts.length > 0) {
               const matchArtifact = filteredArtifacts[0];
@@ -41,27 +43,24 @@ jobs:
               });
               const fs = require('fs');
               fs.writeFileSync(
-                '${{ github.workspace }}/linter-output.zip',
+                `${process.env.GITHUB_WORKSPACE}/linter-output.zip`,
                 Buffer.from(download.data),
               );
             }
       - name: Unzip artifact
         id: unzip
         run: |
-          FILENAME=linter-output.zip
-          EXISTS=$([ -f $FILENAME ]; echo $?)
-          echo ::set-output name=exists::"$EXISTS"
-          if [ "$EXISTS" -eq 0 ]; then
-            unzip $FILENAME
-            echo ::set-output name=commit-sha::"$(cat commit-sha.txt)"
+          if unzip linter-output.zip annotations.json commit-sha.txt; then
+            echo ::set-output \
+              name=sha::"$(grep -Em1 '^[[:xdigit:]]{40}$' commit-sha.txt)"
           fi
-      - if: steps.unzip.outputs.exists == '0' # i.e. true
+      - if: steps.unzip.outputs.sha
         name: Add annotations
         uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           check_name: ${{ matrix.name }}
           linter_output_path: annotations.json
-          commit_sha: ${{ steps.unzip.outputs.commit-sha }}
+          commit_sha: ${{ steps.unzip.outputs.sha }}
           mode: json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

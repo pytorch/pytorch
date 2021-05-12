@@ -1,3 +1,4 @@
+#import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
@@ -29,15 +30,15 @@
   id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       pipelineState:at::native::metal::mpscnn::kernelFor(
-                        _X, @"clamp_half4", @"clamp_half4_nonarray")];
+                        _X, "clamp_half4", "clamp_half4_nonarray")];
 
   [encoder setComputePipelineState:state];
   [encoder setTexture:[_X texture] atIndex:0];
   [encoder setTexture:[_Y texture] atIndex:1];
   id<MTLBuffer> clampBuffer = [[MPSCNNContext sharedInstance].device
-      newBufferWithLength:2 * sizeof(fp16)
+      newBufferWithLength:2 * sizeof(fp16_t)
                   options:MTLResourceOptionCPUCacheModeWriteCombined];
-  fp16* clampBufferPtr = (fp16*)[clampBuffer contents];
+  fp16_t* clampBufferPtr = (fp16_t*)[clampBuffer contents];
   clampBufferPtr[0] = _min.floatValue;
   clampBufferPtr[1] = _max.floatValue;
   [encoder setBuffer:clampBuffer offset:0 atIndex:0];

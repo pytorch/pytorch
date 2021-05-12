@@ -8,6 +8,10 @@ namespace cuda_utils {
 
 constexpr int kCUDABlockReduceNumThreads = 512;
 
+// Sums `val` accross all threads in a warp.
+//
+// Assumptions:
+//   - The size of each block should be a multiple of `C10_WARP_SIZE`
 template <typename T>
 __inline__ __device__ T WarpReduceSum(T val) {
 #pragma unroll
@@ -17,6 +21,13 @@ __inline__ __device__ T WarpReduceSum(T val) {
   return val;
 }
 
+// Sums `val` accross all threads in a block.
+//
+// Assumptions:
+//   - Thread blocks are an 1D set of threads (indexed with `threadIdx.x` only)
+//   - The size of each block should be a multiple of `C10_WARP_SIZE`
+//   - `shared` should be a pointer to shared memory with size of, at least,
+//     `sizeof(T) * number_of_warps`
 template <typename T>
 __inline__ __device__ T BlockReduceSum(T val, T* shared) {
   const int lid = threadIdx.x % C10_WARP_SIZE;

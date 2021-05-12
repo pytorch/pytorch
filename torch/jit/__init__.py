@@ -19,6 +19,7 @@ from torch._jit_internal import (
 )
 from torch.jit._script import (
     script,
+    _script_pdt,
     Attribute,
     ScriptModule,
     script_method,
@@ -187,12 +188,12 @@ def isinstance(obj, target_type):
 # Graph class, so mypy checks need to be skipped.
 @contextmanager
 def _hide_source_ranges() -> Iterator[None]:
-    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore[attr-defined]
     try:
-        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore[attr-defined]
         yield
     finally:
-        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
 
 if not torch._C._jit_init():

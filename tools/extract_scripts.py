@@ -1,24 +1,49 @@
 #!/usr/bin/env python3
 
-# these two pages have some relevant information:
-# https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions
-# https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
-
 import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
+from typing_extensions import TypedDict
 
-Job = Dict[str, Any]
-
-windows_labels = {'windows-latest', 'windows-2019'}
+Step = Dict[str, Any]
 
 
-def get_default_shell(job: Job) -> str:
-    return 'pwsh' if job['runs-on'] in windows_labels else 'bash'
+class Script(TypedDict):
+    extension: str
+    script: str
+
+
+def extract(step: Step) -> Optional[Script]:
+    run = step.get('run')
+
+    # https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#using-a-specific-shell
+    shell = step.get('shell', 'bash')
+    extension = {
+        'bash': '.sh',
+        'pwsh': '.ps1',
+        'python': '.py',
+        'sh': '.sh',
+        'cmd': '.cmd',
+        'powershell': '.ps1',
+    }.get(shell)
+
+    is_gh_script = step.get('uses', '').startswith('actions/github-script@')
+    gh_script = step.get('with', {}).get('script')
+
+    if run is not None and extension is not None:
+        script = {
+            'bash': f'#!/usr/bin/env bash\nset -eo pipefail\n{run}',
+            'sh': f'#!/usr/bin/env sh\nset -e\n{run}',
+        }.get(shell, run)
+        return {'extension': extension, 'script': script}
+    elif is_gh_script and gh_script is not None:
+        return {'extension': '.js', 'script': gh_script}
+    else:
+        return None
 
 
 def main() -> None:
@@ -38,13 +63,13 @@ def main() -> None:
 
         for job_name, job in workflow['jobs'].items():
             job_dir = out / p / job_name
-            default_shell = get_default_shell(job)
             steps = job['steps']
             index_chars = len(str(len(steps) - 1))
             for i, step in enumerate(steps, start=1):
-                script = step.get('run')
-                if script:
-                    step_name = step['name']
+                extracted = extract(step)
+                if extracted:
+                    script = extracted['script']
+                    step_name = step.get('name', '')
                     if '${{' in script:
                         gha_expressions_found = True
                         print(
@@ -52,17 +77,15 @@ def main() -> None:
                             file=sys.stderr
                         )
 
-                    if step.get('shell', default_shell) == 'bash':
-                        job_dir.mkdir(parents=True, exist_ok=True)
+                    job_dir.mkdir(parents=True, exist_ok=True)
 
-                        sanitized = re.sub(
-                            '[^a-zA-Z_]+', '_',
-                            f'_{step_name}',
-                        ).rstrip('_')
-                        filename = f'{i:0{index_chars}}{sanitized}.sh'
-                        (job_dir / filename).write_text(
-                            f'#!/usr/bin/env bash\nset -eo pipefail\n{script}'
-                        )
+                    sanitized = re.sub(
+                        '[^a-zA-Z_]+', '_',
+                        f'_{step_name}',
+                    ).rstrip('_')
+                    extension = extracted['extension']
+                    filename = f'{i:0{index_chars}}{sanitized}{extension}'
+                    (job_dir / filename).write_text(script)
 
     if gha_expressions_found:
         sys.exit(

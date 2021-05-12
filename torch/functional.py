@@ -30,7 +30,6 @@ __all__ = [
     'einsum',
     'istft',
     'lu',
-    'lu_unpack',
     'norm',
     'meshgrid',
     'pca_lowrank',
@@ -71,7 +70,7 @@ def broadcast_tensors(*tensors):
     """
     if has_torch_function(tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
-    return _VF.broadcast_tensors(tensors)  # type: ignore
+    return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
 
 
 def broadcast_shapes(*shapes):
@@ -182,115 +181,6 @@ def _index_tensor_with_indices_list(tensor, indices):
     for index in indices:
         out = out[index]
     return out
-
-
-def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
-    r"""Unpacks the data and pivots from a LU factorization of a tensor.
-
-    Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
-
-    Args:
-        LU_data (Tensor): the packed LU factorization data
-        LU_pivots (Tensor): the packed LU factorization pivots
-        unpack_data (bool): flag indicating if the data should be unpacked
-        unpack_pivots (bool): flag indicating if the pivots should be unpacked
-
-    Examples::
-
-        >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>>
-        >>> # can recover A from factorization
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-
-        >>> # LU factorization of a rectangular matrix:
-        >>> A = torch.randn(2, 3, 2)
-        >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-        >>> P
-        tensor([[[1., 0., 0.],
-                 [0., 1., 0.],
-                 [0., 0., 1.]],
-
-                [[0., 0., 1.],
-                 [0., 1., 0.],
-                 [1., 0., 0.]]])
-        >>> A_L
-        tensor([[[ 1.0000,  0.0000],
-                 [ 0.4763,  1.0000],
-                 [ 0.3683,  0.1135]],
-
-                [[ 1.0000,  0.0000],
-                 [ 0.2957,  1.0000],
-                 [-0.9668, -0.3335]]])
-        >>> A_U
-        tensor([[[ 2.1962,  1.0881],
-                 [ 0.0000, -0.8681]],
-
-                [[-1.0947,  0.3736],
-                 [ 0.0000,  0.5718]]])
-        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-        >>> torch.norm(A_ - A)
-        tensor(2.9802e-08)
-    """
-    if has_torch_function_variadic(LU_data, LU_pivots):
-        return handle_torch_function(
-            lu_unpack, (LU_data, LU_pivots), LU_data, LU_pivots,
-            unpack_data=unpack_data,
-            unpack_pivots=unpack_pivots)
-    shape = LU_data.shape
-    # In generalized LU factorization, the following shape relations hold:
-    #   A.shape[-2:] == (m, n)
-    #   P.shape[-2:] == (m, m)
-    #   L.shape[-2:] == (m, k)
-    #   U.shape[-2:] == (k, n)
-    # where k = min(m, n)
-    m, n = shape[-2:]
-    k = min(m, n)
-    if unpack_data:
-        U: Optional[Tensor] = LU_data.triu()
-        assert U is not None
-        if m != k:
-            U = U.narrow(-2, 0, k)
-        L: Optional[Tensor] = LU_data.tril()
-        assert L is not None
-        if k != n:
-            L = L.narrow(-1, 0, k)
-        L.diagonal(dim1=-2, dim2=-1).fill_(1)
-    else:
-        L = U = None
-
-    if unpack_pivots:
-        LU_pivots_zero_idx = LU_pivots - 1
-        if LU_data.dim() > 2:
-            P: Optional[Tensor] = torch.eye(m, device=LU_data.device,
-                                            dtype=LU_data.dtype) \
-                .expand(shape[:-1] + (m,)) \
-                .clone(memory_format=torch.contiguous_format)
-            assert P is not None
-
-            # TODO: rewrite when TorchScript supports product and map as
-            # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
-            indices = _indices_product(shape[:-2])
-            for idx in indices:
-                final_order = list(range(m))
-                for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
-                    final_order[k], final_order[j] = final_order[j], final_order[k]
-                # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
-                p_idx = _index_tensor_with_indices_list(P, idx)
-                p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
-        else:
-            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
-            for k, j, in enumerate(LU_pivots_zero_idx):
-                final_order[k], final_order[j] = final_order[j], final_order[k]
-            P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
-    else:
-        P = None
-
-    return P, L, U
 
 
 def einsum(equation, *operands):
@@ -406,7 +296,7 @@ def einsum(equation, *operands):
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    return _VF.einsum(equation, operands)  # type: ignore
+    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
 
 if TYPE_CHECKING:
@@ -450,8 +340,8 @@ def _meshgrid(*tensors):
         return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
-        tensors = tensors[0]  # type: ignore
-    return _VF.meshgrid(tensors)  # type: ignore
+        tensors = tensors[0]  # type: ignore[assignment]
+    return _VF.meshgrid(tensors)  # type: ignore[attr-defined]
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
@@ -578,7 +468,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
+    return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore[attr-defined]
                     normalized, onesided, return_complex)
 
 def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
@@ -652,7 +542,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             window=window, center=center, normalized=normalized, onesided=onesided,
             length=length, return_complex=return_complex)
 
-    return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore
+    return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]
                      normalized, onesided, length, return_complex)
 
 
@@ -735,7 +625,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
             return_counts=return_counts, dim=dim)
 
     if dim is not None:
-        output, inverse_indices, counts = _VF.unique_dim(  # type: ignore
+        output, inverse_indices, counts = _VF.unique_dim(
             input,
             dim,
             sorted=sorted,
@@ -808,7 +698,7 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
         return handle_torch_function(
             unique_consecutive, (input,), input, return_inverse=return_inverse,
             return_counts=return_counts, dim=dim)
-    output, inverse_indices, counts = _VF.unique_consecutive(  # type: ignore
+    output, inverse_indices, counts = _VF.unique_consecutive(  # type: ignore[attr-defined]
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     return output, inverse_indices, counts
 
@@ -941,23 +831,23 @@ if TYPE_CHECKING:
     # There's no good way to use this type annotation without breaking JIT
     # overloads. So leave untyped for mypy for now.
 else:
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-def tensordot(a, b, dims= 2, out: Optional[torch.Tensor] = None):  # noqa: 749
+def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -1039,9 +929,9 @@ def tensordot(a, b, dims= 2, out: Optional[torch.Tensor] = None):  # noqa: 749
         raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
 
     if out is None:
-        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
     else:
-        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
@@ -1073,7 +963,7 @@ def cartesian_prod(*tensors):
     """
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
-    return _VF.cartesian_prod(tensors)  # type: ignore
+    return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
 
 def block_diag(*tensors):
     """Create a block diagonal matrix from provided tensors.
@@ -1107,7 +997,7 @@ def block_diag(*tensors):
     """
     if has_torch_function(tensors):
         return handle_torch_function(block_diag, tensors, *tensors)
-    return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore
+    return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
 
 
 def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
@@ -1156,11 +1046,11 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
         return handle_torch_function(
             cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
-        return _VF.cdist(x1, x2, p, None)  # type: ignore
+        return _VF.cdist(x1, x2, p, None)  # type: ignore[attr-defined]
     elif compute_mode == 'use_mm_for_euclid_dist':
-        return _VF.cdist(x1, x2, p, 1)  # type: ignore
+        return _VF.cdist(x1, x2, p, 1)  # type: ignore[attr-defined]
     elif compute_mode == 'donot_use_mm_for_euclid_dist':
-        return _VF.cdist(x1, x2, p, 2)  # type: ignore
+        return _VF.cdist(x1, x2, p, 2)  # type: ignore[attr-defined]
     else:
         raise ValueError(f"{compute_mode} is not a valid value for compute_mode")
 
@@ -1196,7 +1086,7 @@ def atleast_1d(*tensors):
         return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
-    return _VF.atleast_1d(tensors)  # type: ignore
+    return _VF.atleast_1d(tensors)  # type: ignore[attr-defined]
 
 def atleast_2d(*tensors):
     r"""
@@ -1232,7 +1122,7 @@ def atleast_2d(*tensors):
         return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
-    return _VF.atleast_2d(tensors)  # type: ignore
+    return _VF.atleast_2d(tensors)  # type: ignore[attr-defined]
 
 def atleast_3d(*tensors):
     r"""
@@ -1276,7 +1166,7 @@ def atleast_3d(*tensors):
         return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
-    return _VF.atleast_3d(tensors)  # type: ignore
+    return _VF.atleast_3d(tensors)  # type: ignore[attr-defined]
 
 
 if TYPE_CHECKING:
@@ -1294,36 +1184,38 @@ if TYPE_CHECKING:
 else:
     # TODO: type dim as BroadcastingList when
     # https://github.com/pytorch/pytorch/issues/33782 is fixed
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
-        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
-        has a different signature and slightly different behavior that is
-        more consistent with NumPy's numpy.linalg.norm.
+
+        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
+        when computing vector norms and :func:`torch.linalg.matrix_norm` when
+        computing matrix norms. Note, however, the signature for these functions
+        is slightly different than the signature for torch.norm.
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
@@ -1414,10 +1306,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if dim is None and out is None and dtype is None and p is not None:
         if isinstance(p, str):
             if p == "fro":
-                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)  # type: ignore
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
-            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
+            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore[attr-defined]
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
     # remove the overloads where dim is an int and replace with BraodcastingList1
@@ -1428,7 +1320,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         else:
             _dim = dim
     else:
-        _dim = None  # type: ignore
+        _dim = None  # type: ignore[assignment]
 
     if isinstance(p, str):
         if p == "fro":
@@ -1438,22 +1330,22 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             if _dim is None:
                 _dim = list(range(ndim))
             if out is None:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
             else:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
         elif p == "nuc":
             if dtype is not None:
                 raise ValueError("dtype argument is not supported in nuclear norm")
             if _dim is None:
                 if out is None:
-                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore
+                    return _VF.nuclear_norm(input, keepdim=keepdim)
                 else:
-                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
             else:
                 if out is None:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
                 else:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
@@ -1461,14 +1353,14 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
         if out is None:
             if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim)  # type: ignore
+                return _VF.norm(input, p, _dim, keepdim=keepdim)  # type: ignore[attr-defined]
             else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)  # type: ignore
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)  # type: ignore[attr-defined]
         else:
             if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)  # type: ignore
+                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)  # type: ignore[attr-defined]
             else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
 def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
@@ -1478,7 +1370,10 @@ def chain_matmul(*matrices, out=None):
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
     .. warning::
-        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
+
+        :func:`torch.chain_matmul` is deprecated and will be removed in a future PyTorch release.
+        Use :func:`torch.linalg.multi_dot` instead, which accepts a list of two or more tensors
+        rather than multiple arguments.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
@@ -1503,7 +1398,11 @@ def chain_matmul(*matrices, out=None):
     """
     if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
-    return _VF.chain_matmul(matrices)  # type: ignore
+
+    if out is None:
+        return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
+    else:
+        return _VF.chain_matmul(matrices, out=out)  # type: ignore[attr-defined]
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):

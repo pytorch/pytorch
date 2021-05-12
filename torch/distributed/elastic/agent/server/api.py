@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
+from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, Std
@@ -52,6 +53,8 @@ class WorkerSpec:
         monitor_interval: monitor status of workers every ``n`` seconds
         master_port: fixed port to run the c10d store on rank 0
                      if not specified then will chose a random free port
+        master_addr: fixed master_addr to run the c10d store on rank 0
+                     if not specified then will chose hostname on agent rank 0
         redirects: redirect std streams to a file,
                    selectively redirect for a particular
                    local rank by passing a map
@@ -71,6 +74,7 @@ class WorkerSpec:
     max_restarts: int = 3
     monitor_interval: float = 30.0
     master_port: Optional[int] = None
+    master_addr: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
 
@@ -491,17 +495,22 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError()
 
     @staticmethod
-    def _set_master_addr_port(store, master_port):
+    def _set_master_addr_port(
+        store: Store, master_addr: Optional[str], master_port: Optional[int]
+    ):
         if master_port is None:
             sock = _get_socket_with_port()
             with closing(sock):
                 master_port = sock.getsockname()[1]
 
-        store.set("MASTER_ADDR", _get_fq_hostname().encode(encoding="UTF-8"))
+        if master_addr is None:
+            master_addr = _get_fq_hostname()
+
+        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
 
     @staticmethod
-    def _get_master_addr_port(store) -> Tuple[str, int]:
+    def _get_master_addr_port(store: Store) -> Tuple[str, int]:
         master_addr = store.get("MASTER_ADDR").decode(encoding="UTF-8")
         master_port = int(store.get("MASTER_PORT").decode(encoding="UTF-8"))
         return (master_addr, master_port)
@@ -528,7 +537,7 @@ class SimpleElasticAgent(ElasticAgent):
         worker_group.group_world_size = group_world_size
 
         if group_rank == 0:
-            self._set_master_addr_port(store, spec.master_port)
+            self._set_master_addr_port(store, spec.master_addr, spec.master_port)
         master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 

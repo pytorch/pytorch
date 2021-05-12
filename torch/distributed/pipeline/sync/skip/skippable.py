@@ -63,7 +63,7 @@ class Skippable(nn.Module):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
-        self.module = self.module_cls(*args, **kwargs)  # type: ignore
+        self.module = self.module_cls(*args, **kwargs)  # type: ignore[call-arg]
         self.namespaces: Dict[str, Namespace] = {}
 
     def __repr__(self) -> str:
@@ -179,7 +179,7 @@ class Skippable(nn.Module):
             output = stop.args[0]
             return output
 
-    def forward(self, input: TensorOrTensors) -> TensorOrTensors:  # type: ignore
+    def forward(self, input: TensorOrTensors) -> TensorOrTensors:
         """Performs the forward propagation. :class:`stash` or :class:`pop`
         commands will be handled by portals silently. The portals won't be
         exposed to users.

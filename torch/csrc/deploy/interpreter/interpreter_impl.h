@@ -33,7 +33,10 @@ struct Obj {
   at::IValue toIValue() const;
   Obj operator()(at::ArrayRef<Obj> args);
   Obj operator()(at::ArrayRef<at::IValue> args);
-  Obj call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs);
+  Obj call_kwargs(
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs);
+  Obj call_kwargs(std::unordered_map<std::string, c10::IValue> kwargs);
   Obj attr(const char* attr);
 
  private:
@@ -56,7 +59,6 @@ struct InterpreterSessionImpl {
   virtual Obj create_or_get_package_importer_from_container_file(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           container_file_) = 0;
-
   virtual PickledObject pickle(Obj container, Obj obj) = 0;
   virtual Obj unpickle_or_get(int64_t id, const PickledObject& obj) = 0;
   virtual void unload(int64_t id) = 0;
@@ -67,9 +69,12 @@ struct InterpreterSessionImpl {
   virtual Obj call(Obj obj, at::ArrayRef<at::IValue> args) = 0;
   virtual Obj call_kwargs(
       Obj obj,
-      std::vector<std::tuple<std::string, at::IValue>> kwargs) = 0;
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs) = 0;
+  virtual Obj call_kwargs(
+      Obj obj,
+      std::unordered_map<std::string, c10::IValue> kwargs) = 0;
   virtual Obj attr(Obj obj, const char* attr) = 0;
-
 
  protected:
   int64_t ID(Obj obj) const {
@@ -97,7 +102,13 @@ inline Obj Obj::operator()(at::ArrayRef<at::IValue> args) {
   return interaction_->call(*this, args);
 }
 
-inline Obj Obj::call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) {
+inline Obj Obj::call_kwargs(
+    std::vector<at::IValue> args,
+    std::unordered_map<std::string, c10::IValue> kwargs) {
+  return interaction_->call_kwargs(*this, std::move(args), std::move(kwargs));
+}
+inline Obj Obj::call_kwargs(
+    std::unordered_map<std::string, c10::IValue> kwargs) {
   return interaction_->call_kwargs(*this, std::move(kwargs));
 }
 inline Obj Obj::attr(const char* attr) {

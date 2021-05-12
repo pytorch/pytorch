@@ -40,6 +40,7 @@ static void verifyConstBounds(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _1) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -65,6 +66,7 @@ TEST(BoundsInference, _1) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _2) {
   // Verify that bounds inference works for the following example:
   // for i in 0..n:
@@ -90,6 +92,7 @@ TEST(BoundsInference, _2) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, -1}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _3) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -116,6 +119,7 @@ TEST(BoundsInference, _3) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _4) {
   // Verify that bounds inference works for the following example:
   //
@@ -193,6 +197,7 @@ TEST(BoundsInference, _4) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _5) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -212,8 +217,11 @@ TEST(BoundsInference, _5) {
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
   l.splitWithTail(loops[0], 16, &outer, &inner, &tail);
@@ -246,6 +254,7 @@ TEST(BoundsInference, _5) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _6) {
   // Verify that bounds inference works for the following example:
   //
@@ -325,6 +334,7 @@ TEST(BoundsInference, _6) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Adjacent) {
   KernelScope kernel_scope;
   ExprHandle H(6);
@@ -385,6 +395,7 @@ TEST(BoundsInference, Adjacent) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopLoad) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
@@ -441,6 +452,7 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopStore) {
   KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
@@ -501,6 +513,7 @@ TEST(BoundsInference, MultipleTopLoopStore) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
@@ -567,6 +580,7 @@ TEST(BoundsInference, CacheReads) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Flattened) {
   KernelScope kernel_scope;
   Tensor* b = Compute(
@@ -594,6 +608,7 @@ TEST(BoundsInference, Flattened) {
   ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazards) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -646,6 +661,7 @@ TEST(BoundsInference, GetPotentialHazards) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
@@ -674,6 +690,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
@@ -701,6 +718,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
@@ -710,6 +728,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
       });
 
   LoopNest l({A});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner, *tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
@@ -725,7 +744,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
       HazardKind::WriteAfterWrite, getPotentialHazards(analyzer, outer, tail));
 }
 
-TEST(BoundsInference, HasPartialOverlapSameBufferWithOverlap) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -745,11 +765,62 @@ TEST(BoundsInference, HasPartialOverlapSameBufferWithOverlap) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-TEST(BoundsInference, HasPartialOverlapSameBufferNotOverlapping) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 10; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 10; k < 100; k++) {
+  //     A[k] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {200}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(k, 10, 100, Store::make(a_buf, {k}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 10; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 10; k < 100; k++) {
+  //     B[k] = A[k];
+  //   }
+  BufHandle a_buf("A", {200}, kInt);
+  BufHandle b_buf("B", {200}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK =
+      For::make(k, 10, 100, Store::make(b_buf, {k}, Load::make(a_buf, {k})));
+  auto par = Block::make({forJ, forK});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -769,11 +840,12 @@ TEST(BoundsInference, HasPartialOverlapSameBufferNotOverlapping) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forK));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forK, forJ));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-TEST(BoundsInference, HasPartialOverlap2DBufferWithOverlap) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -804,17 +876,18 @@ TEST(BoundsInference, HasPartialOverlap2DBufferWithOverlap) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forI, forM));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forM, forI));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forN));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forN, forJ));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA1, storeA2));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA2, storeA1));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, storeA2));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA1, forM));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forI, forM));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forM, forI));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forN));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forN, forJ));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, storeA1, storeA2));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, storeA2, storeA1));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, storeA2));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-TEST(BoundsInference, HasPartialOverlap2DBufferWithNoOverlap) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -845,17 +918,18 @@ TEST(BoundsInference, HasPartialOverlap2DBufferWithNoOverlap) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forI, forM));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forM, forI));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forN));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forN, forJ));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, storeA2));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA2, storeA1));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, storeA2));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, forM));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forI, forM));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forM, forI));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, forN));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forN, forJ));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, storeA2));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA2, storeA1));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, storeA2));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-TEST(BoundsInference, HasPartialOverlapDifferentBuffers) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -885,17 +959,18 @@ TEST(BoundsInference, HasPartialOverlapDifferentBuffers) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forI, forM));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forM, forI));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forN));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forN, forJ));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, storeA2));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA2, storeA1));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, storeA2));
-  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, forM));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forI, forM));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forM, forI));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, forN));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forN, forJ));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, storeA2));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA2, storeA1));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, storeA2));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-TEST(BoundsInference, HasPartialOverlapDueToRAWDependence) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -909,10 +984,10 @@ TEST(BoundsInference, HasPartialOverlapDueToRAWDependence) {
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(
       k,
-      10,
+      0,
       100,
       Store::make(
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
@@ -920,11 +995,12 @@ TEST(BoundsInference, HasPartialOverlapDueToRAWDependence) {
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-TEST(BoundsInference, HasPartialOverlapDueToWARDependence) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -940,17 +1016,87 @@ TEST(BoundsInference, HasPartialOverlapDueToWARDependence) {
   VarHandle k("k", kInt);
   auto forK = For::make(
       k,
-      10,
+      0,
       100,
       Store::make(
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
   par->accept(&analyzer);
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
-  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, HasConflictingOverlapWithLoads) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int k = 10; k < 100; k++) {
+  //     B[k] = 20 * A[99-k];
+  //   }
+  //   for (int j = 10; j < 100; j++) {
+  //     C[j] = 10 * A[j];
+  //   }
+  BufHandle a_buf("A", {100}, kInt);
+  BufHandle b_buf("B", {100}, kInt);
+  BufHandle c_buf("C", {100}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forK = For::make(
+      k,
+      10,
+      100,
+      Store::make(
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+  auto forJ = For::make(
+      j,
+      10,
+      100,
+      Store::make(c_buf, {j}, Mul::make(10, Load::make(a_buf, {j}))));
+  auto par = Block::make({forK, forJ});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forJ, forK));
+  ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BoundsInference, IsOverlapping) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 100; i++) {
+  //     A[i] = i * 10;               // storeA1
+  //     B[i] = A[99-i] * 20;         // loadA1
+  //     C[i] = A[i + 100] * 10;      // loadA2
+  //     A[i + 50] = i * 50;          // storeA2
+  //     A[i + 150] = i * 150;        // storeA3
+  //   }
+  BufHandle a_buf("A", {300}, kInt);
+  BufHandle b_buf("B", {100}, kInt);
+  BufHandle c_buf("C", {100}, kInt);
+  VarHandle i("i", kInt);
+  auto storeA1 = Store::make(a_buf, {i}, i * 10);
+  auto loadA1 = Load::make(a_buf, {ExprHandle(99) - i});
+  auto storeB = Store::make(b_buf, {i}, Mul::make(loadA1, 20));
+  auto loadA2 = Load::make(a_buf, {i + 100});
+  auto storeC = Store::make(c_buf, {i}, Mul::make(loadA2, 10));
+  auto storeA2 = Store::make(a_buf, {i + 50}, i * 50);
+  auto storeA3 = Store::make(a_buf, {i + 150}, i * 150);
+  auto forI = For::make(
+      i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  forI->accept(&analyzer);
+  ASSERT_TRUE(
+      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA1.node())));
+  ASSERT_FALSE(
+      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA2.node())));
+  ASSERT_TRUE(isOverlapping(analyzer, storeA1, storeA2));
+  ASSERT_FALSE(isOverlapping(analyzer, storeA1, storeA3));
 }
 
 } // namespace jit

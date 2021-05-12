@@ -12,6 +12,8 @@
 
 using namespace at;
 using namespace torch::autograd::generated;
+using torch::autograd::CreationMeta;
+using torch::autograd::as_view;
 
 namespace torch { namespace autograd { namespace VariableType {
 
@@ -82,26 +84,19 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
 namespace {
 
 // Taken from codegened version
-Tensor _fw_primal(const Tensor & self, int64_t level) {
+Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
   if (compute_requires_grad( self )) {
     grad_fn = std::make_shared<Identity>();
     grad_fn->set_next_edges(collect_next_edges( self ));
   }
-  auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return self_.alias();
+
+  auto result = ([&]() {
+    at::AutoDispatchBelowAutograd guard;
+    return at::redispatch::_fw_primal(ks & c10::after_autograd_keyset, self_, level);
   })();
-  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-  if (!self.unsafeGetTensorImpl()->support_as_strided()) {
-    auto size_vec = self.sizes().vec();
-    func = [=](const at::Tensor& input_base) {
-      return input_base.view(size_vec);
-    };
-  }
-  auto result = as_view(/* base */ self, /* output */ tmp, /* is_bw_differentiable */ true,
-                        /* is_fw_differentiable */ false, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT);
+
   if (grad_fn) {
       set_history(flatten_tensor_args( result ), grad_fn);
   }
@@ -131,7 +126,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn->src_device = src.device();
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   rebase_history(self , std::move(grad_fn));
@@ -156,9 +151,9 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
-Tensor& resize_(
+const Tensor& resize_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -166,7 +161,7 @@ Tensor& resize_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -177,9 +172,9 @@ Tensor& resize_(
   return self;
 }
 
-Tensor& resize_as_(
+const Tensor& resize_as_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -188,7 +183,7 @@ Tensor& resize_as_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
@@ -199,24 +194,21 @@ Tensor& resize_as_(
   return self;
 }
 
-Tensor detach(const Tensor & self) {
+Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
+  auto& self_ = unpack(self, "self", 0);
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-  auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
-                        /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
-                        /*allow_tensor_metadata_change=*/false);
+  auto result = ([&]() {
+    at::AutoDispatchBelowAutograd guard;
+    return at::redispatch::detach(ks & c10::after_autograd_keyset, self_);
+  })();
   namedinference::propagate_names(result, self);
 
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
-    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
-  }
+  // Detach the forward grads by not setting anything on the result
 
   return result;
 }
 
-Tensor & detach_(Tensor & self) {
+Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
@@ -249,11 +241,7 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    self._fw_grad(/* level */ 0).detach_();
-  }
+  autograd_meta->fw_grad_.reset();
 
   return self;
 }
@@ -284,20 +272,62 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }  // namespace
 }} // namespace autograd::VariableType
 
-namespace InplaceOrView {
+namespace ADInplaceOrView {
+  #define CREATION_META_DEFINITION InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)
+
   Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
     {
-      at::AutoDispatchBelowInplaceOrView guard;
-      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+      at::AutoDispatchBelowADInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_ADInplaceOrView_keyset, self, src, non_blocking);
     }
     torch::autograd::increment_version(self);
     return self;
   }
 
+  Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
+    auto out = ([&]() {
+      at::AutoDispatchBelowADInplaceOrView guard;
+      // Make an empty shallow copy, the as_view call below will fill in the proper fields
+      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/false));
+    })();
+    std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+    auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
+                          /* is_fw_differentiable */ false, /* view_func */ func,
+                          /* creation_meta */ CreationMeta::DEFAULT,
+                          /*allow_tensor_metadata_change=*/false);
+
+    return result;
+  }
+
+  Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
+    auto tmp = ([&]() {
+      at::AutoDispatchBelowADInplaceOrView guard;
+      // Make an empty shallow copy, the as_view call below will fill in the proper fields
+      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/false));
+    })();
+    std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+    if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+      auto size_vec = self.sizes().vec();
+      func = [=](const at::Tensor& input_base) {
+        return input_base.view(size_vec);
+      };
+    }
+    auto result = as_view(/* base */ self, /* output */ tmp, /* is_bw_differentiable */ true,
+                          /* is_fw_differentiable */ false, /* view_func */ func, /* creation_meta */ CREATION_META_DEFINITION);
+
+    return result;
+  }
+
   namespace {
-    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
-      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
+    TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::copy_)));
+      m.impl("detach", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::detach)));
+      m.impl("_fw_primal", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_fw_primal)));
     }
   } // namespace
-} // namespace InplaceOrView
+} // namespace ADInplaceOrView
 } // namespace torch

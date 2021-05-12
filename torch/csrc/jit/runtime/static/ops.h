@@ -4,6 +4,16 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+namespace at {
+namespace native {
+at::Tensor& reshape_copy_out(
+    at::Tensor& out,
+    const at::Tensor& self,
+    const std::vector<int64_t>& proposed_shape,
+    bool infer_size = true);
+} // namespace native
+} // namespace at
+
 namespace torch {
 namespace jit {
 
@@ -33,6 +43,18 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::detail::empty_cpu(
       {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(
+    at::IntArrayRef sizes,
+    const at::Tensor& t) {
+  return at::detail::empty_cpu(
+      sizes,
       c10::typeMetaToScalarType(t.dtype()),
       t.layout(),
       t.device(),
@@ -72,6 +94,18 @@ inline at::Tensor create_empty_from(const at::Tensor& t, c10::Device device) {
       c10::nullopt);
 }
 
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::MemoryFormat memory_format) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      memory_format);
+}
+
 inline bool checkResizedDataPtr(at::Tensor& t) {
   auto const prev_data_ptr = t.data_ptr();
   t.resize_({0});
@@ -85,14 +119,19 @@ inline void fastResizeToZero(at::Tensor& t) {
 
 bool opIsRegistered(const c10::Symbol& op_name);
 
-bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
 bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 
-bool canRunNatively(Node* n);
+bool mayRunNatively(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
+
+inline std::string PrintNode(const Node* node) {
+  std::ostringstream ss;
+  node->print(ss, 0, nullptr, false);
+  return ss.str();
+}
 
 } // namespace jit
 } // namespace torch

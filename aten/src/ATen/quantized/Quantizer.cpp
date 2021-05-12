@@ -31,7 +31,7 @@ namespace {
 // Note: this is not a native function as Quantizer is not exposed to python yet
 QuantizerPtr Tensor::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
   return get_qtensorimpl(*this)->quantizer();
 }
 
@@ -80,6 +80,7 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 }
 
 int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t new_size_bytes;
   switch(t) {
     case at::ScalarType::QUInt4x2:
@@ -207,6 +208,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
   return rtensor;
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 Quantizer::~Quantizer() {}
 
 C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
