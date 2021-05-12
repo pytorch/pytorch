@@ -178,7 +178,6 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
 
 Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
   size_t ndim = self.sizes().size();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
@@ -192,7 +191,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
     return self.sgn() * grad;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
@@ -204,7 +202,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
@@ -219,7 +216,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
   size_t ndim = self.sizes().size();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef({}));
   Tensor self_scaled;
@@ -234,7 +230,6 @@ Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (ord == 1.0) {
     return self.sgn() * grad;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (ord == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
@@ -254,7 +249,6 @@ Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (ord < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(ord - 1);
     scale_v = grad / norm.pow(ord - 1);
@@ -334,7 +328,6 @@ Tensor angle_backward(Tensor grad, const Tensor& self) {
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
@@ -848,7 +841,6 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
   auto norm_flat = self_flat.norm(p, 1, true);
   auto grad_output = (self_flat * grad_flat).sum(1, true);
   auto nb = norm_backward(grad_output, self_flat, p, norm_flat, 1, true);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto invnorm = (norm_flat + 1e-7).reciprocal();
   auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
   auto norm = unflatten(norm_flat.expand_as(self_flat));
@@ -962,58 +954,63 @@ Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor
   return at::sum(mask * grad_output);
 }
 
-Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
+static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t correction) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
+  return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (self.dim() == 0) {
-    return var_backward(grad, self, unbiased);
+Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+    c10::optional<int64_t> correction_opt, bool keepdim) {
+  auto correction = correction_opt.value_or(1);
+  if (self.dim() == 0 || !dim_opt.has_value()) {
+    return var_backward(grad, self, correction);
   }
+  auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
+  const int64_t dof = _safe_size(self.sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
+  return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
-}
-
-Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
+Tensor std_backward(
+    const Tensor& result, const Tensor& grad, const Tensor& self,
+    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+  auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
+  return var_backward(grad_var, self, dim, correction, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
   return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
 }
 
-Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
   return grad.expand(sizes) / numel;
 }
 
-Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
-  Tensor grad;
-  if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+static Tensor mean_backward(
+    const Tensor& grad, const IntArrayRef sizes, int64_t numel,
+    c10::optional<IntArrayRef> dim, bool keepdim) {
+  if (dim.has_value()) {
+    return mean_backward(grad, sizes, *dim, keepdim);
+  } else {
+    return mean_backward(grad, sizes, numel);
   }
-  if (grads[1].defined()) {
-    Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
-    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
-  }
-  return grad;
 }
 
-Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+Tensor var_std_mean_backward(
+    const variable_list& grads, const Tensor& self, const Tensor& r1,
+    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+    grad = is_std ? std_backward(r1, grads[0], self, dim, correction, keepdim)
+                  : var_backward(grads[0], self, dim, correction, keepdim);
   }
   if (grads[1].defined()) {
-    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
-    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel(), dim, keepdim);
+    grad = grad.defined() ? grad + mean_grad : mean_grad;
   }
   return grad;
 }
@@ -1051,11 +1048,9 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   }
   auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L, /*upper=*/false));
   auto phi = at::matmul(L.transpose(-1, -2).conj(), grad);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
 
   auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2).conj(), phi), L_inverse);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return grad_input.add(grad_input.transpose(-1, -2).conj()).mul_(0.5);  // Symmetrizing the gradient
 }
 
@@ -1275,7 +1270,6 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 //   write a batching rule for it.
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
@@ -1299,7 +1293,6 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
 }
 
 Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
@@ -2205,8 +2198,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool is_eigvec_tensor_nonempty, const Tensor& eigenvalues, const Tensor& eigenvectors) {
   TORCH_CHECK(is_eigvec_tensor_nonempty,
-           "eig_backward: Setting eigenvectors to false in torch.eig doesn't compute eigenvectors ",
-           "and hence we cannot compute backward. Please use torch.eig(eigenvectors=True)");
+           "eig_backward: torch.eig(eigenvalues=False) is not differentiable. ",
+           "Please use torch.linalg.eigvals");
 
   // variable names correspond to the ones in the reference document
   auto D = eigenvalues;
@@ -2353,8 +2346,8 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   // leads to stable gradient updates, and retains symmetry of the updated matrix if it
   // were updated by a gradient based algorithm.
   TORCH_CHECK(eigenvectors,
-           "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
-           "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+           "symeig_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
+           "Use torch.linalg.eigvalsh(A) instead.");
 
   auto glambda = grads[0];
   auto gv = grads[1];
@@ -2381,7 +2374,6 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       result = result + glambda_term;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
@@ -2428,7 +2420,6 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
     // Compute M = (tril(M) + tril(M).conj().transpose(-2, -1)) * 0.5 Identity
     Tensor M_tril = at::tril(M);
     M = M_tril + M_tril.conj().transpose(-2, -1);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     M.diagonal(0, -2, -1).mul_(0.5);
 
     Tensor rhs_term;
@@ -2508,8 +2499,9 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
@@ -2561,8 +2553,9 @@ Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
-    Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
@@ -2616,9 +2609,9 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
-    Tensor u, sigma, v;
-    // TODO: replace self.svd with linalg_svd
-    std::tie(u, sigma, v) = self.svd();
+    Tensor u, sigma, vh;
+    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
+    Tensor v = vh.conj().transpose(-2, -1);
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
@@ -2867,7 +2860,6 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
       training ? toNonOptTensor(save_invstd).to(input.scalar_type())
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
@@ -2883,7 +2875,6 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     auto ggI_sum = sum_exclude_dim1(ggI);
     auto ggIinmu_sum = sum_exclude_dim1(ggI * input_sub_mu);
     auto all_sub = ((ggI_sum * gO_sum).div_(M)).sub_(sum_exclude_dim1(gO * ggI)).add_(
-                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                     (sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum).mul_(3. / M));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(M);
     auto gI_1t = (ggIinmu_sum * sigma2_eps_neg_3_2).div_(M) * (gO_sum.div(M) - gO);
@@ -3000,7 +2991,6 @@ infinitely_differentiable_native_layer_norm_backward(
     Tensor dvar;
     if (drstd.defined()) {
       var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       dvar = -0.5 * rstd_cube * drstd.view({M, 1});
     }
     Tensor ds;
@@ -3027,10 +3017,10 @@ infinitely_differentiable_native_layer_norm_backward(
             X_tensor,
             var,
             mean_tensor,
-            {1},
-            false,
-            true,
-            false);
+            /*dim=*/IntArrayRef{1},
+            /*correction=*/0,
+            /*keepdim=*/true,
+            /*is_std=*/false);
       }
       dX = dX.reshape_as(X);
     } else if (dmean.defined() && drstd.defined()) {
@@ -3039,10 +3029,10 @@ infinitely_differentiable_native_layer_norm_backward(
                X_tensor,
                var,
                mean_tensor,
-               {1},
-               false,
-               true,
-               false)
+               /*dim=*/IntArrayRef{1},
+               /*correction=*/0,
+               /*keepdim=*/true,
+               /*is_std=*/false)
                .reshape_as(X);
     }
   }
@@ -3101,7 +3091,6 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
     Tensor dvar;
     if (drstd.defined()) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
     }
     if (dY.defined()) {
@@ -3120,8 +3109,8 @@ infinitely_differentiable_native_group_norm_backward(
             X_tensor,
             var,
             mean_tensor,
-            {2, 3},
-            false,
+            IntArrayRef{2, 3},
+            0,
             true,
             false);
       }
@@ -3132,8 +3121,8 @@ infinitely_differentiable_native_group_norm_backward(
                X_tensor,
                var,
                mean_tensor,
-               {2, 3},
-               false,
+               IntArrayRef{2, 3},
+               0,
                true,
                false)
                .reshape_as(X);
@@ -3345,6 +3334,38 @@ std::tuple<Tensor, Tensor> polar_backward(
     grad_angle = at::real(grad_conj * result_mul_1_j);
   }
   return std::make_tuple(grad_abs, grad_angle);
+}
+
+Tensor lu_unpack_backward(
+  const std::vector<torch::autograd::Variable>& grads,
+  const Tensor& LU_data,
+  bool unpack_data
+) {
+  auto L_grad = grads[1];
+  auto U_grad = grads[2];
+
+  auto m = LU_data.size(-2);
+  auto n = LU_data.size(-1);
+  auto k = std::min(m, n);
+
+  TORCH_CHECK(unpack_data, "lu_unpack_backward: cannot compute gradients unless unpack_data=True");
+
+  auto res = at::zeros(LU_data.sizes(), LU_data.options());
+
+  Tensor L_grad_contrib;
+  if (L_grad.defined()) {
+    L_grad_contrib = L_grad.tril();
+    L_grad_contrib.diagonal(0, -2, -1).fill_(0);
+    res.narrow(-2, 0, m).narrow(-1, 0, k).add_(L_grad_contrib);
+  }
+
+  Tensor U_grad_contrib;
+  if (U_grad.defined()) {
+    U_grad_contrib = U_grad.triu();
+    res.narrow(-2, 0, k).narrow(-1, 0, n).add_(U_grad_contrib);
+  }
+
+  return res;
 }
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
