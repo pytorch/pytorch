@@ -50,6 +50,36 @@ TORCH_API Tensor* conv2d_depthwise(
     int pad,
     int groups);
 
+// APIs to compute 2D depthwise convolutions with dynamic shapes on input,
+// the first two dims on weight, and groups, while all other parameters are
+// statically known.
+TORCH_API Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    BufHandle bias,
+    ExprHandle N,
+    ExprHandle C,
+    ExprHandle H,
+    ExprHandle W,
+    ExprHandle K,
+    ExprHandle CperG,
+    int stride,
+    int pad,
+    ExprHandle groups);
+
+TORCH_API Tensor* conv2d_depthwise(
+    BufHandle input,
+    BufHandle weight,
+    ExprHandle N,
+    ExprHandle C,
+    ExprHandle H,
+    ExprHandle W,
+    ExprHandle K,
+    ExprHandle CperG,
+    int stride,
+    int pad,
+    ExprHandle groups);
+
 // APIs to compute 2D depthwise convolutions with dynamic shapes on all
 // parameters.
 TORCH_API Tensor* conv2d_depthwise(
