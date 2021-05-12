@@ -8,6 +8,10 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
+
+Data types
+----------
+
 Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
 ======================================= =========================================== ============================= ================================
@@ -44,6 +48,9 @@ quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``                      
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
+Initializing and basic operations
+---------------------------------
+
 A tensor can be constructed from a Python :class:`list` or sequence using the
 :func:`torch.tensor` constructor:
 
@@ -79,6 +86,9 @@ constructor or tensor creation op:
     tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
             [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
 
+For more information about building Tensors, see :ref:`tensor-creation-ops`
+
+
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
 
@@ -107,6 +117,8 @@ single value:
     tensor(2.5000)
     >>> x.item()
     2.5
+
+For more information about indexing, see :ref:`indexing-slicing-joining`
 
 A tensor can be created with :attr:`requires_grad=True` so that
 :mod:`torch.autograd` records operations on them for automatic differentiation.
@@ -146,6 +158,10 @@ view of a storage and defines numeric operations on it.
    Current implementation of :class:`torch.Tensor` introduces memory overhead,
    thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
    If this is your case, consider using one large structure.
+
+
+Tensor class reference
+----------------------
 
 .. class:: Tensor()
 

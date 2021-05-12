@@ -4270,56 +4270,24 @@ else:
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
-        shapes = [(1,), (4,), (10,)]  # single dim inps
-        nums = [1, 2, 5, 10, 20, 50]
-        shapes = shapes + list(product(nums, nums))  # concat 2 dim inps
-        biases = [True, False]
-        rowvars = [True, False]
-        ddofs = [None, 0, 1]
-
-        # special cases
-        t_list = []
-        t_list.append(torch.empty(0, dtype=dtype, device=device))
-        t_list.append(torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device))
-        for t in t_list:
-            actual = torch.cov(t)
-            expected = torch.from_numpy(np.cov(t.cpu().numpy())).to(actual.dtype)
-            if t.size(0) == 0:
-                self.assertEqual(actual, t)
-            else:
-                self.assertEqual(actual, expected)
-
-        for shape, rowvar, bias, ddof in product(shapes, rowvars, biases, ddofs):
-        # single input	
-            t = make_tensor(shape, device, dtype, low=-50, high=50)
-            actual = torch.cov(t)
-            expected = torch.from_numpy(np.cov(t.cpu().numpy())).to(actual.dtype)
+        def check(t, *args, **kwargs):
+            actual = torch.cov(t, *args, **kwargs)
+            expected = np.array(np.cov(t.cpu().numpy(), *args, **kwargs))
             self.assertEqual(actual, expected)
 
-        # two inputs
-            t1 = make_tensor(shape, device, dtype, low=-50, high=50)
-            t2 = t1 + 0.5 * make_tensor(shape, device, dtype, low=-50, high=50)
-            actual = torch.cov(t1, t2)
-            expected = torch.from_numpy(np.cov(t1.cpu().numpy(), t2.cpu().numpy())).to(actual.dtype)
-            self.assertEqual(actual, expected)
+        def generate_input_tensors():
+            yield torch.empty(0, dtype=dtype, device=device)
+            yield torch.tensor(1, dtype=dtype, device=device)
+            yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
+            yield make_tensor((10,), device, dtype)
+            yield make_tensor((5, 1), device, dtype)
+            yield make_tensor((10, 10), device, dtype)
+            yield make_tensor((10, 10), device, dtype, noncontiguous=True)
 
-        # inputs with other args
-            if np.size(shape) == 1:
-                t_size = shape[0]
-            elif rowvar or shape[0] == 1:
-                t_size = shape[1]
-            else:
-                t_size = shape[0]
-
-            fwt = torch.randint(1, 10, (t_size,), device=device) * 2
-            awt = torch.randint(1, 10, (t_size,), device=device)**2
-            actual = torch.cov(t1, t2, rowvar, bias, ddof, fwt, awt)
-            expected = np.cov(t1.cpu().numpy(), t2.cpu().numpy(),
-                              rowvar, bias, ddof, fwt.cpu().numpy(), awt.cpu().numpy())
-            expected = torch.from_numpy(expected).to(actual.dtype)
-            self.assertEqual(actual, expected)
+        for t in generate_input_tensors():
+            check(t)
 
     @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False))
     def test_cov_error(self, device, dtype):

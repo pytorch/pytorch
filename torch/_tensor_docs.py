@@ -955,9 +955,8 @@ count_nonzero(dim=None) -> Tensor
 See :func:`torch.count_nonzero`
 """)
 
-add_docstr_all('cov',
-               r"""
-cov(input, other=None, rowvar=True, bias=None, ddof=None, fweights=None, aweights=None) -> Tensor
+add_docstr_all('cov', r"""
+cov(*, correction=1, fweights=None, aweights=None) -> Tensor
 
 See :func:`torch.cov`
 """)

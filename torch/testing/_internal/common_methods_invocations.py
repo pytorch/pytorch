@@ -2347,29 +2347,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(tensor_nd, kwargs=dict(dim=None, correction=0, keepdim=True)),
     ]
 
-def sample_inputs_cov(op_info, device, dtype, requires_grad):
-    inp_dims = [ (S,), (1, S), (S, 2), (S, S)]  # (S, 1) produces nan outputs
-    biases = [True, False]
-    rowvars = [True, False]
-    ddofs = [None, S]
-    inputs = []
-    for inp, bias, rowvar, ddof in product(inp_dims, biases, rowvars, ddofs):
-        if np.size(inp) == 1:
-            t_size = inp[0]
-        elif rowvar or inp[0] == 1:
-            t_size = inp[1]
-        else:
-            t_size = inp[0]
-        fwt = torch.randint(1, 5, (t_size,), device=device) * 2 + 1
-        awt = torch.randint(1, 10, (t_size,), device=device)  + 1
-        tens = make_tensor(inp, device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)
-        tens2 = tens + make_tensor(inp, device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=False)
-        tens2 = tens2.detach().requires_grad_(requires_grad)    
-        inputs.append(SampleInput(tens))
-        inputs.append(SampleInput(tens, args=(tens2, rowvar, bias, ddof, fwt, awt)))
-    return inputs
+
+def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
+    pass
 
 
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
@@ -4205,8 +4185,7 @@ op_db: List[OpInfo] = [
     OpInfo('cov',
            dtypes=all_types_and_complex(),
            sample_inputs_func=sample_inputs_cov,
-           supports_out=False,
-           ),
+           supports_out=False,),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
