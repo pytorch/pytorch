@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import tempfile
 from enum import Enum
@@ -7,7 +8,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
+from torch.autograd import kineto_available, ProfilerActivity
 
 
 class ProfilerAction(Enum):
@@ -20,16 +21,20 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callable:
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0) -> Callable:
     """
-    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
-    do the warmup for the next ``warmup`` steps, then
-    do the active recording for the next ``active`` steps and then
-    repeat the cycle starting with the next step. The number of cycles is specified by the ``repeat`` parameter.
-    When the parameter's value is zero, the cycles will continue until the profiling is finished.
+    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
+    the first ``skip_first`` steps, then wait for ``wait`` steps, then do the warmup for the next ``warmup`` steps,
+    then do the active recording for the next ``active`` steps and then repeat the cycle starting with ``wait`` steps.
+    The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
+    the cycles will continue until the profiling is finished.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
+        if step < skip_first:
+            return ProfilerAction.NONE
+        else:
+            step -= skip_first
         num_steps = wait + warmup + active
         if repeat > 0 and step / num_steps >= repeat:
             return ProfilerAction.NONE
@@ -41,8 +46,8 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callabl
         else:
             return ProfilerAction.RECORD if mod_step < num_steps - 1 \
                 else ProfilerAction.RECORD_AND_SAVE
-    assert wait >= 0 and warmup >= 0 and active > 0, \
-        "Invalid profiler schedule arguments"
+    assert wait >= 0 and warmup >= 0 and active > 0 and \
+           repeat >= 0 and skip_first >= 0, "Invalid profiler schedule arguments"
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
@@ -80,6 +85,12 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
+
+def supported_activities():
+    """
+    Returns a set of supported profiler activities
+    """
+    return torch.autograd.supported_kineto_activities()
 
 
 class profile(object):
@@ -194,9 +205,7 @@ class profile(object):
         if activities:
             self.activities = set(activities)
         else:
-            self.activities = set([ProfilerActivity.CPU])
-            if torch.cuda.is_available():
-                self.activities.add(ProfilerActivity.CUDA)
+            self.activities = supported_activities()
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -205,9 +214,11 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
-        assert len(self.activities) > 0, "No profiler activities specified"
-        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
-            "CUDA activity specified, but CUDA is not available"
+        for activity in self.activities:
+            if activity not in supported_activities():
+                warn("Unsupported profiler activity specified (" + str(activity) + ")")
+        self.activities = self.activities.intersection(supported_activities())
+        assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
             self.schedule = schedule
@@ -357,6 +368,17 @@ class profile(object):
         """
         torch.autograd._add_metadata(key, value)
 
+    def _get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -385,11 +407,16 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace()
+        self.profiler._prepare_trace()
 
     def _start_trace(self):
         assert self.profiler is not None
-        self.profiler._start_kineto_trace()
+        self.profiler._start_trace()
+
+        if kineto_available():
+            dist_info = self._get_distributed_info()
+            if dist_info:
+                self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None

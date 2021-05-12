@@ -82,10 +82,8 @@ class TestE2EBase : public ::testing::Test {
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback([wp, ownerRRefId = ownerRRef->rrefId()]() {
-      auto jitFuture = wp.lock();
-      callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
+    jitFuture->addCallback([ownerRRefId = ownerRRef->rrefId()](JitFuture& jitFuture) {
+      callback::finishCreatingOwnerRRef(jitFuture, ownerRRefId);
     });
     return ownerRRef;
   }
