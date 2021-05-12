@@ -603,7 +603,7 @@ static void _launch_kernel(int total_n_elems, func_t f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   _elementwise_kernel<n_threads, n_elems_per_thread, func_t>
     <<<grid, block, 0, stream>>>(total_n_elems, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void _unpack_pivots_internal_kernel(
