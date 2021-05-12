@@ -1370,6 +1370,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // fallthrough, we lost the race.  We are guaranteed not to lose the
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
+        C10_FALLTHROUGH;
       case c10::impl::PythonInterpreterTagStatus::TAGGED_BY_OTHER:
         TORCH_CHECK(
             false,
