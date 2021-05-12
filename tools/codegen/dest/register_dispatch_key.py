@@ -85,7 +85,7 @@ class RegisterDispatchKey:
             if f.structured:
                 return self.gen_structured(f)
             else:
-                return list(mapMaybe(self.gen_unstructured, f.functions()))
+                return list(mapMaybe(lambda x: self.gen_unstructured(x, f), f.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
@@ -96,7 +96,9 @@ class RegisterDispatchKey:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
         return kernel_signature(f, self.backend_index, prefix=f'wrapper_{f.func.name.overload_name}_')
 
-    def gen_out_inplace_wrapper(self, f: NativeFunction, g: NativeFunctionsGroup) -> Optional[str]:
+    def gen_out_inplace_wrapper(self, f: NativeFunction, g: Optional[NativeFunctionsGroup]) -> Optional[str]:
+        if g is None:
+            return None
         k = f.func.kind()
         if k is SchemaKind.inplace:
             copy_op = 'at::_copy_from'
@@ -352,11 +354,11 @@ if (strides.empty()) {
                 expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
                     "options.device_opt(), options.pinned_memory_opt()"
                 if self.backend_index.dispatch_key == DispatchKey.CPU:
-                    empty_impl = f"at::native::empty_cpu"
-                    empty_strided_impl = f"at::native::empty_strided_cpu"
+                    empty_impl = "at::native::empty_cpu"
+                    empty_strided_impl = "at::native::empty_strided_cpu"
                 elif self.backend_index.dispatch_key == DispatchKey.CUDA:
-                    empty_impl = f"at::native::empty_cuda"
-                    empty_strided_impl = f"at::native::empty_strided_cuda"
+                    empty_impl = "at::native::empty_cuda"
+                    empty_strided_impl = "at::native::empty_strided_cuda"
                 elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                     empty_impl = "at::empty"
                     empty_strided_impl = "at::empty_strided"
