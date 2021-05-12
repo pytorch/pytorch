@@ -22,18 +22,30 @@ class FilterIterDataPipe(MapIterDataPipe):
                  filter_fn: Callable[..., bool],
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
+                 batch_level: bool = False,
+                 drop_empty_batches: bool = True,
                  ) -> None:
-        super().__init__(datapipe, fn=filter_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+        self.drop_empty_batches = drop_empty_batches
+        super().__init__(datapipe, fn=filter_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, batch_level = batch_level)
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            res = self.fn(data, *self.args, **self.kwargs)
-            if not isinstance(res, bool):
-                raise ValueError("Boolean output is required for "
-                                 "`filter_fn` of FilterIterDataPipe")
-            if res:
-                yield data
+            if self.batch_level or not isinstance(data, list):
+                res = self.fn(data, *self.args, **self.kwargs)
+                if not isinstance(res, bool):
+                    raise ValueError("Boolean output is required for "
+                                    "`filter_fn` of FilterIterDataPipe")
+                if res:
+                    yield data
+            else:
+                res = []
+                for el in data:
+                    if self.fn(el, *self.args, **self.kwargs):
+                        res.append(el)
+                if len(res) or not self.drop_empty_batches:
+                    yield res
+            
 
     def __len__(self):
         raise(NotImplementedError)
