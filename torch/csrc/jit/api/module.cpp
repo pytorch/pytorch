@@ -2,6 +2,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -65,15 +66,8 @@ void assert_ignored_methods_not_called(
     return;
   }
 
-  std::string encountered_ignored_methods_str;
-  int i = 0;
-  for (const std::string& mn : encountered_ignored_methods) {
-    if (i > 0) {
-      encountered_ignored_methods_str += ", ";
-    }
-    encountered_ignored_methods_str += mn;
-    ++i;
-  }
+  const std::string encountered_ignored_methods_str =
+    c10::Join(", ", encountered_ignored_methods);
 
   TORCH_CHECK(
       false,
@@ -109,15 +103,8 @@ void assert_ignored_attributes_not_referenced(
     return;
   }
 
-  std::string encountered_ignored_attributes_str;
-  int i = 0;
-  for (const std::string& an : encountered_ignored_attributes) {
-    if (i > 0) {
-      encountered_ignored_attributes_str += ", ";
-    }
-    encountered_ignored_attributes_str += an;
-    ++i;
-  }
+  const std::string encountered_ignored_attributes_str =
+    c10::Join(", ", encountered_ignored_attributes);
 
   TORCH_CHECK(
       false,
