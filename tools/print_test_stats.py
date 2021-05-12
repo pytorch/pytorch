@@ -765,10 +765,10 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        print("S3 upload only enabled on master, nightly and release branches.")
-        print(f"skipping test report on branch: {branch}")
-        return
+    # if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+    #     print("S3 upload only enabled on master, nightly and release branches.")
+    #     print(f"skipping test report on branch: {branch}")
+    #     return
     now = datetime.datetime.utcnow().isoformat()
     key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
