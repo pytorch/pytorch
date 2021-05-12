@@ -76,6 +76,11 @@ wrap('len')
 def wrapped_via_decorator(a):
     return a + 1
 
+wrap('wrapped_with_submodule')
+
+def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
+    return batchnorm1d(x)
+
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -303,6 +308,24 @@ class TestFX(JitTestCase):
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+    def test_wrap_with_submodule(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+
+            def forward(self, x: torch.Tensor):
+                return wrapped_with_submodule(x, self.batchnorm1d)
+
+        m = symbolic_trace(M())
+
+        self.assertIn("wrapped_with_submodule", m.code)
+
+        input = torch.rand(3, 2)
+        ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+        self.assertEqual(ref_batchnorm1d(input), m(input))
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -1949,9 +1972,9 @@ class TestFX(JitTestCase):
             with self.assertRaises(TypeError):
                 traced(5)
 
-        self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module's generated forward function:",
-                      captured[0])
+        self.assertRegex(captured[0],
+                         r"Call using an FX-traced Module, line .* of the "
+                         r"traced Module's generated forward function:")
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
         class M(torch.nn.Module):
@@ -1971,9 +1994,9 @@ class TestFX(JitTestCase):
         except RuntimeError:
             captured = traceback.format_exc()
 
-        self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module's generated forward function:",
-                         captured)
+        self.assertNotRegex(captured,
+                            r"Call using an FX-traced Module, line .* of the "
+                            r"traced Module's generated forward function:")
 
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
@@ -2614,7 +2637,7 @@ class TestFunctionalTracing(JitTestCase):
     )
 
     # Inconsistent behavior between Python 3.8 and other Python versions:
-    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Python 3.8+: Re-raise internal exception like `PROXY_ITERATED`
     # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
     #                 internal exception above
     # Use the following map to override the expected exception for Python 3.8
@@ -2667,7 +2690,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
