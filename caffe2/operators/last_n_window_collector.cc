@@ -8,6 +8,7 @@ namespace caffe2 {
 namespace {
 
 template <class Context>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class LastNWindowCollectorOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -42,6 +43,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
              output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -83,6 +85,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
 
     // output_num is >= output_batch_size
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (output_num > output_batch_size) {
       output->ExtendTo(output_num, 50);
     }
@@ -136,8 +139,10 @@ class LastNWindowCollectorOp : public Operator<Context> {
   OUTPUT_TAGS(LAST_N, NEXT, NUM_VISITED);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LastNWindowCollector)
     .NumInputs({3, 4, 5})
     .NumOutputs(2, 3)
@@ -216,6 +221,7 @@ This is not thread safe unless a mutex is given.
     .Output(0, "last-N buffer", "Data stored in sessions")
     .Output(1, "next cursor", "Updated input cursor")
     .Output(2, "NUM_VISITED", "number of records seen so far");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(LastNWindowCollector);
 } // namespace
 } // namespace caffe2
