@@ -119,7 +119,6 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialRead may not set errno
     // we read in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
@@ -152,7 +151,6 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialWrite may not set errno
     // we write in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;

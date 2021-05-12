@@ -329,7 +329,6 @@ bool isBiasOfConvOrLinear(Value* v) {
 bool isEmbeddingBagNonInput(Value* v) {
   bool result = matchArgPattern(
       v,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       AtenFuncArgs({{"embedding_bag", 2}, {"embedding_bag", 6}}),
       CallFuncArgs({}));
   return result;
