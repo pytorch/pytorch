@@ -346,16 +346,23 @@ void ScriptModuleSerializer::serialize(
   // so loading the code does not depend on loading the data
   std::vector<IValue> ivalue_constants(
       constant_table_.begin(), constant_table_.end());
-  writeArchive(
-      c10::ivalue::Tuple::create(ivalue_constants),
-      /*archive_name=*/kArchiveNameConstants,
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/");
   if (bytecode_format) {
+    writeArchive(
+        c10::ivalue::Tuple::create(ivalue_constants),
+        /*archive_name=*/kArchiveNameConstants,
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"constants/",
+        true);
+
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
+  } else {
+    writeArchive(
+        c10::ivalue::Tuple::create(ivalue_constants),
+        /*archive_name=*/kArchiveNameConstants,
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"constants/");
   }
-
   // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
     writer_.setMinVersion(item.value().minVersion());
@@ -584,7 +591,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/");
+      /*tensor_dir=*/"constants/",
+      true);
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental
@@ -605,7 +613,7 @@ void ScriptModuleSerializer::writeByteCode(
     // used to symbolicate debug handles
     writeArchive(
         debug_info_telements,
-        /*archive_name=*/"mobile_debug",
+        /*archive_name=*/"mobile_debug_handles",
         /*archive_dir=*/"",
         /*tensor_dir=*/"mobile_debug_handles/");
     // Now get the debug-handles-to-inlined-cs-ptr-map

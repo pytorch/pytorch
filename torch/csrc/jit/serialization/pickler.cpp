@@ -310,6 +310,8 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // change will only be triggered on non-mobile logic
   if (get_tensor_id_ != nullptr) {
     root_key = get_tensor_id_(tensor);
+  } else {
+    root_key = c10::to_string(tensor_data_.size());
   }
   pushString(root_key);
 
