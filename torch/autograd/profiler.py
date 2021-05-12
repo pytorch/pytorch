@@ -1187,18 +1187,19 @@ def parse_kineto_results(result):
 
     # associate CUDA kernels and CUDA runtime (CPU) with CPU events
     for fe in function_events:
-        if fe.device_type == DeviceType.CPU and not fe.is_async and fe.id in cuda_corr_map:
-                for f_evt in cuda_corr_map[fe.id]:
-                    if f_evt.device_type == DeviceType.CUDA:
-                        fe.append_kernel(
-                            f_evt.name,
-                            f_evt.device_index,
-                            f_evt.time_range.end - f_evt.time_range.start)
-                    elif f_evt.device_type == DeviceType.CPU:
-                        # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
-                        # with the 'thread' of the corresponding linked PyTorch event to properly track
-                        # parents and children
-                        f_evt.thread = fe.thread
+        if (fe.device_type == DeviceType.CPU and not fe.is_async and
+                fe.id in cuda_corr_map):
+            for f_evt in cuda_corr_map[fe.id]:
+                if f_evt.device_type == DeviceType.CUDA:
+                    fe.append_kernel(
+                        f_evt.name,
+                        f_evt.device_index,
+                        f_evt.time_range.end - f_evt.time_range.start)
+                elif f_evt.device_type == DeviceType.CPU:
+                    # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
+                    # with the 'thread' of the corresponding linked PyTorch event to properly track
+                    # parents and children
+                    f_evt.thread = fe.thread
 
     # output top-level memory events
     for mem_record in mem_records:
