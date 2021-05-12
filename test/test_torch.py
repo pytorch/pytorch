@@ -4391,7 +4391,7 @@ else:
         r2 = y.shape[-2]
         if r1 == 0 or r2 == 0:
             return torch.empty(r1, r2, device=x.device)
-        return torch.linalg.norm(x[..., None, :] - y[..., None, :, :], ord=p, dim=-1)
+        return torch.linalg.vector_norm(x[..., None, :] - y[..., None, :, :], ord=p, dim=-1)
 
     def test_cdist_norm(self, device):
         for r1 in [3, 4, 5, 6]:
@@ -6014,7 +6014,7 @@ else:
         if k == 0:
             # torch complains about empty indices
             return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-        square = torch.linalg.norm(inp[..., None, :] - inp[..., None, :, :], ord=p, dim=-1)
+        square = torch.linalg.vector_norm(inp[..., None, :] - inp[..., None, :, :], ord=p, dim=-1)
         unroll = square.view(square.shape[:-2] + (n * n,))
         inds = torch.ones(k, dtype=torch.int)
         inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)

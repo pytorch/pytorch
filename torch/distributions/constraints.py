@@ -451,7 +451,7 @@ class _CorrCholesky(Constraint):
 
     def check(self, value):
         tol = torch.finfo(value.dtype).eps * value.size(-1) * 10  # 10 is an adjustable fudge factor
-        row_norm = torch.linalg.norm(value.detach(), dim=-1)
+        row_norm = torch.linalg.vector_norm(value.detach(), dim=-1)
         unit_row_norm = (row_norm - 1.).abs().le(tol).all(dim=-1)
         return _LowerCholesky().check(value) & unit_row_norm
 

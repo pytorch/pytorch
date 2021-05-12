@@ -4194,8 +4194,8 @@ pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
 This is identical to the upper triangular portion, excluding the diagonal, of
-`torch.linalg.norm(input[:, None] - input, ord=p, dim=2)`. This function will be faster
-if the rows are contiguous.
+`torch.linalg.vector_norm(input[:, None] - input, ord=p, dim=2)`. This function
+will be faster if the rows are contiguous.
 
 If input has shape :math:`N \times M` then the output will have shape
 :math:`\frac{1}{2} N (N - 1)`.
