@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
@@ -93,15 +94,15 @@ void ScriptProfile::addDatapoint(
   datapoints_.push_back(std::move(datapoint));
 }
 
-const ScriptProfile::Stats& ScriptProfile::dumpStats() {
+const ScriptProfile::SourceMap& ScriptProfile::dumpStats() {
   TORCH_CHECK(!enabled_, "Only disabled profilers are allowed to dump stats.");
 
   for (const auto& datapoint : datapoints_) {
     if (const auto& source = datapoint->sourceRange.source()) {
       if (auto fileLineCol = datapoint->sourceRange.file_line_col()) {
-        auto it = stats_.find(*source.get());
-        if (it == stats_.end()) {
-          it = stats_.emplace(SourceRef{source}, LineMap{}).first;
+        auto it = sourceMap_.find(*source.get());
+        if (it == sourceMap_.end()) {
+          it = sourceMap_.emplace(SourceRef{source}, LineMap{}).first;
         }
         auto& stats = it->second[std::get<1>(*fileLineCol)];
         stats.count++;
@@ -111,7 +112,7 @@ const ScriptProfile::Stats& ScriptProfile::dumpStats() {
   }
   datapoints_.clear();
 
-  return stats_;
+  return sourceMap_;
 }
 
 ScriptProfile::~ScriptProfile() {

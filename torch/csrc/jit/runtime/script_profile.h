@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 
+#include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/jit/frontend/source_ref.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -35,9 +36,29 @@ class TORCH_API InstructionSpan {
 
 } // namespace profiling
 
-struct TORCH_API InstructionStats {
-  size_t count{0};
+struct TORCH_API InstructionStats : public CustomClassHolder {
+  int64_t count{0};
   std::chrono::nanoseconds duration{0};
+};
+
+class TORCH_API SourceStats : public CustomClassHolder {
+ public:
+  using LineMap = c10::Dict<int64_t, c10::intrusive_ptr<InstructionStats>>;
+
+  SourceStats(SourceRef source, LineMap lineMap)
+      : source_(std::move(source)), lineMap_(std::move(lineMap)) {}
+
+  const SourceRef& getSourceRef() const {
+    return source_;
+  }
+
+  const LineMap& getLineMap() const {
+    return lineMap_;
+  }
+
+ private:
+  SourceRef source_;
+  LineMap lineMap_;
 };
 
 /**
@@ -58,22 +79,22 @@ struct TORCH_API InstructionStats {
  * In general, stats are aggregated per source function body, and then by line
  * number.
  */
-class TORCH_API ScriptProfile {
+class TORCH_API ScriptProfile : public CustomClassHolder {
   // Aggregates datapoints by function source id, then by line number.
-  using LineMap = std::map<size_t, InstructionStats>;
-  using Stats = std::map<SourceRef, LineMap, std::less<>>;
+  using LineMap = std::map<int64_t, InstructionStats>;
+  using SourceMap = std::map<SourceRef, LineMap, std::less<>>;
 
  public:
   void enable();
   void disable();
-  const Stats& dumpStats();
+  const SourceMap& dumpStats();
   void addDatapoint(std::shared_ptr<profiling::Datapoint>);
   ~ScriptProfile();
 
  private:
   bool enabled_{false};
   std::vector<std::shared_ptr<profiling::Datapoint>> datapoints_;
-  Stats stats_;
+  SourceMap sourceMap_;
 };
 
 } // namespace jit

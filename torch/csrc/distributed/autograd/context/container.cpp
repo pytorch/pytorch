@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
@@ -245,17 +246,14 @@ void DistAutogradContainer::sendReleaseContextRpc(
           CleanupAutogradContextReq(context_id).toMessage(),
           options);
 
-      std::weak_ptr<rpc::JitFuture> wp = cleanupFuture;
       cleanupFuture->addCallback(
-          [worker_id, wp]() {
-            auto future = wp.lock();
-            TORCH_INTERNAL_ASSERT(future);
-            if (future->hasError()) {
+          [worker_id](rpc::JitFuture& future) {
+            if (future.hasError()) {
               std::string errorMsg = c10::str(
                   "Could not release Dist Autograd Context on node ",
                   worker_id,
                   ": ",
-                  future->tryRetrieveErrorMessage());
+                  future.tryRetrieveErrorMessage());
               LOG(ERROR) << errorMsg;
               return;
             }
