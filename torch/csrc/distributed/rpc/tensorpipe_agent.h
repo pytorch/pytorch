@@ -43,8 +43,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
-
 struct LazyStreamContext;
 
 using steady_clock_time_point =
@@ -176,7 +174,7 @@ class TensorPipeAgent : public RpcAgent {
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
 
-  std::shared_ptr<JitFuture> send(
+  c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
@@ -202,6 +200,8 @@ class TensorPipeAgent : public RpcAgent {
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
+
+  const std::vector<c10::Device>& getDevices() const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
@@ -256,7 +256,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<JitFuture>& futureResponseMessage,
+      JitFuture& futureResponseMessage,
       uint64_t messageId,
       std::shared_ptr<LazyStreamContext> ctx);
 
@@ -283,12 +283,12 @@ class TensorPipeAgent : public RpcAgent {
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
     explicit AtomicJitFuture(const std::vector<c10::Device>& devices) {
-      jitFuture = std::make_shared<at::ivalue::Future>(
+      jitFuture = c10::make_intrusive<at::ivalue::Future>(
           at::AnyClassType::get(), devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
-    std::shared_ptr<JitFuture> jitFuture;
+    c10::intrusive_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and

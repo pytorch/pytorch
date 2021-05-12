@@ -408,6 +408,12 @@ def node_return_type_is_int(node: Node) -> bool:
     Returns true if this node results in an integer, even if some of the args
     are Tensors.
     """
-    if node.op == 'call_method' and node.target == 'size':
-        return True
-    return False
+    return node.op == 'call_method' and node.target == 'size'
+
+def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
+    """
+    Returns indexes of boolean Tensor args
+    """
+    if node.op == "call_method" and node.target == "masked_fill":
+        return [1]
+    return []

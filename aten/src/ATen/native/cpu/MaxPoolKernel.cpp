@@ -12,8 +12,8 @@ namespace {
 
 template <typename scalar_t>
 void cpu_max_pool(
-    Tensor& output_,
-    Tensor indices_,
+    const Tensor& output_,
+    const Tensor& indices_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
@@ -87,8 +87,8 @@ void cpu_max_pool(
 
 template <typename scalar_t>
 void cpu_max_pool_channels_last(
-    Tensor& output_,
-    Tensor indices_,
+    const Tensor& output_,
+    const Tensor& indices_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
@@ -208,7 +208,7 @@ void cpu_max_pool_channels_last(
 
 template <typename scalar_t>
 void cpu_max_pool_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     const Tensor& indices_) {
   auto grad_output = grad_output_.contiguous();
@@ -255,7 +255,7 @@ void cpu_max_pool_backward(
 
 template <typename scalar_t>
 void cpu_max_pool_backward_channels_last(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     const Tensor& indices_) {
   TORCH_CHECK(grad_output_.ndimension() == 4,
@@ -305,8 +305,8 @@ void cpu_max_pool_backward_channels_last(
 }
 
 void max_pool2d_kernel_impl(
-    Tensor& output,
-    Tensor& indices,
+    const Tensor& output,
+    const Tensor& indices,
     const Tensor& input,
     int kW, int kH,
     int dW, int dH,
@@ -331,7 +331,7 @@ void max_pool2d_kernel_impl(
 }
 
 void max_pool2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& indices) {
   switch (grad_output.suggest_memory_format()) {
