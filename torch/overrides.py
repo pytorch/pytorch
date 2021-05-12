@@ -445,7 +445,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.frac: lambda input, out=None: -1,
         torch.frexp: lambda input, out=None: -1,
         torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
+        torch.functional.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
         torch.gcd: lambda input, other, out=None: -1,
         torch.ge: lambda input, other, out=None: -1,
@@ -455,6 +455,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.inner: lambda input, other, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
+        torch.gradient: lambda input, spacing=None, dim=None, edge_order=1: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_3d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
