@@ -209,10 +209,6 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
-        for activity in self.activities:
-            if activity not in supported_activities():
-                warn("Unsupported profiler activity specified (" + str(activity) + ")")
-        self.activities = self.activities.intersection(supported_activities())
         assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:

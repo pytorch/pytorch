@@ -1,7 +1,7 @@
 import itertools
 from typing import Any
 import torch
-from torch.autograd import DeviceType
+from torch.autograd import DeviceType, ProfilerActivity, ProfilerState
 from torch.futures import Future
 
 from collections import defaultdict, namedtuple
@@ -428,13 +428,19 @@ class profile(object):
         self.kineto_activities = set()
         if use_kineto:
             if torch.autograd.kineto_available():
-                self.profiler_kind = torch.autograd.ProfilerState.KINETO
                 if self.use_cpu:
-                    self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
+                    self.kineto_activities.add(ProfilerActivity.CPU)
+                use_gpu_fallback = False
                 if self.use_cuda:
-                    self.kineto_activities.add(
-                        # uses CUPTI
-                        torch.autograd.ProfilerActivity.CUDA)
+                    if (ProfilerActivity.CUDA not in
+                            torch.autograd.supported_kineto_activities()):
+                        warn("CUPTI tracing is not available, falling back to legacy CUDA profiling")
+                        use_gpu_fallback = True
+                    else:
+                        self.kineto_activities.add(ProfilerActivity.CUDA)
+                self.profiler_kind = ProfilerState.KINETO if not use_gpu_fallback else \
+                    ProfilerState.KINETO_GPU_FALLBACK
+
                 assert len(self.kineto_activities) > 0, \
                     "No activities specified for Kineto profiler"
             else:
@@ -443,9 +449,9 @@ class profile(object):
         if not self.kineto_activities:
             if self.use_cuda:
                 # legacy CUDA mode
-                self.profiler_kind = torch.autograd.ProfilerState.CUDA
+                self.profiler_kind = ProfilerState.CUDA
             else:
-                self.profiler_kind = torch.autograd.ProfilerState.CPU
+                self.profiler_kind = ProfilerState.CPU
 
     def config(self):
         assert self.profiler_kind is not None
@@ -733,7 +739,7 @@ class emit_nvtx(object):
         torch.cuda.synchronize()
         torch.autograd._enable_profiler_legacy(
             torch.autograd.ProfilerConfig(
-                torch.autograd.ProfilerState.NVTX,
+                ProfilerState.NVTX,
                 self.record_shapes,
                 False,
                 False,
@@ -1164,6 +1170,14 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
             flops=kineto_event.flops(),
         )
+        if fe.device_type == DeviceType.CPU and not fe.is_async:
+            # Check if we have CUDA time as a fallback
+            cuda_time = kineto_event.cuda_elapsed_us()
+            if cuda_time > 0:
+                fe.append_kernel(
+                    fe.name,
+                    fe.device_index,
+                    cuda_time)
         function_events.append(fe)
         corr_id = kineto_event.linked_correlation_id()
         if corr_id > 0:
@@ -1173,20 +1187,18 @@ def parse_kineto_results(result):
 
     # associate CUDA kernels and CUDA runtime (CPU) with CPU events
     for fe in function_events:
-        if (fe.device_type == DeviceType.CPU and not fe.is_async and
-                fe.id in cuda_corr_map):
-            for f_evt in cuda_corr_map[fe.id]:
-                if f_evt.device_type == DeviceType.CUDA:
-                    fe.append_kernel(
-                        f_evt.name,
-                        f_evt.device_index,
-                        f_evt.time_range.end - f_evt.time_range.start)
-                elif f_evt.device_type == DeviceType.CPU:
-                    # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
-                    # with the 'thread' of the corresponding linked PyTorch event to properly track
-                    # parents and children
-                    f_evt.thread = fe.thread
-
+        if fe.device_type == DeviceType.CPU and not fe.is_async and fe.id in cuda_corr_map:
+                for f_evt in cuda_corr_map[fe.id]:
+                    if f_evt.device_type == DeviceType.CUDA:
+                        fe.append_kernel(
+                            f_evt.name,
+                            f_evt.device_index,
+                            f_evt.time_range.end - f_evt.time_range.start)
+                    elif f_evt.device_type == DeviceType.CPU:
+                        # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
+                        # with the 'thread' of the corresponding linked PyTorch event to properly track
+                        # parents and children
+                        f_evt.thread = fe.thread
 
     # output top-level memory events
     for mem_record in mem_records:
