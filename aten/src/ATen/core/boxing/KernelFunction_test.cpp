@@ -42,7 +42,6 @@ void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
 
   stack->clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   stack->push_back(5);
 }
 
@@ -71,7 +70,6 @@ void boxed_func_with_multi_return(const OperatorHandle& /*opHandle*/, Stack* sta
 struct unboxed_functor_with_return final : OperatorKernel {
   int64_t operator()(int64_t a, int64_t b) {
     called_with_args = tuple<int64_t, int64_t>(a, b);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 5;
   }
 };
@@ -96,7 +94,6 @@ struct unboxed_functor_without_return_factory final {
 
 int64_t unboxed_function_with_return(int64_t a, int64_t b) {
   called_with_args = tuple<int64_t, int64_t>(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 5;
 }
 
@@ -107,7 +104,6 @@ void unboxed_function_without_return(int64_t a, int64_t b) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto unboxed_lambda_with_return = [] (int64_t a, int64_t b) -> int64_t {
   called_with_args = tuple<int64_t, int64_t>(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 5;
 };
 
@@ -267,7 +263,6 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto s1 = 1.0f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
@@ -368,7 +363,6 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto s1 = 1.0f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
