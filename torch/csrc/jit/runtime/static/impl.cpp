@@ -51,8 +51,8 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   // check output types
-  // Static Runtime supports output types include None, Tensor and List/Tuple
-  // of Tensor
+  // Static Runtime supports output types include None, Tensor,  List/Tuple
+  // of Tensor, or Dict
   for (Value* output : graph->outputs()) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
@@ -61,9 +61,13 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
         kind == prim::DictConstruct) {
       for (Value* input : output->node()->inputs()) {
         const auto& type = input->type();
+        const auto& type_kind = type->kind();
         TORCH_CHECK(
-            type->cast<TensorType>() != nullptr,
-            "Static Runtime expects output type as List or Tuple of Tensor, but got List or Tuple of ",
+            type_kind != TypeKind::ListType &&
+                type_kind != TypeKind::TupleType &&
+                type_kind != TypeKind::DictType,
+            "Static Runtime requires output type to not be a nested "
+            "List/Tuple/Dict, but got a List/Tuple/Dict of: ",
             type->repr_str());
       }
     }
@@ -800,8 +804,7 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: "
-            << time_per_iter
+  std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
