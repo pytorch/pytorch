@@ -221,6 +221,10 @@ def _store_based_barrier(rank, store, timeout):
                 "rank: {}, for key: {} (world_size={}, worker_count={}, timeout={})".format(
                     rank, store_key, world_size, worker_count, timeout))
 
+    logger.info(
+        f"Rank {rank}: Completed store-based barrier for {world_size} nodes."
+    )
+
 def _rank_not_in_group(group: ProcessGroup):
     """
     Helper that checks if the current process's rank is not in a given group.
