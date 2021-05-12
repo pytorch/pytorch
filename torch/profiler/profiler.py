@@ -47,8 +47,7 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first
             return ProfilerAction.RECORD if mod_step < num_steps - 1 \
                 else ProfilerAction.RECORD_AND_SAVE
     assert wait >= 0 and warmup >= 0 and active > 0 and \
-           repeat >= 0 and skip_first >= 0, \
-        "Invalid profiler schedule arguments"
+           repeat >= 0 and skip_first >= 0, "Invalid profiler schedule arguments"
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
@@ -380,24 +379,6 @@ class profile(object):
             "world_size": dist.get_world_size()
         }
 
-
-    def _get_cuda_devices_info(self):
-        if not torch.cuda.is_available():
-            return None
-
-        devices = []
-        device_count = torch.cuda.device_count()
-        for idx in range(device_count):
-            device_prop = torch.cuda.get_device_properties(idx)
-            devices.append({
-                "id": idx,
-                "name": device_prop.name,
-                "multi_processor_count": device_prop.multi_processor_count,
-                "total_memory": device_prop.total_memory
-            })
-
-        return devices
-
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -436,9 +417,6 @@ class profile(object):
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
-            devices_info = self._get_cuda_devices_info()
-            if devices_info:
-                self.add_metadata("devicesProperties", json.dumps(devices_info).replace('"', '\\"'))
 
     def _stop_trace(self):
         assert self.profiler is not None
