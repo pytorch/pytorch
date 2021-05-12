@@ -2047,7 +2047,7 @@ class TestBinaryUfuncs(TestCase):
     @onlyCUDA
     def test_heaviside_cross_device(self, device):
         x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
-        y = torch.tensor(0, device=device)
+        y = torch.tensor(0)
         result = torch.heaviside(x, y)
         expect = torch.tensor([0, 1, 0, 1, 0, 1], device=device)
         self.assertEqual(result, expect)

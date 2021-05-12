@@ -66,11 +66,13 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  if (maybe_get_output().defined()) {
-    native::heaviside_check(self, other, maybe_get_output());
-  } else {
-    native::heaviside_check(self, other);
-  }
+  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+              (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == other.dtype() &&
+              (maybe_get_output().defined() ? maybe_get_output().dtype() == self.dtype() : true),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+
   build_binary_op(maybe_get_output(), self, other);
 }
 

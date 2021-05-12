@@ -4609,14 +4609,17 @@
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
+  device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: heaviside_out
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: heaviside.out
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: heaviside.out
 
