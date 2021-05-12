@@ -1484,6 +1484,27 @@
 - func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+- func: gradient.scalarint(Tensor self, *, Scalar? spacing=None, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalararray(Tensor self, *, Scalar spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.array(Tensor self, *, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalarrayint(Tensor self, *, Scalar[] spacing, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalarrayarray(Tensor self, *, Scalar[] spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.tensorarrayint(Tensor self, *, Tensor[] spacing, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.tensorarray(Tensor self, *, Tensor[] spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -6720,12 +6741,13 @@
     CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
+  structured_delegate: maximum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: maximum
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: maximum_out
@@ -6740,12 +6762,13 @@
   device_check: NoCheck   # TensorIterator
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
+  structured_delegate: minimum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: minimum
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: minimum_out
@@ -6851,15 +6874,15 @@
   variants: method, function
 
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  structured: True
   dispatch:
     CPU: topk_out_cpu
     CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
+  structured_delegate: topk.values
   dispatch:
-    CPU: topk
-    CUDA: topk_cuda
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
@@ -9841,3 +9864,7 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_backward_kernel
+
+- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
+  python_module: nn
+  variants: function
