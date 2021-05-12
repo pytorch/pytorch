@@ -1781,12 +1781,12 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
             replace_with = torch.tensor(sys.float_info.epsilon, device=device, dtype=dtype)
-        result[result == 0] = replace_with 
+        result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():
         result.requires_grad = requires_grad
- 
+
     return result
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
