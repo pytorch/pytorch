@@ -36,11 +36,12 @@ jobs:
         id: calculate-tag
         run: |
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+          echo "::set-output name=docker_tag::${DOCKER_TAG}"
           echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
       - name: Check if image should be built
         id: check
         env:
-          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_image }}
+          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           set -x
