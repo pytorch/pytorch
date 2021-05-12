@@ -69,11 +69,11 @@ class TestBundledImages(TestCase):
         self.assertEqual(raw_data.shape, decoded_data.shape)
         self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol=1e-01))
 
-        # Check if fb::jpeg_decode_to_NCHW works as expected
+        # Check if fb::image_decode_to_NCHW works as expected
         with open("caffe2/test/test_img/p1.jpg", "rb") as fp:
             weight = torch.full((3,), 1.0 / 255.0).diag()
             bias = torch.zeros(3)
             byte_tensor = torch.tensor(list(fp.read())).byte()
-            im2_tensor = torch.ops.fb.jpeg_decode_to_NCHW(byte_tensor, weight, bias)
+            im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
             self.assertTrue(torch.allclose(raw_data, im2_tensor, atol=0.1, rtol=1e-01))

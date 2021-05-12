@@ -173,7 +173,7 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
-        class GraphModuleImpl(cls):  # type: ignore
+        class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
 
@@ -462,6 +462,9 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        if self._graph._pytree_info is not None:
+            self._in_spec = self._graph._pytree_info.in_spec
+            self._out_spec = self._graph._pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 
@@ -485,7 +488,7 @@ class {module_name}(torch.nn.Module):
             err_line_len = len(frame_summary.line)
             all_src_lines = _eval_cache[frame_summary.filename]
 
-            # constiuent substrings of the error message
+            # constituent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
                           f"line {err_lineno} of the traced Module's "
@@ -503,7 +506,7 @@ class {module_name}(torch.nn.Module):
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
-                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore[arg-type]
                 if "eval_with_key" in topmost_framesummary.filename:
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)

@@ -252,7 +252,7 @@ class TestBundledInputs(TestCase):
             m = torch.jit.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
-                inputs="foo"  # type: ignore
+                inputs="foo"  # type: ignore[arg-type]
             )
 
         # List of non tuples. Most common error using the api.
@@ -260,7 +260,23 @@ class TestBundledInputs(TestCase):
             m = torch.jit.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
-                inputs=[torch.ones(1, 2), ]  # type: ignore
+                inputs=[torch.ones(1, 2), ]  # type: ignore[list-item]
+            )
+
+    def test_double_augment(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            m,
+            inputs=[(torch.ones(1),)]
+        )
+        with self.assertRaisesRegex(Exception, "Models can only be augmented with bundled inputs once."):
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs=[(torch.ones(1),)]
             )
 
 if __name__ == '__main__':

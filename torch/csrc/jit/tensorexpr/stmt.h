@@ -294,6 +294,10 @@ class TORCH_API Store : public StmtNode<Store> {
 
   Store(const Buf* buf, std::vector<const Expr*> indices, const Expr* value);
 
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
+
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
@@ -682,6 +686,21 @@ class TORCH_API For : public StmtNode<For> {
     body_ = b;
     set_parent(body_, this);
     return body_;
+  }
+
+  const Expr* setStart(const Expr* start) {
+    start_ = start;
+    return start_;
+  }
+
+  const Expr* setStop(const Expr* stop) {
+    stop_ = stop;
+    return stop_;
+  }
+
+  const Var* setVar(const Var* var) {
+    var_ = var;
+    return var_;
   }
 
  private:

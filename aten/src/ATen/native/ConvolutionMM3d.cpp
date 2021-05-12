@@ -370,7 +370,7 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoNonVariableTypeMode non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor grad_input_t = grad_input[t];
           Tensor grad_output_t = grad_output_contiguous[t];
@@ -527,7 +527,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
     Tensor& finput,
     Tensor& fgrad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
@@ -563,6 +564,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
   const Tensor input = self.contiguous();
   const Tensor weight_2d = view_weight_2d(weight);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_depth = 2;
@@ -596,7 +598,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
 
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoNonVariableTypeMode non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor input_t = input[t];
           Tensor output_t = output[t];
@@ -638,7 +640,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   auto output = at::empty({0}, self.options());
   auto finput = at::empty({0}, self.options());
@@ -676,6 +679,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<Tensor&>(
             fgrad_input), // cast away auto-generated const of buffer
         kernel_size,
@@ -761,7 +765,8 @@ Tensor& slow_conv3d_out(const Tensor& self,
     IntArrayRef padding,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor finput = at::empty({0}, self.options());
   Tensor fgrad_input = at::empty({0}, self.options());
@@ -784,7 +789,8 @@ Tensor slow_conv3d(
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return std::get<0>(at::slow_conv3d_forward(
       self, weight, kernel_size, bias, stride, padding));

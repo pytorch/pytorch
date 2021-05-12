@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -91,6 +92,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
   std::vector<int64_t> out_size;
+  // NOLINTNEXTLINE(performance-inefficient-vector-operation)
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
   for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
@@ -133,6 +135,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (int i = dim-1; i>=0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
@@ -143,14 +146,27 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
+namespace {
+
+bool einsum_check_label(char label) {
+  return std::isalpha(label);
+}
+
+int einsum_label_to_index(char label) {
+  constexpr int NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return std::islower(label) ? label - 'a' : NUM_OF_LETTERS + (label - 'A');
+}
+
+} // namespace
+
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
 Tensor einsum(std::string equation, TensorList operands) {
-  TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
-  checkDeviceType("einsum()", operands, operands[0].device().type());
+  TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
+  checkDeviceType("einsum():", operands, operands[0].device().type());
 
   // Code used to identify ELLIPSIS ("...")
   constexpr int ELLIPSIS = '.';
@@ -176,13 +192,13 @@ Tensor einsum(std::string equation, TensorList operands) {
         TORCH_CHECK(
             // Only one ellipsis per operand can be given
             !found_ell,
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " for which an ellipsis was already found");
         TORCH_CHECK(
             // Ensure it's a valid ellipsis
             i + 2 < lhs.length() && lhs[++i] == '.' && lhs[++i] == '.',
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " that is not part of any ellipsis");
         op_labels[curr_op].push_back(ELLIPSIS);
@@ -194,29 +210,28 @@ Tensor einsum(std::string equation, TensorList operands) {
         ++curr_op;
         TORCH_CHECK(
             curr_op < num_ops,
-            "einsum() fewer operands were provided than specified in the equation");
+            "einsum(): fewer operands were provided than specified in the equation");
         found_ell = false;
         break;
 
       default:
         // Parse label
         TORCH_CHECK(
-            lhs[i] >= 'a' && lhs[i] <= 'z',
-            "einsum() operand subscript must be in range [a, z] but found ",
+            einsum_check_label(lhs[i]),
+            "einsum(): operand subscript must be in [a-zA-Z] but found ",
             lhs[i],
             " for operand ",
             curr_op);
-        // Convert label to index in [0, 25] and store
-        op_labels[curr_op].push_back(lhs[i] - 'a');
+        op_labels[curr_op].push_back(einsum_label_to_index(lhs[i]));
     }
   }
 
   TORCH_CHECK(
       curr_op == num_ops - 1,
-      "einsum() more operands were provided than specified in the equation");
+      "einsum(): more operands were provided than specified in the equation");
 
-  // Labels must be within [a, z].
-  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
+  // Labels must be within [a-zA-Z].
+  constexpr int TOTAL_LABELS = 52;
   std::vector<int> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
@@ -245,7 +260,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
     TORCH_CHECK(
         has_ellipsis ? nlabels <= ndims : nlabels == ndims,
-        "einsum() the number of subscripts in the equation (",
+        "einsum(): the number of subscripts in the equation (",
         nlabels,
         has_ellipsis ? ") is more than the number of dimensions ("
                      : ") does not match the number of dimensions (",
@@ -289,11 +304,11 @@ Tensor einsum(std::string equation, TensorList operands) {
           TORCH_CHECK(
               // There can only be one ellipsis in the output
               !found_ell,
-              "einsum() found \'.\' for output but an ellipsis (...) was already found");
+              "einsum(): found \'.\' for output but an ellipsis (...) was already found");
           TORCH_CHECK(
               // Ensure ellipsis is correct
               i + 2 < rhs.length() && rhs[++i] == '.' && rhs[++i] == '.',
-              "einsum() found \'.\' for output that is not part of any ellipsis (...)");
+              "einsum(): found \'.\' for output that is not part of any ellipsis (...)");
           ell_index = perm_index;
           perm_index += ell_num_dim;
           found_ell = true;
@@ -301,17 +316,16 @@ Tensor einsum(std::string equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
-              // Labels must be in [a, z]
-              rhs[i] >= 'a' && rhs[i] <= 'z',
-              "einsum() subscripts must be in range [a, z] but found ",
+              einsum_check_label(rhs[i]),
+              "einsum(): subscripts must be in [a-zA-Z] but found ",
               rhs[i],
               " for the output");
-          const auto label = rhs[i] - 'a';
+          const auto label = einsum_label_to_index(rhs[i]);
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
               label_count[label] > 0 && label_perm_index[label] == -1,
-              "einsum() output subscript ",
+              "einsum(): output subscript ",
               rhs[i],
               label_perm_index[label] > -1
                   ? " appears more than once in the output"
@@ -367,7 +381,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         const auto dim = label_dim[label];
         TORCH_CHECK(
             operand.size(j) == operand.size(dim),
-            "einsum() subscript ",
+            "einsum(): subscript ",
             char(label + 'a'),
             " is repeated for operand ",
             i,
@@ -404,7 +418,7 @@ Tensor einsum(std::string equation, TensorList operands) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
-        msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
+        msg << "einsum(): operands do not broadcast with remapped shapes [original->remapped]:";
         for (const auto j: c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
@@ -552,7 +566,8 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
@@ -641,9 +656,27 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
+  Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
+  auto result_dtype = result_tmp.scalar_type();
+  auto output_tensor_dtype = result.scalar_type();
+  auto output_device = result.device();
+  auto input1_device = input1.device();
+  auto input2_device = input2.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "tensordot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", input tensor a on ", input1_device, ", and input tensor b on ", input2_device);
+  // check if the computed result has the same dtype as the out tensor
+  // (because tensordot does not support type promotion)
+  TORCH_CHECK(
+    result_dtype == output_tensor_dtype, "tensordot",
+    ": Expected the output tensor to have dtype ", result_dtype,
+    ", but got an output tensor with dtype ", output_tensor_dtype);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
-
 
 }}  // namespace at::native

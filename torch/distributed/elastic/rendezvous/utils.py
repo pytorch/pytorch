@@ -5,9 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import ipaddress
+import random
 import re
 import socket
-from typing import Dict, Optional, Tuple
+import time
+import weakref
+from datetime import timedelta
+from threading import Event, Thread
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
@@ -55,7 +60,7 @@ def _try_parse_port(port_str: str) -> Optional[int]:
     return None
 
 
-def _parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
+def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
     """Extracts the hostname and the port number from a rendezvous endpoint.
 
     Args:
@@ -138,3 +143,119 @@ def _matches_machine_hostname(host: str) -> bool:
             return True
 
     return False
+
+
+def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
+    """Suspends the current thread for ``seconds``.
+
+    Args:
+        seconds:
+            Either the delay, in seconds, or a tuple of a lower and an upper
+            bound within which a random delay will be picked.
+    """
+    if isinstance(seconds, tuple):
+        seconds = random.uniform(*seconds)
+    # Ignore delay requests that are less than 10 milliseconds.
+    if seconds >= 0.01:
+        time.sleep(seconds)
+
+
+class _PeriodicTimer:
+    """Represents a timer that periodically runs a specified function.
+
+    Args:
+        interval:
+            The interval, in seconds, between each run.
+        function:
+            The function to run.
+    """
+
+    # The state of the timer is hold in a separate context object to avoid a
+    # reference cycle between the timer and the background thread.
+    class _Context:
+        interval: float
+        function: Callable[..., None]
+        args: Tuple[Any, ...]
+        kwargs: Dict[str, Any]
+        stop_event: Event
+
+    _name: Optional[str]
+    _thread: Optional[Thread]
+    _finalizer: Optional[weakref.finalize]
+
+    # The context that is shared between the timer and the background thread.
+    _ctx: _Context
+
+    def __init__(
+        self,
+        interval: timedelta,
+        function: Callable[..., None],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self._name = None
+
+        self._ctx = self._Context()
+        self._ctx.interval = interval.total_seconds()
+        self._ctx.function = function  # type: ignore[assignment]
+        self._ctx.args = args or ()
+        self._ctx.kwargs = kwargs or {}
+        self._ctx.stop_event = Event()
+
+        self._thread = None
+        self._finalizer = None
+
+    @property
+    def name(self) -> Optional[str]:
+        """Gets the name of the timer."""
+        return self._name
+
+    def set_name(self, name: str) -> None:
+        """Sets the name of the timer.
+
+        The specified name will be assigned to the background thread and serves
+        for debugging and troubleshooting purposes.
+        """
+        if self._thread:
+            raise RuntimeError("The timer has already started.")
+
+        self._name = name
+
+    def start(self) -> None:
+        """Start the timer."""
+        if self._thread:
+            raise RuntimeError("The timer has already started.")
+
+        self._thread = Thread(
+            target=self._run, name=self._name or "PeriodicTimer", args=(self._ctx,), daemon=True
+        )
+
+        # We avoid using a regular finalizer (a.k.a. __del__) for stopping the
+        # timer as joining a daemon thread during the interpreter shutdown can
+        # cause deadlocks. The weakref.finalize is a superior alternative that
+        # provides a consistent behavior regardless of the GC implementation.
+        self._finalizer = weakref.finalize(
+            self, self._stop_thread, self._thread, self._ctx.stop_event
+        )
+
+        # We do not attempt to stop our background thread during the interpreter
+        # shutdown. At that point we do not even know whether it still exists.
+        self._finalizer.atexit = False
+
+        self._thread.start()
+
+    def cancel(self) -> None:
+        """Stop the timer at the next opportunity."""
+        if self._finalizer:
+            self._finalizer()
+
+    @staticmethod
+    def _run(ctx) -> None:
+        while not ctx.stop_event.wait(ctx.interval):
+            ctx.function(*ctx.args, **ctx.kwargs)
+
+    @staticmethod
+    def _stop_thread(thread, stop_event):
+        stop_event.set()
+
+        thread.join()

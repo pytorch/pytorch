@@ -24,6 +24,7 @@ asyncBarrierOpDevInfer(const OperatorDef& def) {
 }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AsyncNetBarrier)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -43,7 +44,9 @@ data-parallel part starts.
         "cross_device",
         "Specifies either inputs should be across different devices in dev inference options");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(AsyncNetBarrier);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AsyncNetBarrier, AsyncNetBarrierOp<CPUContext>);
 
 

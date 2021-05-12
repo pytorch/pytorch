@@ -86,7 +86,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
-  } else if (t == DispatchKey::XPU) {
+  } else if (t == DispatchKey::XPU || t == DispatchKey::AutogradXPU) {
     return Backend::XPU;
   } else if (t == DispatchKey::SparseXPU) {
     return Backend::SparseXPU;
@@ -253,7 +253,7 @@ static inline bool isSparse(Backend b) {
 }
 
 static inline bool isSparseCsr(Backend b) {
-  switch(b) {
+  switch (b) {
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
       return true;

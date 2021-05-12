@@ -340,6 +340,7 @@ class ConvPoolOpBase : public Operator<Context> {
       kernel_ = dims;
     } else if (legacy_pad_ != LegacyPadding::NOTSET) {
       int output_unused;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int dim = 0; dim < dims.size(); ++dim) {
         ComputeSizeAndPad(
             dims[dim],
@@ -373,6 +374,7 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;

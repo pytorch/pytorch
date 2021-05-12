@@ -19,6 +19,10 @@ namespace jit {
 
 namespace {
 
+std::string getInputDebugName(const Node& n, const int idx) {
+  return n.inputs().at(idx)->debugName();
+}
+
 std::vector<Node*> findAllNodes(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
@@ -52,8 +56,10 @@ void assert_ignored_methods_not_called(
   std::unordered_set<std::string> encountered_ignored_methods;
 
   for (Node* n : all_nodes) {
-    if (ignored_methods.count(n->s(attr::name)) > 0) {
-      encountered_ignored_methods.insert(n->s(attr::name));
+    if (ignored_methods.count(n->s(attr::name)) > 0 &&
+        getInputDebugName(*n, 0) == "self") {
+      encountered_ignored_methods.insert(
+          getInputDebugName(*n, 0) + "." + n->s(attr::name));
     }
   }
   if (encountered_ignored_methods.empty()) {
@@ -94,8 +100,10 @@ void assert_ignored_attributes_not_referenced(
   std::unordered_set<std::string> encountered_ignored_attributes;
 
   for (Node* n : all_nodes) {
-    if (ignored_attributes.count(n->s(attr::name)) > 0) {
-      encountered_ignored_attributes.insert(n->s(attr::name));
+    if (ignored_attributes.count(n->s(attr::name)) > 0 &&
+        getInputDebugName(*n, 0) == "self") {
+      encountered_ignored_attributes.insert(
+          getInputDebugName(*n, 0) + "." + n->s(attr::name));
     }
   }
   if (encountered_ignored_attributes.empty()) {
@@ -167,6 +175,7 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
@@ -321,6 +330,15 @@ Module Module::copy() const {
 
 Module Module::deepcopy() const {
   return Module(_ivalue()->deepcopy());
+}
+
+Module Module::clone(bool inplace) const {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  IValue::HashAliasedIValueMap memo;
+  const std::unordered_set<std::string> ignored_methods;
+  const std::unordered_set<std::string> ignored_attributes;
+  return clone_impl(
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
 
 Module Module::clone(

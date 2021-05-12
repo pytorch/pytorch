@@ -38,6 +38,7 @@
 namespace torch { namespace autograd {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -63,23 +64,28 @@ static void track_bad_autograd_forks() {
 //    backward call we use the caller thread to drive engine execution.
 // This is used when handling reentrant backwards calls;
 // See Note [Reentrant backwards]
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int worker_device = NO_DEVICE;
 
 // This variable is true if ALL invocations in the stack of re-entrant engine
 // invocations are imperative backwards. This special variable is needed for the
 // gradient checkpointing feature only.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int current_depth = 0;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total nested
 //   reentrant backwards depths over all device threads.
 // For CPU devices, it is the total depth associated with the original backward call.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int total_depth = 0;
 
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 
 // Every autograd worker thread is associated with a ready queue, which specifies
@@ -96,6 +102,7 @@ static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 // because we reached the maximum depth, the new thread will just reuse the same
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 
 // Note [Reentrant backwards]
@@ -223,9 +230,17 @@ bool ReadyQueue::empty() const {
 
 Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
+Engine::~Engine() {
+  stop();
+}
+
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
-Engine::~Engine() {
+void Engine::stop() {
+  if (stopped_) {
+    return;
+  }
+  stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
@@ -494,6 +509,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -548,6 +564,7 @@ void GraphTask::set_exception(
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->setError(std::move(eptr));
   }
 }
@@ -671,29 +688,26 @@ static variable_list call_function(
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  {
-    at::ThreadLocalStateGuard guard(graph_task->thread_locals_);
-    if (has_post_hooks) {
-      // In functions/accumulate_grad.cpp, there is some logic to check the
-      // conditions under which the incoming gradient can be stolen directly
-      // (which elides a deep copy) instead of cloned. One of these conditions
-      // is that the incoming gradient's refcount must be 1 (nothing else is
-      // referencing the same data).  Stashing inputs_copy here bumps the
-      // refcount, so if post hooks are employed, it's actually still ok for
-      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
-      //
-      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
-      // accumulate_grad.cpp accounts for this, but also creates a silent
-      // dependency between engine.cpp (ie, this particular engine
-      // implementation) and accumulate_grad.cpp.
-      //
-      // If you change the logic here, make sure it's compatible with
-      // accumulate_grad.cpp.
-      auto inputs_copy = inputs;
-      outputs = fn(std::move(inputs_copy));
-    } else {
-      outputs = fn(std::move(inputs));
-    }
+  if (has_post_hooks) {
+    // In functions/accumulate_grad.cpp, there is some logic to check the
+    // conditions under which the incoming gradient can be stolen directly
+    // (which elides a deep copy) instead of cloned. One of these conditions
+    // is that the incoming gradient's refcount must be 1 (nothing else is
+    // referencing the same data).  Stashing inputs_copy here bumps the
+    // refcount, so if post hooks are employed, it's actually still ok for
+    // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+    // accumulate_grad.cpp accounts for this, but also creates a silent
+    // dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with
+    // accumulate_grad.cpp.
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
+  } else {
+    outputs = fn(std::move(inputs));
   }
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
@@ -734,6 +748,11 @@ void Engine::evaluate_function(
       return;
     }
   }
+
+  // Set the ThreadLocalState before calling the function.
+  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+  // always saves ThreadLocalState without grad_mode.
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
 
   // Switches to a function's CUDA stream (if applicable) before calling it
   const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -1026,6 +1045,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
@@ -1111,6 +1131,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
+    // NOLINTNEXTLINE(modernize-make-shared)
     queue.reset(new ReadyQueue());
   }
 

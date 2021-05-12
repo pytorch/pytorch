@@ -238,12 +238,17 @@ struct TORCH_API Module : public Object {
   // function creates a new `ClassType` and returns a new instance that has the
   // same data as the current instance but with the new type, shared ClassType
   // will be preserved as well
+  Module clone(bool inplace = false) const;
+
+  // Clones both the underlying `ClassType` and the module instance(data), this
+  // function creates a new `ClassType` and returns a new instance that has the
+  // same data as the current instance but with the new type, shared ClassType
+  // will be preserved as well. Also allows the caller to specify a set of
+  // method and attribute names to not clone.
   Module clone(
-      bool inplace = false,
-      const std::unordered_set<std::string>& ignored_methods =
-          std::unordered_set<std::string>(),
-      const std::unordered_set<std::string>& ignored_attributes =
-          std::unordered_set<std::string>()) const;
+      bool inplace,
+      const std::unordered_set<std::string>& ignored_method,
+      const std::unordered_set<std::string>& ignored_attributes) const;
 
   void clone_method(const Module& orig, const std::string& name);
 
@@ -449,6 +454,7 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
+      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
         ++*size_;
       }

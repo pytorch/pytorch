@@ -328,6 +328,9 @@ class Tensor(torch._C._TensorBase):
 
     The result will never require gradient.
 
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
+
     .. note::
 
       Returned Tensor shares the same storage with the original one.
@@ -346,6 +349,9 @@ class Tensor(torch._C._TensorBase):
     detach_ = _C._add_docstr(_C._TensorBase.detach_, r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
+
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
     """)
 
     def retain_grad(self):
@@ -572,6 +578,7 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 

@@ -98,7 +98,7 @@ process:
    can participate in *next* rendezvous.
 
 2. Setting the rendezvous *closed* to signal all workers not
-   to participate in next rendezvous.
+   to participate in next rendezvous
 """
 
 from .api import *  # noqa: F403

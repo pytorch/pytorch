@@ -4,8 +4,18 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 #include <utility>
+#include <c10/core/TensorOptions.h>
 
 namespace torch { namespace utils {
+
+/// Generate an ID for a combination of tensor backend + scalar type to be used
+/// when ordering tensors ('like' tensors are grouped by pulling out their
+/// backend + scalar type, so this function combines that into a single number)
+inline size_t type_id(const at::Tensor& tensor) {
+  return static_cast<size_t>(tensor.options().backend()) *
+      static_cast<size_t>(at::ScalarType::NumOptions) +
+      static_cast<size_t>(tensor.scalar_type());
+}
 
 inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
   static auto flatten = [](const at::Tensor &t) { return t.contiguous().view({-1}); };
@@ -39,9 +49,14 @@ struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
 
-  at::DeprecatedTypeProperties& type() {
+  size_t type_id() {
     AT_ASSERT(!tensors.empty());
-    return tensors[0].type();
+    return ::torch::utils::type_id(tensors[0]);
+  }
+
+  const at::TensorOptions options() {
+    AT_ASSERT(!tensors.empty());
+    return tensors[0].options();
   }
 };
 
