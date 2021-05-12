@@ -18,7 +18,7 @@ DEFINE_DISPATCH(cdist_stub);
 DEFINE_DISPATCH(cdist_backward_stub);
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
-  return at::norm(x1 - x2 + eps, p, 1, keepdim);
+  return at::linalg_vector_norm(x1 - x2 + eps, p, 1, keepdim);
 }
 
 // This is to guarantee that the contiguous memory is passed to the backward pass

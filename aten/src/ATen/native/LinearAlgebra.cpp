@@ -2455,12 +2455,9 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string>
       TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
   }
-  std::array<int64_t, 2> dim_arr = {-2, -1};
-  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
-
   return c10::visit([&](auto&& ord) {
-    Tensor norm_self = at::linalg_norm(self, ord, dim);
-    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+    Tensor norm_self = at::linalg_matrix_norm(self, ord);
+    Tensor norm_inverse = at::linalg_matrix_norm(self_inverse, ord);
     Tensor result = norm_self * norm_inverse;
     return result;
   }, ord_variant);

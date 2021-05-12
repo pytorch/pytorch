@@ -427,7 +427,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::nullopt;
     }
     int p = node->kind() == onnx::ReduceL1 ? 1 : 2;
-    updated_val = at::norm(
+    updated_val = at::linalg_vector_norm(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {

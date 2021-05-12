@@ -1017,7 +1017,7 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
 namespace {
 
 void norm_deprecation_warning() {
-  TORCH_WARN_ONCE(
+  TORCH_CHECK(false,
       "torch.norm is deprecated and may be removed in a future PyTorch release.\n",
       "Use torch.linalg.norm, instead, or torch.linalg.vector_norm when computing ",
       "vector norms and torch.linalg.matrix_norm when computing matrix norms.\n",
@@ -1788,7 +1788,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor&
 }
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
-  return at::norm(self - other, p);
+  return at::linalg_vector_norm(self - other, p);
 }
 
 Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
