@@ -48,7 +48,7 @@ jobs:
           eval "$(aws ecr get-login --no-include-email --region us-east-1)"
           set -x
           # Check if image already exists, if it does then skip building it
-          if docker manifest inspect "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
+          if docker manifest inspect "${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
             exit 0
           fi
           # Covers the case where a previous tag doesn't exist for the tree
