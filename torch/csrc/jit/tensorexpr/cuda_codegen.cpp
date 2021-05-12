@@ -1106,18 +1106,26 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
 
   int ptr_count = buffer_args.size();
+  // If the kernel has a rand call in it, add two extra arguments for random
+  // seed and offset.
+  if (has_random_) {
+    ptr_count += 2;
+  }
   std::vector<void*> ptr_to_args(ptr_count);
+
+  // In CUDA we need to pass pointers to pointers for buffers, thus we need to
+  // go over raw_args and add an extra indirection for such non-scalar
+  // arguments.
+  // Why? See some details here:
+  // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
   for (size_t i = 0; i < buffer_args.size(); i++) {
     ptr_to_args[i] =
         buffer_args[i].isVar() ? raw_args[i] : const_cast<void**>(&raw_args[i]);
   }
-  uint64_t rand_seed = uint64_t(-1);
-  uint64_t rand_offset = uint64_t(-1);
-  if (has_random_) {
-    ptr_count += 2;
-  }
 
   if (has_random_) {
+    uint64_t rand_seed = uint64_t(-1);
+    uint64_t rand_offset = uint64_t(-1);
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     // TODO: total hack. Switch to numel when it is available.
     int64_t total_elements_per_thread = (1LL << 28);
@@ -1132,6 +1140,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
     ptr_to_args[buffer_args.size()] = &rand_seed;
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
+
   const auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
