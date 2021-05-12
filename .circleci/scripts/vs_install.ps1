@@ -1,8 +1,8 @@
 # https://developercommunity.visualstudio.com/t/install-specific-version-of-vs-component/1142479
 # https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
 
-# 16.8.5 BuildTools
-$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/20130c62-1bc8-43d6-b4f0-c20bb7c79113/145a319d79a83376915d8f855605e152ef5f6fa2b2f1d2dca411fb03722eea72/vs_BuildTools.exe"
+# 16.9.5 buildTools
+$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/9665567e-f580-4acd-85f2-bc94a1db745f/3580c7d8c43782aebab3af6db6e46e0f89752a96336f9518d3a10f407f4048af/vs_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
