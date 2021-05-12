@@ -81,7 +81,6 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
     };
   }
   // For small matrices OpenMP overhead is too large
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n < 256) {
     loop(0, n);
   } else {
