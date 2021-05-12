@@ -37,6 +37,7 @@ void deadCodeElim(NNModule* nn) {
   } while (changed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPT_PASS_FROM_FUNC(DeadCodeElim, deadCodeElim);
 
 } // namespace opt
