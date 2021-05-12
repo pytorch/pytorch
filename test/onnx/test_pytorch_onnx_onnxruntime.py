@@ -6813,16 +6813,17 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_lower_tuple_2(self):
         class TupleModule(torch.nn.Module):
-            def forward(self, input):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
-                a = (input, input)
+            def forward(self, input1, input2):
+                # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                a = (input1, input2)
                 for x in range(5):
                     c, d = a
                     a = (c, d)
                 return a
 
-        input = torch.randn(2)
-        self.run_test(TupleModule(), (input,))
+        input1 = torch.randn(2)
+        input2 = torch.randn(2)
+        self.run_test(TupleModule(), (input1, input2))
 
     def test_lower_tuple_3(self):
         class TupleModule(torch.nn.Module):

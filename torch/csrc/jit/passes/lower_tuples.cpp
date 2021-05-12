@@ -30,8 +30,9 @@ std::unordered_set<Symbol> supported_ops = {
 
 // Flatten block inputs and insert a tuple construct in the block
 static void flattenTupleInLoopParams(Node* n, size_t index) {
-  auto input = n->inputs()[index];
+  auto input = n->inputs().at(index);
   TupleTypePtr tt = input->type()->cast<TupleType>();
+  TORCH_INTERNAL_ASSERT(tt);
 
   Block* block = n->blocks().at(0);
   Node* block_node = n;
@@ -54,11 +55,12 @@ static void flattenTupleInLoopParams(Node* n, size_t index) {
 // Flatten tuple outputs of the block node and append a TupleConstruct
 // node after the block node if there is an outer block.
 static void flattenTupleInBlockReturn(Node* n, size_t index) {
-  auto input = n->inputs()[index];
+  auto input = n->inputs().at(index);
   Block* block = n->owningBlock();
   Node* block_node = block->owningNode();
   Node* new_construct_node = nullptr;
   TupleTypePtr tt = input->type()->cast<TupleType>();
+  TORCH_INTERNAL_ASSERT(tt);
 
   // 1- Add flattened tuple to block outputs
   for (size_t j = 0; j < tt->elements().size(); ++j) {
@@ -183,16 +185,12 @@ static void flattenInputs(Node* n, Node* insert_point) {
           "tuple use not matched to tuple construct. Instead found: ",
           n->kind().toQualString());
       if (supported_ops.count(n->kind()) > 0) {
-        if ((n->kind() == prim::Loop)) {
-          if (input->node()->kind() == prim::TupleConstruct) {
-            // This function supports all node types with blocks that take tuple
-            // inputs.
-            flattenTupleInLoopParams(n, i);
-          }
-        } else if ((n->kind() == prim::Return)) {
-          if (input->node()->kind() == prim::TupleConstruct) {
-            flattenTupleInBlockReturn(n, i);
-          }
+        if (n->kind() == prim::Loop) {
+          // This function supports all node types with blocks that take tuple
+          // inputs.
+          flattenTupleInLoopParams(n, i);
+        } else if (n->kind() == prim::Return) {
+          flattenTupleInBlockReturn(n, i);
         } else {
           for (size_t j = 0; j < tt->elements().size(); ++j) {
             n->insertInput(i + 1 + j, input->node()->inputs().at(j));
