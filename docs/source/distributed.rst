@@ -361,6 +361,8 @@ is guaranteed to support two methods:
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
   of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
   output can be utilized on the default stream without further synchronization.
+* ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for GLOO, MPI (except for
+  send/recv operations).
 
 **Example**
 

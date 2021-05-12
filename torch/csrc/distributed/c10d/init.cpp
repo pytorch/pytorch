@@ -1441,7 +1441,7 @@ Example::
                 >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend.
+                ``get_future`` API supports NCCL, GLOO and MPI backends.
                 The ``torch._C.Future`` object returned by this API can be used in
                 ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
                 features on top of ``torch.futures.Future``.
@@ -1457,7 +1457,9 @@ Example::
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
+                For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                tensors are ready.
+                For GPU work, ``fut.done()`` returns only whether the operation has been enqueued.
            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
