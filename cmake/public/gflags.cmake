@@ -81,4 +81,3 @@ if(NOT TARGET gflags)
       "Caffe2 or a Caffe2 dependent library, the next warning / error will "
       "give you more info.")
 endif()
-

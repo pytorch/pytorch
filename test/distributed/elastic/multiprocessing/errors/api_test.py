@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import filecmp
 import json
 import os
 import shutil
@@ -8,7 +7,11 @@ import tempfile
 import unittest
 from unittest import mock
 
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, ProcessFailure, record
+from torch.distributed.elastic.multiprocessing.errors import (
+    ChildFailedError,
+    ProcessFailure,
+    record,
+)
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
 from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
@@ -51,6 +54,15 @@ class ApiTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
+    def test_failure_incorrect_reply_file(self):
+        content = {"unknown_key": "unknown_value"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(content, fp)
+        with self.assertRaises(Exception):
+            ProcessFailure(
+                local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+            )
+
     def failure_with_error_file(self, exception):
         _write_error(exception, self.test_error_file)
         return ProcessFailure(
@@ -61,6 +73,16 @@ class ApiTest(unittest.TestCase):
         return ProcessFailure(
             local_rank=0, pid=997, exitcode=exitcode, error_file="ignored.json"
         )
+
+    def test_process_failure_new_format(self):
+        error_data = {"message": "test error message", "timestamp": 10}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
 
     def test_process_failure(self):
         pf = self.failure_with_error_file(exception=SentinelError("foobar"))
@@ -162,11 +184,14 @@ class ApiTest(unittest.TestCase):
         ):
             with self.assertRaises(ChildFailedError) as cm:
                 raise_child_failure_error_fn("trainer", trainer_error_file)
-
+            pf = cm.exception.get_first_failure()[1]
+            # compare worker error file with reply file and overridden error code
+            expect = json.load(open(pf.error_file, "r"))
+            expect["message"]["errorCode"] = pf.exitcode
+            actual = json.load(open(self.test_error_file, "r"))
             self.assertTrue(
-                filecmp.cmp(
-                    self.test_error_file, cm.exception.get_first_failure()[1].error_file
-                )
+                json.dumps(expect, sort_keys=True),
+                json.dumps(actual, sort_keys=True),
             )
 
     def test_record_child_failure_no_child_error_file(self):

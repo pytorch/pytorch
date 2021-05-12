@@ -41,6 +41,7 @@ auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
 auto UndefinedGradBackward::apply(variable_list&& output_grads) -> variable_list {
   tensor_list input_grads;
   output_grads.reserve(input_grads.size());
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   for (auto& grad : output_grads) {
     input_grads.emplace_back(at::Tensor());
   }

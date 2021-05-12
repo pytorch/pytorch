@@ -7,10 +7,13 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
-from torch._C import ScriptObject  # type: ignore
+import torch._C._fx  # type: ignore[import]
+from torch._C import ScriptObject  # type: ignore[attr-defined]
+import torch.utils._pytree as pytree
 
-from .node import Argument, map_aggregate
-from .graph import Graph
+import sys
+from .node import Argument, map_aggregate, base_types
+from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy
 
@@ -41,15 +44,67 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_names, co.co_varnames, co.co_filename,
             co.co_name, co.co_firstlineno, co.co_lnotab,
             co.co_freevars, co.co_cellvars)
-    new_code = CodeType(*co_args)  # type: ignore
+    new_code = CodeType(*co_args)  # type: ignore[arg-type]
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
     # we need to insert placeholder nodes for *args and **kwargs
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
-class Tracer(TracerBase):
+class _CPatchManager(object):
     """
+    Calls patch_function in order to intercept functions at the C-extension level
+    """
+    def __init__(self, tracer):
+        self.tracer = tracer
+        patched_fns = [torch.randn, torch.rand, torch.randint]
+
+        def patched_impl(to_patch, args, kwargs):
+            return tracer.create_proxy('call_function', to_patch, args, kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            nonlocal c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    if arg in patched_fns:
+                        torch._C._fx.patch_function(arg, patched_in)
+
+        self.func = trace_func
+
+    def __enter__(self):
+        if self.tracer.enable_cpatching:
+            sys.setprofile(self.func)
+
+    def __exit__(self, type, value, tb):
+        sys.setprofile(None)
+
+class PHBase(object):
+    """
+    Object representing an input placeholder to `concrete_args`
+    """
+    def __repr__(self):
+        return 'PH'
+
+PH = PHBase()
+
+class Tracer(TracerBase):
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `math`s path from the
+    # build environment (e.g. `<module 'math' from '/leaked/path').
+
+    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
+
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
     to ``Tracer().trace(m)``.
@@ -58,7 +113,11 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, )) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+        # This method's signature is overridden by the first line of this class'
+        # docstring. If this method's signature is modified, the signature that
+        # overrides it also should be modified accordingly.
+
         """
         Construct a Tracer object.
 
@@ -67,6 +126,16 @@ class Tracer(TracerBase):
             autowrap_modules (List[ModuleType]): defaults to `[math]`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
+
+            enable_cpatching (bool): defaults to `False`,
+                Allows you to enable/disable monkeypatching of torch functions at the
+                C-level (which captures functins like randn).
+
+                C-level monkeypatching works by directly modifying the PyCFunctionObject*
+                so that calling it returns a different function.
+
+                Turning this on is likely to slow down tracing by 1.5-3x.
+
         """
 
         super().__init__()
@@ -80,6 +149,7 @@ class Tracer(TracerBase):
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+        self.enable_cpatching = enable_cpatching
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
@@ -123,7 +193,10 @@ class Tracer(TracerBase):
             for n_, p_ in self.root.named_buffers():
                 if a is p_:
                     return self.create_node('get_attr', n_, (), {})
-
+        elif isinstance(a, torch.nn.Module):
+            for n_, p_ in self.root.named_modules():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, '_fields'):
@@ -194,8 +267,7 @@ class Tracer(TracerBase):
             assert isinstance(path, str)
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
-        # paths. (This happens e.g. in using NormalizeArgs. See
-        #  `test/test_fx_experimental:test_normalize_args`)
+        # paths.
         else:
             for n, p in self.root.named_modules():
                 if mod is p:
@@ -247,6 +319,7 @@ class Tracer(TracerBase):
         fn_for_analysis = inspect.unwrap(root_fn)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
+        orig_args = list(co.co_varnames)
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
         skip_arg_idx = 0
@@ -260,17 +333,41 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
-            if concrete_args is not None and name in concrete_args:
-                return concrete_args[name]
+            if concrete_args is not None and name in concrete_args :
+                cnt = 0
+
+                def replace_ph(x):
+                    nonlocal cnt
+                    cnt += 1
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    if x == PH:
+                        return out
+                    # Union[int, bool] == bool in Python <= 3.6
+                    if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
+                        torch._assert(out == x, f"{name} has been specialized to have value {x}")
+                    else:
+                        torch.warnings.warn(
+                            "Was not able to add assertion to guarantee correct inputs to "
+                            "specialized function. It is up to the user to make sure that your inputs match the "
+                            "inputs you specialized the function with."
+                        )
+
+                    return x
+
+                return pytree.tree_map(replace_ph, concrete_args[name])
             if name[0] == '*':
-                default = ()    # type: ignore
+                default = ()
             else:
                 param = sig.parameters[name]
-                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
+                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
+        arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
+        if isinstance(concrete_args, tuple):
+            assert(len(arg_names) == len(concrete_args))
+            concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
+        args.extend(proxy_placeholder(names) for names in arg_names)
 
-        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -280,7 +377,34 @@ class Tracer(TracerBase):
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
 
+        flat_args, in_spec = pytree.tree_flatten(tuple(args))
+        if any(not isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
+            # In the case that we have pytree-flattened inputs in
+            # `concrete_args`, generate a flattening wrapper around the
+            # original root function and return that.
+            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec, None)
+
+            def flatten_fn(*args):
+                tree_args = pytree.tree_unflatten(list(args), in_spec)
+                tree_out = root_fn(*tree_args)
+                out_args, out_spec = pytree.tree_flatten(tree_out)
+                assert(self.graph._pytree_info is not None)
+                self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
+                return out_args
+
+            return flatten_fn, flat_args
         return root_fn, args
+
+
+    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+        if isinstance(attr_val, torch.nn.Parameter):
+            for n, p in self.root.named_parameters():
+                if attr_val is p:
+                    if n not in parameter_proxy_cache:
+                        parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                    return parameter_proxy_cache[n]
+        return attr_val
+
 
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
@@ -339,13 +463,7 @@ class Tracer(TracerBase):
         @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
             attr_val = _orig_module_getattr(mod, attr)
-            if isinstance(attr_val, torch.nn.Parameter):
-                for n, p in self.root.named_parameters():
-                    if attr_val is p:
-                        if n not in parameter_proxy_cache:
-                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
-                        return parameter_proxy_cache[n]
-            return attr_val
+            return self._module_getattr(attr, attr_val, parameter_proxy_cache)
 
         @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):
@@ -356,17 +474,17 @@ class Tracer(TracerBase):
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        with _Patcher() as patcher:
-            # allow duplicate patches to support the case of nested calls
-            patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
-            patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
-            _patch_wrapped_functions(patcher)
-            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-            for module in self._autowrap_search:
-                _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
-
-            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                             type_expr=fn.__annotations__.get('return', None))
+        with _CPatchManager(self):
+            with _Patcher() as patcher:
+                # allow duplicate patches to support the case of nested calls
+                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+                patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
+                _patch_wrapped_functions(patcher)
+                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                for module in self._autowrap_search:
+                    _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
+                self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                                 type_expr=fn.__annotations__.get('return', None))
 
         self.submodule_paths = None
 
@@ -383,7 +501,7 @@ _wrapped_methods_to_patch : List[Tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
     # This change is needed to trace models like PositionalEmbedding from BERT:
-    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py  # noqa
+    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py
     # but causes issues in quantization documented here:
     # https://github.com/pytorch/pytorch/issues/50710
     # once that is fixed we can make this the default behavior.
@@ -477,7 +595,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -491,7 +609,7 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
@@ -602,22 +720,57 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
+                   enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
     constructed by recording operations seen while tracing through ``root``.
 
+    ``concrete_args`` allows you to partially specialize your function, whether it's to remove control flow or data structures.
+
+    For example::
+
+        def f(a, b):
+            if b == True:
+                return a
+            else:
+                return a*2
+
+    FX can typically not trace through this due to the presence of control
+    flow. However, we can use `concrete_args` to specialize on the value of
+    `b` to trace through this.
+
+        f = fx.symbolic_trace(f, concrete_args={'b': False})
+        assert f(3, False)  == 6
+
+    Note that although you can still pass in different values of `b`, they will be ignored.
+
+    We can also use `concrete_args` to eliminate data-structure handling from
+    our function. This will use pytrees to flatten your input. To avoid
+    overspecializing, pass in `fx.PH` for values that shouldn't be
+    specialized. For example::
+
+        def f(x):
+            out = 0
+            for v in x.values():
+                out += v
+            return out
+        f = fx.symbolic_trace(f, concrete_args={'x': {'a': fx.PH, 'b': fx.PH, 'c': fx.PH}})
+        assert f({'a': 1, 'b': 2, 'c': 4}) == 7
+
+
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
-        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
+        enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    tracer = Tracer()
+    tracer = Tracer(enable_cpatching=enable_cpatching)
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
