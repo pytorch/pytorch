@@ -1732,6 +1732,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
+
+        If include_zero=False (default is True), all the zeros in the created tensor are replaced with an
+        epsilon value (if floating type) else 1 (if integer/boolean type).
     """
 
     assert low is None or low < 9, "low value too high!"
