@@ -112,7 +112,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     scipy==$SCIPY_VERSION \
     scikit-image \
     psutil \
-    unittest-xml-reporting \
+    unittest-xml-reporting==3.0.4 \
     boto3==1.16.34 \
     coverage==5.5 \
     hypothesis==4.53.2 \
