@@ -5,7 +5,7 @@
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input, nonzero
+from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input, nonzero, _handle_reduce_dim_none
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -146,11 +146,9 @@ def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
         if dim is None:
-            print('=== dim is none op_name (13): ', onnx_op_name)
             # all-reduce path
-            return g.op(onnx_op_name, self, keepdims_i=1)
+            return _handle_reduce_dim_none(g, self, onnx_op_name)
         else:
-            print('=== op_name (13): ', onnx_op_name)
             keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
             return g.op(onnx_op_name, self, dim, keepdims_i=keepdim)
     return symbolic

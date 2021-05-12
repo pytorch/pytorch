@@ -363,17 +363,19 @@ def _maybe_cast_reduce_op_input(g, self):
     return self
 
 
+def _handle_reduce_dim_none(g, self, op_name):
+    if len(list(self.node().inputs())) > 0:
+        return g.op(op_name, self, keepdims_i=1)
+    return g.op(op_name, self, keepdims_i=0)
+
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
         if dim is None:
-            print('=== dim is none op_name (9): ', onnx_op_name)
             # all-reduce path
-            # if onnx_op_name == "ReduceSum":
-            #     return g.op(onnx_op_name, self, keepdims_i=1)
-            return g.op(onnx_op_name, self, keepdims_i=1)
+            return _handle_reduce_dim_none(g, self, onnx_op_name)
         else:
-            print('=== op_name (9): ', onnx_op_name)
             # dim-reduce path
             desc = "is" if allow_multi_dim_support else "i"
             dim, keepdim = sym_help._get_const(dim, desc, "dim"), sym_help._get_const(keepdim, "i", "keepdim")
