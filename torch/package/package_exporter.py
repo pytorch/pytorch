@@ -36,8 +36,15 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
+ActionHook = Callable[["PackageExporter", str], None]
+
 
 class _ModuleProviderAction(Enum):
+    """Represents one of the actions that exporter can take on a module.
+
+    See :meth:`PackageExporter.extern` and friends for a description of what the actions do.
+    """
+
     INTERN = 1
     EXTERN = 2
     MOCK = 3
@@ -65,7 +72,7 @@ class PackagingError(Exception):
     Attributes:
         denied (Set[str]): modules that have been marked as denied by the exporter.
         broken (Dict[str, str]): modules for which the exporter could not retrieve source info,
-            along with the reason that retrieval it failed.
+            along with the reason that retrieving it failed.
         unhandled (Set[str]): modules for which there is no user-specified action.
     """
 
@@ -80,39 +87,36 @@ class PackagingError(Exception):
         self.broken = broken
         self.unhandled = unhandled
 
-        filtered_denied = set()
-        for module in self.denied:
-            if module in include_filter:
-                filtered_denied.add(module)
-
-        filtered_broken = {}
-        for module, reason in self.broken.items():
-            if module in include_filter:
-                filtered_broken[module] = reason
-
-        filtered_unhandled = set()
-        for module in self.unhandled:
-            if module in include_filter:
-                filtered_unhandled.add(module)
+        self.filtered_denied = {
+            module for module in self.denied if module in include_filter
+        }
+        self.filtered_broken = {
+            module: reason
+            for module, reason in self.broken.items()
+            if module in include_filter
+        }
+        self.filtered_unhandled = {
+            module for module in self.unhandled if module in include_filter
+        }
 
         message = io.StringIO("Errors raised while packaging:")
 
-        if len(filtered_denied) != 0:
+        if self.filtered_denied:
             message.write(
                 "\n\n* The following modules were detected as dependencies but have been denied:\n"
-                f"{textwrap.indent(pprint.pformat(filtered_denied), prefix='  ')}"
+                f"{textwrap.indent(pprint.pformat(self.filtered_denied), prefix='  ')}"
             )
-        if len(filtered_broken) != 0:
+        if self.filtered_broken:
             message.write(
                 "\n\n* The following modules did not have source information. "
                 "Extern, mock, or refactor to remove the dependency:\n"
-                f"{textwrap.indent(pprint.pformat(filtered_broken), prefix='  ')}"
+                f"{textwrap.indent(pprint.pformat(self.filtered_broken), prefix='  ')}"
             )
-        if len(filtered_unhandled) != 0:
+        if self.filtered_unhandled:
             message.write(
                 "\n\n* The following modules did not match against any patterns. "
                 "Intern, extern, or mock them:\n"
-                f"{textwrap.indent(pprint.pformat(filtered_unhandled), prefix='  ')}"
+                f"{textwrap.indent(pprint.pformat(self.filtered_unhandled), prefix='  ')}"
             )
 
         super().__init__(message.getvalue())
@@ -344,13 +348,7 @@ node [shape=box];
 
         if result is None:
             return None
-            # extra = ""
-            # if self.verbose:
-            #     extra = f" See the dependency graph for more info: \n{self._write_dep_graph(module.__name__)}"
-            # raise ValueError(
-            #     f'cannot save source for module "{module.__name__}" because '
-            #     f'its source file "{filename}" could not be found.{extra}'
-            # )
+
         return "".join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
@@ -418,7 +416,10 @@ node [shape=box];
             # Couldn't find a source!  Add it to our dependency graph as broken
             # and continue.
             self.dependency_graph.add_node(
-                module_name, broken=True, filename=getattr(module_obj, "__file__", None)
+                module_name,
+                is_package=is_package,
+                broken=True,
+                filename=getattr(module_obj, "__file__", None),
             )
             return
 
@@ -507,9 +508,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def register_extern_hook(
-        self, hook: Callable[["PackageExporter", str], None]
-    ) -> RemovableHandle:
+    def register_extern_hook(self, hook: ActionHook) -> RemovableHandle:
         """Registers an extern hook on the exporter.
 
         The hook will be called each time a module matches against an :meth:`extern` pattern.
@@ -528,9 +527,7 @@ node [shape=box];
         self._extern_hooks[handle.id] = hook
         return handle
 
-    def register_mock_hook(
-        self, hook: Callable[["PackageExporter", str], None]
-    ) -> RemovableHandle:
+    def register_mock_hook(self, hook: ActionHook) -> RemovableHandle:
         """Registers a mock hook on the exporter.
 
         The hook will be called each time a module matches against a :meth:`mock` pattern.
@@ -549,9 +546,7 @@ node [shape=box];
         self._mock_hooks[handle.id] = hook
         return handle
 
-    def register_intern_hook(
-        self, hook: Callable[["PackageExporter", str], None]
-    ) -> RemovableHandle:
+    def register_intern_hook(self, hook: ActionHook) -> RemovableHandle:
         """Registers an intern hook on the exporter.
 
         The hook will be called each time a module matches against an :meth:`intern` pattern.
@@ -737,7 +732,7 @@ node [shape=box];
             if attrs.get("action") is None:
                 unhandled.add(module_name)
 
-        if len(denied) != 0 or len(broken) != 0 or len(unhandled) != 0:
+        if denied or broken or unhandled:
             # build up the filter set
             interns = set()
             for module_name, attrs in self.dependency_graph.nodes.items():

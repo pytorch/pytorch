@@ -86,7 +86,7 @@ class TestDependencyAPI(PackageTestCase):
         """
         buffer = BytesIO()
 
-        with self.assertRaises(PackagingError):
+        with self.assertRaisesRegex(PackagingError, "denied"):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
                 exporter.save_source_string("foo", "import package_a.subpackage")
@@ -224,15 +224,13 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        exception_raised = False
         try:
             with PackageExporter(buffer, verbose=False) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
         except PackagingError as e:
-            exception_raised = True
             self.assertEqual(e.unhandled, set(["package_a", "package_a.subpackage"]))
-
-        self.assertTrue(exception_raised)
+        else:
+            self.fail("PackagingError should have been raised")
 
         # Interning all dependencies should work
         with PackageExporter(buffer, verbose=False) as he:
@@ -240,7 +238,7 @@ class TestDependencyAPI(PackageTestCase):
             he.save_pickle("obj", "obj.pkl", obj2)
 
     def test_broken_dependency(self):
-        """A unpackageable dependency should raise a BrokenDependencyError."""
+        """A unpackageable dependency should raise a PackagingError."""
 
         def create_module(name):
             spec = importlib.machinery.ModuleSpec(name, self, is_package=False)  # type: ignore[arg-type]
@@ -264,7 +262,6 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        exception_raised = False
         try:
             with PackageExporter(
                 buffer, verbose=False, importer=BrokenImporter()
@@ -272,10 +269,9 @@ class TestDependencyAPI(PackageTestCase):
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
         except PackagingError as e:
-            exception_raised = True
             self.assertEqual(set(e.broken.keys()), set(["foo", "bar"]))
-
-        self.assertTrue(exception_raised)
+        else:
+            self.fail("PackagingError should have been raised")
 
 
 if __name__ == "__main__":
