@@ -438,9 +438,6 @@ Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 TORCH_IMPL_FUNC(square_out)
 (const Tensor& self, const Tensor& result) { at::pow_out(const_cast<Tensor&>(result), self, 2); }
 
-Tensor square(const Tensor& self) { return at::pow(self, 2); }
-Tensor& square_(Tensor& self) { return self.pow_(2); }
-
 Tensor& logit_out(const Tensor& self,
     c10::optional<double> eps,
     Tensor& result) {
