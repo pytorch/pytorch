@@ -173,5 +173,5 @@ def runtime_validation(f):
                                        .format(self.type, d, type(d)))
                 yield d
 
-    wrapper._runtime_validation = True
+    wrapper._runtime_validation = True  # type: ignore[attr-defined]
     return wrapper
