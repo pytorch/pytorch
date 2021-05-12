@@ -10,7 +10,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
@@ -31,10 +33,13 @@ void compute_fused_params(
   //         + bias(c)
   // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
   for (int64_t c = 0; c < channels; c++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float inv_sigma = 1.0 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;
     float bias_v = bias_data ? bias_data[c] : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     alpha_data[c] = inv_sigma * weight_v * (input_scale / output_scale);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     beta_data[c] = (bias_v - mean_data[c] * inv_sigma * weight_v) / output_scale;
   }
 }

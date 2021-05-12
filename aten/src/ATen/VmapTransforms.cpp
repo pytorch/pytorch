@@ -5,6 +5,7 @@ namespace at {
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t idx = 0; idx < bdims.size(); idx++) {
     if (bdims[idx].dim() != idx) {
       return false;
@@ -29,6 +30,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
   for (const auto& bdim : bdims) {
     permutation[idx++] = bdim.dim();
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t ptr = 0; idx < sizes.size(); ptr++) {
     if (is_bdim[ptr]) {
       continue;
@@ -137,8 +139,10 @@ static Tensor alignBatchDimsAtFront(
   auto physical_sizes = physical_tensor.sizes();
 
   auto tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_INTERNAL_ASSERT(tensor_example_dim <= requested_example_dim);
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (tensor_levels == requested_levels && tensor_example_dim == requested_example_dim) {
     // Optimization: no need to do another view if the physical tensor is
     // already the correct shape
@@ -157,6 +161,7 @@ static Tensor alignBatchDimsAtFront(
   // align the bdims
   int64_t level = 0;
   int64_t tensor_dim = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t bdim = 0; bdim < requested_levels.count(); bdim++) {
     // Determine the level of the bdim
     while (!requested_levels[level]) level++;
@@ -252,6 +257,7 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
   VmapPhysicalViewVec result;
 
   std::bitset<kVmapNumLevels> levels;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t largest_logical_dim;
   std::tie(levels, largest_logical_dim) = getLevelsAndLargestLogicalDim(logical_tensors);
 
@@ -280,6 +286,7 @@ Tensor VmapPhysicalToLogicalMap::apply(const Tensor& physical_tensor) const {
 }
 
 void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensors) const {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
   for (int64_t idx = 0; idx < physical_tensors.size(); ++idx) {
     physical_tensors[idx] = apply(physical_tensors[idx]);
   }
