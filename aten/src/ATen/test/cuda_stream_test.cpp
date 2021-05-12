@@ -88,18 +88,18 @@ TEST(TestStream, GetAndSetTest) {
   ASSERT_EQ_CUDA(curStream, defaultStream);
 }
 
-void thread_fun(at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
-  auto new_stream = at::cuda::getStreamFromPool();
-  at::cuda::setCurrentCUDAStream(new_stream);
-  cur_thread_stream = {at::cuda::getCurrentCUDAStream()};
-  ASSERT_EQ_CUDA(*cur_thread_stream, new_stream);
-}
-
 // Ensures streams are thread local
 TEST(TestStream, MultithreadGetAndSetTest) {
   if (!at::cuda::is_available()) return;
-  at::optional<at::cuda::CUDAStream> s0, s1;
 
+  auto thread_fun = [](at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
+    auto new_stream = at::cuda::getStreamFromPool();
+    at::cuda::setCurrentCUDAStream(new_stream);
+    cur_thread_stream = {at::cuda::getCurrentCUDAStream()};
+    ASSERT_EQ_CUDA(*cur_thread_stream, new_stream);
+  };
+
+  at::optional<at::cuda::CUDAStream> s0, s1;
   std::thread t0{thread_fun, std::ref(s0)};
   std::thread t1{thread_fun, std::ref(s1)};
   t0.join();
@@ -111,6 +111,30 @@ TEST(TestStream, MultithreadGetAndSetTest) {
   ASSERT_EQ_CUDA(cur_stream, default_stream);
   ASSERT_NE_CUDA(cur_stream, *s0);
   ASSERT_NE_CUDA(cur_stream, *s1);
+  ASSERT_NE_CUDA(s0, s1);
+}
+
+TEST(TestStream, MultithreadCUDAGuardTest) {
+  if (!at::cuda::is_available()) return;
+
+  auto thread_fun = [](at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
+    auto new_stream = at::cuda::getStreamFromPool();
+    {
+      at::cuda::CUDAStreamGuard guard(new_stream);
+      cur_thread_stream = {at::cuda::getCurrentCUDAStream()};
+    }
+    ASSERT_EQ_CUDA(*cur_thread_stream, new_stream);
+    at::cuda::CUDAStream cur_stream = at::cuda::getCurrentCUDAStream();
+    at::cuda::CUDAStream default_stream = at::cuda::getDefaultCUDAStream();
+    ASSERT_EQ_CUDA(cur_stream, default_stream);
+  };
+
+  at::optional<at::cuda::CUDAStream> s0, s1;
+  std::thread t0{thread_fun, std::ref(s0)};
+  std::thread t1{thread_fun, std::ref(s1)};
+  t0.join();
+  t1.join();
+
   ASSERT_NE_CUDA(s0, s1);
 }
 
