@@ -1175,7 +1175,7 @@ void SpecialPostProcess(Node* n) {
 
       auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
         TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
-        TORCH_INTERNAL_ASSERT(t_type->scalarType().has_value());
+        TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
         auto scalar_type = t_type->scalarType().value();
         auto onnx_type = ATenTypeToOnnxType(scalar_type);
         n->i_(attr::dtype, onnx_type);
