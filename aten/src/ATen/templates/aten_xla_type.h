@@ -6,4 +6,3 @@
 namespace ${cpp_namespace} {
 ${dispatch_declarations}
 }  // namespace ${cpp_namespace}
-
