@@ -295,7 +295,8 @@ ndtr = _add_docstr(_special.special_ndtr,
                    r"""
 ndtr(input, *, out=None) -> Tensor
 
-Computes the area under the standard Gaussian probability density function, integrated from minus infinity to :attr:`input`, elementwise.
+Computes the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
 
 .. math::
     \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
