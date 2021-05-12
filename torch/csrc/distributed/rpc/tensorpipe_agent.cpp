@@ -55,10 +55,16 @@ std::vector<c10::Device> getDevicesForTensors(
       remoteName);
   std::vector<c10::Device> devices;
   devices.reserve(tensors.size());
-  bool hasCudaTensor = false;
+  bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
-      devices.emplace_back(c10::kCPU);
+      const auto deviceIter = deviceMap.find(c10::kCPU);
+      if (deviceIter == deviceMap.end()) {
+        devices.emplace_back(c10::kCPU);
+      } else {
+        devices.emplace_back(deviceIter->second);
+        hasMappedDevice = true;
+      }
     } else {
       const auto deviceIter = deviceMap.find(t.device());
       TORCH_CHECK(
@@ -68,10 +74,10 @@ std::vector<c10::Device> getDevicesForTensors(
           t.device(),
           " but received a tensor on that device.");
       devices.push_back(deviceIter->second);
-      hasCudaTensor = true;
+      hasMappedDevice = true;
     }
   }
-  if (!hasCudaTensor) {
+  if (!hasMappedDevice) {
     devices.clear();
   }
   return devices;
@@ -95,7 +101,9 @@ std::unordered_set<c10::Device> getLocalDevices(
   std::unordered_set<c10::Device> deviceSet;
   for (const auto& entry : deviceMap) {
     for (const auto& device : entry.second) {
-      deviceSet.insert(device.first);
+      if (!device.first.is_cpu()) {
+        deviceSet.insert(device.first);
+      }
     }
   }
   return deviceSet;
@@ -726,7 +734,7 @@ void TensorPipeAgent::pipeWrite(
 
 void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::shared_ptr<JitFuture>& futureResponseMessage,
+    JitFuture& futureResponseMessage,
     uint64_t messageId,
     std::shared_ptr<LazyStreamContext> ctx) {
   if (!rpcAgentRunning_.load()) {
@@ -740,9 +748,9 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << " is sending response to request #" << messageId << " to "
           << pipe->getRemoteName();
 
-  if (!futureResponseMessage->hasError()) {
+  if (!futureResponseMessage.hasError()) {
     Message&& responseMessage =
-        std::move(*futureResponseMessage->value().toCustomClass<Message>());
+        std::move(*futureResponseMessage.value().toCustomClass<Message>());
     responseMessage.setId(messageId);
 
     std::vector<c10::Device> devices;
@@ -801,7 +809,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(
-            futureResponseMessage->tryRetrieveErrorMessage(), messageId),
+            futureResponseMessage.tryRetrieveErrorMessage(), messageId),
         /* devices */ {},
         std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
@@ -860,7 +868,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
-          std::shared_ptr<JitFuture> futureResponseMessage;
+          c10::intrusive_ptr<JitFuture> futureResponseMessage;
           try {
             // Instead of creating a MultiStreamGuard here, the ctx is passed
             // to the callback and the MultiStreamGuard is created there,
@@ -873,7 +881,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
-                std::make_shared<JitFuture>(at::AnyClassType::get());
+                c10::make_intrusive<JitFuture>(at::AnyClassType::get());
             futureResponseMessage->setError(std::current_exception());
           }
 
@@ -881,20 +889,18 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           if (futureResponseMessage->completed()) {
             decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
-                pipe, futureResponseMessage, messageId, std::move(ctx));
+                pipe, *futureResponseMessage, messageId, std::move(ctx));
           } else {
             // Not complete yet
             increaseCallCount(serverActiveAsyncCalls_);
-            futureResponseMessage->addCallback([this,
-                                                pipe,
-                                                futureResponseMessage,
-                                                messageId,
-                                                ctx{std::move(ctx)}]() mutable {
-              decreaseCallCount(serverActiveCalls_);
-              decreaseCallCount(serverActiveAsyncCalls_);
-              sendCompletedResponseMessage(
-                  pipe, futureResponseMessage, messageId, std::move(ctx));
-            });
+            futureResponseMessage->addCallback(
+                [this, pipe, messageId, ctx{std::move(ctx)}](
+                    JitFuture& futureResponseMessage) mutable {
+                  decreaseCallCount(serverActiveCalls_);
+                  decreaseCallCount(serverActiveAsyncCalls_);
+                  sendCompletedResponseMessage(
+                      pipe, futureResponseMessage, messageId, std::move(ctx));
+                });
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
@@ -904,7 +910,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       });
 }
 
-std::shared_ptr<JitFuture> TensorPipeAgent::send(
+c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
     const float rpcTimeoutSeconds,
@@ -965,11 +971,12 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
         requestMessage.tensors(), deviceMap, clientPipe.pipe_->getRemoteName());
   }
 
-  futureResponseMessage->jitFuture->addCallback([this]() {
-    TORCH_INTERNAL_ASSERT(
-        this->threadPool_.inThreadPool(),
-        "Future marked complete from outside the thread pool");
-  });
+  futureResponseMessage->jitFuture->addCallback(
+      [this](JitFuture& /* unused */) {
+        TORCH_INTERNAL_ASSERT(
+            this->threadPool_.inThreadPool(),
+            "Future marked complete from outside the thread pool");
+      });
 
   increaseCallCount(clientActiveCalls_);
   // Use the default RPC timeout if no timeout is specified for this send call
@@ -1450,6 +1457,10 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
     return {};
   }
   return it->second;
+}
+
+const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
+  return devices_;
 }
 
 size_t TensorPipeAgent::timeoutMapSize() {
