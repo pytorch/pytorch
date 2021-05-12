@@ -170,7 +170,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     }
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of HIIII ", Py_TYPE(obj)->tp_name);
+  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
@@ -207,13 +207,6 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
-  
-  // std::string asd = *device_opt;
-
-  // if (*device_opt=="meta"){
-    // std::cout << *device_opt;
-  // }
-
 
 
   if (THPUtils_checkString(data)) {
@@ -786,10 +779,6 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
 
-  
-  // char * str = "device";
-  // PyObject* user_val = PyObject_GetAttrString(kwargs, str);
-  // PyObject_Print(args, stdout, Py_PRINT_RAW);
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
   });
@@ -800,38 +789,35 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
 
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
-    PyObject* data1 = r.pyobject(2);
-    PyObject* temp;
-    temp = PyUnicode_DecodeFSDefault("metaqq");
-    // PyObject* data2 = "meta";
 
-    std::cout << "--------------------------";
-    std::cout << "\n";
-    std::cout << "ROHITH ARGS : ";
-    PyObject_Print(args, stdout, Py_PRINT_RAW);
-    std::cout << "\n";
-    std::cout << "ROHITH KWARGS : ";
-    // std::cout << PyObject_GetAttrString(data1, "device");
-    std::cout << "\n";
-    std::cout << "PASSED VALUE : ";
-    PyObject_Print(data1, stdout, Py_PRINT_RAW);
-    std::cout << "\n";
-    std::cout << "PASSED VALUE ADDRESS: ";
+    PyObject* meta_str = PyUnicode_DecodeFSDefault("meta");
+    PyObject* ellipsis_str = PyUnicode_DecodeFSDefault("Ellipsis");
 
-    std::cout << PyObject_RichCompareBool(data1, temp, Py_EQ);
+    PyObject* data_passed = PyObject_Str(data);
+    PyObject* device_passed = r.pyobject(2);
 
-    // if(PyObject_Hash(data1)==6582365082992043035){
-    //   std::cout << "MATCH";
-    // }
-    // else{
-    //   std::cout << "DISMATCH";
-    // }
+    if(PyObject_RichCompareBool(device_passed, meta_str, Py_EQ)==1 && PyObject_RichCompareBool(data_passed, ellipsis_str, Py_EQ)==1){
 
-    // std::cout << "\n";
-    // std::cout << "parsed_args : ";
-    // std::cout<< parsed_args;
-    std::cout << "\n";
-    std::cout << "--------------------------";
+        c10::TensorOptions options = typeIdWithDefault(r, 2, dispatch_key);
+        at::ScalarType scalar_type = r.scalartypeWithDefault(1, scalar_type);
+        c10::optional<Device> device_opt;
+        bool copy_variables = true;
+        bool copy_numpy = true;
+        bool type_inference = r.isNone(1);
+        bool pin_memory = r.toBool(3);
+        auto sizes = compute_sizes(data);
+        Tensor new_tensor;
+        at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
+        at::tracer::impl::NoTracerDispatchMode tracer_guard;
+        new_tensor = at::empty(0);
+        bool args_requires_grad = r.toBool(4);
+        new_tensor.detach_(); // ensure new_tensor a leaf node
+        new_tensor.set_requires_grad(args_requires_grad);
+
+        return new_tensor;
+
+
+    }
 
 
     if (THPVariable_Check(data)) {
