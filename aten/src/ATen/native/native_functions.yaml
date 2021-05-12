@@ -9548,17 +9548,18 @@
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_det
 
 - func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CompositeExplicitAutograd: linalg_det_out
 
 # torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method
+
+- func: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor p, Tensor l, Tensor u)
+  variants: function
+  dispatch:
+    CPU, CUDA: _det_lu_based_helper
 
 - func: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
