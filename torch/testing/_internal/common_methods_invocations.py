@@ -3212,6 +3212,44 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+
+def sample_inputs_split(op_info, device, dtype, requires_grad, list_args=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    if list_args:
+        cases = (
+            ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
+            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
+            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
+        )
+    else:
+        cases = (((S, S, S), (2,)),
+                 ((S, S, S), (S, 1)),
+                 )
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
+def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
+             ((S, S, S), ([int(S / 3), S - int(S / 3), 0],)),
+             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], 2)),
+             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], -2)),
+             )
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
     def apply_grad(t):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
@@ -5152,6 +5190,21 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
+    OpInfo('split',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_split,
+           supports_out=False,
+           assert_autodiffed=True),
+    OpInfo('split',
+           variant_test_name='list_args',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=partial(sample_inputs_split, list_args=True),
+           supports_out=False),
+    OpInfo('split_with_sizes',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_split_with_sizes,
+           supports_out=False,
+           assert_autodiffed=True),
     OpInfo('__radd__',
            op=torch.Tensor.__radd__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -6373,15 +6426,6 @@ def method_tests():
         ('squeeze', (S, 1, S, 1), (1,), '1_dim', (True,), [0]),
         ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', (True,), [0]),
         ('squeeze', (), (0,), 'scalar', (True,), [0]),
-        ('split', (S, S, S), (2,), '', (True,)),
-        ('split', (S, S, S), (S, 1), 'dim', (True,), [1]),
-        ('split', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'size_list',
-            (True, 'aten::split_with_sizes')),
-        ('split', (S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2), 'size_list_dim',
-            (True, 'aten::split_with_sizes'), [1]),
-        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True,)),
-        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, )),
-        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'dim', (True, ), [1]),
         ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
         ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
         ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
