@@ -121,7 +121,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
   Value value() const;
 
  private:
-  void bindArg(const BufferArg& buf, const CallArg& data);
+  void bindArg(const BufferArg& buf, void* data);
   void expand_intrinsics() {
     GenericIntrinsicsExpander intrinsics_expander;
     apply_mutator(&intrinsics_expander);
