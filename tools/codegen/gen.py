@@ -203,19 +203,17 @@ class UnambiguousTorchOperators:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        unambiguous_name = self.unambiguous_function_name(f)
         # NB: requires_grad is the only exception to the rule because
         # its const correctness is questionable.
-        if unambiguous_name in set(['requires_grad_']):
+        if str(f.func.name) in set(['requires_grad_']):
             return None
 
         if self.target is Target.DECLARATION:
             return self.gen_declaration(f)
-
-        if self.target is not Target.DEFINITION:
+        if self.target is Target.DEFINITION:
+            return self.gen_definition(f)
+        else:
             assert_never(self.target)
-
-        return self.gen_definition(f)
 
     # Given a function schema "aten::op.overload(...)",
     # If there is no overload name, this returns f"{op}"
@@ -229,37 +227,30 @@ class UnambiguousTorchOperators:
 
     def gen_declaration(self, f: NativeFunction) -> str:
         unambiguous_name = self.unambiguous_function_name(f)
-        returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
-        args = dispatcher.arguments(f.func)
-        args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
-        return f"TORCH_API {returns_type} {unambiguous_name}({args_str});\n"
+        sig = DispatcherSignature.from_schema(f.func)
+        return f"TORCH_API {sig.decl(unambiguous_name)};"
 
     def most_faithful_name(self, f: NativeFunction) -> str:
         sig_group = CppSignatureGroup.from_native_function(f, method=False)
         sig = sig_group.most_faithful_signature()
         return sig.name()
 
-    def gen_definition(self, f: NativeFunction) -> str:
+    def invocation(self, f: NativeFunction):
         faithful_op_name = self.most_faithful_name(f)
-        unambiguous_name = self.unambiguous_function_name(f)
-        returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
-        args = dispatcher.arguments(f.func)
-        args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
-
-        # Method-only operator
+        args = tuple(arg.name for arg in dispatcher.arguments(f.func))
+        # Method only
         if Variant.function not in f.variants:
-            arg0_name = args[0].name
-            other_arg_names = ', '.join(a.name for a in args[1:])
-            return deindent(f"""\
-                {returns_type} {unambiguous_name}({args_str}) {{
-                  return {arg0_name}.{faithful_op_name}({other_arg_names});
-                }}\
-            """)
+            return f"{args[0]}.{faithful_op_name}({', '.join(args[1:])})"
+        return f"at::{faithful_op_name}({', '.join(args)})"
 
-        args_names = ', '.join(a.name for a in args)
+    def gen_definition(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        args = dispatcher.arguments(f.func)
+        sig = DispatcherSignature.from_schema(f.func)
+
         return deindent(f"""\
-            {returns_type} {unambiguous_name}({args_str}) {{
-              return at::{faithful_op_name}({args_names});
+            {sig.defn(unambiguous_name)} {{
+              return {self.invocation(f)};
             }}\
         """)
 

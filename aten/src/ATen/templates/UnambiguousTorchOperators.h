@@ -21,7 +21,7 @@
 // Use ATEN_FN(op) to get an unambiguous *function* version of the operator.
 //
 // There is some interesting behavior for out= operations.
-// ATEN_FN2(sin, "out") gives a function that is *faithful* to the schema;
+// ATEN_FN2(sin, out) gives a function that is *faithful* to the schema;
 // that is, the order of arguments is exactly what it looks like in the schema.
 
 #define ATEN_FN2(op_name, overload) at::_ops::op_name##_##overload
@@ -29,11 +29,17 @@
 
 // WARNING: Please do not call any of the ops in the _ops namespace directly.
 // Use the ATEN_FN macros. We do not guarantee stability of the naming
-// scheme for the functions in at::_ops.
+// scheme for the functions in at::_ops
 namespace at { namespace _ops {
 
-// NB: this is special cased here because requires_grad_ returns a
-// const Tensor&. The codegen assumes that in-place functions return Tensor&.
+// NB: We are forced to special case requires_grad_. This is because all
+// of the auto-generated inplace method signatures in TensorMethods.h are
+// codegen'ed to return Tensor&, but requires_grad_ has a `manual_cpp_binding`
+// with a different signature that returns `const Tensor&`.
+//
+// Eventually, the plan is to kill Tensor& from all C++ signatures and use
+// const Tensor&. When that happens, we can remove this special case and just
+// let the codegen handle it.
 TORCH_API Tensor & requires_grad_(Tensor & self, bool requires_grad);
 
 ${declarations}

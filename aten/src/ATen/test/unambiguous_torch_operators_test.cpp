@@ -52,4 +52,3 @@ TEST(UnambiguousTorchOperatorsTest, TestOutVariantIsFaithful) {
     Tensor&, const Tensor&, Tensor&>(a, b);
   ASSERT_TRUE(at::allclose(result, a.sin()));
 }
-
