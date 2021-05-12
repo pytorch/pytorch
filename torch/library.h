@@ -658,7 +658,7 @@ public:
   }
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& className);
+  inline torch::class_<CurClass> class_(const std::string& className);
 
 private:
   Kind kind_;
