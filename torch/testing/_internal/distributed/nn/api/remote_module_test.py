@@ -137,13 +137,13 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
     @dist_utils.dist_init
     def test_forward_async(self):
