@@ -367,7 +367,8 @@ Module Module::clone_impl(
     IValue s = _ivalue()->getSlot(i);
     std::string attr_name = type()->getAttributeName(i);
 
-    // If this attribute is in the list of ignored attributes, skip clone it.
+    // If this attribute is in the list of ignored attributes, skip it
+    // (i.e. do not clone it).
     if (ignored_attributes.count(attr_name) != 0) {
       continue;
     }
