@@ -5279,7 +5279,7 @@ op_db: List[OpInfo] = [
                    sample_kwargs=lambda device, dtype, input: ({},
                                                                {'posinf': torch.finfo(torch.bfloat16).max,
                                                                 'neginf': torch.finfo(torch.bfloat16).min})
-                                 if dtype is torch.bfloat16 else ({}, {})),
+                   if dtype is torch.bfloat16 else ({}, {})),
     UnaryUfuncInfo('reciprocal',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.reciprocal),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
