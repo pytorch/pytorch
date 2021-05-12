@@ -142,8 +142,8 @@ static void sort_kernel(
 }
 
 static void topk_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const Tensor& values,
+    const Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,
