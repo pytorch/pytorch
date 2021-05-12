@@ -48,7 +48,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
         if batch_level:
-        self.datapipe = datapipe
+            self.datapipe = datapipe
         else:
             self.datapipe = datapipe.unbatch()
         self.batch_size = batch_size
@@ -177,6 +177,86 @@ def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
         return 0
 
     return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
+
+
+@functional_datapipe('groupby')
+class GroupByIterDataPipe(IterDataPipe):
+    def __init__(self, datapipe, group_key_fn, *, buffer_size = 10000, group_size = None, batch_level = False, guaranteed_group_size = None, drop_remaining = False):
+        if batch_level:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch()
+        
+        self.group_key_fn = group_key_fn
+        self.buffer_size = buffer_size 
+        self.group_size = group_size
+        self.batch_level = batch_level
+        self.guaranteed_group_size = None
+        if group_size is not None:
+            self.guaranteed_group_size = group_size
+        if guaranteed_group_size is not None:
+            self.guaranteed_group_size = guaranteed_group_size
+        self.drop_remaining = drop_remaining
+
+    def __iter__(self):
+        buffer = {}
+        buffer_size = 0
+
+        for x in self.datapipe:
+            
+            key = self.group_key_fn(x)
+            
+            if buffer_size == self.buffer_size:
+                biggest_key = None
+                biggest_size = 0
+                for findkey in buffer.keys():
+                    if len(buffer[findkey]) > biggest_size:
+                        biggest_size = len(buffer[findkey])
+                        biggest_key = findkey
+
+                 
+                if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
+                    raise Exception('Failed to group items', str(buffer[biggest_key]))
+
+                if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
+                    yield buffer[biggest_key]
+
+                buffer_size -= len(buffer[biggest_key])
+                del buffer[biggest_key]
+                
+           
+            if key not in buffer:
+                buffer[key] = [x]
+            else:
+                buffer[key].append(x)
+            # print(buffer[key])
+            buffer_size += 1
+
+            if self.group_size is not None and self.group_size == len(buffer[key]):
+                yield buffer[key]
+                buffer_size -= len(buffer[key])
+                del buffer[key]
+        
+        while buffer_size:
+            biggest_key = None
+            biggest_size = 0
+            for key in buffer.keys():
+                if len(buffer[key]) > biggest_size:
+                    biggest_size = len(buffer[key])
+                    biggest_key = key
+
+            if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
+                raise Exception('Failed to group items', str(buffer[biggest_key]))
+
+            if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
+                yield buffer[biggest_key]
+
+            buffer_size -= len(buffer[biggest_key])
+            del buffer[biggest_key]
+
+
+
+
 
 
 @functional_datapipe('group_by_key')
