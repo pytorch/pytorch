@@ -1189,8 +1189,8 @@ class DistributedDataParallel(Module):
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
-            ``get_future`` API supports NCCL, and partially GLOO and MPI backends (support is limited
-            to non peer-to-peer operations) and will return a ``torch._C.Future``
+            ``get_future`` API supports NCCL, and partially GLOO and MPI backends (no support
+            for peer-to-peer operations like send/recv) and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
             ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.

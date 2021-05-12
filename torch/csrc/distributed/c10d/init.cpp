@@ -1446,7 +1446,7 @@ Example::
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
-                (support is limited to non peer-to-peer operations).
+                (no support for peer-to-peer operations like send/recv).
                 The ``torch._C.Future`` object returned by this API can be used in
                 ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
                 features on top of ``torch.futures.Future``.
@@ -1462,12 +1462,12 @@ Example::
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                For CPU work, ``fut.done()`` returns true when work has been complted and value()
-                tensors are ready.
-                For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
-                For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
-                true when tensors have arrived on respective nodes, but not yet necessarily syched on
-                respective GPUs (similarly to GPU work).
+                    1. For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                       tensors are ready.
+                    2. For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
+                    3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
+                       true when tensors have arrived on respective nodes, but not yet necessarily synched on
+                       respective GPUs (similarly to GPU work).
            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
