@@ -2478,6 +2478,21 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "changes the dtype"):
             parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
+    def test_parametrization_same_training_mode(self):
+        r"""Test training mode updated on parametrization registration"""
+        class Identity(nn.Module):
+            def forward(self, X):
+                return X
+
+        module = nn.Linear(4, 4)
+        module.eval()
+        parametrize.register_parametrization(module, "weight", Identity())
+        self.assertFalse(module.parametrizations.weight[0].training)
+        module.train()
+        parametrize.register_parametrization(module, "weight", Identity().eval())
+        self.assertTrue(module.parametrizations.weight[0].training)
+        self.assertTrue(module.parametrizations.weight[1].training)
+
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_validate_pruning_amount_init(self):
@@ -3812,6 +3827,7 @@ class TestNN(NNTestCase):
 
                 torch.nn.utils.parametrizations.spectral_norm(m)
                 pre_remove_out = wrapped_m(input)
+                m.train()
                 self.assertTrue(m.parametrizations.weight[0].training)
                 m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
                 self.assertNotEqual(wrapped_m(input), pre_remove_out)
