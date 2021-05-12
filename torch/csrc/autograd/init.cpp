@@ -13,6 +13,8 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
+#include <set>
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
@@ -82,7 +84,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
       .def("start_us", &LegacyEvent::cpuUs)
-      .def("flops", &LegacyEvent::flops);
+      .def("flops", &LegacyEvent::flops)
+      .def("is_async", &LegacyEvent::isAsync);
 
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
@@ -172,6 +175,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // compute flops
       .def("flops", [](const KinetoEvent& e) {
         return e.flops();
+      })
+      // Whether this is async event or not
+      .def("is_async", [](const KinetoEvent& e) {
+        return e.isAsync();
       });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
@@ -191,6 +198,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #else
     return false;
 #endif
+  });
+
+  m.def("supported_kineto_activities", []() {
+    std::set<ActivityType> activities;
+#ifdef USE_KINETO
+    activities.insert(ActivityType::CPU);
+#ifndef LIBKINETO_NOCUPTI
+    if (at::getNumGPUs() > 0 && !at::hasHIP()) {
+      activities.insert(ActivityType::CUDA);
+    }
+#endif
+#endif
+    return activities;
   });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);

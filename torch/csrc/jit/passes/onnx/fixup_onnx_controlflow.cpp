@@ -219,7 +219,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
   TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
   auto* sub_block = node->blocks().at(0);
   Value* cond = sub_block->insertInput(1, "cond");
-  cond->setType(BoolType::create());
+  cond->setType(BoolType::get());
 
   Value* i = sub_block->inputs().at(0);
   i->setType(TensorType::fromNumberType(IntType::get()));

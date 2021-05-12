@@ -17,45 +17,32 @@ Tensor _segment_reduce_cpu_kernel(
     const Tensor& data,
     const Tensor& lengths,
     int64_t axis,
-    bool unsafe) {
-  const auto lengths_contig = lengths.contiguous();
-  const auto data_contig = data.contiguous();
-
-  int64_t batch_size = lengths_contig.numel();
+    const c10::optional<Scalar>& initial) {
+  int64_t batch_size = lengths.numel();
   auto output = at::empty({batch_size}, data.options());
 
-  const auto* lengths_data = lengths_contig.data_ptr<int64_t>();
-  if (!unsafe) {
-    int64_t sum = 0;
-    for (int64_t i = 0; i < batch_size; ++i) {
-      TORCH_CHECK(
-          (lengths_data[i] > 0), "lengths contains non positive value!");
-      sum += lengths_data[i];
-    }
-    TORCH_CHECK(sum == data.numel());
-  }
+  const auto* lengths_data = lengths.data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND2(
-      kBFloat16,
-      kHalf,
-      data_contig.scalar_type(),
-      "_segment_reduce_cpu",
-      ([&]() {
+      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", ([&]() {
         auto* output_data = output.data_ptr<scalar_t>();
-        const auto* values_data = data_contig.data_ptr<scalar_t>();
+        const auto* values_data = data.data_ptr<scalar_t>();
         int64_t k = 0;
         for (int64_t i = 0; i < batch_size; ++i) {
-          scalar_t reduction = std::numeric_limits<scalar_t>::lowest();
+          scalar_t initial_value = initial.has_value()
+              ? initial.value().to<scalar_t>()
+              : std::numeric_limits<scalar_t>::lowest();
           for (int64_t j = 0; j < lengths_data[i]; ++j) {
             const auto data = values_data[k];
-            reduction =
-                at::_isnan(data) ? data : std::max<scalar_t>(reduction, data);
+            initial_value = at::_isnan(data)
+                ? data
+                : std::max<scalar_t>(initial_value, data);
             k++;
           }
           // If unsafe is false, check on lengths or indices should cover cases
-          // where lengths for a particular segment is non-positive. If unsafe
-          // is true, simply set to numerical limits for particular reduction
-          output_data[i] = reduction;
+          // where lengths for a particular segment is negative. If unsafe
+          // is true, simply set to initial_value for particular reduction
+          output_data[i] = initial_value;
         }
       }));
 
@@ -93,8 +80,7 @@ Tensor _segment_reduce_cpu_backward_kernel(
             }
             k++;
           }
-          // Average gradient output based on number of maximum in the segment
-          TORCH_INTERNAL_ASSERT(counter > 0);
+          // Average gradient based on number of maximum elements in the segment
           if (counter < 2) {
             continue;
           }
@@ -124,7 +110,8 @@ Tensor segment_reduce_kernel(
     const c10::optional<Tensor>& lengths,
     const c10::optional<Tensor>& indices,
     int64_t axis,
-    bool unsafe) {
+    bool unsafe,
+    const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
   TORCH_CHECK(axis == 0, "Currently only dim=0 is supported!");
   TORCH_CHECK(data.dim() == 1);
@@ -142,8 +129,22 @@ Tensor segment_reduce_kernel(
   TORCH_CHECK(data.get_device() == lengths_value.get_device());
   TORCH_CHECK(data.dim() >= lengths_value.dim());
 
+  if (!unsafe) {
+    auto min_length = lengths_value.min().item<int64_t>();
+    TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
+    TORCH_CHECK(min_length != 0 || initial.has_value());
+    TORCH_CHECK(lengths_value.sum().item<int64_t>() == data.numel());
+  }
+
+  const auto data_contig = data.contiguous();
+  const auto lengths_contig = lengths_value.contiguous();
+
   return _segment_reduce_stub(
-      data.device().type(), data, lengths_value, axis, unsafe);
+      data_contig.device().type(),
+      data_contig,
+      lengths_contig,
+      axis,
+      initial);
 }
 
 REGISTER_ARCH_DISPATCH(

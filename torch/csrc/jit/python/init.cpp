@@ -1209,17 +1209,7 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([](const std::vector<py::object>& pyDevices = {}) {
-        std::vector<c10::Device> devices;
-        devices.reserve(pyDevices.size());
-        for (const py::object& pyDev : pyDevices) {
-          TORCH_CHECK_TYPE(
-              THPDevice_Check(pyDev.ptr()),
-              "Expected torch.device, got ",
-              py::repr(pyDev));
-          auto device = reinterpret_cast<THPDevice*>(pyDev.ptr());
-          devices.emplace_back(device->device);
-        }
+      .def(py::init([](std::vector<c10::Device> devices = {}) {
         return std::make_shared<PythonFutureWrapper>(
             c10::make_intrusive<c10::ivalue::Future>(
                 PyObjectType::get(), std::move(devices)));
