@@ -3269,6 +3269,12 @@ workflows:
           name: "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang5-asan"
+          image_name: "pytorch-linux-xenial-py3-clang5-asan"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang7-onnx"
+          image_name: "pytorch-linux-xenial-py3-clang7-onnx"
+      - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3.8"
           image_name: "pytorch-linux-xenial-py3.8"
       - docker_build_job:

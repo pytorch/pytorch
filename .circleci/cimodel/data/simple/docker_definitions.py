@@ -19,6 +19,8 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+    "pytorch-linux-xenial-py3-clang5-asan",
+    "pytorch-linux-xenial-py3-clang7-onnx",
     "pytorch-linux-xenial-py3.8",
     "pytorch-linux-xenial-py3.6-clang7",
     "pytorch-linux-xenial-py3.6-gcc5.4",  # this one is used in doc builds
