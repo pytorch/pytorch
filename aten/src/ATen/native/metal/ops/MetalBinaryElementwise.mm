@@ -33,11 +33,11 @@ Tensor binaryElementwiseShaderKernel(
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
               X1.featureChannels == X2.featureChannels)
-  std::vector<int64_t> outputSize = input1.sizes().vec();
+  IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
-    outputSize = input2.sizes().vec();
+    outputSize = input2.sizes();
   }
-  MetalTensorImplStorage mt{outputSize};
+  MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
@@ -71,15 +71,15 @@ Tensor& binaryElementwiseShaderKernel_(
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
               X1.featureChannels == X2.featureChannels)
-  std::vector<int64_t> outputSize = input1.sizes().vec();
+  IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
-    outputSize = input2.sizes().vec();
+    outputSize = input2.sizes();
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
-  MPSImage* Y = createTemporaryImage(cb1, outputSize);
+  MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       pipelineState:mpscnn::kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
@@ -108,11 +108,11 @@ Tensor binaryElementwiseMPSCNNKernel(
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
               X1.featureChannels == X2.featureChannels)
-  std::vector<int64_t> outputSize = input1.sizes().vec();
+  IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
-    outputSize = input2.sizes().vec();
+    outputSize = input2.sizes();
   }
-  MetalTensorImplStorage mt{outputSize};
+  MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
@@ -138,15 +138,15 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
               X1.featureChannels == X2.featureChannels)
-  std::vector<int64_t> outputSize = input1.sizes().vec();
+  IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
-    outputSize = input2.sizes().vec();
+    outputSize = input2.sizes();
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
-  MPSImage* Y = createTemporaryImage(cb1, outputSize);
+  MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
   T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
   kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
   kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
