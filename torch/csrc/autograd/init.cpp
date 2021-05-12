@@ -239,7 +239,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     at::clearCallbacks();
   });
 
-  py::class_<c10::InferenceMode>(_C_m, "InferenceMode")
+  py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
   Py_RETURN_TRUE;

@@ -253,7 +253,7 @@ class inference_mode(_DecoratorContextManager):
         self.mode = mode
 
     def __enter__(self):
-        self._inference_mode_raii_guard = torch._C.InferenceMode(self.mode)
+        self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard

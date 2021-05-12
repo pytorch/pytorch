@@ -8573,9 +8573,10 @@ class TestAutogradInferenceMode(TestCase):
                 tmp.add_(2)
                 self.assertFalse(self._is_inference_tensor(tmp))
                 self.assertEqual(tmp.requires_grad, requires_grad)
-                # TODO: accessing is_leaf(i.e., grad_fn) raises:
-                # RuntimeError: A view was created in inference mode and its base or
-                # another view of its base has been modified inplace in **normal mode.**
+                # Accessing is_leaf in python tries to update grad_fn and raises:
+                # A view was created in inference mode and its base or
+                # another view of its base has been modified inplace in normal mode
+                # tmp.is_leaf
                 self.assertEqual(a._version, tmp._version)
 
     def test_normal_tensor_view_output_in_normal_mode(self):
