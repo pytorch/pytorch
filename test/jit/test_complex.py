@@ -299,12 +299,13 @@ class TestComplex(JitTestCase):
         self.checkScript(fn2, (x, x))
         self.checkScript(fn2, (x, y))
 
-        x1, y1 = 1+0j, 1.0
+        x1, y1 = 1 + 0j, 1.0
         self.checkScript(fn3, (x1, y1))
         self.checkScript(fn4, (x1, y1))
 
         def fn5(a: complex, b: int):
             return a == b
+
         def fn6(a: complex, b: int):
             return a != b
 
@@ -319,3 +320,9 @@ class TestComplex(JitTestCase):
 
         x, y = 2 - 3j, 4j
         self.checkScript(fn1, (x, y))
+
+    def test_complex_list_sum(self):
+        def fn(x: List[complex]):
+            return sum(x)
+
+        self.checkScript(fn, (torch.randn(4, dtype=torch.cdouble).tolist(), ))

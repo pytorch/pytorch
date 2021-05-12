@@ -18,7 +18,6 @@ TEST(TimerTest, Test) {
 
   // Sleep for a while, and get the time.
   timer.Start();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   float ns = timer.NanoSeconds();
   float us = timer.MicroSeconds();
