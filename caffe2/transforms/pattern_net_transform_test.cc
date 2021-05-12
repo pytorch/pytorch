@@ -92,7 +92,6 @@ TEST(PatternNetTransformTest, TestGenerateTransform) {
   for (int i = 0; i < 4; i++) {
     EXPECT_FALSE(g.is_node_active(i));
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 4; i < 8; i++) {
     EXPECT_TRUE(g.is_node_active(i));
   }
@@ -101,7 +100,6 @@ TEST(PatternNetTransformTest, TestGenerateTransform) {
   EXPECT_TRUE(g.node(5).children.count(6));
   EXPECT_TRUE(g.node(6).children.count(7));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 4; i < 8; i++) {
     EXPECT_EQ(g.node(i).op.input().size(), 1);
     EXPECT_EQ(g.node(i).op.output().size(), 1);
@@ -129,7 +127,6 @@ TEST(PatternNetTransformTest, TestRepeatedTransform) {
   NetDef netdef;
   AddOp(&netdef, "DummyCounterOp1", {"in"}, {"out"});
   AddOp(&netdef, "DummyCounterOp2", {"out"}, {"out"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 99; i++) {
     AddOp(&netdef, "DummyCounterOp1", {"out"}, {"out"});
     AddOp(&netdef, "DummyCounterOp2", {"out"}, {"out"});
@@ -155,7 +152,6 @@ TEST(PatternNetTransformTest, TestRepeatedTransform) {
   NetDef replaced_netdef = g.GetNetDef();
 
   EXPECT_EQ(replaced_netdef.op_size(), 200);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 200; i++) {
     EXPECT_EQ(replaced_netdef.op(i).type(), "DummyCounterOp3");
   }
@@ -350,13 +346,11 @@ TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
   {
     auto arg = op->add_arg();
     arg->set_name("stride_w");
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     arg->set_i(5);
   }
   {
     auto arg = op->add_arg();
     arg->set_name("stride_h");
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     arg->set_i(5);
   }
 

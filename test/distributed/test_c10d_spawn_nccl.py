@@ -1,5 +1,6 @@
 import unittest
 
+import sys
 import test_c10d_spawn
 import torch
 import torch.distributed as c10d
@@ -8,7 +9,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
-
+@unittest.skipIf(sys.version_info >= (3, 9), "Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619")
 class ProcessGroupShareTensorTest(test_c10d_spawn.AbstractProcessGroupShareTensorTest, TestCase):
 
     @classmethod
