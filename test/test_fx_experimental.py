@@ -1308,9 +1308,13 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {'einsum',
+                   'expand',
+                   'expand_as',
+                   'gradient',
                    'index_put',
                    'polygamma',
                    'repeat',
+                   'reshape_as',
                    'view',
                    'view_as',
                    'unfold',

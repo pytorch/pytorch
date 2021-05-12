@@ -45,8 +45,6 @@ struct KinetoObserverContext : public at::ObserverContext {
 };
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent();
-
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -198,7 +196,7 @@ struct TORCH_API KinetoEvent {
   int64_t sequence_nr_ = -1;
   uint8_t scope_ = 0;
 
-  uint8_t activity_type_;
+  uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> dtypes_;
