@@ -322,7 +322,7 @@ void TensorImpl::release_resources() {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
-    pyobj_ = nullptr;  // for safety
+    pyobj_ = nullptr; // for safety
   }
 }
 
