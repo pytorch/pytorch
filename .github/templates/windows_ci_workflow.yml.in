@@ -45,7 +45,7 @@ jobs:
           .jenkins/pytorch/win-build.sh
       - name: Archive artifacts into zip
         run: |
-          7z a -tzip artifacts.zip dist/ build/
+          7z a -tzip artifacts.zip dist/
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v2
