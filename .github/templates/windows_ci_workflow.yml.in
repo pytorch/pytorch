@@ -89,7 +89,7 @@ jobs:
       - name: Install build artifacts
         shell: powershell
         run: |
-          python -mpip install dist/*.whl
+          python -mpip install dist\*.whl
       - name: Run test scripts
         shell: bash
         run: |

@@ -119,6 +119,8 @@ if "%BUILD_WHEEL%"=="1" (
       python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
     )
   )
+  :: Exit before running 2nd build
+  EXIT /B 0
 ) else (
   python setup.py install --cmake && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
