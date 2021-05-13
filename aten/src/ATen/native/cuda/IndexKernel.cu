@@ -227,7 +227,7 @@ static void index_copy_kernel(
   int64_t self_dim_stride) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("index_copy_cuda");
+  // this kernel will not be called when torch.use_deterministic_algorithms(True)
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_copy_cuda", [&] {

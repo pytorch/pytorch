@@ -1956,5 +1956,12 @@ class TestTEFuser(JitTestCase):
                         eager(x, one))
                 self.assertAllFused(script.graph_for(x, one))
 
+    def test_to_device(self):
+        def eager(x):
+            return x.to(device="cpu").relu()
+        x = torch.rand(8)
+        script = self.checkScript(eager, (x,))
+        self.assertAllFused(script.graph_for(x))
+
 if __name__ == '__main__':
     run_tests()
