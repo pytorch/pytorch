@@ -500,8 +500,6 @@ public:
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
-  TensorIteratorConfig& add_borrowed_output(const Tensor& output);
-  TensorIteratorConfig& add_borrowed_input(const Tensor& input);
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
