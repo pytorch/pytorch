@@ -81,11 +81,11 @@ CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 
-TORCH_META_FUNC(square)(const Tensor& self) {
+TORCH_META_FUNC(square) (const Tensor& self) {
   set_output(0, self.sizes(), self.options());
 }
 
-TORCH_META_FUNC(neg)(const Tensor& self) {
+TORCH_META_FUNC(neg) (const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
