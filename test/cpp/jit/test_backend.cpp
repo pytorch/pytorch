@@ -467,6 +467,8 @@ TEST(
   }
 
   std::stringstream ss;
+  c._save_for_mobile(
+      "/tmp/delegated_submodule_with_debug_info.ptl", ExtraFilesMap(), true);
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   /*

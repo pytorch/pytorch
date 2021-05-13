@@ -233,7 +233,7 @@ bool InterpreterState::run(Stack& stack) {
           AT_ERROR(toString(inst.op), " is invalid.");
       }
       // This exception must be caught first as it derived from c10::Error
-    } catch (c10::DelegatedBackendRuntimeException& e) {
+    } catch (c10::BackendRuntimeException& e) {
       exception_pc_ = pc;
       TORCH_RETHROW(e);
     } catch (c10::Error& error) {
