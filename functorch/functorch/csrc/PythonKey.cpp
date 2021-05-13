@@ -4,7 +4,7 @@
 namespace at {
 namespace functorch {
 // The following are publically exposed as methods of Tensor
-bool PythonTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+bool PythonTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(
       memory_format == at::MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of python tensor for memory_format ",
