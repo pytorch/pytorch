@@ -79,9 +79,7 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   //! At this point we have a complete kernel definition and we can
   //! run analysis passes to build a KernelSummary
   //!
-  void finalize(
-      std::vector<kir::Expr*> top_level_exprs,
-      ThreadPredicateMap predicate_map);
+  void finalize(std::vector<kir::Expr*> top_level_exprs);
 
   //! Register input as an input of the kernel
   void addInput(Val* input) {

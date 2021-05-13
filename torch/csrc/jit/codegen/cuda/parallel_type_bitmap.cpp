@@ -78,6 +78,24 @@ bool ParallelTypeBitmap::operator[](size_t pos) const {
   return bitset_[pos];
 }
 
+bool ParallelTypeBitmap::hasTID() const {
+  for (auto pt : {ParallelType::TIDx, ParallelType::TIDy, ParallelType::TIDz}) {
+    if (get(pt)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ParallelTypeBitmap::hasBID() const {
+  for (auto pt : {ParallelType::BIDx, ParallelType::BIDy, ParallelType::BIDz}) {
+    if (get(pt)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::map<ParallelType, bool> ParallelTypeBitmap::getMap() const {
   std::map<ParallelType, bool> map;
   for (const auto& pt_offset : pt_to_offset_) {

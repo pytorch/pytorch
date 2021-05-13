@@ -234,14 +234,11 @@ class ValidateAllocation : private kir::IrVisitor {
 } // namespace
 
 // TODO(kir): Kernel IR validation
-void Kernel::finalize(
-    std::vector<kir::Expr*> top_level_exprs,
-    ThreadPredicateMap predicate_map) {
+void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
   TORCH_CHECK(top_level_exprs_.empty());
-  TORCH_CHECK(!predicate_map_);
   top_level_exprs_ = std::move(top_level_exprs);
-  predicate_map_ =
-      std::make_unique<ThreadPredicateMap>(std::move(predicate_map));
+  predicate_map_ = std::make_unique<ThreadPredicateMap>(
+      GpuLower::current()->threadPredMap());
   ValidateAllocation::validate(this);
   analyze();
 }

@@ -210,16 +210,9 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   }
 
   // Handle these elsewhere
-  if (ignore_internal_syncthread_ops) {
-    if (expr->outputs().size() > 0 &&
-        expr->outputs()[0]->isA<kir::TensorView>()) {
-      const auto domain = expr->outputs()[0]->as<kir::TensorView>()->domain();
-      if ((expr->isA<kir::ReductionOp>() &&
-           (domain->hasBlockReduction() || domain->hasGridReduction())) ||
-          (expr->isA<kir::BroadcastOp>() && domain->hasBlockBroadcast())) {
-        return ir_builder.create<kir::Bool>(true);
-      }
-    }
+  if (ignore_internal_syncthread_ops &&
+      ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
+    return ir_builder.create<kir::Bool>(true);
   }
 
   auto out_tv = firstTvOutput(expr);

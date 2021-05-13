@@ -43,7 +43,7 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
 
   using const_iterator = MapType::const_iterator;
 
-  explicit ThreadPredicateMap(Fusion* fusion);
+  void build(Fusion* fusion);
 
   // TODO(kir): these methods are only used by getParallelBroadcastDomains() ?
   const_iterator find(const TensorView* tv) const;
@@ -53,6 +53,13 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
 
   // Returns a Bool predicate expression for a given output TensorView.
   kir::Bool* getExpr(const TensorView* out_tv) const;
+
+  //! Returns a ParallelTypeBitmap representing which domain needs
+  //! blockBroadcast.
+  //!
+  //! Even when a domain is broadcast and parallelized, it does not need
+  //! blockBroadcast unless it is predicated.
+  ParallelTypeBitmap getParallelBroadcastDomains(const TensorView* tv) const;
 
   void print() const;
 
@@ -68,7 +75,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   void insert(const TensorView* tv, const PredAndSource& pred_and_src);
 
  private:
-  Fusion* fusion_ = nullptr;
   MapType thread_predicates_;
 };
 

@@ -66,17 +66,18 @@ bool isReductionInitExpr(const kir::Expr* expr) {
 } // namespace
 
 kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
+  const auto& pred_map = GpuLower::current()->threadPredMap();
   // No thread predicate is needed predicate when tv is output of a
   // parallel broadcast expression.
   if (auto bop = dynamic_cast<kir::BroadcastOp*>(tv->definition())) {
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorView>());
     const auto out = bop->out()->as<kir::TensorView>()->fuserTv();
-    if (ir_utils::getParallelBroadcastDomains(out, thread_predicates_).any()) {
+    if (pred_map.getParallelBroadcastDomains(out).any()) {
       return kir::IrBuilder(GpuLower::current()->kernel())
           .create<kir::Bool>(true);
     }
   }
-  return thread_predicates_.getExpr(tv->fuserTv());
+  return pred_map.getExpr(tv->fuserTv());
 }
 
 void UnrollPass::handle(kir::Expr* expr) {
@@ -207,6 +208,8 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
   kir::ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
 
+  const auto& pred_map = GpuLower::current()->threadPredMap();
+
   while (loops.size() > 0) {
     auto loop = loops.back();
     loops.pop_back();
@@ -215,10 +218,8 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
     // synchronization, the else part can't be omitted
     for (auto expr : loop->body().exprs()) {
       if (expr->isA<kir::BroadcastOp>()) {
-        const ParallelTypeBitmap domains =
-            ir_utils::getParallelBroadcastDomains(
-                expr->outputs()[0]->as<kir::TensorView>()->fuserTv(),
-                thread_predicates_);
+        const ParallelTypeBitmap domains = pred_map.getParallelBroadcastDomains(
+            expr->outputs()[0]->as<kir::TensorView>()->fuserTv());
         if (domains.any()) {
           return false;
         }
@@ -301,11 +302,10 @@ kir::Expr* UnrollPass::applyReplacements(kir::Expr* expr) const {
 
 std::vector<kir::Expr*> UnrollPass::runPass(
     Fusion* fusion,
-    const std::vector<kir::Expr*>& exprs,
-    const ThreadPredicateMap& thread_predicates) {
+    const std::vector<kir::Expr*>& exprs) {
   FUSER_PERF_SCOPE("UnrollPass::runPass");
 
-  UnrollPass unroll_pass(fusion, thread_predicates);
+  UnrollPass unroll_pass(fusion);
   unroll_pass.computeMap(exprs);
 
   std::vector<kir::Expr*> mutated_exprs;

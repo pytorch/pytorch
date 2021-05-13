@@ -562,8 +562,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
     const auto tensor_index = node->out()->as<kir::TensorIndex>();
 
-    const ParallelTypeBitmap domains = ir_utils::getParallelBroadcastDomains(
-        tensor_index->view()->fuserTv(), kernel_->predicateMap());
+    const ParallelTypeBitmap domains =
+        kernel_->predicateMap().getParallelBroadcastDomains(
+            tensor_index->view()->fuserTv());
 
     const bool thread_x = domains.get(ParallelType::TIDx);
     const bool thread_y = domains.get(ParallelType::TIDy);

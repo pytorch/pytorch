@@ -39,6 +39,10 @@ class TORCH_CUDA_CU_API GpuLower {
   //! (or nullptr if no lowering is in progress)
   static GpuLower* current();
 
+  const ThreadPredicateMap& threadPredMap() const {
+    return thread_pred_map_;
+  }
+
   const ComputeAtMap& caLoopMap() const {
     return ca_loop_map_;
   }
@@ -75,6 +79,7 @@ class TORCH_CUDA_CU_API GpuLower {
   std::unordered_map<const Expr*, kir::Expr*> kir_expr_map_;
 
   // Some stateful information during lowering
+  ThreadPredicateMap thread_pred_map_;
   ComputeAtMap ca_loop_map_;
   ComputeAtMap ca_index_map_;
   ComputeAtMap ca_parallel_map_;

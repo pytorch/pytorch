@@ -138,7 +138,7 @@ void GpuLower::lower() {
   validateParallelize(fusion_);
 
   // Compute thread predicates
-  ThreadPredicateMap preds(fusion_);
+  thread_pred_map_.build(fusion_);
 
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
@@ -166,8 +166,7 @@ void GpuLower::lower() {
   // Insert read after write smem syncs
   const auto raw_sync_exprs = insertRawThreadSynchronization(alloced_exprs);
 
-  const auto unrolled_loops =
-      UnrollPass::runPass(fusion_, raw_sync_exprs, preds);
+  const auto unrolled_loops = UnrollPass::runPass(fusion_, raw_sync_exprs);
 
   const auto unrolled_mv_loops =
       processMisalignedVectorization(fusion_, unrolled_loops);
@@ -178,11 +177,10 @@ void GpuLower::lower() {
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto war_sync_exprs = insertWarThreadSynchronization(reuse_mem_exprs);
 
-  const auto indexed_loops =
-      IndexLowering::getIndexedExprs(war_sync_exprs, preds);
+  const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
 
   // We now have the lowered expressions, finalize the kernel IR
-  kernel_->finalize(indexed_loops, preds);
+  kernel_->finalize(indexed_loops);
 }
 
 kir::Kernel* GpuLower::kernel() const {

@@ -220,16 +220,16 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   }
 }
 
-ThreadPredicateMap::ThreadPredicateMap(Fusion* fusion) : fusion_(fusion) {
+void ThreadPredicateMap::build(Fusion* fusion) {
   FUSER_PERF_SCOPE("ThreadPredicateMap");
 
   // Initialize mapping for input tensors
-  for (auto inp : fusion_->inputs()) {
+  for (auto inp : fusion->inputs()) {
     if (auto tv = dynamic_cast<const TensorView*>(inp)) {
       insert(tv, ParallelTypeBitmap(), SourceMap());
     }
   }
-  for (auto expr : fusion_->exprs()) {
+  for (auto expr : fusion->exprs()) {
     updateBitSet(expr);
   }
 }
@@ -270,6 +270,35 @@ kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
   TORCH_INTERNAL_ASSERT(find(out_tv) != end(), "Couldn't find ", out_tv);
   const auto& pred_and_src = at(out_tv);
   return getPredicate(pred_and_src.pred, pred_and_src.source_map);
+}
+
+ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
+    const TensorView* tv) const {
+  // If no pred is found for tv, no predicate is necessary
+  if (find(tv) == end()) {
+    return ParallelTypeBitmap();
+  }
+
+  ParallelTypeBitmap parallel_broadcast;
+
+  const auto& iter_domains = tv->domain()->domain();
+
+  // If the output is on shared memory, assume that all subsequent
+  // reads from all threads in its CTA can be done with no parallel
+  // broadcast. Only one thread will write to shared memory followed
+  // by a proper _syncthreads.
+  const bool output_smem = tv->getMemoryType() == MemoryType::Shared;
+
+  for (auto id : iter_domains) {
+    if (!id->isBroadcast()) {
+      continue;
+    }
+    if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
+      parallel_broadcast.set(id->getParallelType(), true);
+    }
+  }
+
+  return parallel_broadcast & at(tv).pred;
 }
 
 void ThreadPredicateMap::print() const {

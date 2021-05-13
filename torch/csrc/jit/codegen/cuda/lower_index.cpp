@@ -13,9 +13,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-IndexLowering::IndexLowering(const ThreadPredicateMap& thread_predicates)
-    : ir_builder_(GpuLower::current()->kernel()),
-      thread_predicates_(thread_predicates) {}
+IndexLowering::IndexLowering() : ir_builder_(GpuLower::current()->kernel()) {}
 
 kir::Val* IndexLowering::lowerSrcIndex(kir::Val* val, kir::Val* dst) const {
   if (auto tv = dynamic_cast<kir::TensorView*>(val)) {
@@ -174,7 +172,7 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
     const auto pred = PredicateCompute::getInlinePredicate(
         rop,
         scope_utils::getLoops(active_scope_expr_),
-        thread_predicates_.getExpr(out_tv->fuserTv()),
+        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
         false);
     block_reduction_op->setPredicate(pred);
     pushBack(block_reduction_op);
@@ -249,7 +247,8 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
     // The thread predicate for GridReduction needs to be set
     // separately from the main predicate. Do not combine them like
     // other expressions.
-    const auto& thread_pred = thread_predicates_.at(out_tv->fuserTv()).pred;
+    const auto& thread_pred =
+        GpuLower::current()->threadPredMap().at(out_tv->fuserTv()).pred;
     auto grid_reduction = ir_builder_.create<kir::GridReduction>(
         grid_reduction_op, reduce_buffer, sync_buffer);
     grid_reduction->setThreadPredicate(thread_pred);
@@ -358,7 +357,7 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
     const auto pred = PredicateCompute::getInlinePredicate(
         wop,
         scope_utils::getLoops(active_scope_expr_),
-        thread_predicates_.getExpr(out_tv->fuserTv()),
+        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
         false);
     block_welford_op->setPredicate(pred);
     pushBack(block_welford_op);
@@ -388,7 +387,9 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
     // The thread predicate for GridReduction needs to be set
     // separately from the main predicate. Do not combine them like
     // other expressions.
-    const auto& thread_pred = thread_predicates_.at(out_tv->fuserTv()).pred;
+    const auto& thread_pred =
+        GpuLower::current()->threadPredMap().at(out_tv->fuserTv()).pred;
+
     auto grid_welford = ir_builder_.create<kir::GridWelford>(
         grid_welford_op,
         out_var_buffer,

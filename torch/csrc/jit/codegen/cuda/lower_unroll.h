@@ -56,12 +56,10 @@ class TORCH_CUDA_CU_API UnrollPass {
   // Take the incoming exprs and run loop unrolling, returning the new IR
   static std::vector<kir::Expr*> runPass(
       Fusion* fusion,
-      const std::vector<kir::Expr*>& exprs,
-      const ThreadPredicateMap& thread_predicates);
+      const std::vector<kir::Expr*>& exprs);
 
  private:
-  UnrollPass(Fusion* fusion, const ThreadPredicateMap& thread_predicates)
-      : thread_predicates_(thread_predicates) {
+  UnrollPass(Fusion* fusion) {
     p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs());
   }
 
@@ -85,9 +83,6 @@ class TORCH_CUDA_CU_API UnrollPass {
 
   // Keep all for loops conveniently to make unrolling easier
   std::vector<kir::ForLoop*> for_loops_;
-
-  // Map from TensorView
-  const ThreadPredicateMap& thread_predicates_;
 
   IterDomainMap p2c_root_map_;
 

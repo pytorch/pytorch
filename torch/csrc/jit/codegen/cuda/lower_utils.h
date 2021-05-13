@@ -79,14 +79,8 @@ Expr* asExpr(Statement*);
 // TODO(kir): Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
 
-//! Returns a ParallelTypeBitmap representing which domain needs
-//! blockBroadcast.
-//!
-//! Even when a domain is broadcast and parallelized, it does not need
-//! blockBroadcast unless it is predicated.
-ParallelTypeBitmap getParallelBroadcastDomains(
-    const TensorView* tv,
-    const ThreadPredicateMap& preds);
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
+bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
 
 } // namespace ir_utils
 

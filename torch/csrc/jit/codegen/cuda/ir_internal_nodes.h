@@ -520,7 +520,6 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
-  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
   bool hasVectorize() const;

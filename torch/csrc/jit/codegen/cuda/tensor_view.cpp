@@ -124,10 +124,6 @@ bool TensorView::hasGridReduction() const {
   return domain()->hasGridReduction();
 }
 
-bool TensorView::hasBlockBroadcast() const {
-  return domain()->hasBlockBroadcast();
-}
-
 bool TensorView::hasBroadcast() const {
   return domain()->hasBroadcast();
 }

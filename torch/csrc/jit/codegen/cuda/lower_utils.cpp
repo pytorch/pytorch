@@ -148,34 +148,36 @@ TensorView* asTV(Val* val) {
   return val->as<TensorView>();
 }
 
-ParallelTypeBitmap getParallelBroadcastDomains(
-    const TensorView* tv,
-    const ThreadPredicateMap& preds) {
-  // If no pred is found for tv, no predicate is necessary
-  if (preds.find(tv) == preds.end()) {
-    return ParallelTypeBitmap();
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (!isTVOp(expr)) {
+    return false;
   }
 
-  ParallelTypeBitmap parallel_broadcast;
+  auto tv = getTVOutput(expr);
 
-  const auto& iter_domains = tv->domain()->domain();
-
-  // If the output is on shared memory, assume that all subsequent
-  // reads from all threads in its CTA can be done with no parallel
-  // broadcast. Only one thread will write to shared memory followed
-  // by a proper _syncthreads.
-  const bool output_smem = tv->getMemoryType() == MemoryType::Shared;
-
-  for (auto id : iter_domains) {
-    if (!id->isBroadcast()) {
-      continue;
-    }
-    if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
-      parallel_broadcast.set(id->getParallelType(), true);
-    }
+  if ((expr->isA<ReductionOp>() || expr->isA<WelfordOp>()) &&
+      (tv->hasBlockReduction() || tv->hasGridReduction())) {
+    return true;
+  } else if (expr->isA<BroadcastOp>()) {
+    const ParallelTypeBitmap pt_map =
+        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
+    return pt_map.hasTID();
   }
 
-  return parallel_broadcast & preds.at(tv).pred;
+  return false;
+}
+
+bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (expr->isA<kir::ReductionOp>() || expr->isA<kir::GridReduction>() ||
+      expr->isA<kir::BroadcastOp>() || expr->isA<kir::WelfordOp>() ||
+      expr->isA<kir::GridWelford>()) {
+    auto fuser_tv = getTVOutput(expr)->fuserTv();
+    auto fuser_expr = fuser_tv->definition();
+    TORCH_INTERNAL_ASSERT(fuser_expr != nullptr);
+    return hasBlockSync(fuser_expr, pred_map);
+  }
+
+  return false;
 }
 
 } // namespace ir_utils

@@ -17,16 +17,15 @@ namespace cuda {
 class TORCH_CUDA_CU_API IndexLowering : private kir::IrVisitor {
  public:
   static std::vector<kir::Expr*> getIndexedExprs(
-      std::vector<kir::Expr*> incoming_exprs,
-      const ThreadPredicateMap& thread_predicates) {
+      std::vector<kir::Expr*> incoming_exprs) {
     FUSER_PERF_SCOPE("IndexLowering::getIndexedExprs");
-    IndexLowering il(thread_predicates);
+    IndexLowering il;
     il.generate(incoming_exprs);
     return il.lowered_exprs_;
   }
 
  private:
-  explicit IndexLowering(const ThreadPredicateMap& thread_predicates);
+  IndexLowering();
 
   void pushBack(kir::Expr*);
 
@@ -59,8 +58,6 @@ class TORCH_CUDA_CU_API IndexLowering : private kir::IrVisitor {
   kir::Expr* active_scope_expr_ = nullptr;
 
   kir::IrBuilder ir_builder_;
-
-  const ThreadPredicateMap& thread_predicates_;
 };
 
 } // namespace cuda
