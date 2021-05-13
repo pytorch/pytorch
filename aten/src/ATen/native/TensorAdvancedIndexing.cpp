@@ -502,6 +502,18 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
 
+  // See Note [Enabling Deterministic Operations]
+  if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()){
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (const auto i: c10::irange(dim)) {
+      (void)i;
+      indices.emplace_back();
+    }
+    indices.emplace_back(index);
+    return self.index_put_(indices, source, false);
+  }
+
   return at::_index_copy_(self, dim, index, source);
 }
 
