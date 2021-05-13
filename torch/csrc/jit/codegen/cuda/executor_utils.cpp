@@ -42,6 +42,9 @@ std::string kernelPreamble() {
 #ifndef assert
 #define assert(expr) ((void)0)
 #endif
+#ifndef __align__
+#define __align__(x) __attribute__((aligned(x)))
+#endif
   )";
 #endif
 
