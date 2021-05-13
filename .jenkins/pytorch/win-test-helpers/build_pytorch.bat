@@ -112,13 +112,22 @@ if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
    set BUILD_SPLIT_CUDA=ON
 )
 
-python setup.py install --cmake && sccache --show-stats && (
-  if "%BUILD_ENVIRONMENT%"=="" (
-    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
-  ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+:: BUILD_WHEEL is primarily used by GHA
+if "%BUILD_WHEEL%"=="1" (
+  python setup.py bdist_wheel --cmake && sccache --show-stats && (
+      :: export test times so that potential sharded tests that'll branch off this build will use consistent data
+      python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
+    )
+  )
+) else (
+  python setup.py install --cmake && sccache --show-stats && (
+    if "%BUILD_ENVIRONMENT%"=="" (
+      echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
+    ) else (
+      7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
 
-    :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
+      :: export test times so that potential sharded tests that'll branch off this build will use consistent data
+      python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
+    )
   )
 )

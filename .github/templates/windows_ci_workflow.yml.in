@@ -13,6 +13,7 @@ on:
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
+  BUILD_WHEEL: 1
   CUDA_VERSION: "cpu"
   IN_CI: 1
   JOB_BASE_NAME: test
@@ -42,12 +43,15 @@ jobs:
         shell: bash
         run: |
           .jenkins/pytorch/win-build.sh
-      - name: Archive artifacts
+      - name: Archive artifacts into zip
+        run: |
+          7z a -tzip artifacts.zip dist/ build/
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v2
         with:
           retention-days: 30
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:/w/build-results
+          path: artifacts.zip
   #TODO: Add testing phase
