@@ -3152,10 +3152,17 @@ class TestLinalg(TestCase):
                 else:
                     self.assertEqual(matrix_inverse, expected_inv)
 
-        for torch_inverse in [torch.inverse, torch.linalg.inv]:
+        # helper function for testing torch.linalg.inv_ex
+        def test_inv_ex(input, out=None):
+            if out is not None:
+                info = torch.empty(0, dtype=torch.int32, device=device)
+                return torch.linalg.inv_ex(input, out=(out, info)).inverse
+            return torch.linalg.inv_ex(input).inverse
+
+        for torch_inverse in [torch.inverse, torch.linalg.inv, test_inv_ex]:
             for batches, n in itertools.product(
-                [[], [0], [1], [2], [4], [2, 3]],
-                [0, 5, 64]
+                [[], [0], [2], [2, 1]],
+                [0, 5]
             ):
                 matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
                 run_test(torch_inverse, matrices, batches, n)
@@ -3169,6 +3176,33 @@ class TestLinalg(TestCase):
                         .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                         batches, n
                     )
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @skipCUDAIfRocm
+    def test_inv_ex_singular(self, device, dtype):
+        # if the input matrix is not invertible, info with positive integer is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is singular
+        info = torch.linalg.inv_ex(A).info
+        self.assertEqual(info, 3)
+        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+            torch.linalg.inv_ex(A, check_errors=True)
+
+        # if at least one matrix in the batch is not positive definite,
+        # batched info with positive integer for the corresponding matrix is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A = A.reshape((1, 3, 3))
+        A = A.repeat(5, 1, 1)
+        A[3, -2, -2] = 0  # Now A[3] is singular
+        info = torch.linalg.inv_ex(A).info
+
+        expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+        expected_info[3] = 2
+        self.assertEqual(info, expected_info)
+        with self.assertRaisesRegex(RuntimeError, r'For batch 3: U\(2,2\) is zero, singular U\.'):
+            torch.linalg.inv_ex(A, check_errors=True)
 
     @slowTest
     @skipCUDAIfNoMagmaAndNoCusolver
