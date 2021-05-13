@@ -29,15 +29,19 @@ class col:
     UNDERLINE = "\033[4m"
 
 
+def should_color() -> bool:
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
 def color(the_color: str, text: str) -> str:
-    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+    if should_color():
         return col.BOLD + the_color + str(text) + col.RESET
     else:
         return text
 
 
 def cprint(the_color: str, text: str) -> None:
-    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+    if should_color():
         print(color(the_color, text))
     else:
         print(text)
@@ -161,30 +165,26 @@ async def run_flake8(files: Optional[List[str]], quiet: bool) -> bool:
 
 
 async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
+    env = os.environ.copy()
+    if should_color():
+        # Secret env variable: https://github.com/python/mypy/issues/7771
+        env["MYPY_FORCE_COLOR"] = "1"
+
     if files is not None:
         # Running quick lint, use mypy-wrapper instead so it checks that the files
         # actually should be linted
-        stdout = ""
-        stderr = ""
-        passed = True
 
-        # Pass each file to the mypy_wrapper script
-        # TODO: Fix mypy wrapper to mock mypy's args and take in N files instead
-        # of just 1 at a time
-        for f in files:
-            f = os.path.join(REPO_ROOT, f)
-            f_passed, f_stdout, f_stderr = await shell_cmd(
-                [sys.executable, "tools/mypy_wrapper.py", f]
-            )
-            if not f_passed:
-                passed = False
+        passed, stdout, stderr = await shell_cmd(
+            [sys.executable, "tools/mypy_wrapper.py"] + [
+                os.path.join(REPO_ROOT, f) for f in files
+            ],
+            env=env,
+        )
 
-            if f_stdout != "":
-                stdout += f_stdout + "\n"
-            if f_stderr != "":
-                stderr += f_stderr + "\n"
-
-        print_results("mypy (skipped typestub generation)", passed, [stdout, stderr])
+        print_results("mypy (skipped typestub generation)", passed, [
+            stdout + "\n",
+            stderr + "\n",
+        ])
         return passed
 
     # Not running quicklint, so use lint.yml
@@ -200,6 +200,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
             "Run autogen",
         ],
         redirect=False,
+        env=env,
     )
     passed, _, _ = await shell_cmd(
         [
@@ -213,6 +214,7 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
             "Run mypy",
         ],
         redirect=False,
+        env=env,
     )
     return passed
 

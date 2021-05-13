@@ -203,21 +203,22 @@ def run_benchmark(rank, model, data, config):
     else:
         # trainers = [0, trainer_count)
         trainer_configs = config.trainer_config["configurations"]
-        ps_configs = config.ps_config["configurations"]
-        if (USE_CUDA_RPC in trainer_configs and
-            trainer_configs[USE_CUDA_RPC] and
-            USE_CUDA_RPC in ps_configs and
-            ps_configs[USE_CUDA_RPC] and
-                config.ps_count > 0):
-            ps_rank = get_ps_rank(rank, config)
-            ps_name = get_name(
-                ps_rank,
-                config
-            )
-            rpc_backend_options.set_device_map(
-                ps_name,
-                {rank: ps_rank}
-            )
+        if config.ps_count > 0:
+            ps_configs = config.ps_config["configurations"]
+            if (USE_CUDA_RPC in trainer_configs and
+                trainer_configs[USE_CUDA_RPC] and
+                USE_CUDA_RPC in ps_configs and
+                ps_configs[USE_CUDA_RPC] and
+                    config.ps_count > 0):
+                ps_rank = get_ps_rank(rank, config)
+                ps_name = get_name(
+                    ps_rank,
+                    config
+                )
+                rpc_backend_options.set_device_map(
+                    ps_name,
+                    {rank: ps_rank}
+                )
         trainer_name = get_name(
             rank,
             config
