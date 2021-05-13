@@ -13,6 +13,8 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
+#include <set>
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
@@ -97,6 +99,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
       .value("MLC", c10::DeviceType::MLC)
+      .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
@@ -187,8 +190,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-  m.def("_add_metadata", addMetadata);
 #endif
+
+  m.def("_add_metadata", [](const std::string& key, const std::string& value) {
+#ifdef USE_KINETO
+      addMetadata(key, value);
+#else
+      LOG(WARNING) << "Adding profiling metadata requires using "
+                   << "torch.profiler with Kineto support (USE_KINETO=1)";
+#endif
+  });
 
   m.def("kineto_available", []() {
 #ifdef USE_KINETO
@@ -196,6 +207,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #else
     return false;
 #endif
+  });
+
+  m.def("supported_kineto_activities", []() {
+    std::set<ActivityType> activities;
+#ifdef USE_KINETO
+    activities.insert(ActivityType::CPU);
+#ifndef LIBKINETO_NOCUPTI
+    if (at::getNumGPUs() > 0 && !at::hasHIP()) {
+      activities.insert(ActivityType::CUDA);
+    }
+#endif
+#endif
+    return activities;
   });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);

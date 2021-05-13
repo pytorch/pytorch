@@ -1055,6 +1055,12 @@ def create_handler(
     """Creates a new :py:class:`DynamicRendezvousHandler` from the specified
     parameters.
 
+    Args:
+        store:
+            The C10d store to return as part of the rendezvous.
+        backend:
+            The backend to use to hold the rendezvous state.
+
     +-------------------+------------------------------------------------------+
     | Parameter         | Description                                          |
     +===================+======================================================+

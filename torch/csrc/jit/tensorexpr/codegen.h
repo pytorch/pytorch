@@ -89,6 +89,9 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+ protected:
+  static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
+
  private:
   Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
