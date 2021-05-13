@@ -1484,6 +1484,27 @@
 - func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+- func: gradient.scalarint(Tensor self, *, Scalar? spacing=None, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalararray(Tensor self, *, Scalar spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.array(Tensor self, *, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalarrayint(Tensor self, *, Scalar[] spacing, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.scalarrayarray(Tensor self, *, Scalar[] spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.tensorarrayint(Tensor self, *, Tensor[] spacing, int? dim=None, int edge_order=1) -> Tensor[]
+  variants: function
+
+- func: gradient.tensorarray(Tensor self, *, Tensor[] spacing, int[] dim, int edge_order=1) -> Tensor[]
+  variants: function
+
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4032,29 +4053,32 @@
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function
+  structured_delegate: threshold.out
   dispatch:
-    CPU: threshold
-    CUDA: threshold_cuda
     QuantizedCPU: threshold_quantized_cpu
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
-  dispatch:
-    CPU: threshold_
-    CUDA: threshold__cuda
+  structured_delegate: threshold.out
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: threshold_out
-    CUDA: threshold_out_cuda
+    CPU, CUDA: threshold_out
+
+- func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: threshold_backward_out
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
+  structured_delegate: threshold_backward.grad_input
   dispatch:
-    CPU: threshold_backward
-    CUDA: threshold_backward_cuda
     MkldnnCPU: mkldnn_relu_backward
 
 - func: tile(Tensor self, int[] dims) -> Tensor
@@ -6414,6 +6438,16 @@
   dispatch:
     CompositeExplicitAutograd: lu_solve
 
+- func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
+  variants: function
+  dispatch:
+    CPU, CUDA: lu_unpack
+
+- func: lu_unpack.out(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True, *, Tensor(a!) P, Tensor(b!) L, Tensor(c!) U) -> (Tensor(a!) P, Tensor(b!) L, Tensor(c!) U)
+  variants: function
+  dispatch:
+    CPU, CUDA: lu_unpack_out
+
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6861,15 +6895,15 @@
   variants: method, function
 
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  structured: True
   dispatch:
     CPU: topk_out_cpu
     CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
+  structured_delegate: topk.values
   dispatch:
-    CPU: topk
-    CUDA: topk_cuda
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
@@ -8445,15 +8479,14 @@
 
 - func: max_pool2d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: max_pool2d_with_indices_backward_out_cpu
     CUDA: max_pool2d_with_indices_backward_out_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: max_pool2d_with_indices_backward_cpu
-    CUDA: max_pool2d_with_indices_backward_cuda
+  structured_delegate: max_pool2d_with_indices_backward.grad_input
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -9838,3 +9871,15 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_backward_kernel
+
+- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
+  python_module: nn
+  variants: function
+
+- func: flatten_dense_tensors(Tensor[] tensors) -> Tensor
+  variants: function
+  python_module: nn
+
+- func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
+  variants: function
+  python_module: nn
