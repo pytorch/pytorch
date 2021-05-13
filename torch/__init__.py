@@ -359,10 +359,6 @@ def use_deterministic_algorithms(mode):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
-    .. warning::
-        This feature is in beta, and its design and implementation may change
-        in the future.
-
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -375,12 +371,17 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=False``
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.gather` when ``input`` dimension is one and called
           on a CUDA tensor that requires grad
+        * :func:`torch.index_add` when called on CUDA tensor
+        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
+        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -405,24 +406,20 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.NLLLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_copy`
-        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
-        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
-        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``

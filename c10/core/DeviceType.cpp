@@ -37,8 +37,11 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "xpu" : "XPU";
     case DeviceType::Meta:
       return lower_case ? "meta" : "META";
+    case DeviceType::HPU:
+      return lower_case ? "hpu" : "HPU";
     default:
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Unknown device: ",
           static_cast<int16_t>(d),
           ". If you have recently updated the caffe2.proto file to add a new "
@@ -74,6 +77,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::Metal:
     case DeviceType::XPU:
     case DeviceType::Meta:
+    case DeviceType::HPU:
       return true;
     default:
       return false;

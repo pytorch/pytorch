@@ -97,19 +97,24 @@ class StoreTestBase(object):
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
-    def test_compare_set(self):
-        store = self._create_store()
-        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+    def _test_compare_set(self, store):
+        missing_key_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
         self.assertEqual(b"wrong_old_value", missing_key_result)
 
-        store.set("key0", "value0")
-        self.assertEqual(b"value0", store.get("key0"))
-        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        store.set("cs_key0", "value0")
+        self.assertEqual(b"value0", store.get("cs_key0"))
+        old_value_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
         self.assertEqual(b"value0", old_value_result)
-        self.assertEqual(b"value0", store.get("key0"))
-        new_value_result = store.compare_set("key0", "value0", "new_value0")
+        self.assertEqual(b"value0", store.get("cs_key0"))
+        new_value_result = store.compare_set("cs_key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", new_value_result)
-        self.assertEqual(b"new_value0", store.get("key0"))
+        self.assertEqual(b"new_value0", store.get("cs_key0"))
+        empty_old_value_result = store.compare_set("cs_key1", "", "new_value1")
+        self.assertEqual(b"new_value1", empty_old_value_result)
+        self.assertEqual(b"new_value1", store.get("cs_key1"))
+
+    def test_compare_set(self):
+        self._test_compare_set(self._create_store())
 
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
@@ -686,8 +691,8 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
-            self.assertTrue(ddp_logging_data.is_multi_device_module)
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.get("is_multi_device_module"))
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
                 process_group,
@@ -696,8 +701,8 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
-            self.assertFalse(ddp_logging_data.is_multi_device_module)
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
+            self.assertFalse(ddp_logging_data.get("is_multi_device_module"))
 
         def step_model(model, input, target):
             model.train()
@@ -885,6 +890,92 @@ class AbstractCommTest(object):
     def world_size(self):
         return 2
 
+    def _verify_sequence_number_across_pg(self, pg, verify_pg):
+
+        seq_num = pg._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
+        # We use a separate pg to verify the sequence numbers, otherwise these
+        # collectives will themselves increment the sequence number.
+        dist.all_gather_object(obj_list, seq_num, group=verify_pg)
+        self.assertEqual(len(set(obj_list)), 1)
+        return obj_list[0]
+
+    def _test_sequence_num_incremented(self, process_group, ranks):
+        # verify initial sequence numbers. Use a distinct process group for
+        # verification to keep counts as expected with respect to process_group.
+        verify_pg = dist.new_group(
+            ranks=ranks,
+            backend="gloo",
+        )
+        assert dist.get_world_size(process_group) == dist.get_world_size(verify_pg)
+
+        initial_num = (
+            self._verify_sequence_number_across_pg(
+                pg=process_group, verify_pg=verify_pg
+            )
+            if not c10d.distributed_c10d._rank_not_in_group(process_group)
+            else -1
+        )
+
+        # Verify sequence numbers are appropriately incremented
+        for i in range(10):
+            t = torch.ones(1, device=torch.cuda.current_device())
+            dist.all_reduce(t, group=process_group)
+            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+                seq_num = self._verify_sequence_number_across_pg(
+                    pg=process_group,
+                    verify_pg=verify_pg,
+                )
+                self.assertEqual(initial_num + i + 1, seq_num)
+
+        if dist.get_world_size(process_group) > 2:
+            # Test when certain ranks don't call collectives
+            if dist.get_rank(process_group) not in [0, 2]:
+                dist.all_reduce(t, group=process_group, async_op=True)
+            # Now ranks 0 and 2 should be lagging by 1.
+            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+                seq_num = process_group._get_sequence_number_for_group()
+                rank = dist.get_rank(process_group)
+                obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
+                dist.all_gather_object(obj_list, (rank, seq_num), group=verify_pg)
+                rank_to_seq_num = {rank: num for (rank, num) in obj_list}
+                self.assertEqual(len(set(rank_to_seq_num.values())), 2)
+                self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
+                expected_same = {
+                    rank_to_seq_num[i]
+                    for i in rank_to_seq_num.keys()
+                    if i not in [0, 2]
+                }
+                self.assertEqual(len(expected_same), 1)
+                self.assertEqual(rank_to_seq_num[0] + 1, rank_to_seq_num[1])
+
+    def _test_sequence_num_incremented_default_group(self, backend_name):
+        torch.cuda.set_device(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend_name,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self._test_sequence_num_incremented(
+            c10d.distributed_c10d._get_default_group(),
+            ranks=list(i for i in range(dist.get_world_size())),
+        )
+
+    def _test_sequence_num_incremented_subgroup(self, backend_name):
+        torch.cuda.set_device(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend_name,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        subgroup_ranks = [0, 1, 2]
+        subgroup = dist.new_group(subgroup_ranks)
+        self._test_sequence_num_incremented(subgroup, subgroup_ranks)
+
     def _test_sequence_num_set_default_pg(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -910,10 +1001,12 @@ class AbstractCommTest(object):
         )
 
         subgroup = dist.new_group([0, 1])
-        subgroup_seq = subgroup._get_sequence_number_for_group()
-        obj_list = [None for _ in range(dist.get_world_size())]
-        dist.all_gather_object(obj_list, subgroup_seq)
-        self.assertEqual(len(set(obj_list)), 1)
+
+        if not c10d.distributed_c10d._rank_not_in_group(subgroup):
+            subgroup_seq = subgroup._get_sequence_number_for_group()
+            obj_list = [None for _ in range(dist.get_world_size(subgroup))]
+            dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
+            self.assertEqual(len(set(obj_list)), 1)
 
 
 @unittest.skipIf(
