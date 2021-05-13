@@ -60,7 +60,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif defined(__CUDACC__)
+#elif !defined(__HIP_PLATFORM_HCC__)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
