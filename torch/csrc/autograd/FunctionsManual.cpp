@@ -2432,7 +2432,7 @@ Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const 
 
   // This check just can be triggered in the backwards of torch.symeig
   TORCH_CHECK(eigenvectors,
-           "symeig_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
+           "eigh_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
            "Use torch.linalg.eigvalsh(A) instead.");
 
   const auto gL = grads[0];
