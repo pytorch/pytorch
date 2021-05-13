@@ -1566,7 +1566,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), device])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_tensor_scalar_ops(self):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
@@ -1675,7 +1674,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: enable in ir eval")
     def test_ternary_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(x, y, z)
