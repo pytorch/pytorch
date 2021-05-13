@@ -23,8 +23,6 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
-  # kineto is currently bugged on GHA due to a linker error
-  USE_KINETO: "0"
 
 jobs:
   build:
