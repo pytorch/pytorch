@@ -55,7 +55,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
-      .value("KINETO", ProfilerState::KINETO);
+      .value("KINETO", ProfilerState::KINETO)
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -180,7 +181,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // Whether this is async event or not
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
-      });
+      })
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)
@@ -192,9 +194,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_prepare_profiler", prepareProfiler);
 #endif
 
-  m.def("_add_metadata", [](const std::string& key, const std::string& value) {
+  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
 #ifdef USE_KINETO
-      addMetadata(key, value);
+      addMetadataJson(key, value);
 #else
       LOG(WARNING) << "Adding profiling metadata requires using "
                    << "torch.profiler with Kineto support (USE_KINETO=1)";
