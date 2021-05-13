@@ -137,13 +137,13 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
     @dist_utils.dist_init
     def test_forward_async(self):
@@ -544,6 +544,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             r"Expected one of .+ device type at start of device string",
         ):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "{}/foo".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -554,6 +555,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             RuntimeError, r"CUDA error: invalid device ordinal"
         ):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "{}/cuda:100".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -562,6 +564,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "{}/cpu2".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -570,6 +573,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "{}/".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -581,6 +585,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
         ):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "{}/cuda:0/cuda:1".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -592,6 +597,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
         ):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "/",
                     modes=[ModuleCreationMode.MODULE_CTOR],
@@ -603,6 +609,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
         ):
             list(
+                m.forward() for m in
                 self._create_remote_module_iter(
                     "/cuda:0",
                     modes=[ModuleCreationMode.MODULE_CTOR],
