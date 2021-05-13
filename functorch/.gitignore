@@ -6,3 +6,4 @@ functorch/version.py
 functorch/_C.so
 .gdbinit
 t.py
+.vscode/
