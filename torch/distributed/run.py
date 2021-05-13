@@ -360,14 +360,6 @@ def get_args_parser() -> ArgumentParser:
         help="Skip prepending the training script with 'python' - just execute it directly. Useful "
         "when the script is not a Python script.",
     )
-
-    parser.add_argument(
-        "--run_path",
-        action=check_env,
-        help="Run the training script with runpy.run_path in the same interpreter."
-        " Script must be provided as an abs path (e.g. /abs/path/script.py)."
-        " Takes precedence over --no_python.",
-    )
     parser.add_argument(
         "--log_dir",
         action=env,
@@ -557,47 +549,30 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
 
     with_python = not args.no_python
     cmd = []
-    if args.run_path:
-        cmd.append(run_script_path)
-        cmd.append(args.training_script)
+    if with_python:
+        cmd = [sys.executable, "-u"]
+        if args.module:
+            cmd.append("-m")
     else:
-        if with_python:
-            cmd = [sys.executable, "-u"]
-            if args.module:
-                cmd.append("-m")
-        else:
-            if not args.use_env:
-                raise ValueError(
-                    "When using the '--no_python' flag,"
-                    " you must also set the '--use_env' flag."
-                )
-            if args.module:
-                raise ValueError(
-                    "Don't use both the '--no_python' flag"
-                    " and the '--module' flag at the same time."
-                )
-        cmd.append(args.training_script)
+        if not args.use_env:
+            raise ValueError(
+                "When using the '--no_python' flag,"
+                " you must also set the '--use_env' flag."
+            )
+        if args.module:
+            raise ValueError(
+                "Don't use both the '--no_python' flag"
+                " and the '--module' flag at the same time."
+            )
+    cmd.append(args.training_script)
     if not args.use_env:
         log.warning(
-            "--use_env is deprecated and will be removed in future releases.\n"
-            " Please read local_rank from `os.environ('LOCAL_RANK')` instead."
+            "`torch.distributed.launch` is Deprecated. Use torch.distributed.run"
         )
         cmd.append(f"--local_rank={macros.local_rank}")
     cmd.extend(args.training_script_args)
 
     return config, cmd
-
-
-def run_script_path(training_script: str, *training_script_args: str):
-    """
-    Runs the provided `training_script` from within this interpreter.
-    Usage: `script_as_function("/abs/path/to/script.py", "--arg1", "val1")`
-    """
-    import runpy
-    import sys
-
-    sys.argv = [training_script] + [*training_script_args]
-    runpy.run_path(sys.argv[0], run_name="__main__")
 
 
 def run(args):
