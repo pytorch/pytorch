@@ -132,6 +132,8 @@ class AbstractTestCases:
             self.assertEqual(x.half().dtype, torch.float16)
             self.assertEqual(x.int().dtype, torch.int32)
             self.assertEqual(x.bfloat16().dtype, torch.bfloat16)
+            self.assertEqual(x.cfloat().dtype, torch.complex64)
+            self.assertEqual(x.cdouble().dtype, torch.complex128)
 
         def test_doc_template(self) -> None:
             from torch._torch_docs import __file__ as doc_file
