@@ -55,8 +55,15 @@ void batch_norm_elementwise(
     c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
-      batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
-          out, self, *weight, *bias, mean_, invstd_);
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      if ((weight->defined() && weight->scalar_type() != self.scalar_type()) ||
+          (bias->defined() && bias->scalar_type() != self.scalar_type())) {
+        batch_norm_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
+            out, self, *weight, *bias, mean_, invstd_);
+      } else {
+        batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
+            out, self, *weight, *bias, mean_, invstd_);
+      }
     });
     return;
   }
@@ -123,8 +130,14 @@ Tensor batch_norm_elementwise_backward_train(
   case Impl::Contiguous: {
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_elemt", [&] {
-      return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
-          grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
+        return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
+            grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
+      } else {
+        return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
+            grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
+      }
     });
   }
   case Impl::ChannelsLast: {
@@ -430,9 +443,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
       cuda::detail::canUse32BitIndexMath(grad_out)) {
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_cuda", [&] {
-      return batch_norm_backward_cuda_template<scalar_t, scalar_t, int32_t>(
-          grad_out, input, *weight, *running_mean, *running_var,
-          *save_mean, *save_invstd, train, epsilon, grad_input_mask);
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      if (weight->defined() && weight->scalar_type() != input.scalar_type()) {
+          return batch_norm_backward_cuda_template<scalar_t, accscalar_t, int32_t>(
+              grad_out, input, *weight, *running_mean, *running_var,
+              *save_mean, *save_invstd, train, epsilon, grad_input_mask);
+      } else {
+          return batch_norm_backward_cuda_template<scalar_t, scalar_t, int32_t>(
+              grad_out, input, *weight, *running_mean, *running_var,
+              *save_mean, *save_invstd, train, epsilon, grad_input_mask);
+      }
     });
   }
 
@@ -444,7 +464,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   if (save_mean->defined()) {
     mean = *save_mean;
   } else if (needs_reduction) {
-    TORCH_CHECK(running_mean->defined());
+    TORCH_CHECK(!train && running_mean->defined());
     mean = (running_mean->scalar_type() == acc_type) ?
         *running_mean : running_mean->to(acc_type);
   }
@@ -453,7 +473,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   if (save_invstd->defined()) {
     invstd = *save_invstd;
   } else {
-    TORCH_CHECK(running_var->defined());
+    TORCH_CHECK(!train && running_var->defined());
     auto n_channels = input.sizes()[1];
     invstd = at::empty({n_channels}, input.options().dtype(acc_type));
     batch_norm_calc_invstd(invstd, *running_var, epsilon);
@@ -470,6 +490,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   Tensor grad_input;
   if (grad_input_mask[0]) {
     if (train) {
+      // NOTE: sum_dy and sum_dy_xmy are defined, as train implies needs_reduction
       grad_input = batch_norm_elementwise_backward_train(
           grad_out, input, mean, invstd, *weight, sum_dy, sum_dy_xmu);
     } else {
@@ -571,22 +592,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
         grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, grad_output.scalar_type(), "batch_norm_backward_reduce", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(), "batch_norm_backward_reduce", [&] {
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
     TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
-    const bool is_half_float = weight.defined() &&
-        weight.scalar_type() != input.scalar_type();
+    const bool is_mixed_type = weight.defined() && weight.scalar_type() != input.scalar_type();
     using accscalar_t = at::acc_type<scalar_t, true>;
 
     if (cuda::detail::canUse32BitIndexMath(grad_output)) {
-      if (is_half_float) {
+      if (is_mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       }
     } else {
-      if (is_half_float) {
+      if (is_mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
@@ -610,15 +630,16 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
     TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
     bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
     bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
+    using accscalar_t = at::acc_type<scalar_t, true>;
     if (cuda::detail::canUse32BitIndexMath(self)) {
       if (is_half_float || is_bfloat16_float) {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {
         return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       }
     } else {
       if (is_half_float || is_bfloat16_float) {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {
         return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       }
