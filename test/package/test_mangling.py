@@ -82,6 +82,7 @@ class TestMangling(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = BytesIO()
         with PackageExporter(f1, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
         f1.seek(0)
         importer1 = PackageImporter(f1)
