@@ -3278,9 +3278,9 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divident :attr:`input`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - \text{tquot} * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - tquot * \text{{other}}_i
 
-where :math:`\text{tquot}` is the truncated quotient value (rounded towards zero).
+where :math:`tquot` is the truncated quotient value (rounded towards zero).
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -7632,9 +7632,9 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divisor :attr:`other`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - \text{rquot} * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - rquot * \text{{other}}_i
 
-where :math:`\text{rquot}` is the rounded quotient value (rounded towards nearest integer).
+where :math:`rquot` is the rounded quotient value (rounded towards nearest integer).
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
