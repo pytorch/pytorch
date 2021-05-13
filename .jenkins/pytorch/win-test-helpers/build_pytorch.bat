@@ -114,11 +114,7 @@ if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
 
 :: BUILD_WHEEL is primarily used by GHA
 if "%BUILD_WHEEL%"=="1" (
-  python setup.py bdist_wheel --cmake && sccache --show-stats && (
-      :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-      python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
-    )
-  )
+  python setup.py bdist_wheel --cmake && sccache --show-stats
   :: Exit before running 2nd build
   EXIT /B 0
 ) else (
