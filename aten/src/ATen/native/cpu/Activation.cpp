@@ -84,7 +84,7 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
 }
 
 static void threshold_kernel(
-    TensorIterator& iter,
+    TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "threshold_cpu", [&] {
