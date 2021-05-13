@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+import collections
+import sys
 import types
 from typing import (
     Any,
@@ -17,6 +19,7 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.distributed.rpc.internal import _internal_rpc_pickler
 from torch.distributed.rpc.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
@@ -41,6 +44,8 @@ _REMOTE_MODULE_PICKLED_ATTRIBUTES = (
     "generated_methods",
     "module_rref",
 )
+
+_SerializedRemoteModule = collections.namedtuple("_SerializedRemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES)  # type: ignore[misc]
 
 # These attributes are mostly from RemoteModule's parent class and are not pickled.
 # A new attribute of RemoteModule must be either in _REMOTE_MODULE_PICKLED_ATTRIBUTES
@@ -291,28 +296,14 @@ class _RemoteModule(nn.Module):
         return self.module_rref
 
     def __getstate__(self):
-        # Only pickle the attributes in _REMOTE_MODULE_PICKLED_ATTRIBUTES,
-        # and check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
-        attrs = {}
-        for k, v in self.__dict__.items():
-            if k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
-                attrs[k] = v
-            elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
-                raise RuntimeError(
-                    "Attribute ``{}`` of RemoteModule must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` "
-                    " or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
-                )
-
-        return attrs
+        raise RuntimeError(
+            "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC"
+        )
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
-
-        # Install generated methods when unpickled.
-        for method in self.generated_methods:
-            method_name = method.__name__
-            method = torch.jit.export(method)
-            setattr(self, method_name, types.MethodType(method, self))
+        raise RuntimeError(
+            "Cannot unpickle RemoteModule in python pickler. RemoteModule can only be unpickled when using RPC"
+        )
 
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
@@ -512,3 +503,55 @@ class RemoteModule(_RemoteModule):
         kwargs: Dict[str, Any] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
+
+
+def _remote_module_receiver(
+    *remote_module_pickled_attrs,
+):
+    """
+    Deserializes a RemoteModule.
+    """
+    serialized_remote_module = _SerializedRemoteModule._make(
+        remote_module_pickled_attrs
+    )
+    m = object.__new__(RemoteModule)  # type: ignore[attr-defined]
+    m.__dict__.update(serialized_remote_module._asdict())
+
+    # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
+    m.module_rref = rpc.PyRRef._deserialize(m.module_rref)
+
+    # Install generated methods when unpickled.
+    for method in m.generated_methods:
+        method_name = method.__name__
+        method = torch.jit.export(method)
+        setattr(m, method_name, types.MethodType(method, m))
+
+    return m
+
+
+def _remote_module_reducer(remote_module):
+    """
+    Serializes a RemoteModule.
+    """
+    pickled_attrs = {}
+    for k, v in remote_module.__dict__.items():
+        # Pickling the attribute `module_rref` must invoke RRef's `_serialize()` method.
+        if k == "module_rref":
+            pickled_attrs[k] = v._serialize()
+        elif k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:  # type: ignore[attr-defined]
+            pickled_attrs[k] = v
+        # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
+        elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:  # type: ignore[attr-defined]
+            print(
+                "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
+                "To pickle this attribute, it must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
+                "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k),
+                file=sys.stderr,
+            )
+
+    return (
+        _remote_module_receiver,
+        tuple(pickled_attrs.values()),
+    )
+
+_internal_rpc_pickler._register_reducer(RemoteModule, _remote_module_reducer)
