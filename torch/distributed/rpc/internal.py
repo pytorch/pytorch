@@ -150,7 +150,7 @@ class _InternalRPCPickler:
 
     def deserialize(self, binary_data, tensor_table):
         r"""
-        Deserilize binary string + tensor table to original obj
+        Deserialize binary string + tensor table to original obj
         """
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
