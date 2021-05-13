@@ -28,7 +28,7 @@
 
 #ifdef __HIP_PLATFORM_HCC__
 #define NO_ROCM(x)
-#include <cub/util_type.hpp>
+#include <hipcub/backend/rocprim/util_type.hpp>
 #else
 #define NO_ROCM(x) x
 
