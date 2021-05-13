@@ -1273,6 +1273,10 @@ class {test_classname}(torch.nn.Module):
             optimized_model = optimization.prepare_for_inference(model)
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
 
+            optimized_model2 = optimization.prepare_for_inference(model, pass_config={"conv_bn_fuse": False, "remove_dropout": False})
+            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+
+
     @skipIfNoTorchVision
     @skipIfNoMkldnn
     def test_prepare_for_inference_cpu_torchvision(self):

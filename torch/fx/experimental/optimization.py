@@ -1,7 +1,7 @@
 import torch.fx as fx
 from torch.fx.node import Argument, Target
 from torch.nn.utils.fusion import fuse_conv_bn_eval
-from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast, Callable
+from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -233,7 +233,7 @@ class UnionFind:
 
 def prepare_for_inference(
     model: torch.nn.Module,
-    use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length,
+    pass_config: Optional[Dict[str, any]] = None,
     tracer: Type[fx.Tracer] = fx.Tracer
 ) -> torch.nn.Module:
     """
@@ -249,8 +249,25 @@ def prepare_for_inference(
     Note: As FX does not currently handle aliasing, this pass currently
     assumes nothing aliases. If that isn't true, use at your own risk.
     """
-    model = fuse(model)
-    model = remove_dropout(model)
+    default_pass_config = {
+        "conv_bn_fuse": True,
+        "remove_dropout": True,
+        "mkldnn_layout_optimize": {'heuristic': use_mkl_length},
+    }
+    if pass_config is None:
+        pass_config = {}
+    default_pass_config = default_pass_config.update(pass_config)
+
+    if default_pass_config["conv_bn_fuse"]:
+        model = fuse(model)
+    if default_pass_config["remove_dropout"]:
+        model = remove_dropout(model)
+    if default_pass_config["mkldnn_layout_optimize"] is False:
+        return model
+    if "heuristic" not in default_pass_config["mkldnn_layout_optimize"]:
+        raise RuntimeError("Heuristic not found in mkldnn_layout_optimize config")
+    use_mkl_heuristic = default_pass_config["mkldnn_layout_optimize"]["heuristic"]
+
     cur_tracer = tracer()
     fx_graph = cur_tracer.trace(copy.deepcopy(model))
     fx_model = fx.GraphModule(cur_tracer.root, fx_graph)
