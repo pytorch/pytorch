@@ -18,7 +18,7 @@ SET(AVX512_CODE "
   int main()
   {
     __m512i a = {0, 0, 0, 0, 0, 0, 0, 0};
-    a = _mm512_set1_epi64(0);
+    a = _mm512_set1_epi8(0);
     return 0;
   }
 ")

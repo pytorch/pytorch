@@ -1,6 +1,11 @@
 #include <ATen/cpu/FlushDenormal.h>
 
+#if defined(CPU_CAPABILITY_AVX512)
 #include <ATen/cpu/vec/vec512/intrinsics.h>
+#else
+#include <ATen/cpu/vec/vec256/intrinsics.h>
+#endif
+
 #include <cpuinfo.h>
 
 namespace at { namespace cpu {

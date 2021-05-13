@@ -18,9 +18,10 @@ namespace {
 
 template <> class Vectorize<float> {
 private:
-  __m512 values;
   static constexpr __m512i zero_vec {0, 0, 0, 0, 0, 0, 0, 0};
 public:
+  // values needs to be public, as vec512.h uses it
+  __m512 values;
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {

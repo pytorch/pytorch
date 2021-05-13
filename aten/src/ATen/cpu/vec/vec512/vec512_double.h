@@ -18,9 +18,11 @@ namespace {
 
 template <> class Vectorize<double> {
 private:
-  __m512d values;
   static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
 public:
+  // values needs to be public for compilation with clang
+  // as vec512.h uses it
+  __m512d values;
   using value_type = double;
   using size_type = int;
   static constexpr size_type size() {
