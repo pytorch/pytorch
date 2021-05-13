@@ -3278,7 +3278,7 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divident :attr:`input`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - \text{{tquot}} * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - \text{tquot} * \text{{other}}_i
 
 where :math:`\text{tquot}` is the truncated quotient value (rounded towards zero).
 
@@ -7632,7 +7632,7 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divisor :attr:`other`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - \text{{rquot}} * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - \text{rquot} * \text{{other}}_i
 
 where :math:`\text{rquot}` is the rounded quotient value (rounded towards nearest integer).
 
