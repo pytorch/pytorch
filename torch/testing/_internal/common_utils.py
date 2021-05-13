@@ -1784,14 +1784,16 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
             replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
         else:
-            # An assert is required? It's already done above (L1766)
-            # assert dtype in complex_types()
+            assert dtype in complex_types()
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
             real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
             imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
             replace_with = torch.complex(real, imag)
         for exclude_val in exclude_values:
-            result[result == exclude_val] = replace_with
+            if dtype is torch.bool:
+                result[result == exclude_val] = replace_with
+            else:
+                result[result == exclude_val] = exclude_val + replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():

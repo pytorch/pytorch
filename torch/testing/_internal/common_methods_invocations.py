@@ -2700,25 +2700,29 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
     )
     return [SampleInput(tensor) for tensor in tensors]
 
-def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, autodiffed_args=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    cases = (
-        ((S, S, S), (), 1.5, False),
-        ((), 1.5, (), False),
-        ((S, S, S), (S, S, S), 1.5, False)
-    )
+    if autodiffed_args:
+        samples = (
+            ((S, S, S), 1.5, (), False),
+            ((), 1.5, (), False)
+        )
+    else:
+        cases = (
+            ((S, S, S), (), 1.5, False),
+            ((S, S, S), (S, S, S), 1.5, False),
+            ((S, S, S), (S,), 1.5, False),
+        )
 
-    # Sample inputs with broadcasting
-    cases_with_broadcasting = (
-        ((S,), (S, S, S), 1.5, True),
-        ((S, S, S), (S,), 1.5, True),
-        ((S, 1, S), (S, S), 1.5, True),
-        ((), (S, S, S), 1.5, True),
-        ((S, S, S), 1.5, (), True)
-    )
+        # Sample inputs with broadcasting
+        cases_with_broadcasting = (
+            ((S,), (S, S, S), 1.5, True),
+            ((S, 1, S), (S, S, S), 1.5, True),
+            ((), (S, S, S), 1.5, True)
+        )
 
-    samples = cases + cases_with_broadcasting
+        samples = cases + cases_with_broadcasting
 
     def generator():
         for shape, shape_other, add_other, broadcasts_input in samples:
@@ -4375,19 +4379,22 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('fmod',
            dtypes=all_types_and(torch.float16, torch.bool),
-           sample_inputs_func=sample_inputs_fmod_remainder,
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-           ),),
+           sample_inputs_func=sample_inputs_fmod_remainder),
+    OpInfo('fmod',
+           variant_test_name='autodiffed_args',
+           dtypes=all_types_and(torch.float16, torch.bool),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed_args=True)),
     OpInfo('remainder',
            dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
-           sample_inputs_func=sample_inputs_fmod_remainder,
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-           ),),
+           sample_inputs_func=sample_inputs_fmod_remainder),
+    OpInfo('remainder',
+           variant_test_name='autodiffed_args',
+           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed_args=True)),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
