@@ -208,7 +208,6 @@ Tensor internal_new_from_data(
     bool type_inference,
     bool pin_memory = false) {
 
-
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
@@ -350,7 +349,6 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 // TODO: Make this accept options instead of dispatch key
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
-    
     TORCH_CHECK(dispatchKeyToDeviceType(dispatch_key) == device.value().type(),
              "legacy constructor expects device type: ", dispatchKeyToDeviceType(dispatch_key),
              "but device type: ", device.value().type(), " was passed");
@@ -773,12 +771,7 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
 
-
-
-
-
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
   });
@@ -786,30 +779,8 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   constexpr int ctor_num_args = 6;
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
-
-    if(r.string(2)=="meta" && r.pyobject(0)==Py_Ellipsis){
-
-        c10::TensorOptions options = typeIdWithDefault(r, 2, dispatch_key);
-        at::ScalarType scalar_type = r.scalartypeWithDefault(1, scalar_type);
-        c10::optional<Device> device_opt;
-        bool copy_variables = true;
-        bool copy_numpy = true;
-        bool type_inference = r.isNone(1);
-        bool pin_memory = r.toBool(3);
-        auto sizes = compute_sizes(data);
-        
-        Tensor new_tensor;
-        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalar_type).pinned_memory(pin_memory));
-        bool args_requires_grad = r.toBool(4);
-        new_tensor.detach_(); // ensure new_tensor a leaf node
-        new_tensor.set_requires_grad(args_requires_grad);
-
-        return new_tensor;
-    }
-
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
@@ -839,11 +810,6 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
-
-
-
-
-
 
 Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   // TODO: add requires_grad once we decide on semantics for sharing data.
