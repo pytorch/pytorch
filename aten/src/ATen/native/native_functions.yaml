@@ -9857,3 +9857,11 @@
 - func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
   python_module: nn
   variants: function
+
+- func: flatten_dense_tensors(Tensor[] tensors) -> Tensor
+  variants: function
+  python_module: nn
+
+- func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
+  variants: function
+  python_module: nn
