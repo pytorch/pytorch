@@ -1972,6 +1972,24 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 
+def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
+    # Check np_unary_ufunc_integer_promotion_wrapper
+    def is_integral(dtype):
+        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    @wraps(fn)
+    def wrapped_fn(x):
+        # As the default dtype can change, acquire it when function is called.
+        # NOTE: Promotion in PyTorch is from integer types to the default dtype
+        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
+        if is_integral(x.dtype):
+            return fn(x).astype(np_dtype)
+        return fn(x)
+
+    return wrapped_fn
+
+
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
     """Operator information for torch.fft transforms. """
@@ -4452,11 +4470,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            supports_out=False),
     UnaryUfuncInfo('i0',
-                   ref=np.i0,
+                   ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(
+                       scipy.special.i0) if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
-                   dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    supports_autograd=False),
     UnaryUfuncInfo('special.i0e',
@@ -6138,178 +6157,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
 ]
 
-<<<<<<< HEAD
-if TEST_SCIPY:
-    def reference_sigmoid(x):
-        # 'scipy.special.expit' not supported for the input types
-        if x.dtype in [np.complex64, np.complex128]:
-            return (1 / (1 + np.exp(-x)))
-        return scipy.special.expit(x)
-
-    def reference_lgamma(x):
-        # scipy.special.gammaln returns `-inf` when input is `-inf`.
-        # While Pytorch, C and C++, all return `inf` when input is `-inf`.
-        # Reference:
-        # https://en.cppreference.com/w/cpp/numeric/math/lgamma
-        # https://en.cppreference.com/w/c/numeric/math/lgamma
-
-        # To handle the above discrepancy,
-        # we replace -inf with inf so values
-        # that were originally -inf map to inf as expected
-        if x.dtype.kind == 'f':
-            x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
-
-        out = scipy.special.gammaln(x)
-
-        if x.dtype == np.float16:
-            # `scipy.special.gammaln` returns output of float32 when input is float16,
-            # while `torch.lgamma` preserves `float16`. But due to smaller range of float16,
-            # Pytorch version outputs `inf` while SciPy returns finite values.
-            out = out.astype(np.float16)
-
-        return out
-
-    op_db_scipy_reference: List[OpInfo] = [
-        UnaryUfuncInfo('sigmoid',
-                       ref=reference_sigmoid,
-                       decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2}),),
-                       skips=(
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                           # RuntimeError: sigmoid does not support automatic differentiation for outputs with complex dtype.
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.complex64, torch.complex128]),
-                           SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                    dtypes=[torch.complex64, torch.complex128]),),
-                       dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                       dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                       safe_casts_outputs=True,
-                       assert_autodiffed=True,
-                       test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
-        UnaryUfuncInfo('digamma',
-                       ref=scipy.special.digamma,
-                       decorators=(precisionOverride({torch.float16: 5e-1}),),
-                       dtypes=all_types_and(torch.bool),
-                       dtypesIfCPU=all_types_and(torch.bool),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       skips=(
-                           # In some cases, output is NaN (for input close to
-                           # negative integers) especially due to reduced precision
-                           # in float16 and NaN's can't be tested for equality.
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    device_type='cuda', dtypes=[torch.float16]),),
-                       safe_casts_outputs=True),
-        UnaryUfuncInfo('erf',
-                       ref=scipy.special.erf,
-                       decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2}),),
-                       dtypes=all_types_and(torch.bool),
-                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                       skips=(
-                           # RuntimeError: "pow" not implemented for 'BFloat16'
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16]),),
-                       assert_autodiffed=True,
-                       safe_casts_outputs=True),
-        UnaryUfuncInfo('erfc',
-                       ref=scipy.special.erfc,
-                       decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2}),),
-                       dtypes=all_types_and(torch.bool),
-                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       skips=(
-                           # RuntimeError: "pow" not implemented for 'BFloat16'
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16]),),
-                       assert_autodiffed=True,
-                       safe_casts_outputs=True),
-        UnaryUfuncInfo('erfinv',
-                       ref=scipy.special.erfinv,
-                       decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2,
-                                                      torch.float32: 1e-4}),),
-                       dtypes=all_types_and(torch.bool),
-                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       safe_casts_outputs=True,
-                       domain=(-1, 1),
-                       skips=(
-                           # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
-                           # RuntimeError: "pow" not implemented for 'BFloat16'
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16]),
-                       )
-                       ),
-        UnaryUfuncInfo('i0',
-                       ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i0),
-                       decorators=(precisionOverride({torch.bfloat16: 3e-1,
-                                                      torch.float16: 5e-1}),),
-                       dtypes=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                       skips=(
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    dtypes=[torch.bfloat16]),
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    dtypes=[torch.int8]),
-                       ),
-                       safe_casts_outputs=True,
-                       supports_autograd=False),
-        UnaryUfuncInfo('lgamma',
-                       ref=reference_lgamma,
-                       decorators=(precisionOverride({torch.float16: 7e-1}),),
-                       dtypes=all_types_and(torch.bool),
-                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       skips=(
-                           # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    dtypes=[torch.bfloat16]),
-                           # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
-                           # Backward of `lgamma` uses `digamma` but `digamma`
-                           # is not implemented for `BFloat16`
-                           # Error Raised:
-                           #   RuntimeError: "digamma" not implemented for 'BFloat16'
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16]),
-                       ),
-                       safe_casts_outputs=True),
-        UnaryUfuncInfo('logit',
-                       ref=scipy.special.logit,
-                       domain=(0, 1),
-                       decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                      torch.float16: 5e-1}),),
-                       dtypes=floating_types_and(torch.half),
-                       dtypesIfCPU=floating_types_and(torch.bfloat16),
-                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                       sample_inputs_func=sample_inputs_logit),
-        OpInfo('xlogy',
-               dtypes=all_types_and(torch.bool),
-               dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
-               dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-               test_inplace_grad=True,
-               supports_tensor_out=True,
-               safe_casts_outputs=True,
-               sample_inputs_func=sample_inputs_xlogy),
-        OpInfo('trace',
-               dtypes=all_types_and_complex(),
-               dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-               test_inplace_grad=False,
-               supports_tensor_out=False,
-               sample_inputs_func=sample_inputs_trace)
-    ]
-    op_db = op_db + op_db_scipy_reference
-
-=======
->>>>>>> 6997e7bd3934f9d8fa3d425336f2e20de2705358
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
