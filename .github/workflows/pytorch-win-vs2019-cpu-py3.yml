@@ -75,7 +75,7 @@ jobs:
       - name: Install miniconda3
         shell: powershell
         run: |
-          choco install miniconda3 --params="'/AddToPath:1'"
+          choco install miniconda3 -y --params="'/AddToPath:1'"
           refreshenv
           # Downgrade miniconda3 for current python version
           conda install -y "python=$Env:PYTHON_VERSION"
