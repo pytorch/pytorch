@@ -789,8 +789,9 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
 
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
+    at::Device device = r.string(2);
 
-    if(r.string(2)=="meta" && r.pyobject(0)==Py_Ellipsis){
+    if(device==at::Device(DeviceType::Meta) && r.pyobject(0)==Py_Ellipsis){
 
         c10::TensorOptions options = typeIdWithDefault(r, 2, dispatch_key);
         at::ScalarType scalar_type = r.scalartypeWithDefault(1, scalar_type);
@@ -839,11 +840,6 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
-
-
-
-
-
 
 Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   // TODO: add requires_grad once we decide on semantics for sharing data.
