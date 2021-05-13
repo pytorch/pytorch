@@ -1723,7 +1723,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-        requires_grad: bool = False, noncontiguous: bool = False, include_zero: bool = True) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False,
+                include_zero: bool = True) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low

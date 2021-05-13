@@ -2727,8 +2727,7 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs
             else:
                 # shape_other is scalar
                 arg = shape_other
-            yield(SampleInput(make_arg(shape), args=(arg,),
-                broadcasts_input=broadcasts_input))
+            yield(SampleInput(make_arg(shape), args=(arg,), broadcasts_input=broadcasts_input))
 
     return list(generator())
 
@@ -4379,15 +4378,15 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fmod_remainder,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-            ),),
+           ),),
     OpInfo('remainder',
-            dtypesIfCPU=all_types_and(torch.float16, torch.bool),
-            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
-            sample_inputs_func=sample_inputs_fmod_remainder,
-            skips=(
-                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-            ),),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fmod_remainder,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+           ),),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
