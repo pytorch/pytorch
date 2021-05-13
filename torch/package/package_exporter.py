@@ -19,7 +19,6 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
     Union,
 )
 from urllib.parse import quote
@@ -699,7 +698,8 @@ node [shape=box];
             ):
                 raise Exception(
                     "Serializing ScriptModules directly into a package is a beta feature. "
-                    "To use, set `PackageExporter.gate_torchscript_serialization` to `False`."
+                    "To use, set global "
+                    "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
                 )
             if self.serialized_reduces.get(id(obj)) is None:
                 self.serialized_reduces[id(obj)] = ("reduce_package", id(obj), *obj.__reduce_package__(self))
