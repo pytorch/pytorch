@@ -24,7 +24,7 @@ import torch.jit.annotations
 
 _IS_ASTUNPARSE_INSTALLED = False
 try:
-    import astunparse  # type: ignore
+    import astunparse  # type: ignore[import]
     _IS_ASTUNPARSE_INSTALLED = True
 except ImportError:
     pass
