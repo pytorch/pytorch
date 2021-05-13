@@ -171,6 +171,20 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Test Reports
+        if: always()
+        with:
+          name: test-reports
+          retention-days: 30
+          if-no-files-found: error
+          path:
+            test/test-reports/**/*.xml
       - name: Clean up docker images
         if: always()
         run: |
@@ -178,3 +192,49 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+  render_test_results:
+    if: always()
+    needs:
+      - test
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+        with:
+          # deep clone, to allow tools/print_test_stats.py to use Git commands
+          fetch-depth: 0
+      - uses: actions/download-artifact@v2
+        name: Download PyTorch Test Reports
+        with:
+          name: test-reports
+          path: test/test-reports
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        # boto3 version copied from .circleci/docker/common/install_conda.sh
+        run: |
+          pip install -r requirements.txt
+          pip install boto3==1.16.34 junitparser rich
+      - name: Output Test Results (Click Me)
+        run: |
+          python tools/render_junit.py test
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+      - name: Display and upload test statistics (Click Me)
+        # temporary hack: set CIRCLE_* vars, until we update
+        # tools/print_test_stats.py to natively support GitHub Actions
+        env:
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_JOB: !{{ build_environment }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
+          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+        run: |
+          export PYTHONPATH=$PWD
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test

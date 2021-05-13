@@ -121,14 +121,7 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
-        if self.device_type == 'cpu':
-            sizes = (100, 1000, 10000)
-        elif self.device_type == 'cuda':
-            # On CUDA, stable sort is supported only when the size of
-            # the sorted dim is greater than 2048
-            sizes = (1025, 10000)
-        else:
-            return
+        sizes = (100, 1000, 10000)
         for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
             _, idx = x.sort(stable=True)
@@ -602,6 +595,15 @@ class TestSortAndSelect(TestCase):
         expected_val[:, 1, :, :] *= 1.5
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+    def test_topk_zero(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/49205
+        t = torch.rand(2, 2, device=device).to(dtype=dtype)
+        val, idx = torch.topk(t, k=0, largest=False)
+        self.assertEqual(val.size(), torch.Size([2, 0]))
+        self.assertEqual(idx.size(), torch.Size([2, 0]))
 
     def _test_unique_scalar_empty(self, dtype, device, f):
         # test scalar
