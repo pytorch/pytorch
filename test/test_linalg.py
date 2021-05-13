@@ -1666,10 +1666,10 @@ class TestLinalg(TestCase):
         a = torch.eye(3, 3, dtype=dtype, device=device)
         a = a.reshape((1, 3, 3))
         a = a.repeat(batch_dim, 1, 1)
-        a[0, -1, -1] = 0  # now a[0] is singular
+        a[1, -1, -1] = 0  # now a[1] is singular
         for p in [1, -1, inf, -inf, 'fro', 'nuc']:
-            with self.assertRaisesRegex(RuntimeError, "linalg_cond does not support yet"):
-                torch.linalg.cond(a, p)
+            result = torch.linalg.cond(a, p)
+            self.assertEqual(result[1], float('inf'))
 
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
