@@ -249,11 +249,19 @@ struct C10_API PyInterpreter {
 
   decref_sig* decref_fn_;
 
+  // UBSAN suppression fixes: "call to function
+  // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*, _object*)
+  // through pointer to incorrect function type
+  // 'void (*)(const c10::impl::PyInterpreter *, _object *)'"
+  // See https://github.com/google/sanitizers/issues/911
+
+  __ubsan_ignore_function__
   std::string name() const {
     return (*name_fn_)(this);
   }
 
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
+  __ubsan_ignore_function__
   void decref(PyObject* pyobj) const {
     return (*decref_fn_)(this, pyobj);
   }
