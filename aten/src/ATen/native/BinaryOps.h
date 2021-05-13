@@ -36,13 +36,6 @@ inline void sub_check(const Tensor& self, const Scalar& scalar) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
-inline void heaviside_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(),
-              "heaviside is not yet implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "heaviside is not yet implemented for tensors with different dtypes.");
-}
-
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 
