@@ -121,7 +121,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29500)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the

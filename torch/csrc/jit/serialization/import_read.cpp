@@ -31,7 +31,6 @@ IValue readArchiveAndTensors(
     return len;
   };
 
-  static const char slash = '/';
   std::string tensor_dir_path =
       (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
 
