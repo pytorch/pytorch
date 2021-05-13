@@ -370,7 +370,7 @@ int CUDAHooks::getNumGPUs() const {
 }
 
 void CUDAHooks::deviceSynchronize(int64_t device_index) const {
-  at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
+  Guard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
 }
 

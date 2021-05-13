@@ -781,6 +781,31 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
+<<<<<<< HEAD
+=======
+    at::Device device = r.string(2);
+
+    if(device==at::Device(DeviceType::Meta) && r.pyobject(0)==Py_Ellipsis){
+
+        c10::TensorOptions options = typeIdWithDefault(r, 2, dispatch_key);
+        at::ScalarType scalar_type = r.scalartypeWithDefault(1, scalar_type);
+        c10::optional<Device> device_opt;
+        bool copy_variables = true;
+        bool copy_numpy = true;
+        bool type_inference = r.isNone(1);
+        bool pin_memory = r.toBool(3);
+        auto sizes = compute_sizes(data);
+        
+        Tensor new_tensor;
+        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalar_type).pinned_memory(pin_memory));
+        bool args_requires_grad = r.toBool(4);
+        new_tensor.detach_(); // ensure new_tensor a leaf node
+        new_tensor.set_requires_grad(args_requires_grad);
+
+        return new_tensor;
+    }
+
+>>>>>>> 714f7cc3cc5435f8d315fb8c9a1ab9c37b88cb0c
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "

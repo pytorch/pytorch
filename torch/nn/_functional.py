@@ -160,7 +160,7 @@ __all__ = ['Tensor',
 '_in_projection_packed',
 '_in_projection',
 '_scaled_dot_product_attention',
-'multi_head_attention_forward',
+'multi_head_attention_forward'
 ]
 
 Tensor = torch.Tensor
