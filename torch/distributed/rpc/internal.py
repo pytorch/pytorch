@@ -5,7 +5,6 @@ import pickle
 import sys
 import threading
 import traceback
-import types
 from enum import Enum
 
 import torch
@@ -42,6 +41,13 @@ class _InternalRPCPickler:
         # Ignore type error because dispatch_table is defined in third-party package
         self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore[attr-defined]
         self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        # Used for registering customized picklers.
+        self._class_reducer_dict = {}
+
+    def _register_reducer(self, obj_class, reducer):
+        # For the same class, only register the reducer once.
+        if obj_class not in self._class_reducer_dict:
+            self._class_reducer_dict[obj_class] = reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -83,75 +89,6 @@ class _InternalRPCPickler:
         torch.jit.save(script_module, f)
         return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
 
-
-    @classmethod
-    def _recursive_script_module_receiver(cls, recursive_script_module_serialized):
-        """
-        Given a serialized representation of a RecursiveScriptModule created with torch.jit.save,
-        loads and returns the RecursiveScriptModule.
-        """
-        f = io.BytesIO(script_module_serialized)
-        m = torch.jit.load(f)
-        return m
-
-    def _recursive_script_module_reducer(self, recursive_script_module):
-        """
-        Serializes a RecursiveScriptModule.
-        """
-        # FIXME: RRef should be pickled separately.
-        f = io.BytesIO()
-        torch.jit.save(recursive_script_module, f)
-        return (_InternalRPCPickler._recursive_script_module_receiver, (f.getvalue(),))
-
-    @classmethod
-    def _remote_module_receiver(
-        cls,
-        on,
-        device,
-        is_device_map_set,
-        is_scriptable,
-        generated_methods,
-        module_rref_fork_data,
-    ):
-        m = object.__new__(dist.nn.RemoteModule)  # type: ignore[attr-defined]
-        m.on = on
-        m.device = device
-        m.is_device_map_set = is_device_map_set
-        m.is_scriptable = is_scriptable
-        m.generated_methods = generated_methods
-        # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
-        m.module_rref = dist.rpc.PyRRef._deserialize(module_rref_fork_data)
-
-        # Install generated methods when unpickled.
-        for method in generated_methods:
-            method_name = method.__name__
-            method = torch.jit.export(method)
-            setattr(m, method_name, types.MethodType(method, m))
-
-        return m
-
-    def _remote_module_reducer(self, remote_module):
-        pickled_attrs = {}
-        for k, v in remote_module.__dict__.items():
-            # Pickling the attribute `module_rref` must invoke RRef's `_serialize()` method.
-            if k == "module_rref":
-                pickled_attrs[k] = v._serialize()
-            elif k in dist.nn._REMOTE_MODULE_PICKLED_ATTRIBUTES:  # type: ignore[attr-defined]
-                pickled_attrs[k] = v
-            # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
-            elif k not in dist.nn._REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:  # type: ignore[attr-defined]
-                print(
-                    "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
-                    "To pickle this attribute, it must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
-                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k),
-                    file=sys.stderr,
-                )
-
-        return (
-            _InternalRPCPickler._remote_module_receiver,
-            tuple(pickled_attrs.values()),
-        )
-
     def serialize(self, obj):
         r"""
         Serialize non tensor data into binary string, tensor data into
@@ -175,12 +112,15 @@ class _InternalRPCPickler:
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
-        # Ignore type error because dispatch_table is defined in third-party package
-        p.dispatch_table[dist.nn.RemoteModule] = self._remote_module_reducer  # type: ignore[attr-defined, index]
+
+        # Install customized picklers.
+        for class_name in self._class_reducer_dict.keys():
+            p.dispatch_table[class_name] = self._class_reducer_dict[class_name]  # type: ignore[index]
+
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[torch.jit.ScriptModule] = self._script_module_reducer  # type: ignore[index]
         # Ignore type error because dispatch_table is defined in third-party package
-        p.dispatch_table[torch.jit.RecursiveScriptModule] = self._recursive_script_module_reducer  # type: ignore[index]
+        p.dispatch_table[torch.jit.RecursiveScriptModule] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
