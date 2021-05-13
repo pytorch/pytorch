@@ -347,7 +347,8 @@ def remove_parametrizations(
     # Fetch the original tensor
     original = module.parametrizations[tensor_name].original  # type: ignore[index, union-attr]
     if leave_parametrized:
-        t = getattr(module, tensor_name)
+        with torch.no_grad():
+            t = getattr(module, tensor_name)
         # If they have the same dtype, we reuse the original tensor.
         # We do this so that the parameter does not to change the id()
         # This way the user does not need to update the optimizer

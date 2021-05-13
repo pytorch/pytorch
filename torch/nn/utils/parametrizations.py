@@ -5,7 +5,7 @@ from .. import functional as F
 
 from typing import Optional
 
-class SpectralNorm(Module):
+class _SpectralNorm(Module):
     def __init__(
         self,
         weight: torch.Tensor,
@@ -141,7 +141,7 @@ def spectral_norm(module: Module,
         reimplementation of :func:`torch.nn.utils.spectral_norm`.
 
     .. note::
-        If the `SpectralNorm` module, i.e., `module.parametrization.weight[idx]`,
+        If the `_SpectralNorm` module, i.e., `module.parametrization.weight[idx]`,
         is in training mode on removal, it will perform another power iteration.
         If you'd like to avoid this iteration, set the module to eval mode
         before its removal.
@@ -154,7 +154,7 @@ def spectral_norm(module: Module,
         in_features=20, out_features=40, bias=True
         (parametrizations): ModuleDict(
             (weight): ParametrizationList(
-            (0): SpectralNorm()
+            (0): _SpectralNorm()
             )
         )
         )
@@ -176,5 +176,5 @@ def spectral_norm(module: Module,
             dim = 1
         else:
             dim = 0
-    parametrize.register_parametrization(module, name, SpectralNorm(weight, n_power_iterations, dim, eps))
+    parametrize.register_parametrization(module, name, _SpectralNorm(weight, n_power_iterations, dim, eps))
     return module
