@@ -340,16 +340,15 @@ class _MinimizerBase:
         for node in submodule.graph.nodes:
             if node.op == "output":
                 result_key = map_arg(node.args, lambda x: x.name)
+                if isinstance(result_key[0], tuple):
+                    result_key = result_key[0]
 
         a_result = self.run_a(submodule, a_input)
         b_result = self.run_b(submodule, b_input)
         self._store_outputs(a_result, b_result, submodule)
 
         # Compare results
-        names: Names = output_names
-        if output_names is None:
-            names = [str(v) for v in result_key]
-        numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
+        numeric_result, bool_result = self.compare_fn(a_result, b_result, result_key)
         self.results[result_key] = numeric_result
         if not bool_result:
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
@@ -475,7 +474,7 @@ class _MinimizerBase:
 
         return nodes
 
-    def run_nodes(self, start: Optional[str] = None, end: Optional[str] = None):
+    def run_nodes(self, start: Optional[str] = None, end: Optional[str] = None, output_names: Names = None):
         """
         Run part of the model from `start` node to `end` node. If `start` is None
         then we start from the beginning of the model. If `end` is None then we
@@ -496,7 +495,6 @@ class _MinimizerBase:
             if node in self.fusions:
                 cur_nodes.update(self.fusions[node])
 
-        output_names = []
         if self.settings.return_intermediate:
             output_names = [node.name for node in nodes]
 
@@ -527,7 +525,6 @@ class _MinimizerBase:
         """
 
         print(self.settings)
-        print(self.module.graph)
         nodes = self._collect_nodes(start, end)
 
         if self.settings.traverse_method == "sequential":
