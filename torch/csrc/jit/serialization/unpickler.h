@@ -120,7 +120,6 @@ class TORCH_API Unpickler {
   // remember the position. Don't call reader_ directly.
   std::function<size_t(char*, size_t)> reader_;
   // Small buffer to avoid calling reader_ on a per-byte basis.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 256> buffer_;
   size_t buffer_pos_{0};
   size_t buffer_remaining_{0};

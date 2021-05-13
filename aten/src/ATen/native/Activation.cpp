@@ -13,7 +13,38 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
+  const Tensor& result = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(self) // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
+  const Tensor& gradInput = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(gradInput)
+    .add_input(self)
+    .add_input(grad)  // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+} // namespace meta
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
@@ -207,7 +238,6 @@ Tensor selu(const Tensor & self) {
 }
 
 Tensor relu6(const Tensor & self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -216,7 +246,6 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor & relu6_(Tensor & self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -355,7 +384,6 @@ Tensor rrelu_with_noise_backward(
     bool is_result) {
   auto lower_tensor = scalar_to_tensor(lower);
   auto upper_tensor = scalar_to_tensor(upper);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {
@@ -409,45 +437,12 @@ Tensor softplus_backward(
   return iter.output();
 }
 
-// computes `result = self <= threshold ? value : other`
-// other is `self` in threshold() and `grad` in threshold_backward()
-static Tensor threshold_out(
-    optional<Tensor> opt_result,
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value,
-    const Tensor& other) {
-  Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-  threshold_stub(iter.device_type(), iter, threshold, value);
-  return iter.output();
+TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_stub(device_type(), *this, threshold, value);
 }
 
-Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out(nullopt, self, threshold, value, self);
-}
-
-Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_stub(device_type(), *this, threshold, 0);
 }
 
 // -----------------------------------
@@ -464,7 +459,6 @@ void inline prelu_cpu_kernel_share_weights(
   auto input_data = input.data_ptr<scalar_t>();
   auto weight_val = weight.data_ptr<scalar_t>()[0];
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       scalar_t input_data_val = input_data[i];
@@ -505,7 +499,6 @@ void inline prelu_cpu_kernel_multi_weights(
       }
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -579,7 +572,6 @@ void inline prelu_cpu_backward_kernel_share_weights(
   auto input_grad_data = input_grad.data_ptr<scalar_t>();
   auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
@@ -634,7 +626,6 @@ void inline prelu_cpu_backward_kernel_multi_weights(
       }
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -785,9 +776,7 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }

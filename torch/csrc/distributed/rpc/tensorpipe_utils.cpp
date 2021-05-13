@@ -67,8 +67,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
-  // Tensors
-  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  {
+    // The function below might allocate new tensors if there are Tensor views.
+    // Apply stream guard here to include those Tensor allocation operations to
+    // the streams.
+    c10::MultiStreamGuard guard(
+        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+    // Tensors
+    buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  }
 
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(

@@ -240,7 +240,6 @@ void Pickler::pushInt(int64_t n) {
   } else {
     // Push 8 byte integer
     push<PickleOpCode>(PickleOpCode::LONG1);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     push<uint8_t>(8);
     push<int64_t>(n);
   }
