@@ -279,7 +279,10 @@ class Decoder:
 
         # if data is a stream handle, we need to read all the content before decoding
         if isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase):
+            bs = data
             data = data.read()
+            # Explicitly close binary stream
+            bs.close()
 
         for f in self.handlers:
             result = f(key, data)

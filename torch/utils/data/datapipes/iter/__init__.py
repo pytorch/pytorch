@@ -1,7 +1,9 @@
 from torch.utils.data.datapipes.iter.listdirfiles import ListDirFilesIterDataPipe as ListDirFiles
 from torch.utils.data.datapipes.iter.loadfilesfromdisk import LoadFilesFromDiskIterDataPipe as LoadFilesFromDisk
-from torch.utils.data.datapipes.iter.readfilesfromtar import ReadFilesFromTarIterDataPipe as ReadFilesFromTar
-from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIterDataPipe as ReadFilesFromZip
+from torch.utils.data.datapipes.iter.openfilesfromarchive import \
+    (OpenFilesFromArchiveIterDataPipe as OpenFilesFromArchive,
+     OpenFilesFromTarIterDataPipe as OpenFilesFromTar,
+     OpenFilesFromZipIterDataPipe as OpenFilesFromZip)
 from torch.utils.data.datapipes.iter.routeddecoder import RoutedDecoderIterDataPipe as RoutedDecoder
 
 # Functional DataPipe
@@ -18,5 +20,5 @@ from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'Map', 'Sampler', 'Shuffle', 'Transforms', 'Zip']
+__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'OpenFilesFromArchive', 'OpenFilesFromTar', 'OpenFilesFromZip', 'RoutedDecoder',
+           'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'GroupByKey', 'Map', 'Sampler', 'Shuffle', 'Transforms', 'Zip']
