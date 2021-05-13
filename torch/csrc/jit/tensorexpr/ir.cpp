@@ -71,6 +71,7 @@ Store* Store::make(
 
 const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& strides,
     const std::vector<const Expr*>& indices) {
   // Handle already flattened indices first
   if (indices.size() == 1) {
@@ -83,13 +84,6 @@ const Expr* flatten_index(
   }
   if (ndim == 0) {
     return new IntImm(0);
-  }
-  std::vector<const Expr*> strides(ndim);
-  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
-  // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = new IntImm(1);
-  for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
   }
 
   const Expr* total_index = new IntImm(0);
