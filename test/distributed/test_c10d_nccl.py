@@ -1745,7 +1745,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         )
         if static_graph:
             ddp_model._set_static_graph()
-        self.assertEqual(ddp_model.get_ddp_logging_data().get("static_graph", 0), static_graph)
+        self.assertEqual(ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph)
         input, ddp_input, target, ddp_target = self._prepare_dummy_data()
         loss = nn.MSELoss()
         for i in range(5):
