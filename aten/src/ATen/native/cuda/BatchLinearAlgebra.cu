@@ -1921,15 +1921,17 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 
 static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   int64_t batch_size = batchCount(input);
+  int m = input.size(-2);
 #ifdef USE_CUSOLVER
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-  if (batch_size == 1 || !use_magma_) {
+  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_) {
     lu_cusolver_looped(input, pivots, infos, compute_pivots);
   }
 #else
-  if (batch_size == 1)
+  if (batch_size == 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
+      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+    });
   }
 #endif
   else {
