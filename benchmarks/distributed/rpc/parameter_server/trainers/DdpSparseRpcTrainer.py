@@ -1,8 +1,9 @@
+import copy
+
 import torch
 import torch.distributed as c10d
 import torch.nn as nn
 from servers.AverageParameterServer import AverageParameterServer
-from servers.AverageBatchParameterServer import AverageBatchParameterServer
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .DdpTrainerBase import DdpTrainerBase
@@ -12,8 +13,7 @@ from .RpcTrainerBase import RpcTrainerBase
 class DdpSparseRpcTrainer(DdpTrainerBase, RpcTrainerBase):
 
     PS_MAP = {
-        "AverageParameterServer": AverageParameterServer,
-        "AverageBatchParameterServer": AverageBatchParameterServer
+        "AverageParameterServer": AverageParameterServer
     }
 
     class HookState:
@@ -59,25 +59,26 @@ class DdpSparseRpcTrainer(DdpTrainerBase, RpcTrainerBase):
     @staticmethod
     def process_bucket(state, bucket):
         cref = state.cref
-        tensor = bucket.get_tensor()
         parameters = cref.bucket_to_parameters(bucket)
         for parameter in parameters:
-            sparse = tensor.is_sparse
+            # other solution?
+            p_param = copy.deepcopy(parameter)
+            sparse = p_param.is_sparse
             if sparse:
-                tensor = cref.sparse_tensor_to_rpc_format(tensor)
+                p_param = cref.sparse_tensor_to_rpc_format(p_param)
             if not cref.use_cuda_rpc:
                 if sparse:
-                    tensor[0] = tensor[0].cpu()
-                    tensor[1] = tensor[1].cpu()
+                    p_param[0] = p_param[0].cpu()
+                    p_param[1] = p_param[1].cpu()
                 else:
-                    tensor = tensor.cpu()
+                    p_param = p_param.cpu()
             if state.batch_number > 0:
                 ps = cref.ps
                 ps_args = [
                     cref.ps_rref,
                     state.batch_number,
                     state.param_loc,
-                    tensor
+                    p_param
                 ]
                 fut = cref.send_async_request(
                     state.get_key(),
@@ -113,15 +114,27 @@ class DdpSparseRpcTrainer(DdpTrainerBase, RpcTrainerBase):
         return DdpSparseRpcTrainer.hook
 
     def process_gradient_futs(self, ddp_parameters, hook_gradient_futures):
-        param_gradient_map = {}
+        # TODO: investigate multi parameter layer hashing
+        sgp_map = {}
+        dgp_pair_list = []
         for param in ddp_parameters:
             if param.grad is None:
                 continue
-            param_gradient_map[param.grad] = param
+            if param.grad.is_sparse:
+                sgp_map[param.grad] = param
+            else:
+                dgp_pair_list.append([param.grad, param])
 
         for gradient, fut in hook_gradient_futures.items():
-            param = param_gradient_map[gradient]
-            ps_gradient = self.sparse_rpc_format_to_tensor(fut.wait())
+            ps_gradient = fut.wait()
+            if gradient.is_sparse:
+                param = sgp_map[gradient]
+                ps_gradient = self.sparse_rpc_format_to_tensor(ps_gradient)
+            else:
+                for d_pair in dgp_pair_list:
+                    d_g = d_pair[0]
+                    if d_g.equal(gradient):
+                        param = d_pair[1]
             if not self.use_cuda_rpc:
                 ps_gradient = ps_gradient.cuda(self.rank)
             param.grad = ps_gradient

@@ -1,7 +1,6 @@
 from data.DummyData import DummyData
 from models.DummyModel import DummyModel
 from servers.AverageParameterServer import AverageParameterServer
-from servers.AverageBatchParameterServer import AverageBatchParameterServer
 from trainers.DdpNcclTrainer import DdpNcclTrainer
 from trainers.DdpSparseRpcTrainer import DdpSparseRpcTrainer
 

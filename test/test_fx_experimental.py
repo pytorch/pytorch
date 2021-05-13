@@ -1310,9 +1310,11 @@ class TestNormalizeOperators(JitTestCase):
         op_skip = {'einsum',
                    'expand',
                    'expand_as',
+                   'gradient',
                    'index_put',
                    'polygamma',
                    'repeat',
+                   'reshape_as',
                    'view',
                    'view_as',
                    'unfold',
@@ -1321,7 +1323,8 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
-                   '__rpow__'}
+                   '__rpow__',
+                   '__rmatmul__'}
 
         # Unsupported input types
         if op.name in op_skip:
