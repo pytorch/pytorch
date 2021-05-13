@@ -185,6 +185,12 @@ def _rebuild_mlc_tensor(data, dtype, device, requires_grad):
     return tensor
 
 
+def _rebuild_ort_tensor(data, dtype, device, requires_grad):
+    tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
+
+
 def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
     return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
 
