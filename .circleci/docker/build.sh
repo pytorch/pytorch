@@ -236,14 +236,6 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.9
     ;;
-  pytorch-linux-bionic-rocm3.10-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.10
-    ;;
   pytorch-linux-bionic-rocm4.0.1-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=9
@@ -259,6 +251,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.1
+    ;;
+  pytorch-linux-bionic-rocm4.2-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.2
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
