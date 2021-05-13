@@ -15,28 +15,33 @@ import time
 import unittest
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from unittest import mock
 from unittest.mock import Mock, patch
 
 import torch
 import torch.distributed as dist
-import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 import torch.distributed.rpc as rpc
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
-    WorkerSpec,
     WorkerState,
 )
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
 from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.rpc.backend_registry import BackendType
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
+)
+from torch.testing._internal.distributed.elastic_test import (
+    Conf,
+    run_job,
+    get_etcd_rdzv_params,
+    get_agent,
+    run_agent,
+    get_worker_spec,
 )
 
 
@@ -166,25 +171,10 @@ def _check_env_function():
         "TORCHELASTIC_RESTART_COUNT",
         "TORCHELASTIC_MAX_RESTARTS",
         "TORCHELASTIC_RUN_ID",
-        "TORCHELASTIC_USE_AGENT_STORE"
+        "TORCHELASTIC_USE_AGENT_STORE",
     ]
     for var in env_vars:
         _ = os.environ[var]
-
-
-@dataclass
-class Conf:
-    """
-    Holds arguments to launch an agent (e.g. simulates an agent run on a node).
-
-    """
-
-    entrypoint: Callable
-    local_world_size: int
-    args: Tuple = ()
-    role: str = "default"
-    redirects: Std = Std.NONE
-    tee: Std = Std.NONE
 
 
 class LocalElasticAgentTest(unittest.TestCase):
@@ -209,139 +199,23 @@ class LocalElasticAgentTest(unittest.TestCase):
     def log_dir(self) -> str:
         return tempfile.mkdtemp(prefix="torchelastic_", dir=self._test_dir)
 
-    def get_worker_spec(
-        self,
-        node_config: Conf,
-        min_nodes=1,
-        max_nodes=1,
-        max_restarts=0,
-        monitor_interval=0.01,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
-    ):
-        rdzv_params = RendezvousParameters(
-            backend="etcd",
+    def _get_etcd_rdzv_params(self, nnodes: int) -> RendezvousParameters:
+        return get_etcd_rdzv_params(
             endpoint=self._etcd_server.get_endpoint(),
             run_id=self._run_id,
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
+            min_nodes=nnodes,
+            max_nodes=nnodes,
         )
-        rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
-        return WorkerSpec(
-            role=node_config.role,
-            local_world_size=node_config.local_world_size,
-            entrypoint=node_config.entrypoint,
-            args=node_config.args,
-            rdzv_handler=rdzv_handler,
-            max_restarts=max_restarts,
-            monitor_interval=monitor_interval,
-            redirects=node_config.redirects,
-            tee=node_config.tee,
-            master_addr=master_addr_override,
-            master_port=master_port_override,
-        )
-
-    def get_agent(
-        self, spec: WorkerSpec, start_method: str = "spawn", exit_barrier_timeout=5
-    ) -> LocalElasticAgent:
-        return LocalElasticAgent(
-            spec,
-            start_method=start_method,
-            exit_barrier_timeout=exit_barrier_timeout,
-            log_dir=self.log_dir(),
-        )
-
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #  `torch.distributed.elastic.multiprocessing.errors.record`.
-    @record
-    def run_agent(
-        self,
-        conf: Conf,
-        agent_results: Optional[mp.Queue] = None,  # (role, agent_result)
-        min_nodes=1,
-        max_nodes=1,
-        start_method: str = "spawn",
-        max_restarts: int = 0,
-        exit_barrier_timeout=5,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
-    ) -> Optional[RunResult]:
-        """
-        Runs a single agent. This method can be called either on a separate process
-        or the main test process. When calling this method on a sparate process make
-        sure to pass the ``agent_results`` multiprocessing Queue so that the agent's
-        run results can be returned. If ``agent_results`` is omitted, then the
-        run result is returned from the method.
-        """
-
-        spec = self.get_worker_spec(
-            node_config=conf,
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
-            max_restarts=max_restarts,
-            master_addr_override=master_addr_override,
-            master_port_override=master_port_override,
-        )
-        agent = self.get_agent(
-            spec=spec,
-            start_method=start_method,
-            exit_barrier_timeout=exit_barrier_timeout,
-        )
-        result = agent.run()
-        if agent_results:
-            agent_results.put((conf.role, result))
-
-        if result.is_failed():
-            raise ChildFailedError(spec.get_entrypoint_name(), result.failures)
-        else:
-            if not agent_results:
-                return result
-
-    def run_job(
-        self, node_configs: List[Conf], exit_barrier_timeout: int = 5
-    ) -> Dict[str, List[RunResult]]:
-        """
-        Simulates running a distributed job by running multiple agents
-        (one on each process). Agent 0 is run on the main process for
-        test coverage and ease of debugging
-        """
-
-        nnodes = len(node_configs)
-
-        # each element in this queue holds a tuple (role, RunResult) for each agent
-        agent_results = mp.Queue()
-
-        # run first agent of first config on main process for test coverage + ease of debugging
-        # it is important we loop in reverse order b/c running fn on the main process blocks
-        procs = []
-        for node_idx in reversed(range(len(node_configs))):
-            conf = node_configs[node_idx]
-            run_agent_args = {
-                "conf": conf,
-                "agent_results": agent_results,
-                "min_nodes": nnodes,
-                "max_nodes": nnodes,
-                "start_method": "spawn",
-                "max_restarts": 0,
-                "exit_barrier_timeout": exit_barrier_timeout,
-            }
-            p = mp.Process(target=self.run_agent, kwargs=run_agent_args)
-            procs.append(p)
-            p.start()
-        for p in procs:
-            p.join()
-
-        results: Dict[str, List[RunResult]] = {}
-        while not agent_results.empty():
-            role, run_result = agent_results.get()
-            results.setdefault(role, []).append(run_result)
-        return results
 
     @unittest.skipIf(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_dummy_compute(self):
-        res = self.run_agent(Conf(entrypoint=dummy_compute, local_world_size=2))
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
+            Conf(entrypoint=dummy_compute, local_world_size=2),
+            self.log_dir(),
+        )
         self.assertFalse(res.is_failed())
         for return_value in res.return_values.values():
             self.assertIsInstance(return_value, torch.Tensor)
@@ -351,7 +225,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_run_happy_function(self):
-        res = self.run_agent(Conf(entrypoint=_happy_function, local_world_size=2))
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
+            Conf(entrypoint=_happy_function, local_world_size=2),
+            self.log_dir(),
+        )
         self.assertFalse(res.is_failed())
         self.assertIsNone(res.return_values[0])
         self.assertIsNone(res.return_values[1])
@@ -362,12 +240,14 @@ class LocalElasticAgentTest(unittest.TestCase):
     def test_check_master_addr_port_override(self):
         master_addr = "test_host"
         master_port = 42
-        res = self.run_agent(
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
             Conf(
                 entrypoint=_check_master_port_addr_override,
                 args=(master_addr, master_port),
                 local_world_size=1,
             ),
+            self.log_dir(),
             master_addr_override=master_addr,
             master_port_override=master_port,
         )
@@ -380,14 +260,22 @@ class LocalElasticAgentTest(unittest.TestCase):
     def test_run_check_env_function(self):
         # just checks that all env vars that we need to set on the user script
         # is actually set
-        res = self.run_agent(Conf(entrypoint=_check_env_function, local_world_size=1))
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
+            Conf(entrypoint=_check_env_function, local_world_size=1),
+            self.log_dir(),
+        )
         self.assertFalse(res.is_failed())
 
     @unittest.skipIf(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_run_function_with_return_value(self):
-        res = self.run_agent(Conf(entrypoint=_echo, args=("foo",), local_world_size=2))
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
+            Conf(entrypoint=_echo, args=("foo",), local_world_size=2),
+            self.log_dir(),
+        )
         self.assertFalse(res.is_failed())
         self.assertEqual("foo", res.return_values[0])
         self.assertEqual("foo", res.return_values[1])
@@ -404,7 +292,9 @@ class LocalElasticAgentTest(unittest.TestCase):
         # due to getting stuck on the _dist_sum in waiting for TCPStore workers
         # to join the cluster
         # TODO(aivanou): t83447589 come up with the proper fix
-        res = self.run_job(node_configs)
+        res = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)), self.log_dir(), node_configs
+        )
         self.assertEqual(2, len(res["sum"]))
         ranks = set()
         for run_results in res["sum"]:
@@ -428,7 +318,9 @@ class LocalElasticAgentTest(unittest.TestCase):
         # due to getting stuck on the _dist_sum in waiting for TCPStore workers
         # to join the cluster
         # TODO(aivanou): t83447589 come up with the proper fix
-        res = self.run_job(node_configs)
+        res = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)), self.log_dir(), node_configs
+        )
         self.assertEqual(3, len(res["sum"]))
         ranks = set()
         for run_results in res["sum"]:
@@ -446,7 +338,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         replyfile = os.path.join(self._test_dir, "error.json")
         with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": replyfile}):
             with self.assertRaises(ChildFailedError) as cm:
-                self.run_agent(Conf(entrypoint=_sad_function, local_world_size=2))
+                run_agent(
+                    self._get_etcd_rdzv_params(1),
+                    Conf(entrypoint=_sad_function, local_world_size=2),
+                    self.log_dir(),
+                )
 
             rank, failure = cm.exception.get_first_failure()
             failure_data = failure.error_file_data["message"]
@@ -464,9 +360,10 @@ class LocalElasticAgentTest(unittest.TestCase):
         """
         checks agent failure handling logic
         """
+        rdzv_params = self._get_etcd_rdzv_params(1)
         node_conf = Conf(entrypoint=_bipolar_function, local_world_size=4)
-        spec = self.get_worker_spec(node_conf, max_restarts=2)
-        agent = self.get_agent(spec)
+        spec = get_worker_spec(rdzv_params, node_conf, max_restarts=2)
+        agent = get_agent(spec, self.log_dir())
         run_result = agent.run()
         self.assertTrue(run_result.is_failed())
         self.assertEqual(0, agent._remaining_restarts)
@@ -486,7 +383,9 @@ class LocalElasticAgentTest(unittest.TestCase):
             Conf(role="ps", entrypoint=_get_role_info, local_world_size=5),
             Conf(role="ps", entrypoint=_get_role_info, local_world_size=2),
         ]
-        results = self.run_job(node_configs)
+        results = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)), self.log_dir(), node_configs
+        )
         print(f"heterogeneous job result: {results}")
         self.assertEqual(1, len(results["master"]))
         self.assertEqual(4, len(results["trainer"]))
@@ -513,7 +412,9 @@ class LocalElasticAgentTest(unittest.TestCase):
             Conf(role="ps", entrypoint=_get_role_info, local_world_size=3),
             Conf(role="ps", entrypoint=_get_role_info, local_world_size=3),
         ]
-        results = self.run_job(node_configs)
+        results = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)), self.log_dir(), node_configs
+        )
         print(f"homogeneous job result: {results}")
         self.assertEqual(1, len(results["master"]))
         self.assertEqual(4, len(results["trainer"]))
@@ -589,17 +490,17 @@ class LocalElasticAgentTest(unittest.TestCase):
         node_conf = Conf(entrypoint=_dist_sum, args=(wait,), local_world_size=2)
         agent_results = mp.Queue()
         agent_args = {
+            "rdzv_params": self._get_etcd_rdzv_params(nnodes),
             "conf": node_conf,
+            "log_dir": self.log_dir(),
             "agent_results": agent_results,
-            "min_nodes": nnodes,
-            "max_nodes": nnodes,
             "max_restarts": 2,
         }
 
         procs = []
         for _ in range(nnodes):
             p = mp.Process(
-                target=self.run_agent,
+                target=run_agent,
                 kwargs=agent_args,
             )
             procs.append(p)
@@ -610,7 +511,7 @@ class LocalElasticAgentTest(unittest.TestCase):
             if i % 2 != 0:
                 procs[i].kill()
                 p = mp.Process(
-                    target=self.run_agent,
+                    target=run_agent,
                     kwargs=agent_args,
                 )
                 procs[i] = p
@@ -635,17 +536,17 @@ class LocalElasticAgentTest(unittest.TestCase):
         node_conf = Conf(entrypoint=_dist_sum, args=(wait,), local_world_size=2)
         agent_results = mp.Queue()
         agent_args = {
+            "rdzv_params": self._get_etcd_rdzv_params(1),
             "conf": node_conf,
+            "log_dir": self.log_dir(),
             "agent_results": agent_results,
-            "min_nodes": min_nodes,
-            "max_nodes": max_nodes,
             "max_restarts": 2,
         }
 
         procs = []
         for _ in range(max_nodes):
             p = mp.Process(
-                target=self.run_agent,
+                target=run_agent,
                 kwargs=agent_args,
             )
             procs.append(p)
@@ -692,7 +593,9 @@ class LocalElasticAgentTest(unittest.TestCase):
             ),
         ]
 
-        results = self.run_job(node_configs)
+        results = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)), self.log_dir(), node_configs
+        )
         master_retvals = results["master"][0].return_values
         # there is only one master but the global rank is not stable
         # so compare the master return value as a collection
@@ -712,7 +615,12 @@ class LocalElasticAgentTest(unittest.TestCase):
             Conf(role="zzz", entrypoint=_sleep, args=(0 * sec,), local_world_size=1),
             Conf(role="zzz", entrypoint=_sleep, args=(2 * sec,), local_world_size=1),
         ]
-        results = self.run_job(node_configs, exit_barrier_timeout=2 * 2 * sec)
+        results = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)),
+            self.log_dir(),
+            node_configs,
+            exit_barrier_timeout=2 * 2 * sec,
+        )
         for i in range(2):
             run_results = results["zzz"][i]
             self.assertFalse(run_results.is_failed())
@@ -733,7 +641,12 @@ class LocalElasticAgentTest(unittest.TestCase):
             Conf(role="zzz", entrypoint=_sleep, args=(0 * sec,), local_world_size=1),
             Conf(role="zzz", entrypoint=_sleep, args=(4 * sec,), local_world_size=1),
         ]
-        results = self.run_job(node_configs, exit_barrier_timeout=0)
+        results = run_job(
+            self._get_etcd_rdzv_params(len(node_configs)),
+            self.log_dir(),
+            node_configs,
+            exit_barrier_timeout=0,
+        )
         for i in range(2):
             run_results = results["zzz"][i]
             self.assertFalse(run_results.is_failed())
@@ -750,7 +663,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         Failure during the barrier should NOT fail the job.
         """
         barrier_mock.side_effect = RuntimeError("test error")
-        res = self.run_agent(Conf(entrypoint=_happy_function, local_world_size=1))
+        res = run_agent(
+            self._get_etcd_rdzv_params(1),
+            Conf(entrypoint=_happy_function, local_world_size=1),
+            self.log_dir(),
+        )
         self.assertFalse(res.is_failed())
         barrier_mock.assert_called_once()
 
@@ -760,8 +677,9 @@ class LocalElasticAgentTest(unittest.TestCase):
         pcontext_mock.pids.return_value = {0: 0}
         start_processes_mock.return_value = pcontext_mock
         node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-        spec = self.get_worker_spec(node_conf, max_restarts=0)
-        agent = self.get_agent(spec)
+        rdzv_params = self._get_etcd_rdzv_params(1)
+        spec = get_worker_spec(rdzv_params, node_conf, max_restarts=0)
+        agent = get_agent(spec, self.log_dir())
         with patch.object(agent, "_monitor_workers") as monitor_mock:
             monitor_mock.return_value = RunResult(
                 state=WorkerState.SUCCEEDED, return_values={0: 0}
