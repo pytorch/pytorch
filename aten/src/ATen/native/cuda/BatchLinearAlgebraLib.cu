@@ -968,63 +968,6 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
   return result;
 }
 
-// The 'apply_' word is used for templated by dtype functions that call an API routine
-// underneath. Since the cusolver API has a slightly different structure we do not prepend
-// apply_ to this function.
-void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-  auto infos_data = infos.data_ptr<int>();
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cusolver", [&]{
-    auto self_data = self.data_ptr<scalar_t>();
-    auto self_stride = matrixStride(self);
-    auto batch_size = batchCount(self);
-    int m = cuda_int_cast(self.size(-2), "m");
-    int n = cuda_int_cast(self.size(-1), "n");
-    int lda = std::max<int>(1, m);
-
-    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-      if (get_pivots) {
-        auto pivots_data = pivots.data_ptr<int>();
-        auto pivots_stride = pivots.size(-1);
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          pivots_data + batch * pivots_stride,
-          infos_data + batch
-        );
-      }
-      else {
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          nullptr,
-          infos_data + batch
-        );
-      }
-    }
-  });
-
-  // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
-  if (!get_pivots) {
-    if (self.is_complex()) {
-      auto real = at::real(self);
-      auto imag = at::imag(self);
-      // TODO: Make nan_to_num_ work with complex numbers so this if-condition is unneccesary.
-      at::nan_to_num_(real, 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-      at::nan_to_num_(imag, 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-    }
-    else {
-      at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-    }
-  }
-}
-
 template <typename scalar_t>
 static void apply_syevd(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -1254,6 +1197,67 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   }
 }
 
+// The 'apply_' word is used for templated by dtype functions that call an API routine
+// underneath. Since the cusolver API has a slightly different structure we do not prepend
+// apply_ to this function.
+void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+  int m = cuda_int_cast(self.size(-2), "m");
+  int n = cuda_int_cast(self.size(-1), "n");
+  int lda = std::max<int>(1, m);
+  auto self_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+  auto infos_data = infos.data_ptr<int>();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cusolver", [&]{
+    auto self_data = self.data_ptr<scalar_t>();
+
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+      if (get_pivots) {
+        auto pivots_data = pivots.data_ptr<int>();
+        auto pivots_stride = pivots.size(-1);
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          pivots_data + batch * pivots_stride,
+          infos_data + batch
+        );
+      }
+      else {
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          nullptr,
+          infos_data + batch
+        );
+      }
+    }
+  });
+
+  // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
+  if (!get_pivots) {
+    if (self.is_complex()) {
+      auto real = at::real(self);
+      auto imag = at::imag(self);
+      // TODO: Make nan_to_num_ work with complex numbers so this if-condition is unneccesary.
+      at::nan_to_num_(real, 0, std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity());
+      at::nan_to_num_(imag, 0, std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity());
+    }
+    else {
+      at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity());
+    }
+
+    // Fill the pivots tensor with indices using 1-based (Fortran) indexing
+    auto k = std::min(m, n);
+    Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
+    pivots.copy_(pivots_tmp);
+  }
+}
 #endif  // USE_CUSOLVER
 
 }} // namespace at::native

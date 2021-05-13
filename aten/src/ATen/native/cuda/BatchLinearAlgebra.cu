@@ -1920,20 +1920,16 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 }
 
 static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  // TODO: compare performance and use the best performing option based on input's sizes
-  auto batch_size = batchCount(input);
-  auto m = input.size(-2);
-
+  int64_t batch_size = batchCount(input);
 #ifdef USE_CUSOLVER
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-  if (batch_size == 1) {
+  if (batch_size == 1 || !use_magma_) {
     lu_cusolver_looped(input, pivots, infos, compute_pivots);
   }
 #else
-  if (batch_size == 1) {
+  if (batch_size == 1)
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
+      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
   }
 #endif
   else {
