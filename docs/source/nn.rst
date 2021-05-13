@@ -345,22 +345,6 @@ From the ``torch.nn.utils`` module
     clip_grad_value_
     parameters_to_vector
     vector_to_parameters
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    parametrize.register_parametrization
-    parametrize.remove_parametrizations
-    parametrize.cached
-    parametrize.is_parametrized
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    parametrize.ParametrizationList
     prune.BasePruningMethod
 
 .. autosummary::
@@ -387,6 +371,28 @@ From the ``torch.nn.utils`` module
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+
+Utility functions to parametrize Tensors on existing Modules.
+Note that these functions can be used to parametrize a given Parameter
+or Buffer given a specific function that maps from an input space to the
+parametrized space. They are not parameterizations that would transform
+an object into a parameter.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    parametrize.register_parametrization
+    parametrize.remove_parametrizations
+    parametrize.cached
+    parametrize.is_parametrized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    parametrize.ParametrizationList
 
 Utility functions in other modules
 
