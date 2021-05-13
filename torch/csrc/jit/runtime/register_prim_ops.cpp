@@ -853,8 +853,7 @@ RegisterOperators reg(
          aten::div,
          static_cast<double>(a) / static_cast<double>(b),
          a / b,
-         a / b,
-         Scalar),
+         float),
      DEFINE_GENERIC_OP(
          aten::floordiv,
          floordiv(a, b),
@@ -883,10 +882,7 @@ RegisterOperators reg(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         static_cast<c10::complex<double>>(
-             pow(static_cast<c10::complex<double>>(a),
-                 static_cast<c10::complex<double>>(b))),
-         Scalar),
+         float),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
          [](Stack* stack) {
