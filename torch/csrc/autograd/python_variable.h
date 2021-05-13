@@ -18,7 +18,9 @@ struct THPVariable {
     PyObject* backward_hooks = nullptr;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *THPVariableClass;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
@@ -44,7 +46,10 @@ inline bool THPVariable_Check(PyObject *obj)
   return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
 }
 
-inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
-  auto var = (THPVariable*)obj;
+inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
   return var->cdata;
+}
+
+inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
+  return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
 }

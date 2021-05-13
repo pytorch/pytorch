@@ -13,7 +13,7 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-namespace {
+namespace onnx_constant_fold {
 
 enum OnnxType : int {
   ONNX_FLOAT = 1,
@@ -28,6 +28,7 @@ enum OnnxType : int {
   ONNX_UINT32,
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
@@ -146,6 +147,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
                               : axes_a[i];
@@ -170,6 +172,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto steps_a = inputTensorValues[4].accessor<int64_t, 1>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < inputTensorValues[4].sizes()[0]; ++i) {
       // Only steps == 1 are supported for constant-folding.
       if (steps_a[i] != 1) {
@@ -183,6 +186,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   auto starts_a = inputTensorValues[1].accessor<int64_t, 1>();
   auto ends_a = inputTensorValues[2].accessor<int64_t, 1>();
   auto updated_val = inputTensorValues[0];
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
     // ONNX slice accepts negative starts and ends values.
     int64_t start = starts_a[i], end = ends_a[i], axis = axes[i];
@@ -193,6 +197,57 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     updated_val = at::narrow(updated_val, axis, start, length);
   }
   return c10::optional<at::Tensor>(updated_val);
+}
+
+// Refer to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF
+at::Tensor runTorchArange_opset11(
+    const Node* node,
+    const std::vector<at::Tensor>& inputTensorValues) {
+  AT_ASSERT(inputTensorValues.size() == 3);
+  auto dtype = inputTensorValues[0].scalar_type();
+  at::Tensor updated_val;
+  switch (dtype) {
+    case at::ScalarType::Float: {
+      auto start = inputTensorValues[0].item<float>();
+      auto end = inputTensorValues[1].item<float>();
+      auto step = inputTensorValues[2].item<float>();
+      updated_val = at::arange(start, end, step);
+      break;
+    }
+    case at::ScalarType::Double: {
+      auto start = inputTensorValues[0].item<double>();
+      auto end = inputTensorValues[1].item<double>();
+      auto step = inputTensorValues[2].item<double>();
+      updated_val = at::arange(start, end, step);
+      break;
+    }
+    case at::ScalarType::Short: {
+      auto start = inputTensorValues[0].item<int16_t>();
+      auto end = inputTensorValues[1].item<int16_t>();
+      auto step = inputTensorValues[2].item<int16_t>();
+      updated_val = at::arange(start, end, step);
+      break;
+    }
+    case at::ScalarType::Int: {
+      auto start = inputTensorValues[0].item<int>();
+      auto end = inputTensorValues[1].item<int>();
+      auto step = inputTensorValues[2].item<int>();
+      updated_val = at::arange(start, end, step);
+      break;
+    }
+    case at::ScalarType::Long: {
+      auto start = inputTensorValues[0].item<int64_t>();
+      auto end = inputTensorValues[1].item<int64_t>();
+      auto step = inputTensorValues[2].item<int64_t>();
+      updated_val = at::arange(start, end, step);
+      break;
+    }
+    default: {
+      std::cerr << "Warning: Constant folding - ONNX Range type: " << dtype
+                << " is not supported." << std::endl;
+    }
+  }
+  return updated_val;
 }
 
 c10::optional<at::Tensor> runTorchBackendForOnnx(
@@ -277,7 +332,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::nullopt;
     }
   } else if (node->kind() == onnx::Squeeze) {
-    assert(inputTensorValues.size() == 2 or inputTensorValues.size() == 1);
+    assert(inputTensorValues.size() == 2 || inputTensorValues.size() == 1);
     if (opset_version == ONNX_OPSET_13) {
       // Squeeze version 13 input axes is optional, inputTensorValues.size() ==
       // 1 means axes equal to None
@@ -377,10 +432,11 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
     assert(inputTensorValues.size() == 2);
-    if (!node->hasAttributeS("axis")) {
-      return c10::nullopt;
+    // default axis = 0
+    int64_t axis = 0;
+    if (node->hasAttributeS("axis")) {
+      axis = node->i(attr::axis);
     }
-    auto axis = node->i(attr::axis);
     // If axis attribute for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim sizes) for aten op
     axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
@@ -401,6 +457,19 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (q < 1) {
       updated_val = updated_val.squeeze();
     }
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Range) {
+    updated_val = runTorchArange_opset11(node, inputTensorValues);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Where) {
+    updated_val = at::where(
+        inputTensorValues[0], inputTensorValues[1], inputTensorValues[2]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Equal) {
+    updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Neg) {
+    updated_val = at::neg(inputTensorValues[0]);
     return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
@@ -465,7 +534,7 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   return parentNodes;
 }
 
-} // Anonymous namespace
+} // namespace onnx_constant_fold
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
@@ -493,20 +562,21 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
       // Constant folding for multiple-output nodes not supported. Skip it.
       continue;
     }
-    if (!areNodeInputsConstant(node, valsToParamsMap)) {
+    if (!onnx_constant_fold::areNodeInputsConstant(node, valsToParamsMap)) {
       // If all the inputs to this node are not either parameter or
       // onnx::Constant, then skip this node.
       continue;
     }
 
-    auto inputTensorValues = getValues(node, valsToParamsMap);
+    auto inputTensorValues =
+        onnx_constant_fold::getValues(node, valsToParamsMap);
     if (inputTensorValues.empty()) {
       // This is a terminal node with no inputs, such as onnx::Constant. Skip
       // it.
       continue;
     }
-    auto updatedValWrapped =
-        runTorchBackendForOnnx(node, inputTensorValues, opset_version);
+    auto updatedValWrapped = onnx_constant_fold::runTorchBackendForOnnx(
+        node, inputTensorValues, opset_version);
     if (updatedValWrapped == c10::nullopt) {
       // Constant folding is not supported for this op. Skip it.
       continue;
@@ -529,7 +599,8 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     // below), and then remove the current node. If the parent was
     // an initializer (not onnx::Constant) then they are all removed
     // by eraseUnusedBlockInputs() call (below) outside the loop.
-    auto onnxConstParents = getOnnxConstParentsToRemove(node);
+    auto onnxConstParents =
+        onnx_constant_fold::getOnnxConstParentsToRemove(node);
     node->removeAllInputs();
     for (auto* n : onnxConstParents) {
       n->destroy();

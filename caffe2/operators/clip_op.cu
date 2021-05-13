@@ -43,7 +43,7 @@ __global__ void ClipGradientKernel(const int N,  const T minval,
 template <>
 bool ClipOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  
+
   CAFFE_ENFORCE_GE(X.numel(), 0);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   ClipKernel<<<
@@ -61,7 +61,7 @@ template <>
 bool ClipGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  
+
   CAFFE_ENFORCE_GE(Y.numel(), 0);
   CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());

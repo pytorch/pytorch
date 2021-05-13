@@ -2,8 +2,11 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/Randperm.cuh>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <vector>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -40,6 +43,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
 
   // launch kernel to get expected randoms
   expected_uniforms<<<1, 1>>>(x, counter_offset);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
   cudaDeviceSynchronize();
@@ -146,4 +150,58 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
 
   // expected uniforms will start from counter offset of 4
   assert_with_expected_uniforms(4);
+}
+
+__managed__ int keys[] = {
+  1, (1 << 15) + 1,  (1 << 16) + 1,
+  2, (1 << 14) + 2, 2
+};
+
+__managed__ int values[] = { 1, 2, 3, 4, 5, 9999 };
+
+std::vector<std::vector<int>> valid_perms1 = {
+  {1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {2, 3, 1}, {3, 1, 2}, {3, 2, 1}
+};
+std::vector<std::vector<int>> valid_perms2 = {
+  {4, 5}, {5, 4}
+};
+
+TEST(RandomPermutationTest, TestIslandShuffle) {
+  if (!at::cuda::is_available()) return;
+  at::manual_seed(123);
+
+  bool shuffled1 = false;
+  bool shuffled2 = false;
+  for (int i = 0; i < 100; i++) {
+    cudaDeviceSynchronize();
+    c10::optional<at::Generator> gen = c10::nullopt;
+    randperm_handle_duplicate_keys(keys, values, 8, 5, gen);
+    cudaDeviceSynchronize();
+    std::vector<int> slice1 = {values[0], values[1], values[2]};
+    std::vector<int> slice2 = {values[3], values[4]};
+    if (slice1 != valid_perms1[0]) {
+      shuffled1 = true;
+    }
+    if (slice2 != valid_perms2[0]) {
+      shuffled2 = true;
+    }
+    bool passed1 = false;
+    bool passed2 = false;
+    for (auto &i : valid_perms1) {
+      if (i == slice1) {
+        passed1 = true;
+        break;
+      }
+    }
+    for (auto &i : valid_perms2) {
+      if (i == slice2) {
+        passed2 = true;
+        break;
+      }
+    }
+    ASSERT_TRUE(passed1);
+    ASSERT_TRUE(passed2);
+  }
+  ASSERT_TRUE(shuffled1);
+  ASSERT_TRUE(shuffled2);
 }

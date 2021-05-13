@@ -30,8 +30,9 @@ class Vec256<ComplexFlt> {
   using value_type = ComplexFlt;
   using vec_internal_type = vfloat32;
   using vec_internal_mask_type = vbool32;
+  using size_type = int;
 
-  static constexpr int size() {
+  static constexpr size_type size() {
     return 4;
   }
   Vec256() {}
@@ -417,7 +418,7 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> sqrt() const {
-    return map(std::sqrt);  
+    return map(std::sqrt);
   }
 
   Vec256<ComplexFlt> reciprocal() const {

@@ -54,6 +54,7 @@ class Adadelta(Optimizer):
             grads = []
             square_avgs = []
             acc_deltas = []
+            lr, rho, eps, weight_decay = group['lr'], group['rho'], group['eps'], group['weight_decay']
 
             for p in group['params']:
                 if p.grad is None:
@@ -74,17 +75,15 @@ class Adadelta(Optimizer):
                 square_avgs.append(state['square_avg'])
                 acc_deltas.append(state['acc_delta'])
 
-                lr, rho, eps, weight_decay = group['lr'], group['rho'], group['eps'], group['weight_decay']
-
                 state['step'] += 1
 
             F.adadelta(params_with_grad,
                        grads,
                        square_avgs,
                        acc_deltas,
-                       lr,
-                       rho,
-                       eps,
-                       weight_decay)
+                       lr=lr,
+                       rho=rho,
+                       eps=eps,
+                       weight_decay=weight_decay)
 
         return loss

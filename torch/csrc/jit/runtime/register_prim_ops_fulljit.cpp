@@ -25,6 +25,7 @@ namespace jit {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {Operator(
          prim::profile,
@@ -210,6 +211,7 @@ RegisterOperators reg(
      Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t n;
            pop(stack, n);
            c10::List<int64_t> elems;
@@ -225,6 +227,7 @@ RegisterOperators reg(
      Operator(
          "prim::NumToTensor.bool(bool a) -> Tensor",
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
@@ -247,7 +250,9 @@ RegisterOperators reg(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool non_blocking;
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool copy;
            pop(stack, self, non_blocking, copy);
            c10::optional<c10::Device> device = c10::nullopt;
@@ -282,11 +287,27 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse_csr(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse_csr());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_mlc(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mlc());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -323,14 +344,6 @@ RegisterOperators reg(
            } else {
              push(stack, a.name());
            }
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::layout(Tensor a) -> int",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.layout());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -531,6 +544,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            at::Tensor a, b;
            pop(stack, a, b);
+           // NOLINTNEXTLINE(bugprone-branch-clone)
            if (!a.defined() && !b.defined()) {
              // undef + undef == undef
              stack->emplace_back(a);
@@ -615,11 +629,25 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      // This operator is generated inside the compiler for indexing into
+     // ModuleList without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           std::stringstream ss;
+           ss << ind.toInt();
+           push(stack, module_dict.toModule().attr(ss.str()));
+         },
+         aliasAnalysisFromSchema()),
+     // This operator is generated inside the compiler for indexing into
      // ModuleDict without a statically determinable key. Accordingly,
      // self must be a ModuleType and the output must be an InterfaceType.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+             "prim::ModuleContainerIndex.dict(Any self, str ind) -> Any"),
          [](Stack* stack) {
            IValue ind = pop(stack);
            IValue module_dict = pop(stack);
@@ -642,6 +670,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase())});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
@@ -677,7 +706,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -690,6 +719,7 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
@@ -875,8 +905,10 @@ RegisterOperators reg2({
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack* stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
           pop(stack, a);
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b, c;
           b = modf(a, &c);
           push(stack, b, c);
@@ -885,9 +917,12 @@ RegisterOperators reg2({
     Operator(
         "aten::frexp(float a) -> (float, int)",
         [](Stack* stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
           pop(stack, a);
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double m;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int e;
           m = std::frexp(a, &e);
           push(stack, m, e);
@@ -896,7 +931,9 @@ RegisterOperators reg2({
     Operator(
         "aten::ldexp(float x, int i) -> float",
         [](Stack* stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t b;
           pop(stack, a, b);
           push(stack, std::ldexp(a, b));
@@ -910,19 +947,25 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_GENERIC_BINARY_OP(
+        aten::log,
+        std::log(a) / std::log(b),
+        float,
+        complex),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
-    DEFINE_SCALAR_SCALAR_BINARY_OP(
+    DEFINE_INT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
+    DEFINE_FLOAT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::log,
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
         float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atan, std::atan(a), float, float),
     DEFINE_GENERIC_OP(
         aten::atan2,
         std::atan2(a, b),
@@ -930,20 +973,27 @@ RegisterOperators reg2({
         float,
         float),
     DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
-    DEFINE_SCALAR_SCALAR_BINARY_OP(
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::atan2,
         std::atan2(a, b),
         std::atan2(a, b),
         float),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        aten::angle,
+        std::arg(a),
+        float,
+        float,
+        float,
+        float),
     DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
     DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
@@ -951,6 +1001,18 @@ RegisterOperators reg2({
     DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isnan,
+        std::isnan(a.real()) || std::isnan(a.imag()),
+        bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isfinite,
+        std::isfinite(a.real()) && std::isfinite(a.imag()),
+        bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isinf,
+        std::isinf(a.real()) || std::isinf(a.imag()),
+        bool),
     DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
     DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
     DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
@@ -959,7 +1021,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
-    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        prim::abs,
+        std::abs(a),
+        int,
+        float,
+        float,
+        float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
         [](Stack* stack) {
@@ -1006,6 +1074,52 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.int(int[] self) -> int",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.float(float[] self) -> float",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          auto sum = 0.0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.complex(complex[] self) -> complex",
+        [](Stack* stack) {
+          c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
+          c10::complex<double> sum = 0.0;
+          for (int i = 0; i < l.size(); i++) {
+            sum = sum + l.extract(i);
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.bool(bool[] self) -> int",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            if (elem) {
+              sum += 1;
+            }
+          }
+          push(stack, sum);
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -1102,6 +1216,7 @@ RegisterOperators reg2({
     Operator(
         "aten::divmod.int(int x, int y) -> (int, int)",
         [](Stack* stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
@@ -1123,12 +1238,14 @@ RegisterOperators reg2({
     Operator(
         "aten::divmod.float(float x, float y) -> (float, float)",
         [](Stack* stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a, b;
           pop(stack, a, b);
           if (b == 0) {
             throw std::runtime_error("ZeroDivisionError: float divmod()");
           }
           double rem = fmod(a, b);
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           if (rem && (a < 0) != (b < 0)) {
             rem += b;
           }
@@ -1173,6 +1290,57 @@ RegisterOperators reg2({
         "aten::hash.generic(t value) -> int",
         hashValue,
         aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
+  Operator(                                                             \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      " y) -> complex",                                                 \
+      [](Stack* stack) {                                                \
+        actual_type_a a;                                                \
+        actual_type_b b;                                                \
+        pop(stack, a, b);                                               \
+        auto comp = c10::complex<double>(a, b);                         \
+        push(stack, comp);                                              \
+      },                                                                \
+      aliasAnalysisFromSchema())
+
+#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(                               \
+    type_a, type_b, actual_type_a, actual_type_b)                        \
+  Operator(                                                              \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b     \
+      " y) -> complex",                                                  \
+      [](Stack* stack) {                                                 \
+        actual_type_a a;                                                 \
+        actual_type_b b;                                                 \
+        pop(stack, a, b);                                                \
+        auto comp = c10::complex<double>(a.item<double>(), b);           \
+        push(stack, comp);                                               \
+      },                                                                 \
+      aliasAnalysisFromSchema()),                                        \
+      Operator(                                                          \
+          "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a \
+          " y) -> complex",                                              \
+          [](Stack* stack) {                                             \
+            actual_type_b a;                                             \
+            actual_type_a b;                                             \
+            pop(stack, a, b);                                            \
+            auto comp = c10::complex<double>(a, b.item<double>());       \
+            push(stack, comp);                                           \
+          },                                                             \
+          aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_OP(int, bool, int, bool),
+    DEFINE_COMPLEX_OP(bool, int, bool, int),
+    DEFINE_COMPLEX_OP(float, bool, double, bool),
+    DEFINE_COMPLEX_OP(bool, float, bool, double),
+    DEFINE_COMPLEX_OP(float, int, double, int),
+    DEFINE_COMPLEX_OP(int, float, int, double),
+    DEFINE_COMPLEX_OP(int, int, int, int),
+    DEFINE_COMPLEX_OP(bool, bool, bool, bool),
+    DEFINE_COMPLEX_OP(float, float, double, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, float, at::Tensor, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, int, at::Tensor, int),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
 });
 
 bool isSortableTupleType(
@@ -1280,6 +1448,7 @@ void sort_op(Stack* stack) {
 }
 
 // NB: this must be registered after the other aten::sort operators
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators regSort({
     Operator(
         "aten::sorted.any(t[](a) self) -> (t[])",
@@ -1582,6 +1751,7 @@ void upsample_bilinear_op(Stack* stack) {
 }
 
 // These ops are no longer generated, but remain here for BC
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
@@ -1648,6 +1818,7 @@ std::string get_first(const c10::List<c10::List<std::string>>& strings) {
   return strings.get(0).get(0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg4 =
     torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",

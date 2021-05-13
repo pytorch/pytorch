@@ -31,7 +31,7 @@ class TestHash(JitTestCase):
         def fn_unhashable(t1: Tuple[int, List[int]]):
             return hash(t1)
 
-        with self.assertRaisesRegex(RuntimeError, "unhashable"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "unhashable", "hash"):
             fn_unhashable((1, [1]))
 
     def test_hash_tensor(self):

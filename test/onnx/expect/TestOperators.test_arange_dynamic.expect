@@ -146,7 +146,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "Range13_dim_0"
+            dim_value: 10
           }
         }
       }

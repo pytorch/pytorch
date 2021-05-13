@@ -15,8 +15,7 @@ Stmt* Tensor::constructStmt(
     const std::vector<const Var*>& reduce_args) const {
   std::vector<const Expr*> indices(args.begin(), args.end());
 
-  const Expr* mask = new IntImm(1);
-  Stmt* s = new Store(buf_, indices, body, mask);
+  Stmt* s = new Store(buf_, indices, body);
 
   size_t ndim = buf()->ndim();
   size_t reduce_ndim = reduce_dims.size();
@@ -35,7 +34,7 @@ Stmt* Tensor::constructStmt(
           reduce_args[dim_index], new IntImm(0), reduce_dims[dim_index], s);
     }
     if (init_expr) {
-      Store* init_stmt = new Store(buf(), indices, init_expr, new IntImm(1));
+      Store* init_stmt = new Store(buf(), indices, init_expr);
       s = new Block({init_stmt, s});
     }
   }
@@ -153,13 +152,27 @@ Tensor* Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
+    const BufHandle& buffer,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      name,
+      dim_args,
+      reducer,
+      [&](ParameterList& p) { return buffer.load(p); },
+      reduce_args);
+}
+
+Tensor* Reduce(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
     Tensor* tensor,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(
       name,
       dim_args,
       reducer,
-      [&](ParameterList& p) { return tensor->call(p); },
+      [&](ParameterList& p) { return tensor->load(p); },
       reduce_args);
 }
 

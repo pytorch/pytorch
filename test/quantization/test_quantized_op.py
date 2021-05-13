@@ -27,6 +27,8 @@ from torch.testing._internal.common_quantized import _quantize, _dequantize, _ca
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.quantization import PerChannelMinMaxObserver
 
+from typing import Optional
+
 np_dtype = {
     torch.quint8 : np.uint8,
     torch.qint8 : np.int8,
@@ -2005,20 +2007,31 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
-        side_lens = (2, 8, 11)
+        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11])
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = (True, False)
         affine_list = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
-        test_cases = itertools.product(*combined)
-
+        combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
+        test_cases_product = itertools.product(*combined)
+        test_cases = list(test_case for test_case in test_cases_product)
+        # add just one test case to test overflow
+        test_cases.append([
+            [1, 4, 224, 224, 160],  # shape,
+            torch.qint8,  # torch_type
+            0.1,  # scale
+            0,  # zero_point
+            False,   # channels_last
+            True,  # affine
+        ])
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
-                shapes = [side_len] * 4
+                shapes, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
+                if channels_last and shapes.__len__() >= 5:
+                    # required rank 4 tensor to use channels_last format
+                    continue
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -2064,7 +2077,7 @@ class TestQuantizedOps(TestCase):
                         ch_vals = dqX[batch_idx][ch_idx]
                         assume(
                             float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
-                            or group_vals.numel() < 5)
+                            or ch_vals.numel() < 5 or ch_vals.numel() > 25600)
 
                 qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
 
@@ -2408,18 +2421,31 @@ class TestQuantizedOps(TestCase):
                 super(MultiheadAttentionModel, self).__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
-            def forward(self, query, key, value, key_padding_mask=None, need_weights=True, attn_mask=None):
+            def forward(
+                self,
+                query,
+                key,
+                value,
+                key_padding_mask: Optional[torch.Tensor] = None,
+                need_weights: bool = True,
+                attn_mask: Optional[torch.Tensor] = None,
+            ):
                 return self.layer(query, key, value, key_padding_mask, need_weights, attn_mask)
 
         qengine = torch.backends.quantized.engine
+
+        min_power = 30
+        max_mse = 2
 
         num_heads = 16
         batch_size = 4
         target_seq_length = 128
         source_seq_length = 64
-        embed_dim = 512  # Must be divisible by the number of heads
+        qembed_dim = 512  # Must be divisible by the number of heads
+        kembed_dim = 128
+        vembed_dim = 256
 
-        dropout = 0  # This is not supported
+        dropout = 0.0  # This is not supported
 
         Bias = [False, True]
         Add_bias_kv = [False, True]
@@ -2437,68 +2463,70 @@ class TestQuantizedOps(TestCase):
             }
         }
 
-        fp_data = [
-            torch.randn(target_seq_length, batch_size, embed_dim),  # Q
-            torch.randn(source_seq_length, batch_size, embed_dim),  # K
-            torch.randn(source_seq_length, batch_size, embed_dim)   # V
-        ]
+        for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
+            fp_data = [
+                torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if kdim is None else kembed_dim),  # K
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if vdim is None else vembed_dim)   # V
+            ]
 
-        q_data = []
-        reduce_range = (qengine == 'fbgemm')
-        for idx, x in enumerate(fp_data):
-            scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype, reduce_range=reduce_range)
-            x = x.to(torch.float)
-            qx = torch.quantize_per_tensor(x, scale=scale,
-                                           zero_point=zero_point, dtype=qtype)
-            q_data.append(qx)
+            q_data = []
+            reduce_range = (qengine == 'fbgemm')
+            for idx, x in enumerate(fp_data):
+                scale, zero_point = _calculate_dynamic_qparams(
+                    x, dtype=dtype, reduce_range=reduce_range)
+                x = x.to(torch.float)
+                qx = torch.quantize_per_tensor(x, scale=scale,
+                                               zero_point=zero_point, dtype=qtype)
+                q_data.append(qx)
 
-            # Dequantize the data back for reference
-            fp_data[idx] = qx.dequantize()
+                # Dequantize the data back for reference
+                fp_data[idx] = qx.dequantize()
 
-        # TODO: need to investigate why resetting the bias reduces SNR
-        #       https://github.com/pytorch/pytorch/issues/51662
-        min_power = 30
-        max_mse = 2
+            with torch.no_grad():
+                for bias, add_bias_kv, add_zero_attn in itertools.product(
+                        Bias, Add_bias_kv, Add_zero_attn):
+                    mha = MultiheadAttentionModel(qembed_dim, num_heads, dropout,
+                                                  bias, add_bias_kv, add_zero_attn,
+                                                  kdim=kdim, vdim=vdim)
+                    mha.eval()
 
+                    # Prepare
+                    mha.qconfig = torch.quantization.get_default_qconfig(qengine)
+                    mha_prepared = torch.quantization.prepare(
+                        mha, prepare_custom_config_dict=custom_module_config)
 
-        with torch.no_grad():
-            for bias, add_bias_kv, add_zero_attn in itertools.product(
-                    Bias, Add_bias_kv, Add_zero_attn):
-                mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
-                                              bias, add_bias_kv, add_zero_attn)
-                mha.eval()
+                    # Calibrate
+                    y = mha_prepared(*fp_data)
+                    y_ref = mha(*fp_data)
+                    # Check the result of the prepare
+                    self.assertEqual(y_ref[0], y[0])  # Attention
+                    self.assertEqual(y_ref[1], y[1])  # Weight
 
-                # Prepare
-                mha.qconfig = torch.quantization.get_default_qconfig(qengine)
-                mha_prepared = torch.quantization.prepare(
-                    mha, prepare_custom_config_dict=custom_module_config)
+                    # Quantize
+                    mha_quantized = torch.quantization.convert(
+                        mha_prepared,
+                        convert_custom_config_dict=custom_module_config)
+                    qy = mha_quantized(*q_data)
 
-                # Calibrate
-                y = mha_prepared(*fp_data)
-                y_ref = mha(*fp_data)
-                # Check the result of the prepare
-                self.assertEqual(y_ref[0], y[0])  # Attention
-                self.assertEqual(y_ref[1], y[1])  # Weight
+                    # Reference result
+                    mha.layer = mha_quantized.layer.dequantize()
+                    y_ref = mha(*fp_data)
 
-                # Quantize
-                mha_quantized = torch.quantization.convert(
-                    mha_prepared,
-                    convert_custom_config_dict=custom_module_config)
-                qy = mha_quantized(*q_data)
+                    snr = _snr(y, qy)
+                    for signal, mse, power in snr:
+                        self.assertTrue(
+                            power > min_power or mse < max_mse,
+                            msg=(f"Error is too high: SNR(dB): {power}, "
+                                 f"Signal: {signal}, MSE: {mse}; "
+                                 f"Run with bias={bias}, "
+                                 f"add_bias_kv={add_bias_kv}, "
+                                 f"add_zero_attn={add_zero_attn}"))
 
-                # Reference result
-                mha.layer = mha_quantized.layer.dequantize()
-                y_ref = mha(*fp_data)
-
-                snr = _snr(y, qy)
-                for signal, mse, power in snr:
-                    self.assertTrue(
-                        power > min_power or mse < max_mse,
-                        msg=(f"Error is too high: SNR(dB): {power}, "
-                             f"Signal: {signal}, MSE: {mse}; "
-                             f"Run with bias={bias}, "
-                             f"add_bias_kv={add_bias_kv}, "
-                             f"add_zero_attn={add_zero_attn}"))
+                    # Verify the result is scriptable
+                    mha_quantized_scripted = torch.jit.script(mha_quantized)
 
 
 class TestDynamicQuantizedLinear(TestCase):
@@ -3096,9 +3124,10 @@ class TestQuantizedLinear(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
-    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams):
+    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
+                                      num_batches):
         weights = torch.from_numpy((np.random.random_sample((
-            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+            num_batches, num_embeddings, embedding_dim)).squeeze() + 1).astype(np.float32))
         qtype = torch.quint8
         if bit_rate == 8:
             w_packed = pack_fn(weights)
@@ -3107,16 +3136,24 @@ class TestQuantizedEmbeddingOps(TestCase):
         w_unpacked = unpack_fn(w_packed)
 
         if bit_rate == 8 or bit_rate == 4:
+            obs_weights = weights
+            # Combine 3D embeddings (e.g. stacked combination of embeddings)
+            # in a dimension orthogonal to channels.
+            if(num_batches > 1):
+                stacked_shape = list(weights.size())
+                stacked_shape[1] *= stacked_shape[0]
+                obs_weights = weights.reshape(stacked_shape[1:])
+
             # Check numerics of prepack function that accepts qtensor as input.
             # We use min-max observer to mimic the quantization performed in the original function.
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
-            obs(weights)
+            obs(obs_weights)
             # Get the scale and zero point for the weight tensor
             qparams = obs.calculate_qparams()
             if bit_rate == 4:
                 qtype = torch.quint4x2
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qtype)
+            qweight = torch.quantize_per_channel(obs_weights, qparams[0], qparams[1], axis=0, dtype=qtype)
             real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
             self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
             unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
@@ -3171,12 +3208,13 @@ class TestQuantizedEmbeddingOps(TestCase):
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
-    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim):
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+           num_batches=st.integers(1, 5))
+    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim, num_batches):
         pack_fn = torch.ops.quantized.embedding_bag_byte_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_byte_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False, num_batches)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
@@ -3186,7 +3224,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1)
 
     """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
@@ -3196,7 +3234,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams, 1)
 
 
     def embedding_bag_rowwise_offsets_run(

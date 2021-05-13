@@ -1,5 +1,5 @@
 import torch.distributed.rpc as rpc
-import torch.distributed.rpc._testing  # noqa
+import torch.distributed.rpc._testing  # noqa: F401
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )

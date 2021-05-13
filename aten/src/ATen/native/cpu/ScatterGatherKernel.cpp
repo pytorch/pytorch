@@ -20,6 +20,7 @@ public:
     *self_data = *self_data && *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
@@ -29,6 +30,7 @@ public:
     *self_data += *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceAdd reduce_add;
 
 class TensorAssign {
@@ -38,6 +40,7 @@ public:
     *self_data = *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
@@ -101,7 +104,7 @@ template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(Tensor& self, int64_t dim,
-    const Tensor& index, Scalar& value,
+    const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -130,6 +133,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(index)
@@ -145,7 +149,7 @@ struct cpu_scatter_gather_base_kernel {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+      "scatter_gather_scalar_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
@@ -221,6 +225,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(src)
@@ -240,7 +245,7 @@ struct cpu_scatter_gather_base_kernel {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+      "scatter_gather_tensor_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
@@ -311,7 +316,7 @@ void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Te
     self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
+void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
@@ -338,7 +343,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
 }
 
 void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                                      Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                                      const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
@@ -353,11 +358,17 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
 
 }} // namespace at::native

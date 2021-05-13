@@ -14,8 +14,8 @@ int main(int argc, char* argv[]) {
 
 void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   // Test
-  torch::InterpreterManager m(1);
-  torch::Package p = m.load_package(model_filename);
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
   auto model = p.load_pickle("model", "model.pkl");
   at::IValue eg;
   {
@@ -52,20 +52,20 @@ TEST(TorchpyTest, ResNet) {
 }
 
 TEST(TorchpyTest, Movable) {
-  torch::InterpreterManager m(1);
-  torch::MovableObject obj;
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::ReplicatedObj obj;
   {
     auto I = m.acquire_one();
     auto model =
-        I.global("torch.nn", "Module")(std::vector<torch::PythonObject>());
+        I.global("torch.nn", "Module")(std::vector<torch::deploy::Obj>());
     obj = I.create_movable(model);
   }
   obj.acquire_session();
 }
 
 TEST(TorchpyTest, MultiSerialSimpleModel) {
-  torch::InterpreterManager manager(3);
-  torch::Package p = manager.load_package(path("SIMPLE", simple));
+  torch::deploy::InterpreterManager manager(3);
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
@@ -84,13 +84,26 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   for (size_t i = 0; i < ninterp; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+
+  // test kwargs api with args
+  std::vector<c10::IValue> args;
+  args.emplace_back(input);
+  std::unordered_map<std::string, c10::IValue> kwargs_empty;
+  auto jit_output_args = model.call_kwargs(args, kwargs_empty).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_args));
+
+  // and with kwargs only
+  std::unordered_map<std::string, c10::IValue> kwargs;
+  kwargs["input"] = input;
+  auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
-  torch::InterpreterManager manager(nthreads);
+  torch::deploy::InterpreterManager manager(nthreads);
 
-  torch::Package p = manager.load_package(path("SIMPLE", simple));
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 

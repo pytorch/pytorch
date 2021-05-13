@@ -9,6 +9,7 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
     torch._C.__dict__['_CudaGraphBase'] = _dummy_type('_CudaGraphBase')
+    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -37,7 +38,7 @@ class Stream(torch._C._CudaStreamBase):
         r"""Makes all future work submitted to the stream wait for an event.
 
         Args:
-            event (Event): an event to wait for.
+            event (torch.cuda.Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
            `CUDA Stream documentation`_ for more info.
@@ -68,7 +69,7 @@ class Stream(torch._C._CudaStreamBase):
         r"""Records an event.
 
         Args:
-            event (Event, optional): event to record. If not given, a new one
+            event (torch.cuda.Event, optional): event to record. If not given, a new one
                 will be allocated.
 
         Returns:
@@ -204,3 +205,4 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event uninitialized>'
 
 _Graph = torch._C._CudaGraphBase
+_graph_pool_handle = torch._C._graph_pool_handle

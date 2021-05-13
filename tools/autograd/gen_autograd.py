@@ -4,6 +4,7 @@ repository, run:
 
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
+       aten/src/ATen/native/native_functions.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -23,68 +24,20 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
+from tools.codegen.api import cpp
+from tools.codegen.api.autograd import (
+    match_differentiability_info, NativeFunctionWithDifferentiabilityInfo,
+)
+from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
-
-# See NOTE [ Autograd View Variables ] in variable.h for details.
-# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
-# you **MUST** also update the public list of view ops accordingly in
-# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
-# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
-#
-# A map: function name => name of the argument that all outputs are view of
-
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
-
-VIEW_FUNCTIONS = {
-    'numpy_T': 'self',
-    'alias': 'self',
-    'as_strided': 'self',
-    'diagonal': 'self',
-    'expand': 'self',
-    'permute': 'self',
-    'select': 'self',
-    'slice': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
-    'squeeze': 'self',
-    't': 'self',
-    'transpose': 'self',
-    'unfold': 'self',
-    'unsqueeze': 'self',
-    'flatten': 'self',
-    'view': 'self',
-    'unbind': 'self',
-    '_indices': 'self',
-    '_values': 'self',
-    'indices': 'self',
-    'values': 'self',
-    # sparse_coo ctor output should really be views of both indices and values,
-    # but we only supports making as view of a single variable, and indices is
-    # discrete anyways.
-    # FIXME: clone indices on construction.
-    'sparse_coo_tensor_with_dims_and_tensors': 'values',
-}
-
-for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
-    VIEW_FUNCTIONS[key] = 'self'
-
-# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of outputs is being gradually deprecated.
-MULTI_OUTPUT_SAFE_FUNCTIONS = {
-    'split',
-    'split_with_sizes',
-}
-
-# note: some VIEW_FUNCTIONS are just compositions of the view functions above
-# this list contains both the root view functions and any that are purely composed
-# of viewing functions, and is used by the JIT to determine when an operator
-# may return a view of its inputs; however they may sometimes return a copy.
-# (e.g. `contiguous`)
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
-})
+from typing import List
+from . import gen_python_functions
+from .gen_autograd_functions import gen_autograd_functions_lib, gen_autograd_functions_python
+from .gen_trace_type import gen_trace_type
+from .gen_variable_type import gen_variable_type
+from .gen_inplace_or_view_type import gen_inplace_or_view_type
+from .gen_variable_factories import gen_variable_factories
+from .load_derivatives import load_derivatives
 
 def gen_autograd(
     aten_path: str,
@@ -95,28 +48,29 @@ def gen_autograd(
     disable_autograd: bool = False,
 ) -> None:
     # Parse and load derivatives.yaml
-    from .load_derivatives import load_derivatives
     differentiability_infos = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
+    fns = list(sorted(filter(
+        operator_selector.is_native_function_selected_for_training,
+        parse_native_yaml(native_functions_path)), key=lambda f: cpp.name(f.func)))
+    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
+
     # Generate VariableType.h/cpp
-    from .gen_trace_type import gen_trace_type
-    from .gen_variable_type import gen_variable_type
     if not disable_autograd:
-        gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
+        gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
+
+        gen_inplace_or_view_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
-
     # Generate Functions.h/cpp
-    from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
         out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
-    from .gen_variable_factories import gen_variable_factories
     gen_variable_factories(out, native_functions_path, template_path)
 
 
@@ -126,19 +80,16 @@ def gen_autograd_python(
     out: str,
     autograd_dir: str,
 ) -> None:
-    from .load_derivatives import load_derivatives
     differentiability_infos = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate Functions.h/cpp
-    from .gen_autograd_functions import gen_autograd_functions_python
     gen_autograd_functions_python(
         out, differentiability_infos, template_path)
 
     # Generate Python bindings
-    from . import gen_python_functions
     deprecated_path = os.path.join(autograd_dir, 'deprecated.yaml')
     gen_python_functions.gen(
         out, native_functions_path, deprecated_path, template_path)

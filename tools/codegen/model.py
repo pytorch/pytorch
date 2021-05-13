@@ -5,8 +5,6 @@ from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequenc
 from enum import Enum, auto
 import itertools
 
-from tools.codegen.utils import *
-
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
@@ -70,12 +68,12 @@ class DispatchKey(Enum):
     QuantizedCPU = auto()
     QuantizedCUDA = auto()
     QuantizedXPU = auto()
-    ComplexCPU = auto()
-    ComplexCUDA = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()
@@ -104,9 +102,9 @@ class DispatchKey(Enum):
     TESTING_ONLY_GenericMode = auto()
     NumDispatchKeys = auto()
     Autograd = auto()
-    Math = auto()
-    DefaultBackend = auto()
-    EndOfAliasKeys = DefaultBackend
+    CompositeImplicitAutograd = auto()
+    CompositeExplicitAutograd = auto()
+    EndOfAliasKeys = CompositeExplicitAutograd
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -127,24 +125,20 @@ class DispatchKey(Enum):
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
 
-class UseC10Dispatcher(Enum):
-    full = 0
-    hacky_wrapper_for_legacy_signatures = 1
-
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
-    return dk in {DispatchKey.DefaultBackend, DispatchKey.Math}
+    return dk in {DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd}
 
 # CUDA specific dispatch keys
 def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.ComplexCUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -153,6 +147,10 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
+
+class DeviceCheckType(Enum):
+    NoCheck = 0
+    ExactSame = 1
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -175,12 +173,15 @@ class NativeFunction:
     # classes for expository clarity.)
     func: 'FunctionSchema'
 
-    # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'full'
-    use_c10_dispatcher: UseC10Dispatcher
+    # Whether or not to generate mutable tensor arguments like regular
+    # ones
+    use_const_ref_for_mutable_tensors: bool
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
+
+    # How to emit automatic generation of device check
+    device_check: DeviceCheckType
 
     # What python module to put the function in
     python_module: Optional[str]
@@ -208,7 +209,7 @@ class NativeFunction:
     # case, that is equivalent to having written:
     #
     #   dispatch:
-    #       Math: $operator_name
+    #       CompositeImplicitAutograd: $operator_name
     dispatch: Dict[DispatchKey, str]
 
     # The location in the YAML file were this native function entry was
@@ -252,7 +253,7 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             return True
         else:
-            return self.dispatch.keys() != {DispatchKey.Math}
+            return self.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -274,16 +275,8 @@ class NativeFunction:
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
-        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
-        assert use_c10_dispatcher_s != 'full', \
-            "There is no need to specify 'use_c10_dispatcher: full' anymore. This is the default now. Just remove the line."
-        if use_c10_dispatcher_s is None:
-            use_c10_dispatcher = UseC10Dispatcher.full
-        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
-            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-        else:
-            raise AssertionError(
-                f'use_c10_dispatcher must be full or hacky_wrapper_for_legacy_signatures, got {use_c10_dispatcher}')
+        use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -305,6 +298,14 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        device_check_s = e.pop('device_check', None)
+        assert device_check_s is None or isinstance(device_check_s, str), f'not a str: {device_check_s}'
+        device_check: DeviceCheckType
+        if device_check_s is None:
+            device_check = DeviceCheckType.ExactSame
+        else:
+            device_check = DeviceCheckType[device_check_s]
+
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
@@ -323,6 +324,8 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
+        from tools.codegen.api import cpp
+
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Dict[DispatchKey, str] = {}
@@ -338,21 +341,29 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     dispatch[dispatch_key] = v
+            assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
+                "unnecessary dispatch table for this function; just delete the dispatch " \
+                "key entirely"
+            assert dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
+                f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} " \
+                f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
+                "name, then delete the dispatch table"
         elif not structured and structured_delegate is None:
-            from tools.codegen.api import cpp
-            dispatch[DispatchKey.Math] = cpp.name(func)
+            dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
 
-        assert not (DispatchKey.DefaultBackend in dispatch and DispatchKey.Math in dispatch), \
-            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+        assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
+            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
-            "implementation, specify DefaultBackend; otherwise specify Math only"
+            "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
-        e.pop('__line__')
+        # don't care if it exists or not; make it easier to use this function
+        # with other yaml parsers that aren't setting __line__ in the dict
+        e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
             func=func,
-            use_c10_dispatcher=use_c10_dispatcher,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -363,6 +374,7 @@ class NativeFunction:
             category_override=category_override,
             dispatch=dispatch,
             device_guard=device_guard,
+            device_check=device_check,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
         )
@@ -404,9 +416,6 @@ class NativeFunction:
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
-        if self.structured or self.structured_delegate:
-            assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
-                "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
         if self.structured_inherits is not None:
             assert self.structured, "structured_inherits must also imply structured: True"
         if self.structured_delegate is not None:
@@ -414,37 +423,52 @@ class NativeFunction:
                 assert k not in self.dispatch, \
                     f"if structured_delegate, then must not have {k} in dispatch dictionary " \
                     "(it is delegated!)"
+        if str(self.func.name).startswith('_foreach'):
+            assert self.device_check == DeviceCheckType.NoCheck, \
+                "foreach kernels fall back to slow path when tensor are on different devices, " \
+                "device_check not allowed to be enabled"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
+#
+# NB: we create NativeFunctionsGroup *even if* the function is not
+# actually annotated structured.  Test the structured boolean to see if it
+# actually is structured or not.
 @dataclass(frozen=True)
-class StructuredNativeFunctions:
+class NativeFunctionsGroup:
     functional: NativeFunction
     inplace: Optional[NativeFunction]
     out: NativeFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.out.structured
 
     def __post_init__(self) -> None:
         test_sig: FunctionSchema = self.functional.func.signature()
         for f in self.functions():
             if test_sig != f.func.signature():
                 raise AssertionError(
-                    "StructuredNativeFunctions constructed from two NativeFunctions "
+                    "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert self.functional.structured_delegate == self.out.func.name, \
-            f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
-            f"but its actual delegate is {self.out.func.name}"
         assert self.out.func.kind() == SchemaKind.out
-        assert self.out.structured
-        # For now, structured composite kernels are not supported (need some
-        # design work to figure out how to make the composite case work)
-        assert self.out.dispatch.keys() != {DispatchKey.Math}
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
-            assert self.inplace.structured_delegate == self.out.func.name
+
+        if self.structured:
+            # For now, structured composite kernels are not supported (need some
+            # design work to figure out how to make the composite case work)
+            assert self.out.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+
+            assert self.functional.structured_delegate == self.out.func.name, \
+                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+                f"but its actual delegate is {self.out.func.name}"
+            if self.inplace is not None:
+                assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
@@ -456,17 +480,74 @@ class StructuredNativeFunctions:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
-        functional = d.get(SchemaKind.functional)
-        inplace = d.get(SchemaKind.inplace)
-        out = d.get(SchemaKind.out)
-        if functional is None or out is None or not out.structured:
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
+        assert d
+        if len(d) == 1:
             return None
-        return StructuredNativeFunctions(
+        d = dict(d)  # non-destructive updates please
+        functional = d.pop(SchemaKind.functional, None)
+        inplace = d.pop(SchemaKind.inplace, None)
+        out = d.pop(SchemaKind.out, None)
+        assert not d
+        assert functional is not None
+        # There are a few operators which only have functional/inplace variants;
+        # these don't count as structured for our purposes here
+        if out is None:
+            return None
+        return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
             out=out,
         )
+
+def is_foreach_op(name: str) -> bool:
+    return str(name) in set([
+        '_amp_foreach_non_finite_check_and_unscale_',
+        '_foreach_add_.ScalarList',
+        '_foreach_sub_.ScalarList',
+        '_foreach_mul_.ScalarList',
+        '_foreach_div_.ScalarList',
+        '_foreach_add_.Scalar',
+        '_foreach_sub_.Scalar',
+        '_foreach_mul_.Scalar',
+        '_foreach_div_.Scalar',
+        '_foreach_add_.List',
+        '_foreach_sub_.List',
+        '_foreach_mul_.List',
+        '_foreach_div_.List',
+        '_foreach_exp_',
+        '_foreach_sqrt_',
+        '_foreach_abs_',
+        '_foreach_acos_',
+        '_foreach_asin_',
+        '_foreach_atan_',
+        '_foreach_ceil_',
+        '_foreach_cos_',
+        '_foreach_cosh_',
+        '_foreach_erf_',
+        '_foreach_erfc_',
+        '_foreach_expm1_',
+        '_foreach_floor_',
+        '_foreach_log_',
+        '_foreach_log10_',
+        '_foreach_log1p_',
+        '_foreach_log2_',
+        '_foreach_neg_',
+        '_foreach_tan_',
+        '_foreach_tanh_',
+        '_foreach_sin_',
+        '_foreach_sinh_',
+        '_foreach_round_',
+        '_foreach_lgamma_',
+        '_foreach_frac_',
+        '_foreach_reciprocal_',
+        '_foreach_sigmoid_',
+        '_foreach_trunc_',
+        '_foreach_addcmul_.Scalar',
+        '_foreach_addcdiv_.Scalar',
+        '_foreach_addcmul_.ScalarList',
+        '_foreach_addcdiv_.ScalarList',
+        '_foreach_zero_'])
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -577,53 +658,7 @@ class FunctionSchema:
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
-            if str(self.name) not in [
-                    '_amp_foreach_non_finite_check_and_unscale_',
-                    '_foreach_add_.ScalarList',
-                    '_foreach_sub_.ScalarList',
-                    '_foreach_mul_.ScalarList',
-                    '_foreach_div_.ScalarList',
-                    '_foreach_add_.Scalar',
-                    '_foreach_sub_.Scalar',
-                    '_foreach_mul_.Scalar',
-                    '_foreach_div_.Scalar',
-                    '_foreach_add_.List',
-                    '_foreach_sub_.List',
-                    '_foreach_mul_.List',
-                    '_foreach_div_.List',
-                    '_foreach_exp_',
-                    '_foreach_sqrt_',
-                    '_foreach_abs_',
-                    '_foreach_acos_',
-                    '_foreach_asin_',
-                    '_foreach_atan_',
-                    '_foreach_ceil_',
-                    '_foreach_cos_',
-                    '_foreach_cosh_',
-                    '_foreach_erf_',
-                    '_foreach_erfc_',
-                    '_foreach_expm1_',
-                    '_foreach_floor_',
-                    '_foreach_log_',
-                    '_foreach_log10_',
-                    '_foreach_log1p_',
-                    '_foreach_log2_',
-                    '_foreach_neg_',
-                    '_foreach_tan_',
-                    '_foreach_tanh_',
-                    '_foreach_sin_',
-                    '_foreach_sinh_',
-                    '_foreach_round_',
-                    '_foreach_lgamma_',
-                    '_foreach_frac_',
-                    '_foreach_reciprocal_',
-                    '_foreach_sigmoid_',
-                    '_foreach_trunc_',
-                    '_foreach_addcmul_.Scalar',
-                    '_foreach_addcdiv_.Scalar',
-                    '_foreach_addcmul_.ScalarList',
-                    '_foreach_addcdiv_.ScalarList',
-                    '_foreach_zero_']:
+            if not is_foreach_op(str(self.name)):
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
@@ -735,7 +770,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)$', ann)
+        m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
@@ -1328,6 +1363,100 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+@dataclass(frozen=True)
+class ExternalBackendMetadata:
+
+    operator: OperatorName
+    backend: str
+    is_autograd: bool
+
+    structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
+
+@dataclass(frozen=True)
+class ExternalBackendFunction:
+
+    native_function: NativeFunction
+    metadata: Optional[ExternalBackendMetadata]
+
+    @property
+    def structured(self) -> bool:
+        # An external backend op is only considered structured if it's been marked structured both in-tree and out-of-tree
+        return self.native_function.structured and self.metadata is not None and self.metadata.structured
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.metadata is not None and self.metadata.is_autograd
+
+    def __post_init__(self) -> None:
+        if self.metadata is not None:
+            assert self.metadata.operator == self.native_function.func.name, \
+                f'Metadata and native function names do not match: {self.metadata.operator} and {self.native_function.func.name}'
+        kind = self.native_function.func.kind()
+        if kind == SchemaKind.out or kind == SchemaKind.inplace:
+            assert self.metadata is None or not self.metadata.structured, \
+                "Found an out/inplace operator marked with the structured keyword." \
+                f" Only functional operators can be marked as structured. operator={str(self.native_function.func.name)}"
+
+@dataclass(frozen=True)
+class ExternalBackendFunctionsGroup:
+    functional: ExternalBackendFunction
+    inplace: Optional[ExternalBackendFunction]
+    out: ExternalBackendFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.primary.structured
+
+    @property
+    def primary(self) -> ExternalBackendFunction:
+        # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
+        # This will eventually be toggleable per backend.
+        return self.functional
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.primary.metadata is not None and self.primary.metadata.is_autograd
+
+    def __post_init__(self) -> None:
+        # Note: I didn't want to copy-paste the post_init checks that NativeFunctionsGroup performs.
+        # ExternalBackendFunctionsGroup objects should be created using `from_function_group` (below),
+        # which guarantees that the relevant checks have already been performed.
+        if self.structured:
+            for f in self.functions():
+                if f == self.primary:
+                    continue
+                # For ops marked as structured externally, we expect external backends to
+                # only include either the functional or out variant in their yaml
+                assert f.metadata is None, \
+                    f"{str(self.primary.native_function.func.name)} is marked as structured. " \
+                    f"variant, {str(f.native_function.func.name)} will be generated for you " \
+                    "and doesn't need to live in the yaml."
+
+    def functions(self) -> Iterator[ExternalBackendFunction]:
+        yield self.out
+        yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_function_group(
+            g: NativeFunctionsGroup,
+            metadata: Dict[OperatorName, ExternalBackendMetadata]
+    ) -> 'ExternalBackendFunctionsGroup':
+        out_meta = metadata.get(g.out.func.name, None)
+        out = ExternalBackendFunction(g.out, out_meta)
+
+        functional_meta = metadata.get(g.functional.func.name, None)
+        functional = ExternalBackendFunction(g.functional, functional_meta)
+
+        inplace = None
+        if g.inplace:
+            inplace_meta = metadata.get(g.inplace.func.name, None)
+            inplace = ExternalBackendFunction(g.inplace, inplace_meta)
+
+        return ExternalBackendFunctionsGroup(functional, inplace, out)
+
 
 # Helper functions for parsing argument lists (both inputs and returns)
 

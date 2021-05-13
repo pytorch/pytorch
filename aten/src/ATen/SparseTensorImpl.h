@@ -33,6 +33,8 @@ public:
   // Public for now...
   explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
 
+  void release_resources() override;
+
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
   int64_t dense_dim() const { return dense_dim_; }
@@ -41,7 +43,6 @@ public:
   Tensor values() const { return values_; }
 
   IntArrayRef strides() const override;
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   int64_t stride(int64_t d) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;

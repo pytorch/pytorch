@@ -8,11 +8,11 @@
 
 namespace torch { namespace autograd {
 
-TORCH_API variable_list _wrap_outputs(
+TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
   const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
-  const at::ArrayRef<Variable> raw_outputs,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
   const std::shared_ptr<Node> &cdata);
 
 TORCH_API void check_variable_result(const Variable& original,
@@ -90,11 +90,13 @@ struct TORCH_API Function {
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
 struct TORCH_API AutogradContext {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradContext() : materialize_grads_(true) {}
   AutogradContext(const AutogradContext &other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
   /// Can be used to save non-variable data for `backward`.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
   /// Saves the list of variables for a future call to `backward`. This
@@ -137,6 +139,7 @@ private:
 };
 
 struct TORCH_API VariableInfo {
+  explicit VariableInfo();
   explicit VariableInfo(const Variable& var);
 
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
@@ -146,6 +149,7 @@ struct TORCH_API VariableInfo {
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
+  bool is_empty;
 };
 
 // CppNode<T> is the Node in the autograd graph that represents the user defined
@@ -171,7 +175,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list) : is_var_(is_var), list_(list) {}
   void operator()(const c10::optional<at::Tensor>& x) {
-    if (x) {
+    if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
       list_.emplace_back(x.value());
     } else {
@@ -194,10 +198,30 @@ inline void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&&.
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, variable_list>::value, T&>::type to_output_type(variable_list& output_list) { return output_list; }
+typename std::enable_if<std::is_same<T, variable_list>::value, T>::type to_output_type(
+  std::vector<c10::optional<Variable>>& output_list) {
+    variable_list result;
+    std::transform(output_list.begin(), output_list.end(), std::back_inserter(result),
+      [](const c10::optional<Variable>& var) { return *var; });
+    return result;
+}
 
 template <typename T>
-typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(variable_list& output_list) { return output_list[0]; }
+typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(
+  std::vector<c10::optional<Variable>>& output_list) {
+    return *output_list[0];
+}
+
+inline std::vector<c10::optional<Variable>> to_optional(Variable& output) {
+  return std::vector<c10::optional<Variable>>{output};
+}
+
+inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
+  std::vector<c10::optional<Variable>> result;
+  std::transform(output.begin(), output.end(), std::back_inserter(result),
+    [](const Variable& var) { return var; });
+  return result;
+}
 
 template<class T>
 template<typename X, typename... Args>
@@ -229,12 +253,19 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
-  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx_.get_non_differentiable(), node->ctx_.get_and_bump_dirty(), outputs, is_executable ? node : nullptr);
+  auto wrapped_outputs = _wrap_outputs(
+    input_vars,
+    node->ctx_.get_non_differentiable(),
+    node->ctx_.get_and_bump_dirty(),
+    to_optional(outputs),
+    is_executable ? node : nullptr);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
-    if (is_executable) {
-      node->output_info_.emplace_back(output);
+    if (is_executable && output.has_value()) {
+      node->output_info_.emplace_back(output.value());
+    } else if (is_executable) {
+      node->output_info_.emplace_back();
     }
   }
 
@@ -276,6 +307,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
     for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
@@ -287,6 +319,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -297,6 +330,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   variable_list results;
   results.reserve(num_outputs);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < num_outputs; ++i) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {

@@ -10,7 +10,7 @@ using lerp_fn_scalar = void (*)(
     at::Tensor& ret,
     const at::Tensor& self,
     const at::Tensor& end,
-    Scalar weight);
+    const Scalar& weight);
 
 using lerp_fn_tensor = void (*)(
     at::Tensor& ret,

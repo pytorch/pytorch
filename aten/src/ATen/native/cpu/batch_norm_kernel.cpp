@@ -71,7 +71,7 @@ void batch_norm_cpu_inference_contiguous_impl(Tensor& output,
   if (image_size != 1) {
     const int64_t n_offset = n_channel * image_size;
     const int64_t loop_size = image_size - (image_size % Vec::size());
-    for (int64_t n = 0; n < n_batch; n++) { 
+    for (int64_t n = 0; n < n_batch; n++) {
       for (int64_t c = 0; c < n_channel; c++) {
         const Vec alpha_vec(alpha_data[c]);
         const Vec beta_vec(beta_data[c]);
@@ -109,6 +109,7 @@ void batch_norm_cpu_inference_contiguous_kernel(Tensor& output, const Tensor& in
 
 }// anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(batch_norm_cpu_inference_contiguous_stub, &batch_norm_cpu_inference_contiguous_kernel);
 
 }} // namespace at::native

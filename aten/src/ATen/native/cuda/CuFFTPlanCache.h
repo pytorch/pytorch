@@ -260,7 +260,7 @@ public:
 
 #ifdef __HIP_PLATFORM_HCC__
     // clone input to avoid issues with hipfft clobering the input and failing tests
-    clone_input = true; 
+    clone_input = true;
 #else
     clone_input = false;
 #endif
