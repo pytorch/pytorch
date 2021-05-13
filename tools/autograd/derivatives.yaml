@@ -188,11 +188,6 @@
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
   result: self_t + maybe_multiply(other_t, alpha)
 
-- name: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  self: handle_r_to_c(self.scalar_type(), grad)
-  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t.add_(maybe_multiply(other_t, alpha))
-
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
 
@@ -846,11 +841,6 @@
   self: mul_tensor_backward(grad, other, self.scalar_type())
   other: mul_tensor_backward(grad, self, other.scalar_type())
   result: other_t * self_p + self_t * other_p
-
-- name: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  self: mul_tensor_backward(grad, other, self.scalar_type())
-  other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: self_t.mul_(other_p.conj()).add_(other_t * (self_p / other_p).conj())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
