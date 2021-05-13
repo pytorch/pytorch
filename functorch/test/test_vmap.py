@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
-from common import parameterized, instantiate_parameterized_methods
+from common_utils import parameterized, instantiate_parameterized_methods
 import types
 
 from functorch import vmap
