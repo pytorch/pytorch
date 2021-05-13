@@ -12,6 +12,7 @@
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1301,6 +1302,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("timeout") = kProcessGroupDefaultTimeout,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
+
+    auto processGroupWrapper =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
+          module, "ProcessGroupWrapper", processGroup)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                          const c10::intrusive_ptr<::c10d::ProcessGroupGloo>&
+                              gloo_pg) {
+                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                    pg, gloo_pg);
+              }),
+              py::arg("pg"),
+              py::arg("gloo_pg"),
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL

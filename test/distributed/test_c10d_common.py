@@ -596,6 +596,76 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
+class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
+    def setUp(self):
+        super(AbstractProcessGroupWrapperTest, self).setUp()
+        # For Windows platform, Python does not support fork, change it to spawn here.
+        if sys.platform == "win32":
+            self._spawn_processes()
+        else:
+            self._fork_processes()
+
+    def _test_collectives_op_mismatch(self, wrapper_pg, use_cuda=False):
+        tensor = torch.randn(20, 10)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        works = []
+        # Run a few successful collectives
+        for _ in range(10):
+            work = wrapper_pg.allreduce([tensor])
+            works.append(work)
+
+        for w in works:
+            w.wait()
+
+        # Simulate mismatch: allreduce vs reduce.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mismatch between collective operation types"
+        ):
+            if self.rank == 0:
+                wrapper_pg.allreduce([tensor])
+            else:
+                wrapper_pg.reduce([tensor])
+
+        # Check additional mismatches
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mismatch between collective operation types"
+        ):
+            scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
+            scattered_tensor = torch.empty(4)
+            if self.rank == 0:
+                wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
+            else:
+                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mismatch between collective operation types"
+        ):
+            if self.rank == 0:
+                wrapper_pg.broadcast(tensor, 0)
+            else:
+                output_tensors = [torch.zeros_like(tensor) for _ in range(self.world_size)]
+                wrapper_pg.allgather([output_tensors], [tensor])
+
+    def _test_collective_shape_mismatch(self, wrapper_pg, use_cuda=False):
+        dim = 2 if self.rank == 0 else 10
+        tensor = torch.randn(20, dim)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+            wrapper_pg.allreduce([tensor])
+        # Check errors are raised when dimensionality of shapes is different
+        tensor = torch.randn(20, 10, 2) if self.rank == 0 else torch.randn(20, 10)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+            wrapper_pg.allreduce([tensor])
+
+
 class AbstractDistributedDataParallelTest(object):
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
