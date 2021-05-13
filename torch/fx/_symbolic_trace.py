@@ -722,10 +722,6 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-# HACK: `torch.fx.symbolic_trace` refers to the function, not the module
-# wrap's default `__module__` is `torch.fx.symbolic_trace`. This leads to fuckery
-wrap.__module__ = 'torch.fx'
-
 def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
