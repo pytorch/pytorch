@@ -2723,7 +2723,7 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs
     def generator():
         for shape, shape_other, add_other, broadcasts_input in cases:
             if isinstance(shape_other, tuple):
-                arg = make_arg(shape_other, requires_grad=False, include_zero=False) + add_other
+                arg = make_arg(shape_other, requires_grad=False, exclude_values=[0]) + add_other
             else:
                 # shape_other is scalar
                 arg = shape_other
@@ -4377,6 +4377,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bool),
            sample_inputs_func=sample_inputs_fmod_remainder,
            skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
            ),),
     OpInfo('remainder',
