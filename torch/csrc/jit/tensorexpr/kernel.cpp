@@ -3043,9 +3043,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
           auto stride = strides[stride_index];
+          auto size = sizes[stride_index];
           auto index = Div::make(absolute_position, IntImm::make(stride));
-          absolute_position =
+          if (size != 1) {
+            absolute_position =
               Mod::make(absolute_position, IntImm::make(stride));
+          }
           new_axes[stride_index] = index;
         }
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
