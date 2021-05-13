@@ -178,7 +178,7 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
-  result: auto_element_wise
+  result: handle_r_to_c(result.scalar_type(), self_t.conj() * self_p.sgn())
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt()).conj()
