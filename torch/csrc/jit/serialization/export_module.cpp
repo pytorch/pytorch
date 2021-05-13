@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -288,11 +289,19 @@ void setstateTuple(
 // If so combine all the maps together and return one.
 void getBackendDebugInfoMap(
     const Module& m,
-    DelegateDebugInfoMapType& debug_map) {
-  const auto& map =
-      getStaticBackendModuleDebugInfoMapPtr()->getDebugInfoMap(m._ivalue());
-  if (map) {
-    debug_map.insert(map.value().begin(), map.value().end());
+    BackendDebugInfoMapType& debug_map) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+    constexpr size_t kSourceRange = 1;
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      debug_map.insert(map.value().begin(), map.value().end());
+    }
   }
   for (const auto& c : m.children()) {
     getBackendDebugInfoMap(c, debug_map);
@@ -300,22 +309,29 @@ void getBackendDebugInfoMap(
 }
 
 SourceRangeRecords getBackendSourceRanges(const Module& m) {
-  constexpr size_t kSourceRange = 1;
   SourceRangeRecords sr_records;
-  const auto& map =
-      getStaticBackendModuleDebugInfoMapPtr()->getDebugInfoMap(m._ivalue());
-  if (map) {
-    const auto& map_val = map.value();
-    // This map is map of debug handle-to-delegateDebugInfoType
-    // DebugInfoPair = <source range, inlined_cs_ptr>
-    for (const auto& it : map_val) {
-      sr_records.emplace_back(
-          std::numeric_limits<size_t>::max(), it.second.first);
-      auto cs_ptr = it.second.second;
-      if (cs_ptr) {
-        for (const auto& e : cs_ptr->vec()) {
-          const auto sr = std::get<kSourceRange>(e);
-          sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+    constexpr size_t kSourceRange = 1;
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      const auto& map_val = map.value();
+      // This map is map of debug handle-to-delegateDebugInfoType
+      // DebugInfoPair = <source range, inlined_cs_ptr>
+      for (const auto& it : map_val) {
+        sr_records.emplace_back(
+            std::numeric_limits<size_t>::max(), it.second.first);
+        auto cs_ptr = it.second.second;
+        if (cs_ptr) {
+          for (const auto& e : cs_ptr->vec()) {
+            const auto sr = std::get<kSourceRange>(e);
+            sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+          }
         }
       }
     }
@@ -331,12 +347,6 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
-void cleanupBackendModuleDebugInfoMap(const Module& m) {
-  getStaticBackendModuleDebugInfoMapPtr()->removeDebugInfoMap(m._ivalue());
-  for (const auto& c : m.children()) {
-    getStaticBackendModuleDebugInfoMapPtr()->removeDebugInfoMap(c._ivalue());
-  }
-}
 } // namespace
 
 void moduleMethodsTuple(
@@ -600,7 +610,7 @@ class ScriptModuleSerializer {
       // For delegated backends get debug_info_map
       // This is merged with other debug_info_map of other modules
       // which were not delegated.
-      DelegateDebugInfoMapType backend_debug_info_map;
+      BackendDebugInfoMapType backend_debug_info_map;
       getBackendDebugInfoMap(module, backend_debug_info_map);
       // Now get the debug-handles-to-inlined-cs-ptr-map
       // And serialize that in a separate archive
@@ -618,14 +628,6 @@ class ScriptModuleSerializer {
           cs_data.size(),
           cs_data.size() > kMinToCompress /*compress*/);
     }
-    // This introduces a strange behavior where if you do
-    // module._save_for_mobile(..., debug_info=true)
-    // module._save_for_mobile(..., debug_info=true)
-    // Meaning if you try to save the model twice the second time
-    // you would lose the information.
-    // This should probably be fixed by having cleanup step perhaps
-    // inside the module dtor
-    cleanupBackendModuleDebugInfoMap(module);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {

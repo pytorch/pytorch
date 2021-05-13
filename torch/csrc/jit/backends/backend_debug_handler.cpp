@@ -38,13 +38,11 @@ std::unordered_map<DebugHandleType, DebugInfoPair> BackendDebugHandleManager::
   return handles_to_inlined_callstack_ptrs_;
 }
 
-BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder(
-    ObjectPtr module_ptr) {
+BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder() throw() {
   TORCH_CHECK(
       debug_handle_manager_ptr == nullptr,
       "Module debug recording already in progress.");
-  debug_handle_manager_ptr = &debug_handle_manager;
-  module_ptr_ = module_ptr;
+  debug_handle_manager_ptr = &debug_handle_manager_;
 }
 
 BackendModuleDebugInfoRecorder::~BackendModuleDebugInfoRecorder() {
@@ -53,44 +51,13 @@ BackendModuleDebugInfoRecorder::~BackendModuleDebugInfoRecorder() {
   debug_handle_manager_ptr = nullptr;
 }
 
-void BackendModuleDebugInfoRecorder::stopRecording() {
-  getStaticBackendModuleDebugInfoMapPtr()->addDebugInfoMap(
-      module_ptr_, std::move(debug_handle_manager_ptr->getCallStackPtrMap()));
-  debug_handle_manager_ptr = nullptr;
+BackendDebugInfoMapType BackendModuleDebugInfoRecorder::stopRecording() {
+  return std::move(debug_handle_manager_ptr->getCallStackPtrMap());
 }
 
 BackendDebugHandleManager* getBackendDebugHandleManager() {
   return debug_handle_manager_ptr;
 }
 
-BackendModuleDebugInfoMap* getStaticBackendModuleDebugInfoMapPtr() {
-  static BackendModuleDebugInfoMap module_debug_info_map;
-  return &module_debug_info_map;
-}
-
-void BackendModuleDebugInfoMap::addDebugInfoMap(
-    const ObjectPtr& ptr,
-    DelegateDebugInfoMapType&& debug_map) {
-  std::lock_guard<std::mutex> lock(debug_info_mutex_);
-  TORCH_CHECK(
-      debug_info_map_.count(ptr) == 0,
-      "Debug info map already exists for the said module.");
-  debug_info_map_.emplace(ptr, std::move(debug_map));
-}
-
-void BackendModuleDebugInfoMap::removeDebugInfoMap(const ObjectPtr& ptr) {
-  std::lock_guard<std::mutex> lock(debug_info_mutex_);
-  debug_info_map_.erase(ptr);
-}
-
-c10::optional<DelegateDebugInfoMapType> BackendModuleDebugInfoMap::
-    getDebugInfoMap(const ObjectPtr& ptr) {
-  std::unique_lock<std::mutex> lock(debug_info_mutex_);
-  const auto& it = debug_info_map_.find(ptr);
-  if (it == debug_info_map_.end()) {
-    return c10::nullopt;
-  }
-  return it->second;
-}
 } // namespace jit
 } // namespace torch
