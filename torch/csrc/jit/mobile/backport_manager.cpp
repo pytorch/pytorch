@@ -37,15 +37,19 @@ bool update_bytecode_version(
   return false;
 }
 
+// Copy files from source to destination except those in the exclued list
 void selective_copy(
     PyTorchStreamReader& reader,
     PyTorchStreamWriter& writer,
     const std::unordered_set<std::string>& excluded_files) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
-    // Don't copy archive `version` and archive `bytecode`
+    // Don't copy archive in excluded_files, usually archive `version` and `bytecode`
     // Archvie `version` will be written when PyTorchStreamWriter is going to
     // finalize and run writeEndOfFile()
+
+    // records is the list of all files names in the zip file, and each record is one file
+    // with path to parent folder, for example: script_module_v4_unify/constants/0
     bool skip = false;
     for (const auto& excluded_file : excluded_files) {
       if (record.find(excluded_file) != std::string::npos) {
