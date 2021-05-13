@@ -1759,7 +1759,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (torch.zeros(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
             result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
