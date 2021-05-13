@@ -14,7 +14,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 
 namespace at {
 
@@ -101,7 +100,7 @@ class TORCH_API TensorMaker {
 
   TensorMaker& context(void* value, ContextDeleter deleter = nullptr) noexcept {
     ctx_ = std::unique_ptr<void, ContextDeleter>{
-        value, deleter ? deleter : detail::noopDelete};
+        value, deleter != nullptr ? deleter : detail::noopDelete};
 
     return *this;
   }
@@ -130,9 +129,7 @@ class TORCH_API TensorMaker {
 
   DataPtr makeDataPtrFromContext() noexcept;
 
-  SmallVector<std::int64_t, 5> makeTempSizes() const noexcept;
-
-  Tensor makeEmptyTensor() const;
+  IntArrayRef makeTempSizes() const noexcept;
 
   void* data_;
   IntArrayRef sizes_;

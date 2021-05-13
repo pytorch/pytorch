@@ -65,11 +65,6 @@ bool Context::deterministicAlgorithms() const {
 }
 
 void Context::setDeterministicAlgorithms(bool b) {
-  if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
-  }
-
   _deterministic_algorithms = b;
 }
 
@@ -92,7 +87,9 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 
 bool Context::checkCuBLASConfigDeterministic() {
@@ -109,7 +106,7 @@ bool Context::checkCuBLASConfigDeterministic() {
   return cublas_config_deterministic;
 }
 
-void Context::alertCuBLASConfigNotDeterministic() {
+void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
   TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
@@ -138,7 +135,7 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
-bool Context::hasMKL() const {
+bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
 #else
@@ -146,7 +143,7 @@ bool Context::hasMKL() const {
 #endif
 }
 
-bool Context::hasMKLDNN() const {
+bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
 #else
@@ -154,7 +151,7 @@ bool Context::hasMKLDNN() const {
 #endif
 }
 
-bool Context::hasOpenMP() const {
+bool Context::hasOpenMP() {
 #ifdef _OPENMP
   return true;
 #else
@@ -162,7 +159,7 @@ bool Context::hasOpenMP() const {
 #endif
 }
 
-bool Context::hasLAPACK() const {
+bool Context::hasLAPACK() {
 #ifdef USE_LAPACK
   return true;
 #else
@@ -184,7 +181,7 @@ void Context::setQEngine(at::QEngine e) {
   TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
 }
 
-const std::vector<at::QEngine>& Context::supportedQEngines() const {
+const std::vector<at::QEngine>& Context::supportedQEngines() {
   static auto supported_qengines = []() {
     std::vector<at::QEngine> engines = {};
     // Engines are listed in priority order: later one wins
@@ -212,7 +209,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
   return supported_qengines;
 }
 
-bool Context::isXNNPACKAvailable() const {
+bool Context::isXNNPACKAvailable() {
 #ifdef USE_XNNPACK
   return true;
 #else
@@ -240,6 +237,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {

@@ -220,7 +220,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName,
+        std::move(qualMethodName),
         std::move(schema),
         std::move(wrapped_func),
         std::move(doc_string));
@@ -241,15 +241,13 @@ class class_ {
     torch::jit::Function* getter;
     torch::jit::Function* setter;
 
-    auto getter_name = name + "_getter";
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
-    getter = defineMethod(getter_name, wrapped_getter, doc_string);
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
 
-    auto setter_name = name + "_setter";
     auto wrapped_setter =
         detail::wrap_func<CurClass, SetterFunc>(std::move(setter_func));
-    setter = defineMethod(setter_name, wrapped_setter, doc_string);
+    setter = defineMethod(name + "_setter", wrapped_setter, doc_string);
 
     classTypePtr->addProperty(name, getter, setter);
     return *this;
@@ -263,10 +261,9 @@ class class_ {
       std::string doc_string = "") {
     torch::jit::Function* getter;
 
-    auto getter_name = name + "_getter";
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
-    getter = defineMethod(getter_name, wrapped_getter, doc_string);
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
 
     classTypePtr->addProperty(name, getter, nullptr);
     return *this;
@@ -302,9 +299,8 @@ class class_ {
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
-    auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
+        qualClassName + "." + name, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;

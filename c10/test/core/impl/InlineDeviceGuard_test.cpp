@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/FakeGuardImpl.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
 
 using namespace c10;
 using namespace c10::impl;
@@ -17,6 +17,7 @@ static Device dev(DeviceIndex index) {
 
 using TestGuard = InlineDeviceGuard<TestGuardImpl>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineDeviceGuard, Constructor) {
   for (DeviceIndex i : {-1, 0, 1}) {
     DeviceIndex init_i = 0;
@@ -51,11 +52,14 @@ TEST(InlineDeviceGuard, Constructor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineDeviceGuard, ConstructorError) {
-  EXPECT_ANY_THROW(InlineDeviceGuard<FakeGuardImpl<DeviceType::CUDA>>
-                   g(Device(DeviceType::HIP, 1)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  EXPECT_ANY_THROW(InlineDeviceGuard<FakeGuardImpl<DeviceType::CUDA>> g(
+      Device(DeviceType::HIP, 1)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -72,6 +76,7 @@ TEST(InlineDeviceGuard, SetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineDeviceGuard, ResetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -88,6 +93,7 @@ TEST(InlineDeviceGuard, ResetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -104,10 +110,12 @@ TEST(InlineDeviceGuard, SetIndex) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
-// -- InlineOptionalDeviceGuard --------------------------------------------------
+// -- InlineOptionalDeviceGuard
+// --------------------------------------------------
 
 using MaybeTestGuard = InlineOptionalDeviceGuard<TestGuardImpl>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalDeviceGuard, Constructor) {
   for (DeviceIndex i : {-1, 0, 1}) {
     DeviceIndex init_i = 0;
@@ -140,6 +148,7 @@ TEST(InlineOptionalDeviceGuard, Constructor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalDeviceGuard, NullaryConstructor) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -161,6 +170,7 @@ TEST(InlineOptionalDeviceGuard, NullaryConstructor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -176,6 +186,7 @@ TEST(InlineOptionalDeviceGuard, SetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);

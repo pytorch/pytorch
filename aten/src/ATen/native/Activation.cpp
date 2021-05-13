@@ -6,40 +6,93 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#if defined(C10_MOBILE) && defined(USE_XNNPACK)
+#include <ATen/native/xnnpack/Engine.h>
+#endif
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
+  const Tensor& result = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(self) // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
+  const Tensor& gradInput = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(gradInput)
+    .add_input(self)
+    .add_input(grad)  // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+} // namespace meta
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardtanh_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(shrink_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& hardtanh_out(Tensor& result, const Tensor& self, const Scalar& min, const Scalar& max) {
+Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
   return at::clamp_out(result, self, min, max);
 }
 
@@ -47,8 +100,7 @@ Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp_(self, min, max);
 }
 
-Tensor& hardtanh_backward_out(Tensor& grad_input,
-    const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
+Tensor& hardtanh_backward_out(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max, Tensor& grad_input) {
   auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
   return grad_input;
@@ -68,7 +120,7 @@ Tensor hardsigmoid(const Tensor& self) {
   return iter.output();
 }
 
-Tensor& hardsigmoid_out(Tensor& result, const Tensor& self) {
+Tensor& hardsigmoid_out(const Tensor& self, Tensor& result) {
   auto iter = TensorIterator::unary_op(result, self);
   hardsigmoid_stub(iter.device_type(), iter);
   return result;
@@ -88,12 +140,11 @@ Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
   return iter.output();
 }
 
-Tensor& elu_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor& elu_out(const Tensor& self,
     const Scalar& alpha,
     const Scalar& scale,
-    const Scalar& input_scale) {
+    const Scalar& input_scale,
+    Tensor& result) {
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return result;
@@ -138,19 +189,30 @@ Tensor elu_backward(
 }
 
 Tensor hardswish(const Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    return xnnpack::hardswish(self);
+  }
+  #endif
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   hardswish_stub(iter.device_type(), iter);
   return iter.output();
 }
 
-Tensor& hardswish_out(Tensor& result, const Tensor& self) {
+Tensor& hardswish_out(const Tensor& self, Tensor& result) {
   auto iter = TensorIterator::unary_op(result, self);
   hardswish_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor& hardswish_(Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    xnnpack::hardswish_(self);
+    return self;
+  }
+  #endif
   auto iter = TensorIterator::unary_op(self, self);
   hardswish_stub(iter.device_type(), iter);
   return self;
@@ -268,14 +330,13 @@ inline void _rrelu_with_noise_train(
   }
 }
 
-Tensor& rrelu_with_noise_out_cpu(
-    Tensor& output,
-    const Tensor& self,
+Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     const Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator) {
+    c10::optional<Generator> generator,
+    Tensor& output) {
   if (training) {
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
@@ -298,7 +359,8 @@ Tensor rrelu_with_noise_cpu(
     bool training,
     c10::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return at::native::rrelu_with_noise_out_cpu(output, self, noise, lower, upper, training, generator);
+  return at::native::rrelu_with_noise_out_cpu(
+      self, noise, lower, upper, training, generator, output);
 }
 
 Tensor& rrelu_with_noise_cpu_(
@@ -308,7 +370,8 @@ Tensor& rrelu_with_noise_cpu_(
     const Scalar& upper,
     bool training,
     c10::optional<Generator> generator) {
-  return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
+  return at::native::rrelu_with_noise_out_cpu(
+      self, noise, lower, upper, training, generator, self);
 }
 
 Tensor rrelu_with_noise_backward(
@@ -338,7 +401,7 @@ Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool tr
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
-Tensor & softplus_out(Tensor& result, const Tensor& self, const Scalar& beta, const Scalar& threshold) {
+Tensor & softplus_out(const Tensor& self, const Scalar& beta, const Scalar& threshold, Tensor& result) {
   auto iter = TensorIterator::unary_op(result, self);
   softplus_stub(iter.device_type(), iter, beta, threshold);
   return result;
@@ -351,14 +414,13 @@ Tensor softplus(const Tensor& self, const Scalar& beta, const Scalar& threshold)
   return iter.output();
 }
 
-Tensor & softplus_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor & softplus_backward_out(const Tensor& grad_output,
     const Tensor& self,
     const Scalar& beta,
     const Scalar& threshold,
-    const Tensor& output) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+    const Tensor& output,
+    Tensor& grad_input) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return grad_input;
 }
@@ -370,50 +432,17 @@ Tensor softplus_backward(
     const Scalar& threshold,
     const Tensor& output) {
   Tensor grad_input;
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return iter.output();
 }
 
-// computes `result = self <= threshold ? value : other`
-// other is `self` in threshold() and `grad` in threshold_backward()
-static Tensor threshold_out(
-    optional<Tensor> opt_result,
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value,
-    const Tensor& other) {
-  Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-  threshold_stub(iter.device_type(), iter, threshold, value);
-  return iter.output();
+TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_stub(device_type(), *this, threshold, value);
 }
 
-Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out(nullopt, self, threshold, value, self);
-}
-
-Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_stub(device_type(), *this, threshold, 0);
 }
 
 // -----------------------------------
@@ -689,7 +718,7 @@ static inline void softshrink_check(const Scalar& lambd) {
   TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
 }
 
-Tensor& softshrink_out(Tensor& result, const Tensor & self, const Scalar& lambd) {
+Tensor& softshrink_out(const Tensor & self, const Scalar& lambd, Tensor& result) {
   softshrink_check(lambd);
   auto iter = TensorIterator::unary_op(result, self);
   softshrink_stub(iter.device_type(), iter, lambd);
@@ -704,7 +733,7 @@ Tensor softshrink(const Tensor & self, const Scalar& lambd) {
   return iter.output();
 }
 
-Tensor& softshrink_backward_out(Tensor& grad_input, const Tensor & grad, const Tensor & self, const Scalar& lambd) {
+Tensor& softshrink_backward_out(const Tensor & grad, const Tensor & self, const Scalar& lambd, Tensor& grad_input) {
   auto iter = TensorIterator::binary_op(grad_input, grad, self);
   shrink_backward_stub(iter.device_type(), iter, lambd);
   return grad_input;
@@ -752,10 +781,9 @@ Tensor infinitely_differentiable_gelu_backward(
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
-Tensor& leaky_relu_out(
-    Tensor& result,
-    const Tensor& self,
-    const Scalar& negval) {
+Tensor& leaky_relu_out(const Tensor& self,
+    const Scalar& negval,
+    Tensor& result) {
   auto iter = TensorIterator::unary_op(result, self);
   leaky_relu_stub(iter.device_type(), iter, negval);
   return result;
@@ -808,7 +836,7 @@ std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   return std::make_tuple(result, buffer);
 }
 
-std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Tensor& result, Tensor& buffer) {
   result.resize_as_(input);
   buffer.resize_as_(input, at::MemoryFormat::Contiguous);
   TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
@@ -820,7 +848,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor&
   return std::forward_as_tuple(result, buffer);
 }
 
-Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+Tensor & log_sigmoid_out(const Tensor & self, Tensor & output) {
   Tensor buffer = at::empty({0}, self.options());
   return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
 }
@@ -841,11 +869,10 @@ Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, 
   return iter.output();
 }
 
-Tensor& log_sigmoid_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
-    const Tensor& buffer) {
+    const Tensor& buffer,
+    Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
     .add_output(grad_input)
     .add_input(input)
@@ -856,7 +883,9 @@ Tensor& log_sigmoid_backward_out_cpu(
   return grad_input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native

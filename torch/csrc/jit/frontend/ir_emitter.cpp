@@ -232,11 +232,16 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Function& method;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -1409,6 +1414,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
     c10::optional<RefinementSet> refinements;
     c10::optional<bool> static_if;
@@ -1474,6 +1480,7 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1596,7 +1603,9 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
 
       {
@@ -1791,6 +1800,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
@@ -2030,7 +2040,7 @@ struct to_ir {
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
-          assignee.kind() == TK_TUPLE_LITERAL) {
+          assignee.kind() == TK_TUPLE_LITERAL || assignee.kind() == '.') {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -2078,6 +2088,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
@@ -2252,6 +2263,7 @@ struct to_ir {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
@@ -2336,6 +2348,7 @@ struct to_ir {
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
@@ -2482,6 +2495,10 @@ struct to_ir {
               sub_starred_unpack);
           i++;
         } break;
+        case '.': {
+          emitSelectAssign(assignee, outputs.at(i), rhs_loc);
+          i++;
+        } break;
         default:
           throw ErrorReport(assignee)
               << "unexpected expression on the left-hand side";
@@ -2594,6 +2611,16 @@ struct to_ir {
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+  }
+
+  void emitSelectAssign(
+      const Expr& lhs,
+      SugaredValuePtr rhs,
+      const SourceRange& loc) {
+    const auto lhs_select = Select(lhs);
+    auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
+    const auto rhs_value = rhs->asValue(loc, method);
+    lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3314,6 +3341,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* fork_node;
     TypePtr out_type;
 
@@ -3484,6 +3512,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
@@ -3715,7 +3758,7 @@ struct to_ir {
       Value* end,
       Value* step) {
     std::vector<NamedValue> args;
-    args.reserve(4);
+    args.reserve(5);
     args.emplace_back(loc, "self", sliceable);
 
     // XXX: If list slicing becomes more complicated or stops using
@@ -3727,11 +3770,10 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
-    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
-    // string, and tuple slicing should be same (tugsbayasgalan)
+
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
-      // since we are only dealing with tuple slicing for now, we try to keep
+      // since we are only dealing with tuple slicing, we try to keep
       // tuple args seperate for now
       tuple_args.reserve(3);
 
@@ -3745,22 +3787,15 @@ struct to_ir {
       return emitTupleSlice(loc, args[0], tuple_args);
     }
 
-    // TODO this needs to be cleaned for list slicing
-    // Default value for start is 0.
-    if (!start) {
-      start = graph->insertConstant(0, loc);
-    }
-    args.emplace_back(loc, "start", start);
-
-    if (end) {
-      args.emplace_back(loc, "end", end);
-    }
-
+    // handling cases like x[0:2]. x[0:2:] is already handled from python
     if (!step) {
       step = graph->insertConstant(1, loc);
     }
-    NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+
+    args.emplace_back(loc, "start", start);
+    args.emplace_back(loc, "end", end);
+    args.emplace_back(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,

@@ -9,13 +9,6 @@ and users can easily apply any of these hooks to optimize communication.
 Besides, the hook interface can also support user-defined communication
 strategies for more advanced use cases.
 
-.. warning ::
-    DDP communication hook is experimental and subject to change.
-
-.. warning ::
-    DDP communication hooks can only support single process single device mode
-    on NCCL backend.
-
 How to Use a Communication Hook?
 --------------------------------
 
@@ -35,7 +28,7 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autoclass:: torch.distributed.GradBucket
 
 .. autofunction:: torch.distributed.GradBucket.get_index
-.. autofunction:: torch.distributed.GradBucket.get_tensors
+.. autofunction:: torch.distributed.GradBucket.get_tensor
 .. autofunction:: torch.distributed.GradBucket.get_per_parameter_tensors
 .. autofunction:: torch.distributed.GradBucket.is_the_last_bucket_to_allreduce
 .. autofunction:: torch.distributed.GradBucket.set_tensor
@@ -81,7 +74,9 @@ PowerSGD Hooks
     compressed communication and improve accuracy.
 
 .. warning ::
-    The current implementation may cause gradient overflow for FP16 input.
+    PowerSGD hooks may conflict with `Apex automatic mixed precision package <https://github.com/NVIDIA/apex>`_.
+    Please use PyTorch `native automatic mixed precision package <https://pytorch.org/docs/stable/amp.html>`_
+    instead.
 
 .. autofunction:: powerSGD_hook
 .. autofunction:: batched_powerSGD_hook

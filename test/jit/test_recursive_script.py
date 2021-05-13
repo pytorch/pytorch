@@ -82,7 +82,7 @@ class TestRecursiveScript(JitTestCase):
                 return self.fn(x)
 
         m = M(fn)
-        with self.assertRaisesRegex(RuntimeError, "failed to compile"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "failed to compile", "i_dont_exist"):
             torch.jit.script(m)
 
     def test_init_error(self):
@@ -210,7 +210,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
+        with self.assertRaisesRegexWithHighlight(torch.jit.frontend.FrontendError, "Cannot instantiate class", "MyScriptClass"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
@@ -384,7 +384,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_class(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -400,7 +400,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_annotation(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)

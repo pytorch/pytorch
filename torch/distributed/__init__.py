@@ -5,7 +5,7 @@ import os
 from enum import Enum
 
 
-def is_available():
+def is_available() -> bool:
     """
     Returns ``True`` if the distributed package is available. Otherwise,
     ``torch.distributed`` does not expose any other APIs. Currently,
@@ -27,6 +27,7 @@ if is_available():
         FileStore,
         TCPStore,
         ProcessGroup,
+        PrefixStore,
         Reducer,
         Logger,
         BuiltinCommHookType,
@@ -37,7 +38,6 @@ if is_available():
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _verify_model_across_ranks,
-        _verify_replicas_within_process,
         _test_python_store,
         _DistributedDebugLevel,
         _get_debug_mode
@@ -48,9 +48,9 @@ if is_available():
             _round_robin_process_groups,
         )
 
-    from .distributed_c10d import *
+    from .distributed_c10d import *  # noqa: F403
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
 
-    from .distributed_c10d import _backend
+    from .distributed_c10d import _backend, _all_gather_base
