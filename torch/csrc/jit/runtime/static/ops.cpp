@@ -303,7 +303,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::addmm_cpu_out(in0_t, in1_t, in2_t, in3_s, in4_s, out_t);
+    at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
   };
 });
 
@@ -586,7 +586,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::threshold_out(in0_t, 0, 0, out_t);
+      at::cpu::threshold_out(out_t, in0_t, 0, 0);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
@@ -676,7 +676,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// TODO: fix clone
 // clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
@@ -684,13 +683,27 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     return nullptr;
   }
   return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto& src = p_node->Input(0).toTensor();
+    const auto& optional_memory_format =
+        p_node->Input(1).toOptional<c10::MemoryFormat>();
+    auto memory_format =
+        optional_memory_format.value_or(c10::MemoryFormat::Preserve);
+
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_t);
+      if (memory_format == c10::MemoryFormat::Preserve &&
+          src.is_non_overlapping_and_dense()) {
+        // Copy all strides
+        p_node->Output(0) =
+            at::empty_strided(src.sizes(), src.strides(), src.options());
+      } else {
+        memory_format = src.suggest_memory_format();
+        p_node->Output(0) = create_empty_from(src, memory_format);
+      }
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-    at::native::copy_(out_t, in0_t, false);
+    at::native::resize_impl_cpu_(
+        out_t.unsafeGetTensorImpl(), src.sizes(), src.strides());
+    at::native::copy_(out_t, src, false);
   };
 });
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1285,6 +1298,9 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
+  if (n->inputs().size() != 2) {
+    return nullptr;
+  }
   return [](ProcessedNode* p_node) {
     const auto& self = p_node->Input(0).toTensor();
     const auto repeats = p_node->Input(1).toIntVector();
@@ -1403,17 +1419,17 @@ REGISTER_OPERATOR_FUNCTOR(
             at::borrow_from_optional_tensor(bias_opt);
         const at::Tensor& bias = *bias_maybe_owned;
 
-        auto inputs = at::native::_prepare_layer_norm_inputs(
+        auto M_N = at::native::_check_layer_norm_inputs(
             input, normalized_shape, weight, bias);
-        auto X = std::get<0>(inputs);
-        auto gamma = std::get<1>(inputs);
-        auto beta = std::get<2>(inputs);
-        auto M = std::get<3>(inputs);
-        auto N = std::get<4>(inputs);
+        auto M = M_N.first;
+        auto N = M_N.second;
+        auto X = input.expect_contiguous();
+        auto gamma = weight.expect_contiguous();
+        auto beta = bias.expect_contiguous();
 
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = at::native::empty_like(
-              X,
+              *X,
               c10::nullopt /* dtype */,
               c10::nullopt /* layout */,
               c10::nullopt /* device */,
@@ -1421,11 +1437,11 @@ REGISTER_OPERATOR_FUNCTOR(
               at::MemoryFormat::Contiguous);
         } else {
           at::native::resize_(
-              p_node->Output(0).toTensor(), X.sizes(), c10::nullopt);
+              p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
         }
         at::Tensor& output = p_node->Output(0).toTensor();
-        at::Tensor mean = at::empty({M}, X.options());
-        at::Tensor rstd = at::empty({M}, X.options());
+        at::Tensor mean = create_empty_from({M}, *X);
+        at::Tensor rstd = create_empty_from({M}, *X);
 
         at::native::layer_norm_cpu_out(
             output,
@@ -1433,8 +1449,8 @@ REGISTER_OPERATOR_FUNCTOR(
             rstd,
             input,
             normalized_shape,
-            gamma,
-            beta,
+            *gamma,
+            *beta,
             eps,
             M,
             N);
