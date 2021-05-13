@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/api/module.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -67,7 +67,7 @@ void assert_ignored_methods_not_called(
   }
 
   const std::string encountered_ignored_methods_str =
-    c10::Join(", ", encountered_ignored_methods);
+      c10::Join(", ", encountered_ignored_methods);
 
   TORCH_CHECK(
       false,
@@ -104,7 +104,7 @@ void assert_ignored_attributes_not_referenced(
   }
 
   const std::string encountered_ignored_attributes_str =
-    c10::Join(", ", encountered_ignored_attributes);
+      c10::Join(", ", encountered_ignored_attributes);
 
   TORCH_CHECK(
       false,
