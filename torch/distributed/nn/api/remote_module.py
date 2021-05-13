@@ -82,14 +82,14 @@ def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=
     return rpc.RRef(module, module_interface_cls)
 
 
-def _param_rrefs(module_rref, recurse):
+def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
     ret: List[rpc.RRef[Parameter]] = []
     for param in module_rref.local_value().parameters(recurse):
         ret.append(rpc.RRef(param))
     return ret
 
 
-def _raise_not_supported(name):
+def _raise_not_supported(name: str) -> None:
     raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
 
 
@@ -253,7 +253,7 @@ class _RemoteModule(nn.Module):
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef]:
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         """
         Returns a list of :class:`~torch.distributed.rpc.RRef` pointing to the
         remote module's parameters. This can typically be used in conjuction
@@ -271,7 +271,7 @@ class _RemoteModule(nn.Module):
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
-    def get_module_rref(self) -> rpc.RRef:
+    def get_module_rref(self) -> rpc.RRef[nn.Module]:
         """
         Returns an :class:`~torch.distributed.rpc.RRef` (``RRef[nn.Module]``)
         pointing to the remote module.
