@@ -164,7 +164,6 @@ static void LSTMUnit(
             f_times_c_prev,
             0,
             c_to_tanh_params.real_multiplier,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             32,
             true /*signed*/);
         int32_t c_temp = f_times_c_prev_rescaled + i_times_g;

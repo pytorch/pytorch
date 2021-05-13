@@ -66,7 +66,6 @@ inline void noop(Stack* n) {}
 // result will always be a even number. Due to symmetricity, it also applies to
 // negative cases.
 inline double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
 }
 

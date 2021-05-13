@@ -13,7 +13,6 @@ using namespace at;
 TEST(TensorIteratorTest, CPUScalar) {
   if (!at::hasCUDA()) return;
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::randn({5, 5}, kCUDA);
   auto y = at::ones(1, kCPU).squeeze();
   auto iter = TensorIterator::binary_op(out, x, y);
@@ -26,7 +25,6 @@ TEST(TensorIteratorTest, CPUScalar) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, CPUScalarInputs) {
   if (!at::hasCUDA()) return;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor out = at::empty({5, 5}, kCUDA);
   auto x = at::ones(1, kCPU).squeeze();
   auto y = at::ones(1, kCPU).squeeze();
@@ -39,9 +37,7 @@ TEST(TensorIteratorTest, CPUScalarInputs) {
 TEST(TensorIteratorTest, MixedDevices) {
   if (!at::hasCUDA()) return;
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::randn({5, 5}, kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = at::ones({5}, kCPU);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
@@ -49,13 +45,10 @@ TEST(TensorIteratorTest, MixedDevices) {
 
 Tensor random_tensor_for_type(at::ScalarType scalar_type) {
   if (at::isFloatingType(scalar_type)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randn({5, 5}, at::device(kCPU).dtype(scalar_type));
   } else if (scalar_type == kBool) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randint(0, 2, {5, 5}, at::device(kCPU).dtype(scalar_type));
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return at::randint(1, 10, {5, 5}, at::device(kCPU).dtype(scalar_type));
   }
 }
@@ -176,7 +169,6 @@ AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::zeros({50000}, at::TensorOptions(kCPU).dtype(kInt));
   auto iter = TensorIterator::unary_op(out, x);
   at::native::cpu_serial_kernel(iter, [=](int a) -> int {
