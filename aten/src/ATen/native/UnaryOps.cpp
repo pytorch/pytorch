@@ -80,7 +80,10 @@ CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
-CREATE_UNARY_META_FUNC(square)
+
+TORCH_META_FUNC(square)(const Tensor& self) {
+  return;
+}
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
