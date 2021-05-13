@@ -28,11 +28,12 @@ enum class DeviceType : int8_t {
   XPU = 12, // XPU
   MLC = 13, // ML Compute / Apple
   Meta = 14, // Meta (tensors with no data)
+  HPU = 15, // HPU / HABANA
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 15,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 16,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -46,6 +47,7 @@ constexpr DeviceType kMeta = DeviceType::Meta;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
 constexpr DeviceType kMetal = DeviceType::Metal;
 constexpr DeviceType kXPU = DeviceType::XPU;
+constexpr DeviceType kHPU = DeviceType::HPU;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =

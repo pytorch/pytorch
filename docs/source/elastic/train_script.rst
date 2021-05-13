@@ -8,7 +8,7 @@ working with ``torch.distributed.run`` with these differences:
    ``MASTER_ADDR``, and ``MASTER_PORT``.
 
 2. ``rdzv_backend`` and ``rdzv_endpoint`` must be provided. For most users
-   this will be set to ``etcd`` (see `rendezvous <rendezvous.html>`_).
+   this will be set to ``c10d`` (see `rendezvous <rendezvous.html>`_).
 
 3. Make sure you have a ``load_checkpoint(path)`` and
    ``save_checkpoint(path)`` logic in your script. When workers fail
