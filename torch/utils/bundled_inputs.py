@@ -59,7 +59,7 @@ def augment_model_with_bundled_inputs(
 
     Inputs can be specified in one of two ways:
 
-      - The model can define `_generate_bundled_inputs_for_forward`
+      - The model can define `_generate_bundled_inputs_for_forward`.
         If the user chooses this method inputs should be None
 
       - `inputs` is a list of inputs of form List[Tuple[Any, ...]]. A list of tuples where the elements
@@ -121,10 +121,9 @@ def augment_many_model_functions_with_bundled_inputs(
 
     Inputs can be specified in one of two ways:
 
-      - The model can define `_generate_bundled_inputs_for_<function_name>`
-        get_all_bundled_inputs will simply call this method
-        and cache the value. If the user chooses this method inputs[<function>]
-        should map to None
+      - The model can define `_generate_bundled_inputs_for_<function_name>`.
+        If the user chooses this method inputs[<function>] should map to None
+
       - The `inputs` argument to this function can be a dictionary mapping functions to a
         list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
         The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
