@@ -2,7 +2,6 @@ import operator
 import unittest
 import contextlib
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
@@ -17,13 +16,13 @@ torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
-from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
+from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+from test_jit import backward_graph, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
