@@ -3009,20 +3009,51 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
     return new Tensor(buf, nullptr);
   }
 
-  // We need to project the contiguous form of the output that is "natively"
-  // produced by NNC onto the strided representation that we want to return.
-  // So we create a new tensor with identical indexing, but restrided.
   auto dims = c10::fmap<DimArg>(sizesForValue(v));
-  auto output =
-      Compute("output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
-        return BufHandle(buf).load(axes_input);
+  // We need to convert the output tensor so that its values are layed
+  // so that when viewed from the output strides the values are correct.
+  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // [0] [1] [2] [3] [4] [5]
+  // The same valued tensor with strides (2, 1) would be layed out like
+  // [0] [3] [1] [4] [2] [5]
+  // When we are doing the re-ordering of values into the output tensor,
+  // we are iterating per-element of the input, and we are fixed
+  // in indexing in to the output tensor at [i, j] = val
+  // `val` we want here is equal to the indices for the output
+  // tensor that would have given the same position as the output
+  // The position is equal to the sum of stride[i] * index[i],
+  // and we can can calculate the equivalent indices in the
+  // output tensor strides by iteratively computing the index of
+  // the biggest stride:
+  // absolute = ...
+  // for stride in strides_from_largest_to_smallest:
+  //     cur_idx = absolute // stride
+  //     absolute = absolute % stride
+
+  return Compute(
+      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+        std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
+        auto absolute_position = IntImm::make(0);
+        for (size_t i = 0; i < axes.size(); ++i) {
+          absolute_position =
+              absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
+        }
+        std::vector<size_t> sorted_stride_indices =
+            reverse_sort_indices(strides);
+        std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
+        for (size_t stride_index : sorted_stride_indices) {
+          auto stride = strides[stride_index];
+          auto size = sizes[stride_index];
+          auto index = Div::make(absolute_position, IntImm::make(stride));
+          if (size != 1) {
+            absolute_position =
+              Mod::make(absolute_position, IntImm::make(stride));
+          }
+          new_axes[stride_index] = index;
+        }
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        return BufHandle(buf).load(new_axes);
       });
-  std::vector<const Expr*> strideExprs;
-  for (auto const& stride : strides) {
-    strideExprs.push_back(IntImm::make(stride).node());
-  }
-  const_cast<Buf*>(output->buf())->set_strides(std::move(strideExprs));
-  return output;
 }
 
 void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
