@@ -46,7 +46,7 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf)
+                                                        skipCUDAIf, skipMeta)
 
 _END_SENTINEL = object()
 
@@ -390,6 +390,19 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
+
+    def test_unrelated_inputs(self):
+        # test to ensure grad(grad)check runs successfully even if there is an
+        # unrelated (but differentiable) inputs
+
+        def my_function(x, y):
+            return x * x
+
+        x = torch.rand(10, dtype=torch.double, requires_grad=True)
+        y = torch.rand(10, dtype=torch.double, requires_grad=True)
+
+        gradcheck(my_function, (x, y))
+        gradgradcheck(my_function, (x, y))
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -7810,6 +7823,7 @@ class TestAutogradDeviceType(TestCase):
                     param.grad = None
                 inp.grad = None
 
+    @skipMeta  # LSTM cell reuses output which was resized
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
@@ -7817,6 +7831,7 @@ class TestAutogradDeviceType(TestCase):
             mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
 
+    @skipMeta  # GRU cell reuses output which was resized
     def test_GRU_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
