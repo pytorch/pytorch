@@ -2718,10 +2718,10 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs
         ((S, S, S), 1.5, (), True)
     )
 
-    cases = cases + cases_with_broadcasting
+    samples = cases + cases_with_broadcasting
 
     def generator():
-        for shape, shape_other, add_other, broadcasts_input in cases:
+        for shape, shape_other, add_other, broadcasts_input in samples:
             if isinstance(shape_other, tuple):
                 arg = make_arg(shape_other, requires_grad=False, exclude_values=[0]) + add_other
             else:
