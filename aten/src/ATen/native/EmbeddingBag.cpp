@@ -44,6 +44,18 @@ static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
 
 namespace {
 
+std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
+    const Tensor& indices,
+    const Tensor& offsets) {
+  const auto commonType =
+      promoteTypes(offsets.scalar_type(), indices.scalar_type());
+  return {
+      indices.scalar_type() == commonType ? indices
+                                          : indices.toType(commonType),
+      offsets.scalar_type() == commonType ? offsets
+                                          : offsets.toType(commonType)};
+}
+
 // Determines if we can use a fast implementation for index_select_add, which
 // is only applicable if special conditions are met
 template<typename index_t>
@@ -83,6 +95,7 @@ index_select_add(const Tensor &select_indices,
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* src_data = src.data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -103,6 +116,7 @@ index_select_add(const Tensor &select_indices,
               output_data + output_stride0 * add_indices_data[i], output_stride1);
     } else if (bag_size.defined()) {
       // Decrement bag_size to reflect that the index is padded
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
@@ -134,10 +148,12 @@ index_select_add(const Tensor &select_indices,
     } else {
       output_size = offsets.numel();
       offsets_include_last.resize(offsets.numel() + 1);
-      std::memcpy(
-          offsets_include_last.data(),
-          offsets.data_ptr<index_t>(),
-          sizeof(index_t) * offsets.numel());
+      if (offsets.numel() > 0) {
+        std::memcpy(
+            offsets_include_last.data(),
+            offsets.data_ptr<index_t>(),
+            sizeof(index_t) * offsets.numel());
+      }
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
     }
@@ -184,6 +200,7 @@ index_select_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.data_ptr<float>();
     auto* add_indices_data = add_indices.data_ptr<index_t>();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -206,6 +223,7 @@ index_select_add(const Tensor &select_indices,
             output_stride1);
       } else if (bag_size.defined()) {
         // Decrement bag_size to reflect that the index is padded
+        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -232,6 +250,7 @@ index_select_scale_add(const Tensor &select_indices,
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* src_data = src.data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -258,6 +277,7 @@ index_select_scale_add(const Tensor &select_indices,
       }
     } else if (bag_size.defined()) {
       // Decrement bag_size to reflect that the index is padded
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
@@ -341,6 +361,7 @@ index_select_scale_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.data_ptr<float>();
     auto* add_indices_data = add_indices.data_ptr<index_t>();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -365,6 +386,7 @@ index_select_scale_add(const Tensor &select_indices,
         }
       } else if (bag_size.defined()) {
         // Decrement bag_size to reflect that the index is padded
+        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -389,15 +411,16 @@ void check_arguments(
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
-    TORCH_CHECK(offsets.sizes()[0] >= 1, "offsets should have at least 1 element");
-    index_t offset_0 = offsets.data_ptr<index_t>()[0];
-    index_t offset_n = offsets.data_ptr<index_t>()[offsets.sizes()[0]-1];
-    TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
-                              "in the mini-batch has to start from position 0. "
-                              "However, got ", offsets[0]);
-    TORCH_CHECK(offset_n <= indices.sizes()[0], "offsets[-1] can not "
-                "be greater than input's length ", indices.sizes()[0], " but got offsets[-1] of ",
-                offset_n);
+    if (offsets.sizes()[0] > 0) {
+      index_t offset_0 = offsets.data_ptr<index_t>()[0];
+      index_t offset_n = offsets.data_ptr<index_t>()[offsets.sizes()[0]-1];
+      TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
+                                "in the mini-batch has to start from position 0. "
+                                "However, got ", offsets[0]);
+      TORCH_CHECK(offset_n <= indices.sizes()[0], "offsets[-1] can not "
+                  "be greater than input's length ", indices.sizes()[0], " but got offsets[-1] of ",
+                  offset_n);
+    }
   });
 
   if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
@@ -433,7 +456,9 @@ void make_bag_size_out(
           offsets.slice(0, 1, num_bags, 1) -
           offsets.slice(0, 0, num_bags - 1, 1);
     }
-    bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
+    if (num_bags > 0) {
+      bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
+    }
   }
 }
 
@@ -644,14 +669,15 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
-    const Tensor& indices,
-    const Tensor& offsets,
+    const Tensor& indices_,
+    const Tensor& offsets_,
     const int64_t mode,
     const Tensor& per_sample_weights,
     bool include_last_offset,
     int64_t padding_idx,
     bool requires_grad) {
-
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
@@ -767,8 +793,8 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
-                              const Tensor &offsets,
+Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
+                              const Tensor &offsets_,
                               const Tensor &offset2bag,
                               const Tensor &bag_size_,
                               const Tensor &max_indices_,
@@ -780,6 +806,8 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
@@ -884,6 +912,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     Tensor& index_grad_weight,
     int64_t padding_idx) {
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
 
   auto ind_sort_ = indices_.sort();
@@ -892,6 +921,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
   optional<Tensor> per_sample_weights;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t* per_sample_weights_data;
   optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
@@ -1000,8 +1030,8 @@ template<typename scalar_t>
 Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
-    const Tensor& indices,
-    const Tensor& offsets,
+    const Tensor& indices_,
+    const Tensor& offsets_,
     const Tensor& offset2bag,
     int64_t mode,
     int64_t padding_idx) {
@@ -1012,6 +1042,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
 
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.sizes()[0];
 
@@ -1109,6 +1141,7 @@ Tensor _embedding_bag_sparse_backward(
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);
 

@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 GroupNormDNNLowPOp<T>::GroupNormDNNLowPOp(
     const OperatorDef& operator_def,
@@ -654,15 +655,18 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelDequantizedNHWC(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     GroupNorm,
     DNNLOWP,
     GroupNormDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8GroupNorm,
     DNNLOWP,
     GroupNormDNNLowPOp<uint8_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8GroupNorm).NumInputs(3).NumOutputs({1, 3});
 
 } // namespace caffe2

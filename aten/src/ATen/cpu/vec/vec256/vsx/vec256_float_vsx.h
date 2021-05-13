@@ -459,8 +459,8 @@ class Vectorize<float> {
     // inf and nan checks
 #if 0
                     ret = blendv(ret, v_inf, x >= vf_89);
-                    ret = blendv(ret, v_inf, ret._isnan());
-                    ret = blendv(ret, v_nan, this->_isnan());
+                    ret = blendv(ret, v_inf, ret.isnan());
+                    ret = blendv(ret, v_nan, this->isnan());
 #endif
     return ret;
   }

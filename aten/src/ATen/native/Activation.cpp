@@ -6,33 +6,86 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#if defined(C10_MOBILE) && defined(USE_XNNPACK)
+#include <ATen/native/xnnpack/Engine.h>
+#endif
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
+  const Tensor& result = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(self) // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
+  const Tensor& gradInput = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(gradInput)
+    .add_input(self)
+    .add_input(grad)  // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+} // namespace meta
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardtanh_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(shrink_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -136,6 +189,11 @@ Tensor elu_backward(
 }
 
 Tensor hardswish(const Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    return xnnpack::hardswish(self);
+  }
+  #endif
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   hardswish_stub(iter.device_type(), iter);
@@ -149,6 +207,12 @@ Tensor& hardswish_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor& hardswish_(Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    xnnpack::hardswish_(self);
+    return self;
+  }
+  #endif
   auto iter = TensorIterator::unary_op(self, self);
   hardswish_stub(iter.device_type(), iter);
   return self;
@@ -373,45 +437,12 @@ Tensor softplus_backward(
   return iter.output();
 }
 
-// computes `result = self <= threshold ? value : other`
-// other is `self` in threshold() and `grad` in threshold_backward()
-static Tensor threshold_out(
-    optional<Tensor> opt_result,
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value,
-    const Tensor& other) {
-  Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-  threshold_stub(iter.device_type(), iter, threshold, value);
-  return iter.output();
+TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_stub(device_type(), *this, threshold, value);
 }
 
-Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out(nullopt, self, threshold, value, self);
-}
-
-Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_stub(device_type(), *this, threshold, 0);
 }
 
 // -----------------------------------
@@ -852,7 +883,9 @@ Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
   return grad_input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native

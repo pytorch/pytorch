@@ -9,7 +9,7 @@ torch.package
 
 API Reference
 -------------
-.. autoclass:: torch.package.DeniedModuleError
+.. autoclass:: torch.package.PackagingError
 
 .. autoclass:: torch.package.EmptyMatchError
 
@@ -22,3 +22,6 @@ API Reference
   :members:
 
   .. automethod:: __init__
+
+.. autoclass:: torch.package.Directory
+  :members:

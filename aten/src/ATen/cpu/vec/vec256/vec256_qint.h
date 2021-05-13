@@ -527,7 +527,9 @@ struct Vectorize<c10::qint8> : public Vectorizeqi {
 
     // This is needed because the compiler emits awful code for the default
     // constructor for moving the enum
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
     Vectorize(const Vectorize<c10::qint8>& other) : Vectorizeqi(other.vals) { }
+
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
@@ -799,6 +801,7 @@ struct Vectorize<c10::quint8> : public Vectorizeqi {
         vals = _mm256_set1_epi8(uw);
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
     Vectorize(const Vectorize<c10::quint8>& other) : Vectorizeqi(other.vals) { }
 
     void store(void* ptr, int count = size()) const {

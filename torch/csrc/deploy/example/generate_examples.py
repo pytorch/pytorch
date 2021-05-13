@@ -15,6 +15,7 @@ except ImportError:
 def save(name, model, model_jit, eg):
     with PackageExporter(str(p / name)) as e:
         e.mock('iopath.**')
+        e.intern('**')
         e.save_pickle('model', 'model.pkl', model)
         e.save_pickle('model', 'example.pkl', eg)
     model_jit.save(str(p / (name + '_jit')))
@@ -22,7 +23,6 @@ def save(name, model, model_jit, eg):
 
 parser = argparse.ArgumentParser(description="Generate Examples")
 parser.add_argument("--install_dir", help="Root directory for all output files")
-parser.add_argument("--fbcode_dir", help="fbcode passes this to all binaries, so we accept it")
 
 
 if __name__ == "__main__":
