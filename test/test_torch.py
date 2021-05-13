@@ -39,7 +39,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
@@ -5212,56 +5212,44 @@ else:
         with self.assertRaises(IndexError):
             a.index_copy_(1, idx, c)
 
-    @onlyCPU
-    def test_index_copy_deterministic(self, device):
-        m = 6
-        n = 3
-        x = torch.zeros(m, n, device=device)
-        elems = 20000
-        src = torch.rand(elems, n, device=device)
-        index = torch.randint(m, (elems,), device=device)
-        with DeterministicGuard(True):
-            y0 = torch.index_copy(x, 0, index, src)
-            for _ in range(10):
-                y = torch.index_copy(x, 0, index, src)
-                self.assertEqual(y, y0, atol=0, rtol=0)
-
-    # Ensures that index_copy throws nondeterministic alerts in the correct cases
-    @onlyCUDA
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_index_copy(self, device, dtype):
-        @expectedAlertNondeterministic('index_copy_cuda', 'cuda')
-        def test_func(slf, device, call_type):
-            S = 10
-            a = torch.randn(S, device=device)
-            b = torch.randn(S, device=device)
-            index = torch.randint(S, (S,), device=device)
-            if call_type == 'function':
-                torch.index_copy(a, 0, index, b)
-            elif call_type == 'method':
-                a.index_copy(0, index, b)
-            elif call_type == 'method inplace':
-                a.index_copy_(0, index, b)
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        test_func(self, device, 'function')
-        test_func(self, device, 'method')
-        test_func(self, device, 'method inplace')
+    def _prepare_data_for_index_copy_and_add_deterministic(
+        self, dim: int, device: torch.device
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert (dim >= 0 and dim < 3)
+        a = [5, 4, 3]
+        a[dim] = 2000
+        x = torch.zeros(a, device=device)
+        b = a.copy()
+        elems = a[dim] * 20
+        b[dim] = elems
+        src = torch.rand(b, device=device)
+        index = torch.randint(a[dim], (elems,), device=device)
+        return (x, index, src)
 
     @onlyOnCPUAndCUDA
-    def test_index_add_deterministic(self, device):
+    def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
-            a = [5, 4, 3]
-            a[dim] = 1000
-            alpha = random.random() + 1
-            x = torch.zeros(a, device=device)
-            b = a.copy()
-            elems = a[dim] * 20
-            b[dim] = elems
-            src = torch.rand(b, device=device)
-            index = torch.randint(a[dim], (elems,), device=device)
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
+            with DeterministicGuard(True):
+                y0 = torch.index_copy(x, dim, index, src)
 
+            x0 = x.clone().detach()
+            index_list = index.tolist()
+            for i in range(len(index_list)):
+                if dim == 0:
+                    x0[index_list[i], :, :] = src[i, :, :]
+                elif dim == 1:
+                    x0[:, index_list[i], :] = src[:, i, :]
+                elif dim == 2:
+                    x0[:, :, index_list[i]] = src[:, :, i]
+
+            self.assertEqual(x0, y0, atol=0, rtol=0)
+
+    @onlyOnCPUAndCUDA
+    def test_index_add_deterministic(self, device: torch.device) -> None:
+        for dim in range(3):
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
+            alpha = random.random() + 1
             # on CPU it should be deterministic regardless of the deterministic mode
             with DeterministicGuard(True):
                 y0 = torch.index_add(x, dim, index, src, alpha=alpha)
@@ -7967,8 +7955,6 @@ tensor_op_tests = [
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('narrow', '', _small_3d, lambda t, d: [1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('norm', '3_norm', _small_3d, lambda t, d: [3], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
@@ -8009,9 +7995,6 @@ tensor_op_tests = [
     ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('squeeze', '', _new_t((1, 2, 1, 4)), lambda t, d: [],),
-    ('squeeze', 'dim', _new_t((1, 2, 1, 4)), lambda t, d: [2], ),
-    ('squeeze', 'neg_dim', _new_t((1, 2, 1, 4)), lambda t, d: [-2], ),
     ('t', '', _new_t((1, 2)), lambda t, d: [],),
     ('take', '', _new_t((3, 4)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],
