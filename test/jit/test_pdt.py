@@ -203,6 +203,7 @@ class TestPDT(JitTestCase):
                          pdt_model_one.test_find({1.1: True, 2.2: True, 3.3: False, }, 4.4))
         self.assertEqual(script_model_two.test_find(["hello", "world", ], "world"),
                          pdt_model_two.test_find(["hello", "world", ], "world"))
+
     def test_pdt(self):
         def test_sum(a, b):
             return a + b
