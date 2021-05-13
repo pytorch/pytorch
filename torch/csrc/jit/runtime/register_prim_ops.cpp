@@ -663,7 +663,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int? start=0, int? end=9223372036854775807, int step=1) -> t[]"),
+             "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -853,7 +853,8 @@ RegisterOperators reg(
          aten::div,
          static_cast<double>(a) / static_cast<double>(b),
          a / b,
-         float),
+         a / b,
+         Scalar),
      DEFINE_GENERIC_OP(
          aten::floordiv,
          floordiv(a, b),
@@ -882,7 +883,10 @@ RegisterOperators reg(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         float),
+         static_cast<c10::complex<double>>(
+             pow(static_cast<c10::complex<double>>(a),
+                 static_cast<c10::complex<double>>(b))),
+         Scalar),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
          [](Stack* stack) {
