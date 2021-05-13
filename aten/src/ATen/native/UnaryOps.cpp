@@ -82,7 +82,8 @@ CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 
 TORCH_META_FUNC(square) (const Tensor& self) {
-  set_output(0, self.sizes(), self.options());
+  auto common_dtype = at::result_type(self, 2);
+  set_output(0, self.sizes(), self.options().dtype(common_dtype));
 }
 
 TORCH_META_FUNC(neg) (const Tensor& self) {
