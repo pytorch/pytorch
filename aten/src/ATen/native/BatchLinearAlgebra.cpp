@@ -2760,6 +2760,12 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 }
 
 Tensor linalg_eigvals(const Tensor& input) {
+  // if input requires grad we must compute the eigenvectors to make this function differentiable
+  // the eigenvectors are not exposed to the user
+  if (at::GradMode::is_enabled() && input.requires_grad()) {
+    return std::get<0>(at::linalg_eig(input));
+  }
+
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
 
