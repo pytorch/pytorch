@@ -41,9 +41,13 @@ class JitPlugin(CoveragePlugin):
                 filename = getsourcefile(obj)
                 # We don't want to report for filename = None
                 if filename:
-                    sourcelines, starting_lineno = getsourcelines(obj)
-                    line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
-                    cov_data.add_lines(line_data)
+                    try:
+                        sourcelines, starting_lineno = getsourcelines(obj)
+                    except OSError:
+                        pass
+                    else:
+                        line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
+                        cov_data.add_lines(line_data)
         super().dynamic_context(frame)
 
 def coverage_init(reg, options):
