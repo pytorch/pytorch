@@ -22,11 +22,12 @@ from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
 
-_IS_ASTUNPARSE_INSTALLED = True
+_IS_ASTUNPARSE_INSTALLED = False
 try:
     import astunparse  # type: ignore
+    _IS_ASTUNPARSE_INSTALLED = True
 except ImportError:
-    _IS_ASTUNPARSE_INSTALLED = False
+    pass
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -417,7 +418,11 @@ def build_ignore_context_manager(ctx, stmt):
         outputs = []
         for arg in args:
             var_name = arg.arg
-            var_ann = arg.value.value
+            if sys.version_info < (3, 8):
+                # Starting python3.8 ast.Str is deprecated
+                var_ann = arg.value.s
+            else:
+                var_ann = arg.value.value
             var_decl_type, var_ann = var_ann.split(":")
             if var_decl_type == "inp":
                 inputs.append(InputType(var_name, var_ann))
@@ -668,7 +673,8 @@ class StmtBuilder(Builder):
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
             if not _IS_ASTUNPARSE_INSTALLED:
-                raise RuntimeError("torch.jit._IgnoreContextManager is not supported in this platform")
+                raise RuntimeError("torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                                   please install it in your Python environment")
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
