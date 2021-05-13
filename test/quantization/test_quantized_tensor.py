@@ -146,38 +146,6 @@ class TestQuantizedTensor(TestCase):
     def test_qtensor_cpu(self):
         self._test_qtensor(torch.device('cpu'))
 
-    def test_cuda_quantized_tensor(self):
-        assert(torch.cuda.is_available())
-        xf = torch.randn(2, 2).to('cuda')
-
-        # working (CUDA backend listed in native_functions.yaml))
-        x = torch.quantize_per_tensor(xf, scale=2.0, zero_point=0, dtype=torch.quint8)  # works
-        assert('cuda' in str(x.device))
-        print(x.qscheme())  # works
-        print(x.dequantize().to('cpu'))  # works
-        print(x.q_scale())  # works
-        print(x.q_zero_point())  # workss
-        x = torch._empty_affine_quantized([10, 2], scale=1, zero_point=0,
-                                          dtype=torch.qint8, device='cuda')  # works
-        assert('cuda' in str(x.device))
-        print(x.qscheme())  # works
-        print(x.dequantize().to('cpu'))  # works
-        print(x.q_scale())  # works
-        print(x.q_zero_point())  # works
-
-        # not working (quantize_tensor_per_channel_float_qparams only supports CPU device type.)
-        # xf1 = torch.randn(2, 2).to('cuda')
-        # x,x1 = torch.quantize_per_tensor(tensors=(xf,xf1), scales=torch.Tensor([2.0, 3.0]).to('cuda'), zero_points=torch.Tensor([0,0]).to('cuda'), dtype = torch.qint8)
-        # assert('cuda' in str(x.device))
-        # assert('cuda' in str(x1.device))
-
-        # not working (no CUDA backend listed in native_functions.yaml)
-
-        x = torch.quantize_per_channel(xf, scales=torch.Tensor([2.0, 3.0]).to(
-            'cuda'), zero_points=torch.Tensor([0, 0]).to('cuda'), axis=0, dtype=torch.qint8)  # fails
-        assert('cuda' in str(x.device))
-        print(x.q_per_channel_axis())  # ?
-
     def _test_qtensor(self, device):
         device = str(device)
         num_elements = 10
@@ -212,6 +180,38 @@ class TestQuantizedTensor(TestCase):
                              "tensor([], " + device_msg + "size=(0, 1), dtype=" + dtype_msg +
                              "quantization_scheme=torch.per_tensor_affine, " +
                              "scale=1.0, zero_point=2)")
+
+    def test_cuda_quantized_tensor(self):
+        assert(torch.cuda.is_available())
+        xf = torch.randn(2, 2).to('cuda')
+
+        # working (CUDA backend listed in native_functions.yaml))
+        x = torch.quantize_per_tensor(xf, scale=2.0, zero_point=0, dtype=torch.quint8)  # works
+        assert('cuda' in str(x.device))
+        print(x.qscheme())  # works
+        print(x.dequantize().to('cpu'))  # works
+        print(x.q_scale())  # works
+        print(x.q_zero_point())  # workss
+        x = torch._empty_affine_quantized([10, 2], scale=1, zero_point=0,
+                                          dtype=torch.qint8, device='cuda')  # works
+        assert('cuda' in str(x.device))
+        print(x.qscheme())  # works
+        print(x.dequantize().to('cpu'))  # works
+        print(x.q_scale())  # works
+        print(x.q_zero_point())  # works
+
+        # not working (quantize_tensor_per_channel_float_qparams only supports CPU device type.)
+        # xf1 = torch.randn(2, 2).to('cuda')
+        # x,x1 = torch.quantize_per_tensor(tensors=(xf,xf1), scales=torch.Tensor([2.0, 3.0]).to('cuda'), zero_points=torch.Tensor([0,0]).to('cuda'), dtype = torch.qint8)
+        # assert('cuda' in str(x.device))
+        # assert('cuda' in str(x1.device))
+
+        # not working (no CUDA backend listed in native_functions.yaml)
+
+        x = torch.quantize_per_channel(xf, scales=torch.Tensor([2.0, 3.0]).to(
+            'cuda'), zero_points=torch.Tensor([0, 0]).to('cuda'), axis=0, dtype=torch.qint8)  # fails
+        assert('cuda' in str(x.device))
+        print(x.q_per_channel_axis())  # ?
 
     def test_qtensor_sub_byte(self):
         num_elements = 10
@@ -537,7 +537,7 @@ class TestQuantizedTensor(TestCase):
                 self.assertEqual(qr1.q_zero_point(), qr2.q_zero_point())
                 # compare dequantized result
                 self.assertEqual(qr1.dequantize(), qr2.dequantize())
-                # compare permuted + dequantized result with original transposed result
+                # compare permuted + fd result with original transposed result
                 self.assertTrue(np.allclose(qr2.dequantize().cpu().numpy(),
                                             r.cpu().numpy().transpose([1, 0, 2, 3]), atol=2 / scale))
                 # make permuted result contiguous
