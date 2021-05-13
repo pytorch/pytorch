@@ -22,6 +22,8 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
@@ -347,9 +349,7 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   // that are above max(atol, rtol * max(S)) threshold
   Tensor S, max_S;
   if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    S = at::linalg_svdvals(input);
     // singular values are sorted in descending order
     max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   } else {
@@ -408,10 +408,20 @@ Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermit
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  TORCH_WARN_ONCE(
+    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
+    "renamed in torch.linalg.matrix_rank to 'hermitian'."
+  );
   return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  TORCH_WARN_ONCE(
+    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
+    "renamed in torch.linalg.matrix_rank to 'hermitian'."
+  );
   return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
 }
 
@@ -666,6 +676,11 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor chain_matmul(TensorList matrices) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
@@ -679,6 +694,11 @@ Tensor chain_matmul(TensorList matrices) {
 }
 
 Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
@@ -2151,7 +2171,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
     auto permutation_reverse = create_reverse_permutation(permutation);
 
-    result_ = std::get<1>(self_.permute(permutation).svd()).abs();
+    result_ = at::linalg_svdvals(self_.permute(permutation));
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {
@@ -2702,6 +2722,142 @@ struct KronImpl final {
     c10::SmallVector<int64_t, 10> a_reshape;
     c10::SmallVector<int64_t, 10> b_reshape;
 };
+}
+
+DEFINE_DISPATCH(unpack_pivots_stub);
+
+std::tuple<Tensor, Tensor, Tensor> lu_unpack(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool unpack_data,
+    bool unpack_pivots
+    ) {
+  TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
+      "lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
+      "Note: this function is intended to be used with the output produced by torch{.linalg}.lu");
+
+  // trivial case
+  if (!unpack_data && !unpack_pivots) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor L, U;
+  // In the generalized LU factorization, the following shape relations hold:
+  // A.shape[-2:] == (m, n),
+  // P.shape[-2:] == (m, m),
+  // U.shape[-2:] == (m, k),
+  // L.shape[-2:] == (k, n),
+  // where k = min(m, n)
+  int64_t m = LU_data.size(-2);
+  int64_t n = LU_data.size(-1);
+  int64_t k = std::min(m, n);
+
+  if (unpack_data) {
+    U = LU_data.triu();
+    if (m != k) {
+      U = U.narrow(-2, 0, k);
+    }
+
+    L = LU_data.tril();
+    if (k != n) {
+      L = L.narrow(-1, 0, k);
+    }
+    L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  }
+
+  if (!unpack_pivots) {
+    return std::make_tuple(Tensor(), L, U);
+  }
+
+  auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
+  unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
+  auto unpacked_pivots = at::empty(
+    unpacked_pivots_sizes,
+    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // Fill `unpacked_pivots` with identity permutation
+  auto id_perm = at::arange(m, LU_pivots.options());
+  unpacked_pivots.copy_(id_perm);
+
+  // WARNING: we assume that unchanged LAPACK pivots are provided.
+  // Since LAPACK relies on the FORTRAN's 1-based indexing,
+  // we subtract 1 to convert the pivots to the C-style 0-based indexing.
+  // This behaviour could change in the future.
+  auto LU_pivots_zero_idx = LU_pivots - 1;
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
+    .add_output(unpacked_pivots)
+    .add_input(LU_pivots_zero_idx)
+    .build();
+  // }
+
+  unpack_pivots_stub(
+    LU_pivots.device().type(),
+    iter,
+    LU_pivots.size(-1)
+  );
+
+  // The permutation matrix is converted to LU_data.dtype
+  // because `matmul` does not work with integer matrices.
+  unpacked_pivots_sizes.push_back(m);
+  auto permutation_matrix = at::zeros(
+    unpacked_pivots_sizes,
+    LU_data.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // now that we know the final permutation,
+  // scatter 1s at proper locations.
+  permutation_matrix.scatter_(
+    -2,
+    unpacked_pivots.unsqueeze(-2).to(at::kLong),
+    at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
+  );
+
+  return std::make_tuple(permutation_matrix, L, U);
+}
+
+using TupleTensorRefs3 = std::tuple<Tensor&, Tensor&, Tensor&>;
+
+TupleTensorRefs3 lu_unpack_out(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool unpack_data,
+    bool unpack_pivots,
+    Tensor& P,
+    Tensor& L,
+    Tensor& U
+    ) {
+  Tensor P_tmp, L_tmp, U_tmp;
+  std::tie(P_tmp, L_tmp, U_tmp) = at::lu_unpack(LU_data, LU_pivots, unpack_data, unpack_pivots);
+
+  if (unpack_pivots) {
+    checkSameDevice("lu_unpack", P, LU_data, "P");
+    // Note that lu_unpack returns P such that P.dtype == LU_data.dtype,
+    // because otherwise we cannot use P in matric products (no int -> float promotion)
+    checkLinalgCompatibleDtype("lu_unpack", P, LU_data, "L");
+
+    at::native::resize_output(P, P_tmp.sizes());
+    P.copy_(P_tmp);
+  }
+
+  if (unpack_data) {
+    checkSameDevice("lu_unpack", L, LU_data, "L");
+    checkSameDevice("lu_unpack", U, LU_data, "U");
+    checkLinalgCompatibleDtype("lu_unpack", L, LU_data, "L");
+    checkLinalgCompatibleDtype("lu_unpack", U, LU_data, "U");
+
+    at::native::resize_output(L, L_tmp.sizes());
+    at::native::resize_output(U, U_tmp.sizes());
+    L.copy_(L_tmp);
+    U.copy_(U_tmp);
+  }
+
+  return TupleTensorRefs3(P, L, U);
 }
 
 /*
