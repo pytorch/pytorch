@@ -200,7 +200,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
       : ExprNodeBase(dtype, kPrimitive),
         base_handle_(var),
         dims_(std::move(dims)),
-        strides_(compute_strides(dims_)),
         initializer_(initializer) {
     TORCH_CHECK(var);
   }
@@ -218,17 +217,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_;
   }
   void set_dims(std::vector<const Expr*> dims) {
-    dims_ = std::move(dims);
-    strides_ = compute_strides(dims_);
+    dims_ = dims;
   };
-
-  const std::vector<const Expr*>& strides() const {
-    return strides_;
-  }
-
-  void set_strides(std::vector<const Expr*> strides) {
-    strides_ = std::move(strides);
-  }
 
   const Expr* initializer() const {
     return initializer_;
@@ -244,12 +234,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
  private:
-  std::vector<const Expr*> compute_strides(
-      const std::vector<const Expr*>& dims) const;
-
   Var* base_handle_;
   std::vector<const Expr*> dims_;
-  std::vector<const Expr*> strides_;
   const Expr* initializer_;
 };
 
