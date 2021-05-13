@@ -85,8 +85,10 @@ template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOAT
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 }}}  // namespace at::cuda::detail
 
+namespace hipcub {
+
 template <>
-struct ::hipcub::FpLimits<c10::BFloat16>
+struct FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -99,7 +101,8 @@ struct ::hipcub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct ::hipcub::NumericTraits<c10::BFloat16>: ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+template <> struct NumericTraits<c10::BFloat16>: BaseTraits<FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+}  // namespace hipcub
 
 namespace at { namespace cuda { namespace detail {
 #endif
