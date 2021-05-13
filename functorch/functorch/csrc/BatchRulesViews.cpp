@@ -110,11 +110,32 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
   return { self_.repeat(sizes_with_bdim), 0 };
 }
 
+std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
+    const Tensor& input,
+    optional<int64_t> input_bdim,
+    int64_t diagonal) {
+  if (!input_bdim) {
+    return { at::diag(input, diagonal), nullopt };
+  }
+
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  auto rank = rankWithoutBatchDim(input, input_bdim);
+
+  if (rank == 1) {
+    return { at::diag_embed(input_, diagonal), 0};
+  } else if (rank == 2) {
+    return { at::diagonal(input_.movedim(0, -1), diagonal), rank - 2};
+  } else {
+    TORCH_INTERNAL_ASSERT("Passed in an invalid shape to at::diag");
+  }
+}
+
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("flatten.using_ints", flatten_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   VMAP_SUPPORT("repeat", repeat_batch_rule);
+  VMAP_SUPPORT("diag", diag_batch_rule);
 }
 
 }}
