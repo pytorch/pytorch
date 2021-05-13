@@ -3013,8 +3013,8 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   // produced by NNC onto the strided representation that we want to return.
   // So we create a new tensor with identical indexing, but restrided.
   auto dims = c10::fmap<DimArg>(sizesForValue(v));
-  auto output = Compute(
-      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+  auto output =
+      Compute("output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         return BufHandle(buf).load(axes_input);
       });
   std::vector<const Expr*> strideExprs;
