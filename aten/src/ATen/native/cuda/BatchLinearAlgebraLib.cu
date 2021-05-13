@@ -1204,10 +1204,21 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");
   int lda = std::max<int>(1, m);
-  auto self_stride = matrixStride(self);
-  auto batch_size = batchCount(self);
+  int64_t self_stride = matrixStride(self);
+  int64_t batch_size = batchCount(self);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cusolver", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+    self.scalar_type(),
+    "lu_cusolver",
+    [&m,
+     &n,
+     &lda,
+     &self_stride,
+     &batch_size,
+     &self,
+     &pivots,
+     &infos,
+     &get_pivots]() {
     auto self_data = self.data_ptr<scalar_t>();
     auto infos_data = infos.data_ptr<int>();
 
