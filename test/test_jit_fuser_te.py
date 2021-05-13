@@ -51,6 +51,15 @@ def texpr_reductions_enabled():
     finally:
         torch._C._jit_set_texpr_reductions_enabled(old)
 
+@contextlib.contextmanager
+def inline_fusion_groups():
+    old_inlining = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(True)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old_inlining)
+
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
@@ -1422,8 +1431,10 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardswish,
             torch.sqrt,
             torch.rsqrt,
+            F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1815,7 +1826,10 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
     def test_superslomo(self):
-        for device in self.devices:
+        devices = self.devices.copy()
+        if not LLVM_ENABLED:
+            devices.remove("cpu")
+        for device in devices:
             # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
             # A few interesting things happen here: strided inputs of mixed size,
             # plus outputs of mixed shapes.  The latter characteristic happened to
@@ -1901,6 +1915,7 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
 
+    @unittest.skipIf(not LLVM_ENABLED, "Too slow to run with the TE interpreter")
     def test_conv2d_depthwise(self):
         def eager(input, weight, bias):
             return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
@@ -1922,6 +1937,31 @@ class TestTEFuser(JitTestCase):
 
         script = self.checkScript(eager, (input, weight, bias))
         FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+    def test_type_as_cat(self):
+        with inline_fusion_groups():
+            def eager(x, y):
+                return torch.cat((x, y.type_as(x)), dim=1)
+            for dtype1, dtype2 in product(self.dtypes, self.dtypes):
+                x = torch.randint(2, (1, 13,)).to(dtype1)
+                zero = torch.tensor([[0]]).to(dtype2)
+                one = torch.tensor([[1]]).to(dtype2)
+                script = torch.jit.trace(eager, (x, zero))
+                for _ in range(3):
+                    torch.testing.assert_allclose(
+                        script(x, zero),
+                        eager(x, zero))
+                    torch.testing.assert_allclose(
+                        script(x, one),
+                        eager(x, one))
+                self.assertAllFused(script.graph_for(x, one))
+
+    def test_to_device(self):
+        def eager(x):
+            return x.to(device="cpu").relu()
+        x = torch.rand(8)
+        script = self.checkScript(eager, (x,))
+        self.assertAllFused(script.graph_for(x))
 
 if __name__ == '__main__':
     run_tests()

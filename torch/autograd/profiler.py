@@ -8,6 +8,7 @@ from collections import defaultdict, namedtuple
 from operator import attrgetter
 
 from typing import Dict, List, Tuple, Optional
+from warnings import warn
 
 import math
 
@@ -57,7 +58,7 @@ class EventList(list):
 
     def _remove_dup_nodes(self):
         while True:
-            to_delete = []
+            to_delete = set()
             for idx in range(len(self)):
                 if (self[idx].cpu_parent is not None and
                         self[idx].cpu_parent.name == self[idx].name and
@@ -66,7 +67,7 @@ class EventList(list):
                     self[idx].cpu_parent.kernels = self[idx].kernels  # lift kernels up
                     for ch in self[idx].cpu_children:
                         ch.cpu_parent = self[idx].cpu_parent
-                    to_delete.append(idx)
+                    to_delete.add(idx)
             if len(to_delete) == 0:
                 break
             new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
@@ -246,10 +247,10 @@ class EventList(list):
                                                evt.thread, next_id))
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
-
-            # remove trailing whitespace and comma
-            f.seek(f.tell() - 2, os.SEEK_SET)
-            f.truncate()
+            if len(self) > 0:
+                # remove trailing whitespace and comma
+                f.seek(f.tell() - 2, os.SEEK_SET)
+                f.truncate()
             f.write("]")
 
     def supported_export_stacks_metrics(self):
@@ -426,26 +427,25 @@ class profile(object):
         self.profiler_kind = None
         self.kineto_activities = set()
         if use_kineto:
-            self.profiler_kind = torch.autograd.ProfilerState.KINETO
-            if self.use_cpu:
-                self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
-            if self.use_cuda:
-                self.kineto_activities.add(
-                    # uses CUPTI
-                    torch.autograd.ProfilerActivity.CUDA)
-            assert len(self.kineto_activities) > 0, \
-                "No activities specified for Kineto profiler"
-        elif self.use_cuda:
-            # legacy CUDA mode
-            self.profiler_kind = torch.autograd.ProfilerState.CUDA
-        else:
-            self.profiler_kind = torch.autograd.ProfilerState.CPU
+            if torch.autograd.kineto_available():
+                self.profiler_kind = torch.autograd.ProfilerState.KINETO
+                if self.use_cpu:
+                    self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
+                if self.use_cuda:
+                    self.kineto_activities.add(
+                        # uses CUPTI
+                        torch.autograd.ProfilerActivity.CUDA)
+                assert len(self.kineto_activities) > 0, \
+                    "No activities specified for Kineto profiler"
+            else:
+                warn("Kineto is not available, falling back to legacy profiler")
 
-        if self.profiler_kind == torch.autograd.ProfilerState.KINETO:
-            assert (
-                torch.autograd.kineto_available()
-            ), """Requested Kineto profiling but Kineto is not available,
-                  make sure PyTorch is built with USE_KINETO=1"""
+        if not self.kineto_activities:
+            if self.use_cuda:
+                # legacy CUDA mode
+                self.profiler_kind = torch.autograd.ProfilerState.CUDA
+            else:
+                self.profiler_kind = torch.autograd.ProfilerState.CPU
 
     def config(self):
         assert self.profiler_kind is not None
@@ -461,22 +461,24 @@ class profile(object):
             return
         if self.entered:
             raise RuntimeError("profiler context manager is not reentrant")
+        self._prepare_trace()
+        self._start_trace()
+        return self
+
+    def _prepare_trace(self):
         self.entered = True
         if self.kineto_activities:
             torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
+        else:
+            # no-op in case of legacy profiler
+            pass
+
+    def _start_trace(self):
+        self.entered = True
+        if self.kineto_activities:
             torch.autograd._enable_profiler(self.config(), self.kineto_activities)
         else:
             torch.autograd._enable_profiler_legacy(self.config())
-        return self
-
-    def _prepare_kineto_trace(self):
-        assert self.kineto_activities
-        self.entered = True
-        torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
-
-    def _start_kineto_trace(self):
-        assert self.kineto_activities
-        torch.autograd._enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
@@ -1140,7 +1142,9 @@ def parse_kineto_results(result):
                     cuda_memory_usage += mem_record[0].cuda_memory_usage()
                     mem_record[1] = True
 
-        is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        is_async = kineto_event.is_async() or (
+            kineto_event.start_thread_id() != kineto_event.end_thread_id()
+        )
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
             name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
@@ -1277,7 +1281,9 @@ def parse_legacy_records(thread_records):
 
                 cpu_memory_usage = cpu_memory_allocs[record_key]
                 cuda_memory_usage = cuda_memory_allocs[record_key]
-                is_async = start.thread_id() != record.thread_id()
+                is_async = start.is_async() or (
+                    start.thread_id() != record.thread_id()
+                )
                 is_remote_event = record.is_remote()
                 start_flops = start.flops()
 
