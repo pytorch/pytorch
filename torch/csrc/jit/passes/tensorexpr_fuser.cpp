@@ -1089,9 +1089,7 @@ class TensorExprFuser {
     REQ(typesAreSupported(node));
 
     // A hook to optimizations limitter to allow bisecting the pass
-    if (!JIT_OPT_ALLOWED) {
-      return false;
-    }
+    REQ(JIT_OPT_ALLOWED);
 
     return true;
   }
