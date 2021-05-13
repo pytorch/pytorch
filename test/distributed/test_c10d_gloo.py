@@ -218,7 +218,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
         pg = c10d.create_process_group_wrapper(
             _pg,
-            "foo",
+            "unused",
             store,
             self.rank,
             self.world_size,
@@ -281,14 +281,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
-        pg = c10d.create_process_group_wrapper(
-            _pg,
-            "unused",
-            store,
-            self.rank,
-            self.world_size,
-        )
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
         xs = [torch.FloatTensor([])]
         fut = pg.broadcast(xs).get_future()
         fut.wait()
