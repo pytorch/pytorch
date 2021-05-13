@@ -249,19 +249,20 @@ class _MinimizerBase:
                 with "minimize", all preceding nodes with "main_0" and all following
                 nodes with "main_1".
         """
-        preceding = True
-
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
 
             if node in selected_nodes:
                 node.tag = "minimize"
-                preceding = False
-            elif preceding:
-                node.tag = "main_0"
-            else:
+            elif any(
+                n.tag in {"minimize", "main_1"}  # type: ignore[attr-defined]
+                for n in node.all_input_nodes
+                if n.op in CALLABLE_NODE_OPS
+            ):
                 node.tag = "main_1"
+            else:
+                node.tag = "main_0"
 
     def _build_submodule(self, nodes: NodeSet) -> Tuple[torch.fx.GraphModule, str]:
         """
@@ -526,6 +527,7 @@ class _MinimizerBase:
         """
 
         print(self.settings)
+        print(self.module.graph)
         nodes = self._collect_nodes(start, end)
 
         if self.settings.traverse_method == "sequential":
