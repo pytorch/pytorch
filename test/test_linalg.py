@@ -5383,6 +5383,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @precisionOverride({torch.float: 1e-3})
+    @skipCUDAIfRocm
     def test_lu_unpack(self, device, dtype):
         def run_test(pivot):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
