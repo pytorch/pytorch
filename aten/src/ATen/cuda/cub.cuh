@@ -83,6 +83,7 @@ template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOAT
 #else
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+}}}  // namespace at::cuda::detail
 
 template <>
 struct ::hipcub::FpLimits<c10::BFloat16>
@@ -99,6 +100,8 @@ struct ::hipcub::FpLimits<c10::BFloat16>
 };
 
 template <> struct ::hipcub::NumericTraits<c10::BFloat16>: ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+namespace at { namespace cuda { namespace detail {
 #endif
 
 }  // namespace detail
