@@ -1959,14 +1959,14 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:   Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK:   for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:     for (int idx1 = 0; idx1 < W + 1; idx1++) {
-# CHECK:       temp[(0 + idx0 * (1 * (W + 1))) + idx1 * 1] = (idx0 + cy) * (idx1 + 0);
+# CHECK:       temp[(0 + idx0 * ((W + 1) * 1)) + idx1 * 1] = (idx0 + cy) * (idx1 + 0);
 # CHECK:     }
 # CHECK:   }
 # CHECK:   for (int cx = 0; cx < W; cx++) {
-# CHECK:     cons[(0 + cy * (1 * W)) + cx * 1] = int(0);
+# CHECK:     cons[(0 + cy * (W * 1)) + cx * 1] = int(0);
 # CHECK:     for (int r = 0; r < 2; r++) {
 # CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * (W + 1))) + (s + cx) * 1]);
+#: CHECK:         cons[(0 + cy * (W * 1)) + cx * 1] = (cons[(0 + cy * (W * 1)) + cx * 1]) + (temp[(0 + r * ((W + 1) * 1)) + (s + cx) * 1]);
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
@@ -1995,13 +1995,13 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:     Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK:     for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:       for (int idx1 = 0; idx1 < 2; idx1++) {
-# CHECK:         temp[(0 + idx0 * (1 * 2)) + idx1 * 1] = (cy + idx0) * (cx + idx1);
+# CHECK:         temp[
 # CHECK:       }
 # CHECK:     }
-# CHECK:     cons[(0 + cy * (1 * W)) + cx * 1] = 0;
+# CHECK:     cons[
 # CHECK:     for (int r = 0; r < 2; r++) {
 # CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * 2)) + s * 1]);
+# CHECK:         cons[
 # CHECK:       }
 # CHECK:     }
 # CHECK:     Free(temp);

@@ -810,6 +810,7 @@ TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>&);
 TORCH_API const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& strides,
     const std::vector<const Expr*>& indices);
 
 } // namespace tensorexpr
