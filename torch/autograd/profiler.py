@@ -423,6 +423,9 @@ class profile(object):
         if not self.use_cpu:
             assert use_kineto, \
                 "Device-only events supported only with Kineto (use_kineto=True)"
+        if self.use_cuda and not torch.cuda.is_available():
+            warn("CUDA is not available, disabling CUDA profiling")
+            self.use_cuda = False
 
         self.profiler_kind = None
         self.kineto_activities = set()
