@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+//#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <ATen/native/LinearAlgebraUtils.h>

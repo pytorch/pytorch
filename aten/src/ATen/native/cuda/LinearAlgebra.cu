@@ -627,7 +627,6 @@ void unpack_pivots_cuda_kernel(
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
-REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cuda);
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
 
 }}
