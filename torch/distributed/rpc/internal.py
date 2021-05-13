@@ -113,14 +113,17 @@ class _InternalRPCPickler:
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
 
+        # Add dispatch pickling for ScriptModule if needed.
+        if isinstance(obj, torch.jit.ScriptModule):
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
+
+        # Ignore type error because dispatch_table is defined in third-party package
+        p.dispatch_table[torch.jit.RecursiveScriptModule] = self._script_module_reducer  # type: ignore[index]
+
         # Install customized picklers.
         for class_name in self._class_reducer_dict.keys():
             p.dispatch_table[class_name] = self._class_reducer_dict[class_name]  # type: ignore[index]
-
-        # Ignore type error because dispatch_table is defined in third-party package
-        p.dispatch_table[torch.jit.ScriptModule] = self._script_module_reducer  # type: ignore[index]
-        # Ignore type error because dispatch_table is defined in third-party package
-        p.dispatch_table[torch.jit.RecursiveScriptModule] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
