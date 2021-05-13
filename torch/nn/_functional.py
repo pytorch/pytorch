@@ -16,7 +16,7 @@ from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 
-__all__ = ['Tensor', 
+__all__ = ['Tensor',
 'conv1d',
 'conv2d',
 'conv3d',
