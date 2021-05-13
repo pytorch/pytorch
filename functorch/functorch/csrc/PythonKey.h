@@ -12,6 +12,7 @@ inline at::Tensor getValueFromPyTensor(const py::object& pyTensor) {
 struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   explicit PythonTensorImpl(py::object value): TensorImpl(c10::DispatchKeySet(c10::DispatchKey::FuncTorchPython), getValueFromPyTensor(value).dtype(), c10::Device(at::kCPU)), value_(value) {
     set_storage_access_should_throw();
+    set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
     // asm("int $0x3\n");
     auto tensor = getValueFromPyTensor(value_);
 
@@ -38,7 +39,7 @@ struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   // tensor are private.
 
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-  bool is_contiguous(at::MemoryFormat memory_format) const override;
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
