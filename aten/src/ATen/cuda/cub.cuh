@@ -62,6 +62,8 @@ struct cuda_type<c10::BFloat16> {
 
 #else
 
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
 template <>
 struct cub::FpLimits<c10::BFloat16>
 {
