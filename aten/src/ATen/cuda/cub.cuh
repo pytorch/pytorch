@@ -60,7 +60,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#else
+#elif defined(__CUDACC__)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
@@ -80,6 +80,25 @@ struct cub::FpLimits<c10::BFloat16>
 
 template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
 
+#else
+
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
+template <>
+struct ::hipcub::FpLimits<c10::BFloat16>
+{
+    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<c10::BFloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<c10::BFloat16&>(lowest_word);
+    }
+};
+
+template <> struct ::hipcub::NumericTraits<c10::BFloat16>: ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
 #endif
 
 }  // namespace detail
