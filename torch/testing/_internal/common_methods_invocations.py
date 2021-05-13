@@ -3213,7 +3213,7 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
-def sample_inputs_split(op_info, device, dtype, requires_grad, list_args=False, **kwargs):
+def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if list_args:
@@ -5193,7 +5193,7 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('split',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_split,
+           sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
            assert_autodiffed=True),
     OpInfo('split',
