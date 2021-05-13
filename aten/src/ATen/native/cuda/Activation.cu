@@ -305,13 +305,13 @@ void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const S
 }
 
 template <typename scalar_t>
-void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t value) {
+void threshold_kernel_impl(TensorIteratorBase& iter, scalar_t threshold, scalar_t value) {
   gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
     return x <= threshold ? value : other;
   });
 }
 
-static void threshold_kernel(TensorIterator& iter, const Scalar& threshold, const Scalar& value) {
+static void threshold_kernel_cuda(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "threshold_cuda", [&] {
     threshold_kernel_impl<scalar_t>(iter, threshold.to<scalar_t>(), value.to<scalar_t>());
   });
@@ -524,47 +524,6 @@ Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
   return dX;
 }
 
-// computes `result = self <= threshold ? value : other`
-// other is `self` in threshold() and `grad` in threshold_backward()
-static Tensor threshold_out_cuda(
-    optional<Tensor> opt_result,
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value,
-    const Tensor& other) {
-  Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-  threshold_kernel(iter, threshold, value);
-  return iter.output();
-}
-
-Tensor threshold_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out_cuda(nullopt, self, threshold, value, self);
-}
-
-Tensor& threshold__cuda(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out_cuda(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out_cuda(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out_cuda(nullopt, self, threshold, 0, grad);
-}
-
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
@@ -581,6 +540,7 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+REGISTER_DISPATCH(threshold_stub, &threshold_kernel_cuda);
 
 } // namespace native
 } // namespace at
