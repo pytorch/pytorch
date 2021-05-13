@@ -103,9 +103,9 @@ template<typename Base_type, typename Exp_type>
 void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
-  if (d_exp == 0.5) {
-    sqrt_kernel_cuda(iter);
-  } else if (d_exp == 2) {
+  // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
+  // in pow_tensor_scalar_kernel
+  if (d_exp == 2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base;
     });
@@ -113,10 +113,6 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base * base;
     });
-  } else if (d_exp == -0.5) {
-    rsqrt_kernel_cuda(iter);
-  } else if (d_exp == -1) {
-    reciprocal_kernel_cuda(iter);
   } else if (d_exp == -2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return 1.0 / (base * base);
@@ -129,6 +125,16 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
+  // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
+  if (!exp_scalar.isComplex()) {
+    if (exp_scalar.equal(.5)) {
+      return sqrt_kernel_cuda(iter);
+    } else if (exp_scalar.equal(-0.5)) {
+      return rsqrt_kernel_cuda(iter);
+    } else if (exp_scalar.equal(-1.0)) {
+      return reciprocal_kernel_cuda(iter);
+    }
+  }
   if (isComplexType(iter.common_dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
