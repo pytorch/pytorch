@@ -24,6 +24,9 @@ env:
 jobs:
   calculate-docker-image:
     runs-on: linux.2xlarge
+    env:
+      DOCKER_BUILDKIT: 1
+    timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
