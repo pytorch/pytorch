@@ -45,6 +45,7 @@ TEST(LoopNest, ExprSimple01) {
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
   l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
+  ASSERT_EQ(loops[0], x_outer);
   l.splitWithTail(x_outer, 2);
 }
 
@@ -406,6 +407,7 @@ TEST(LoopNest, ExprSplitAndSlice) {
   // inner: [0, 21)
   // tail:  [84, 100)
   l.splitWithTail(loops[0], 21, &outer, &inner, &tail);
+  ASSERT_EQ(loops[0], outer);
   l.sliceTail(inner, 2);
   l.sliceHead(outer, 2);
 
@@ -530,6 +532,8 @@ TEST(LoopNest, ExprSplitWithTail) {
   For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
+  ASSERT_EQ(loops[0], x_outer);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.splitWithTail(x_outer, 7);
 
   Stmt* stmt = l.root_stmt();
@@ -565,6 +569,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  ASSERT_EQ(loops[0], x_outer);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -698,7 +703,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   ASSERT_GT(loops.size(), 0);
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
   l.splitWithTail(loops[0], 4, &outer, &inner, &tail);
-  ASSERT_NE(outer, nullptr);
+  ASSERT_EQ(loops[0], outer);
   ASSERT_NE(inner, nullptr);
   ASSERT_NE(tail, nullptr);
 
@@ -3148,6 +3153,9 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
   l.splitWithTail(for_stmt, 10, &x_outer, &x_inner, &x_tail);
+
+  // The new x_outer statement should be same as the input loop.
+  ASSERT_EQ(for_stmt, x_outer);
 
   auto x_outer_result = IRSimplifier::simplify(x_outer);
   std::ostringstream oss_outer;

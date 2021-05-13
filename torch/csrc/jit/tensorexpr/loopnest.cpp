@@ -1167,16 +1167,6 @@ void LoopNest::splitWithTail(
   // x -> x.outer * inner.size + x.inner
   const Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
 
-  Stmt* body_inner =
-      Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
-
-  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer =
-      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
-
-  // TODO: cleanup API for adding/removing statements
-  p->replace_stmt(f, *outer);
-
   if (tail_is_needed) {
     const Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
@@ -1187,10 +1177,19 @@ void LoopNest::splitWithTail(
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->insert_stmt_after(*tail, *outer);
+    p->insert_stmt_after(*tail, f);
   } else {
     *tail = nullptr;
   }
+
+  Stmt* body_inner = Substitute(f->removeBody(), {{f->var(), combined_index1}});
+
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  f->setVar(i_outer);
+  f->setStart(new IntImm(0));
+  f->setStop(split_count);
+  f->setBody(*inner);
+  *outer = f;
 }
 
 void LoopNest::splitWithMask(For* f, int factor) {
