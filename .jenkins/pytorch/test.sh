@@ -368,7 +368,7 @@ test_backward_compatibility() {
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  pip_install --pre torch -f https://download.pytorch.org/whl/test/cpu/torch_test.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
   deactivate
