@@ -156,9 +156,6 @@ public:
   }
   // AVX512 doesn't have horizontal add & horizontal sub instructions.
   // TODO: hadd_pd() & hsub_pd() may have scope for improvement.
-  // At https://stackoverflow.com/questions/26896432/horizontal-add-with-m512-avx512/26905830,
-  // Peter Cordes recommends not using _mm256_hadd_ps because it has a high latency
-  // and blocks port longer than other clever alternatives.
   static __m512d hadd_pd(__m512d a, __m512d b) {
   __m512i idx1 = _mm512_set_epi64(14, 6, 12, 4, 10, 2, 8, 0);
   __m512i idx2 = _mm512_set_epi64(15, 7, 13, 5, 11, 3, 9, 1);

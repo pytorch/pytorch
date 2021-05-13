@@ -649,37 +649,18 @@ public:
     }
   }
   // AVX512 doesn't have horizontal add & horizontal sub instructions.
-  // TODO: hadd_ps() & hsub_ps() may have scope for improvement.
-  // At https://stackoverflow.com/questions/26896432/horizontal-add-with-m512-avx512/26905830,
-  // Peter Cordes recommends not using _mm256_hadd_ps because it has a high latency
-  // and blocks port longer than other clever alternatives.
-  static __m512 hadd_ps(__m512 a, __m512 b) {
-    auto first_half_a = _mm512_extracti32x8_epi32(_mm512_castps_si512(a), 0);
-    auto second_half_a = _mm512_extracti32x8_epi32(_mm512_castps_si512(a), 1);
-    auto first_half_b = _mm512_extracti32x8_epi32(_mm512_castps_si512(b), 0);
-    auto second_half_b = _mm512_extracti32x8_epi32(_mm512_castps_si512(b), 1);
-    auto first_half_hadd = _mm256_hadd_ps(_mm256_castsi256_ps(first_half_a),
-                                          _mm256_castsi256_ps(first_half_b));
-    auto second_half_hadd = _mm256_hadd_ps(_mm256_castsi256_ps(second_half_a),
-                                           _mm256_castsi256_ps(second_half_b));
-    auto ret_val = _mm512_set1_ps(0.0);
-    ret_val = _mm512_insertf32x8(ret_val, first_half_hadd, 0);
-    ret_val = _mm512_insertf32x8(ret_val, second_half_hadd, 1);
-    return ret_val;
+  // TODO: hadd_pd() & hsub_pd() may have scope for improvement.
+  static inline __m512 hadd_ps(__m512 a, __m512 b) {
+  __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
+  __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
+  return _mm512_add_ps(_mm512_mask_permutex2var_ps(a, 0xff, idx1, b),
+                       _mm512_mask_permutex2var_ps(a, 0xff, idx2, b));
   }
-  static __m512 hsub_ps(__m512 a, __m512 b) {
-    auto first_half_a = _mm512_extracti32x8_epi32(_mm512_castps_si512(a), 0);
-    auto second_half_a = _mm512_extracti32x8_epi32(_mm512_castps_si512(a), 1);
-    auto first_half_b = _mm512_extracti32x8_epi32(_mm512_castps_si512(b), 0);
-    auto second_half_b = _mm512_extracti32x8_epi32(_mm512_castps_si512(b), 1);
-    auto first_half_hsub = _mm256_hsub_ps(_mm256_castsi256_ps(first_half_a),
-                                          _mm256_castsi256_ps(first_half_b));
-    auto second_half_hsub = _mm256_hsub_ps(_mm256_castsi256_ps(second_half_a),
-                                           _mm256_castsi256_ps(second_half_b));
-    auto ret_val = _mm512_set1_ps(0.0);
-    ret_val = _mm512_insertf32x8(ret_val, first_half_hsub, 0);
-    ret_val = _mm512_insertf32x8(ret_val, second_half_hsub, 1);
-    return ret_val;
+  static inline __m512 hsub_ps(__m512 a, __m512 b) {
+  __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
+  __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
+  return _mm512_sub_ps(_mm512_mask_permutex2var_ps(a, 0xff, idx1, b),
+                       _mm512_mask_permutex2var_ps(a, 0xff, idx2, b));
   }
   const c10::complex<float>& operator[](int idx) const  = delete;
   c10::complex<float>& operator[](int idx) = delete;
