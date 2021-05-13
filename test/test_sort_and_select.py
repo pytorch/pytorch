@@ -245,7 +245,10 @@ class TestSortAndSelect(TestCase):
 
         for sample, dim in generate_samples():
             _, idx_torch = sample.sort(dim=dim, stable=True)
-            sample_numpy = sample.cpu().numpy()
+            if dtype is torch.bfloat16:
+                sample_numpy = sample.float().cpu().numpy()
+            else:
+                sample_numpy = sample.cpu().numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
@@ -254,7 +257,10 @@ class TestSortAndSelect(TestCase):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             if tensor.size() != torch.Size([]):
-                expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+                if dtype is torch.bfloat16:
+                    expected = torch.from_numpy(np.msort(tensor.float().cpu().numpy())).bfloat16()
+                else:
+                    expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
             else:
                 expected = tensor  # numpy.msort() does not support empty shapes tensor
 
