@@ -186,7 +186,7 @@ void Method::run(Stack& stack) const {
       observer->onExitRunMethod(instance_key);
     }
     // This exception must be caught first as it derived from c10::Error
-  } catch (c10::DelegatedBackendRuntimeException& e) {
+  } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     e.pushDebugHandle(function_->getExceptionDebugHandle());
     // symbolicate all handles
