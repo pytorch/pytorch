@@ -2946,12 +2946,7 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_tensor(lhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
         rhs = make_tensor(rhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-        if op_info.name == 'matmul':
-            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
-        elif op_info.name == '__rmatmul__':
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
-        else:
-            raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
+        sample_inputs.append(SampleInput(lhs, args=(rhs,)))
     return tuple(sample_inputs)
 
 
@@ -5176,20 +5171,6 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::mul'],),
-    OpInfo('__rmatmul__',
-           op=torch.Tensor.__rmatmul__,
-           dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
-           dtypesIfROCM=floating_types_and(torch.half),
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_matmul,
-           supports_out=False,
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',),
-               # https://github.com/pytorch/pytorch/issues/55755
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                        device_type='cpu', dtypes=(torch.float16,)),)),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),

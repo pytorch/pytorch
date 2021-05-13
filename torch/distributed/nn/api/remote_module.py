@@ -74,16 +74,20 @@ def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cud
     )
 
 
-def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=None):
+def _create_module(module_cls, args, kwargs, device):
     module = module_cls(*args, **kwargs)
     if not isinstance(module, nn.Module):
         raise ValueError(
             "Expect `module_cls(*args, **kwargs)` returns an instance of <class nn.Module>, "
             f"but it returns an instance of {type(module)}."
         )
+    module.to(device)
+    return module
+
+def _create_module_with_interface(module_cls, args, kwargs, device, module_interface_cls):
+    module = _create_module(module_cls, args, kwargs, device)
     if module_interface_cls is not None:
         module = torch.jit.script(module)
-    module.to(device)
     return rpc.RRef(module, module_interface_cls)
 
 
@@ -239,18 +243,26 @@ class _RemoteModule(nn.Module):
 
             # Create the module on the remote side.
             fut.wait()  # Ensure remote_module_cls is available on remote side.
+
+            # TODO: We need to change this to rpc.remote, and make it async (see the else branch below).
+            # For that we need to be able to apply _module_interface_cls to the RRef returned by rpc.remote
+            # See https://github.com/pytorch/pytorch/issues/58098 for more context.
+            self.module_rref = rpc.rpc_sync(
+                self.on,
+                _create_module_with_interface,
+                (module_cls, args, kwargs, self.device, _module_interface_cls),
+            )
         else:
             self.is_scriptable = False
             self.generated_methods = (
                 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
             )
-
-        # Create the module on the remote side.
-        self.module_rref = rpc.rpc_sync(
-            self.on,
-            _create_module,
-            (module_cls, args, kwargs, self.device, _module_interface_cls),
-        )
+            # Create the module on the remote side.
+            self.module_rref = rpc.remote(
+                self.on,
+                _create_module,
+                (module_cls, args, kwargs, self.device),
+            )
 
         # Install generated methods.
         for method in self.generated_methods:
