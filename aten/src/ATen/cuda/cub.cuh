@@ -76,7 +76,7 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: HACK_NAMESPACE_NAME(cub)::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
 
 #endif
 
