@@ -57,12 +57,12 @@ void nnc_aten_{name}(
     int64_t args_num,
     int64_t* extra_args) {{
   std::vector<at::Tensor> tensors =
-        constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   {nl.join(tensor_decls)}
   try {{
     at::{name}_out({', '.join(['r'] + arg_names)});
-  }} catch(...) {{
+  }} catch (...) {{
   }}
 }}"""
         func_registration = f"""\
