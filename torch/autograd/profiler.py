@@ -492,7 +492,7 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if self.use_cuda and torch.cuda.is_available():
+        if self.use_cuda:
             torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
@@ -1481,10 +1481,11 @@ def build_table(
     name_column_width = max([len(evt.key) for evt in events]) + 4
     name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
 
-    DEFAULT_COLUMN_WIDTH = 12
+    MAX_SHAPES_COLUMN_WIDTH = 80
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, 45)
+    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
 
+    DEFAULT_COLUMN_WIDTH = 12
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None

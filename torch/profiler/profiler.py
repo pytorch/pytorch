@@ -91,8 +91,8 @@ def supported_activities():
     Returns a set of supported profiler tracing activities.
     Note: profiler uses CUPTI library to trace on-device CUDA kernels.
     In builds where CUDA is enabled but CUPTI is not available, passing
-    ProfilerActivity.CUDA to profiler would result in using legacy CUDA
-    profiling code (same as in the legacy torch.autograd.profiler). This
+    ``ProfilerActivity.CUDA`` to profiler would result in using legacy CUDA
+    profiling code (same as in the legacy ``torch.autograd.profiler``). This
     would show CUDA time in the profiler table output, but won't include
     on-device kernels in the resulting JSON trace.
     """
