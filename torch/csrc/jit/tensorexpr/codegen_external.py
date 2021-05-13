@@ -72,7 +72,8 @@ const static RegisterNNCExternalFunction nnc_{name}(
         func_decls.append(func_decl)
         func_registrations.append(func_registration)
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
-    fm.write_with_template('external_functions_codegen.cpp', external_path, lambda: {'external_registrations': func_registrations, 'external_functions': func_decls})
+    fm.write_with_template('external_functions_codegen.cpp', external_path,
+                           lambda: {'external_registrations': func_registrations, 'external_functions': func_decls})
 
 
 def main() -> None:
