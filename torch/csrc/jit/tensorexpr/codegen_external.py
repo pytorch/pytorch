@@ -2,7 +2,6 @@
 import argparse
 from tools.codegen.gen import parse_native_yaml, FileManager
 import tools.codegen.model as model
-from tools.codegen.code_template import CodeTemplate
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())
@@ -13,7 +12,7 @@ def deindent(code: str) -> str:
     return '\n'.join(lines)
 
 
-def gen_external(native_functions_path):
+def gen_external(native_functions_path, external_path):
     native_functions = parse_native_yaml(native_functions_path)
     func_decls = []
     func_registrations = []
@@ -72,21 +71,21 @@ const static RegisterNNCExternalFunction nnc_{name}(
     nnc_aten_{name});"""
         func_decls.append(func_decl)
         func_registrations.append(func_registration)
-    external_path = "../../../../tools/jit/templates/external_functions_codegen_template.cpp"
-    code_template = CodeTemplate.from_file(external_path)
-
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
-
     fm.write_with_template('external_functions_codegen.cpp', external_path, lambda: {'external_registrations': func_registrations, 'external_functions': func_decls})
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Generate annotated_fn_args script')
-    parser.add_argument('native_functions', metavar='NATIVE',
-                        help='path to native_functions.yaml')
+    parser.add_argument('--native_functions',
+                        help='path to native_functions.yaml',
+                        default='../../../../aten/src/ATen/native/native_functions.yaml')
+    parser.add_argument('--template_path',
+                        help='path to external_functions_codegen_template.cpp',
+                        default='../../../../tools/jit/templates/external_functions_codegen_template.cpp')
     args = parser.parse_args()
-    gen_external(args.native_functions)
+    gen_external(args.native_functions, args.template_path)
 
 if __name__ == '__main__':
     main()

@@ -14,14 +14,10 @@ namespace tensorexpr {
 extern "C" {
 #endif
 
-$ {
-  external_functions
-}
+${external_functions}
 
 #ifndef C10_MOBILE
-$ {
-  external_registrations
-}
+${external_registrations}
 #endif
 
 #ifdef C10_MOBILE
