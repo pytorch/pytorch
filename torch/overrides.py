@@ -114,6 +114,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_grad_enabled,
         torch.no_grad,
         torch.enable_grad,
+        torch.inference_mode,
+        torch.is_inference_mode_enabled,
         torch.layout,
         torch.align_tensors,
         torch.arange,
