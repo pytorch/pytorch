@@ -3,9 +3,16 @@
 
 import collections
 import numbers
-from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
-                    TypeVar, Union, get_type_hints)
-from typing import _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
+import sys
+from typing import (Any, Dict, Iterator, List, Set, Tuple, TypeVar, Union,
+                    get_type_hints)
+from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
+
+try:  # Python > 3.6
+    from typing import ForwardRef  # type: ignore[attr-defined]
+except ImportError:  # Python 3.6
+    from typing import _ForwardRef as ForwardRef  # type: ignore[attr-defined]
+
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 try:
@@ -250,19 +257,23 @@ class _DataPipeMeta(GenericMeta):
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace)
 
+        namespace['__type_class__'] = False
         # For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
                 return super().__new__(cls, name, bases, namespace)
 
-        namespace.update({'type': _DEFAULT_TYPE, '__init_subclass__': _dp_init_subclass})
+        namespace.update({'type': _DEFAULT_TYPE,
+                          '__init_subclass__': _dp_init_subclass})
         return super().__new__(cls, name, bases, namespace)
 
     @_tp_cache
     def __getitem__(self, param):
         if param is None:
             raise TypeError('{}[t]: t can not be None'.format(self.__name__))
-        if isinstance(param, Sequence):
+        if isinstance(param, str):
+            param = ForwardRef(param)
+        if isinstance(param, tuple):
             param = Tuple[param]
         _type_check(param, msg="{}[t]: t must be a type".format(self.__name__))
         t = _DataPipeType(param)
@@ -281,6 +292,7 @@ class _DataPipeMeta(GenericMeta):
 
         return self.__class__(name, bases,
                               {'__init_subclass__': _dp_init_subclass,
+                               '__type_class__': True,
                                'type': t})
 
     def __eq__(self, other):
@@ -316,6 +328,21 @@ def _mro_subclass_init(obj):
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # TODO:
     # - add global switch for type checking at compile-time
+
+    # Ignore internal type class
+    if getattr(sub_cls, '__type_class__', False):
+        return
+
+    # Check if the string type is valid
+    if isinstance(sub_cls.type.param, ForwardRef):
+        base_globals = sys.modules[sub_cls.__module__].__dict__
+        try:
+            param = _eval_type(sub_cls.type.param, base_globals, locals())
+            sub_cls.type.param = param
+        except TypeError as e:
+            raise TypeError("{} is not supported by Python typing"
+                            .format(sub_cls.type.param.__forward_arg__)) from e
+
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
         hints = get_type_hints(iter_fn)
