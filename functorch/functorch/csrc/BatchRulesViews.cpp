@@ -1,4 +1,5 @@
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <iostream>
 
 namespace at { namespace functorch {
 
@@ -117,16 +118,15 @@ std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
   if (!input_bdim) {
     return { at::diag(input, diagonal), nullopt };
   }
-
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto rank = rankWithoutBatchDim(input, input_bdim);
 
   if (rank == 1) {
     return { at::diag_embed(input_, diagonal), 0};
   } else if (rank == 2) {
-    return { at::diagonal(input_.movedim(0, -1), diagonal), rank - 2};
+    return { at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2};
   } else {
-    TORCH_INTERNAL_ASSERT("Passed in an invalid shape to at::diag");
+    throw std::runtime_error("Passed in an invalid shape to at::diag");
   }
 }
 
