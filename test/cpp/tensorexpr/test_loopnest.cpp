@@ -671,6 +671,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *mid, *inner;
   l.splitWithMask(loops[0], 4, &outer, &inner);
+  ASSERT_EQ(loops[0], outer);
   l.splitWithMask(outer, 4);
 
   Stmt* stmt1 = IRSimplifier::simplify(l.root_stmt());
@@ -734,6 +735,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   auto loops = NodeFinder<For>::find(l.root_stmt());
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
   l.splitWithMask(loops[0], 4, &outer, &inner);
+  ASSERT_EQ(loops[0], outer);
 
   // Outer loop carries loop axis bindings.
   ASSERT_TRUE(outer->loop_options().is_gpu_block_index());
@@ -1317,6 +1319,7 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   LoopNest l({b}, {a, b});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
   l.splitWithMask(loops[0], 4, &i_outer, &i_inner);
+  ASSERT_EQ(loops[0], i_outer);
   l.splitWithMask(i_inner, 2);
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }

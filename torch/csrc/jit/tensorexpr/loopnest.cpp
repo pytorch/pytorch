@@ -1250,10 +1250,11 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer =
-      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
-
-  p->replace_stmt(f, *outer);
+  f->setVar(i_outer);
+  f->setStart(new IntImm(0));
+  f->setStop(split_count);
+  f->setBody(*inner);
+  *outer = f;
 }
 
 std::vector<For*> LoopNest::distributeLoop(
