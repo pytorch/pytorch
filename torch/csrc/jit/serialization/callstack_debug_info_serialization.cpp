@@ -5,6 +5,10 @@
 namespace torch {
 namespace jit {
 
+namespace {
+const int64_t kInvalidSourceRangeTag = -1;
+} // namespace
+
 c10::IValue InlinedCallStackSerializer::serialize(
     const InlinedCallStackPtr& cs_ptr,
     const SourceRangeTagMap& source_range_tags) {
@@ -21,7 +25,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
   elements.reserve(3);
   elements.emplace_back(
       serialize_module_instance_info(cs_ptr->module_instance()));
-  int64_t source_range_tag{-1};
+  int64_t source_range_tag{kInvalidSourceRangeTag};
   const SourceRange& sr = cs_ptr->source_range().findSourceRangeThatGenerated()
       ? cs_ptr->source_range().findSourceRangeThatGenerated().value()
       : cs_ptr->source_range();
@@ -80,7 +84,7 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
      */
     elements.reserve(3);
     elements.emplace_back(debug_handle);
-    int64_t source_range_tag{-1};
+    int64_t source_range_tag{kInvalidSourceRangeTag};
     const auto source_range =
         std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
     const SourceRange& sr = source_range.findSourceRangeThatGenerated()
@@ -126,12 +130,13 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   int64_t source_range_tag = tup_elems[1].toInt();
   auto source_range_it = source_range_map.find(source_range_tag);
   TORCH_CHECK(
-      source_range_tag == -1 || source_range_it != source_range_map.end(),
+      source_range_tag == kInvalidSourceRangeTag ||
+          source_range_it != source_range_map.end(),
       "Source range tag must exist in deserialized source range map."
       " Not found source range tag:",
       source_range_tag);
   SourceRange source_range;
-  if (source_range_tag != -1) {
+  if (source_range_tag != kInvalidSourceRangeTag) {
     source_range = source_range_it->second;
   }
   auto callee = deserialize(tup_elems[2], source_range_map, cu);

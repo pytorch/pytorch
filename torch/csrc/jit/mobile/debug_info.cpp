@@ -13,13 +13,6 @@ namespace jit {
 
 namespace {
 
-// This function construct stacktrace with module hierarchy
-// Module hierarchy will contain information about where in the
-// module hierarchy this source is. For example if conv2d op
-// exist in hierarcy A->B->C->Conv2d with type annotations of
-// A -> TopM, B->MyModule, C->SomeModule, then module hierarchy
-// will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
-// Source level stack information will be from model source code.
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack) {
   constexpr size_t kSourceRange = 1;
@@ -55,7 +48,7 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
           module_info += "." + module_instance_info.instance_name();
         } else {
           const auto& instance_name = module_instance_info.instance_name();
-          module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+          module_info += "." + instance_name + "(UNKNOWN_TYPE)";
         }
       } else {
         module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
@@ -71,6 +64,13 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
   }
 }
 
+// This function construct stacktrace with module hierarchy
+// Module hierarchy will contain information about where in the
+// module hierarchy this source is. For example if conv2d op
+// exist in hierarcy A->B->C->Conv2d with type annotations of
+// A -> TopM, B->MyModule, C->SomeModule, then module hierarchy
+// will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
+// Source level stack information will be from model source code.
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
     const std::vector<DebugInfoTuple>& source_callstacks,
     const std::string& root_scope_string,
@@ -203,7 +203,7 @@ std::pair<std::string, std::string> MobileDebugTable::
     }
     debug_handles_string += "}";
     debug_handles_string =
-        "Debug info for handles, " + debug_handles_string + ", not found.";
+        "Debug info for handles: " + debug_handles_string + ", was not found.";
     return {debug_handles_string, debug_handles_string};
   }
   return (getStackTraceWithModuleHierarchy(
