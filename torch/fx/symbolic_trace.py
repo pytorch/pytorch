@@ -23,13 +23,54 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 _orig_module_call : Callable = torch.nn.Module.__call__
 _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
-# TODO: document proxyable types
-
-proxyable_classes : Dict[Type, None] = {}
+_proxyable_classes : Dict[Type, None] = {}
 
 class ProxyableClassMeta(type):
+    """
+    ProxyableClassMeta allows you to make construction of a given Python class
+    symbolically traceable. For example::
+
+        import torch
+        import torch.fx
+
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_ctor(x : TensorPair, y : torch.Tensor):
+            s = x.add(TensorPair(y, y))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = torch.randn(5, 3)
+        ref_out = use_tensor_pair_ctor(x, y)
+
+        traced = torch.fx.symbolic_trace(use_tensor_pair_ctor)
+        print(traced.code)
+        '''
+        def forward(self, x : __main___TensorPair, y : torch.Tensor):
+            tensor_pair = __main___TensorPair(y, y);  y = None
+            add = x.add(tensor_pair);  tensor_pair = None
+            mul = add.mul(x);  add = x = None
+            return mul
+        '''
+
+    From this example, we can see that contruction of a class (``TensorPair``)
+    defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
+    tracing.
+    """
     def __init__(cls, name, bases, attrs):
-        proxyable_classes.setdefault(cls)
+        _proxyable_classes.setdefault(cls)
         return super().__init__(name, bases, attrs)
 
     def __call__(cls, *args, **kwargs):
@@ -221,7 +262,10 @@ class Tracer(TracerBase):
             for n_, p_ in self.root.named_buffers():
                 if a is p_:
                     return self.create_node('get_attr', n_, (), {})
-
+        elif isinstance(a, torch.nn.Module):
+            for n_, p_ in self.root.named_modules():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, '_fields'):
@@ -251,7 +295,7 @@ class Tracer(TracerBase):
 
             return self.create_node('get_attr', qualname, (), {})
 
-        if type(a) in proxyable_classes:
+        if type(a) in _proxyable_classes:
             # This is an instance of a proxyable class for which we did not
             # witness its construction. Intern this as a constant attribute
 
