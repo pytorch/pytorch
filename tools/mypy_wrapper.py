@@ -167,8 +167,6 @@ def run(
         ),
         list(dict.fromkeys(  # remove duplicates, retain order
             item
-            # assume stderr is empty
-            # https://github.com/python/mypy/issues/1051
             for stdout, _, _ in mypy_results
             for item in stdout.splitlines()
         )),
