@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/core/DeviceType.h>
+#include <c10/core/InferenceMode.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -55,7 +56,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
-      .value("KINETO", ProfilerState::KINETO);
+      .value("KINETO", ProfilerState::KINETO)
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -99,6 +101,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
       .value("MLC", c10::DeviceType::MLC)
+      .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
@@ -179,7 +182,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // Whether this is async event or not
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
-      });
+      })
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)
@@ -189,8 +193,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-  m.def("_add_metadata", addMetadata);
 #endif
+
+  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
+#ifdef USE_KINETO
+      addMetadataJson(key, value);
+#else
+      LOG(WARNING) << "Adding profiling metadata requires using "
+                   << "torch.profiler with Kineto support (USE_KINETO=1)";
+#endif
+  });
 
   m.def("kineto_available", []() {
 #ifdef USE_KINETO
@@ -237,6 +249,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
+
+  py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
+      .def(py::init<bool>());
 
   Py_RETURN_TRUE;
 }
@@ -302,6 +317,16 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * is_inference_mode_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (c10::InferenceMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
@@ -348,6 +373,7 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+  {"is_inference_mode_enabled", is_inference_mode_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
