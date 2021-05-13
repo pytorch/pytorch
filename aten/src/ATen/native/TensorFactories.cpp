@@ -528,7 +528,7 @@ TensorOptions linspace_logspace_infer_options(
     }
   }
 
-  return options;
+  return options.has_dtype() ? options : options.dtype(c10::get_default_dtype());
 }
 } // anonymous namespace
 
