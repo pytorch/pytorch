@@ -90,7 +90,9 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     return new Load(
-        v->dtype(), v->buf(), {flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices())});
+        v->dtype(),
+        v->buf(),
+        {flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices())});
   }
 
   Stmt* mutate(const Store* v) override {
@@ -100,7 +102,9 @@ class IndexFlattener : public IRMutator {
       return (Stmt*)v;
     }
     return new Store(
-        v->buf(), {flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices())}, new_value);
+        v->buf(),
+        {flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices())},
+        new_value);
   }
 };
 

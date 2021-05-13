@@ -244,7 +244,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
  private:
-  std::vector<const Expr*> compute_strides(const std::vector<const Expr*>& dims) const;
+  std::vector<const Expr*> compute_strides(
+      const std::vector<const Expr*>& dims) const;
 
   Var* base_handle_;
   std::vector<const Expr*> dims_;

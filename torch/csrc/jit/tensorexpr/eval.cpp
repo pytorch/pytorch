@@ -615,7 +615,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     void* ptr = iter->second;
 
-    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices());
+    const Expr* flat_idx =
+        flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
@@ -645,7 +646,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     void* ptr = iter->second;
 
-    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices());
+    const Expr* flat_idx =
+        flatten_index(v->buf()->dims(), v->buf()->strides(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     ScalarType v_sdtype = v->value()->dtype().scalar_type();

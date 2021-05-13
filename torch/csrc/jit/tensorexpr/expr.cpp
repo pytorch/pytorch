@@ -369,7 +369,8 @@ ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
 }
 
-std::vector<const Expr*> Buf::compute_strides(const std::vector<const Expr*>& dims) const {
+std::vector<const Expr*> Buf::compute_strides(
+    const std::vector<const Expr*>& dims) const {
   std::vector<const Expr*> strides;
   ExprHandle stride = IntImm::make(1);
   for (auto it = crbegin(dims); it != crend(dims); it++) {
