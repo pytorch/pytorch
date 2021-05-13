@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
@@ -16,13 +17,28 @@
 
 namespace at { namespace native {
 
+static inline bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (input.is_mkldnn()) {
+    return true;
+  }
+  return input.device().is_cpu() &&
+      input.scalar_type() == ScalarType::BFloat16 &&
+      input.numel() != 0;
+#endif
+  return false;
+}
+
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
-  if (input.is_mkldnn()) {
+  if (use_mkldnn(input)) {
     return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
