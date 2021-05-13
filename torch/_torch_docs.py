@@ -3293,7 +3293,8 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 .. note::
 
-   Doesn't support complex inputs.
+   Complex inputs are not supported. In some cases, it is not mathematically
+   possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
