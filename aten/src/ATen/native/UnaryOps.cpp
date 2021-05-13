@@ -82,7 +82,7 @@ CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 
 TORCH_META_FUNC(square)(const Tensor& self) {
-  return;
+  set_output(0, self.sizes(), self.options());
 }
 
 TORCH_META_FUNC(neg)(const Tensor& self) {

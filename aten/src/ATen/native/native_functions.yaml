@@ -3892,7 +3892,6 @@
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
-  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: square_out
 
