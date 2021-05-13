@@ -467,7 +467,7 @@ struct MethodValue : public SugaredValue {
               << " method '" << method.name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
-        schemas.push_back(&(method.getSchema()));
+        schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {

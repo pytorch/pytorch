@@ -1499,6 +1499,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
+  } else if (typ->kind() == NumberType::Kind) {
+    return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
@@ -2124,9 +2126,18 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;
 
+  // adds overloaded function to the ClassType.
+  // this API must be used only for overloaded methods.
   void addOverloadedMethod(torch::jit::Function* method);
+
+  // finds and returns all mangled names of overloaded function
+  // with given name. If no there is no such overloaded function,
+  // returns nullptr.
   c10::optional<std::vector<std::string>> findOverloadedMethod(
       const std::string& name) const;
+
+  // given the mangled name, return the function pointer
+  // corresponding that name.
   torch::jit::Function* getMangledOverloadedMethod(
       const std::string& name) const;
 

@@ -2,7 +2,6 @@
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
