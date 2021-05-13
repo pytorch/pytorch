@@ -1,0 +1,55 @@
+# Template is at:    .github/templates/windows_ci_workflow.yml
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: Windows CI (!{{ build_environment }})
+
+on:
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+!{{ on_pull_request }}
+  push:
+    branches:
+      - master
+      - release/*
+  workflow_dispatch:
+
+env:
+  BUILD_ENVIRONMENT: !{{ build_environment }}
+  CUDA_VERSION: "cpu"
+  IN_CI: 1
+  JOB_BASE_NAME: test
+  PYTHON_VERSION: "3.6"
+  SCCACHE_BUCKET: "ossci-compiler-cache"
+  TORCH_CUDA_ARCH_LIST: "5.2;7.5"
+  VC_PRODUCT: "BuildTools"
+  VC_VERSION: ""
+  VC_YEAR: "2019"
+  # kineto is currently bugged on GHA due to a linker error
+  USE_KINETO: "0"
+
+jobs:
+  build:
+    runs-on: "windows.4xlarge"
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        run: |
+          choco install vswhere -y
+          .\.circleci\scripts\vs_install.ps1
+      - name: Install Windows 10 SDK
+        shell: powershell
+        run: |
+          .\.github\scripts\install_windows_sdk.ps1
+      - name: Build
+        shell: bash
+        run: |
+          .jenkins/pytorch/win-build.sh
+      - name: Archive artifacts
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          retention-days: 30
+          if-no-files-found: error
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          path: C:/w/build-results
+  #TODO: Add testing phase
