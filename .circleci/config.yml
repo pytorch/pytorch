@@ -2213,15 +2213,4 @@ pytorch_windows_params:
       default: '2019'
       type: string
 version: 2.1
-workflows:
-  build:
-    jobs:
-    - docker_build_job:
-        filters:
-          branches:
-            only: /.*/
-          tags:
-            only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-        image_name: pytorch-linux-xenial-py3.6-gcc5.4
-        name: docker-pytorch-linux-xenial-py3.6-gcc5.4
-    when: always
+workflows: {}
