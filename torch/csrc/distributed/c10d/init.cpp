@@ -409,7 +409,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_set_static_graph",
           &::c10d::Reducer::set_static_graph,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_delay_all_reduce",
+          &::c10d::Reducer::delay_all_reduce,
+          py::call_guard<py::gil_scoped_release>()) ;
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
