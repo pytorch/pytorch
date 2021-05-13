@@ -73,7 +73,7 @@ jobs:
         if: steps.check.outputs.rebuild
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
-          DOCKER_SKIP_UPLOAD_TO_S3: 1
+          DOCKER_SKIP_S3_UPLOAD: 1
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
