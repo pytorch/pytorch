@@ -19,7 +19,6 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
     Union,
 )
 from urllib.parse import quote
