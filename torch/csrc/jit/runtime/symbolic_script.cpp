@@ -1454,13 +1454,13 @@ const std::vector<std::string> functions = {
 
         def hardshrink(self, lambd: number):
           def backward(grad_output):
-            mask = ((self > float(lambd)) | (self < -float(lambd))).type_as(self)
+            mask = ((self > lambd) | (self < -lambd))
             return grad_output * mask, None
           return torch.hardshrink(self, lambd=lambd), backward
 
         def hardtanh(self, min_val: number, max_val: number):
           def backward(grad_output):
-            mask = ((self >= float(min_val)) * (self <= float(max_val))).type_as(self)
+            mask = ((self >= min_val) * (self <= max_val))
             return grad_output * mask, None, None
           return torch.hardtanh(self, min_val=min_val, max_val=max_val), backward
 
