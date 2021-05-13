@@ -2718,7 +2718,7 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, **kwargs
         ((S, S, S), 1.5, (), True)
     )
 
-    cases += cases_with_broadcasting
+    cases = cases + cases_with_broadcasting
 
     def generator():
         for shape, shape_other, add_other, broadcasts_input in cases:
