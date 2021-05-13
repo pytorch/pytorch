@@ -9567,14 +9567,9 @@
 
 - func: linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_eigvals
 
 - func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CPU, CUDA: linalg_eigvals_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
