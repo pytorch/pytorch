@@ -26,13 +26,17 @@ class OpenFilesFromArchiveIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]])
     """
     _dispatch: Dict[str, IterDataPipe[Tuple[str, BufferedIOBase]]] = {}
 
-    def __init_subclass__(cls, archive_type: Optional[str] = None, **kwargs):
-        super().__init_subclass__(**kwargs)  # type: ignore[call-arg]
-        if archive_type is not None:
-            if archive_type in OpenFilesFromArchiveIterDataPipe._dispatch:
-                raise ValueError("Unable to add archive type {} as it has already been taken"
-                                 .format(archive_type))
-            OpenFilesFromArchiveIterDataPipe._dispatch[archive_type] = cls  # type: ignore[assignment]
+    @classmethod
+    def register(cls, archive_type: str):
+        if archive_type in cls._dispatch:
+            raise ValueError("Unable to add archive type {} as it has already been taken"
+                             .format(archive_type))
+
+        def _register(sub_cls):
+            cls._dispatch[archive_type] = sub_cls
+            return sub_cls
+
+        return _register
 
     @classmethod
     def open_from(cls, archive_type: str, *args, **kwargs):
@@ -71,7 +75,8 @@ class OpenFilesFromArchiveIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]])
         return self.length
 
 
-class OpenFilesFromTarIterDataPipe(OpenFilesFromArchiveIterDataPipe, archive_type='tar'):
+@OpenFilesFromArchiveIterDataPipe.register('tar')
+class OpenFilesFromTarIterDataPipe(OpenFilesFromArchiveIterDataPipe):
     r""" :class:`OpenFilesFromTarIterDataPipe`.
 
     Iterable DataPipe to extract file binary streams from tuples of pathname and tar
@@ -100,7 +105,8 @@ class OpenFilesFromTarIterDataPipe(OpenFilesFromArchiveIterDataPipe, archive_typ
             yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
 
 
-class OpenFilesFromZipIterDataPipe(OpenFilesFromArchiveIterDataPipe, archive_type='zip'):
+@OpenFilesFromArchiveIterDataPipe.register('zip')
+class OpenFilesFromZipIterDataPipe(OpenFilesFromArchiveIterDataPipe):
     r""" :class:`OpenFilesFromZipIterDataPipe`.
 
     Iterable DataPipe to extract file binary streams from tuples of pathname and zip
