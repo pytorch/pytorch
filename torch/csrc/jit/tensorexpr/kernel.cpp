@@ -2239,7 +2239,8 @@ Tensor* tensorexpr::computeOperandValue(
           outputType,
           [](const ExprHandle& a, const ExprHandle& lambd) {
             auto pos_clambd = Cast::make(a.dtype(), lambd);
-            auto neg_clambd = ExprHandle(-0) - pos_clambd;
+            auto neg_clambd =
+                Cast::make(a.dtype(), ExprHandle(-0)) - pos_clambd;
             auto zero = Cast::make(a.dtype(), 0);
             auto mm = CompareSelect::make(a, neg_clambd, a, zero, kLT);
             return CompareSelect::make(a, pos_clambd, a, mm, kGT);
