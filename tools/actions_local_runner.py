@@ -173,28 +173,18 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
     if files is not None:
         # Running quick lint, use mypy-wrapper instead so it checks that the files
         # actually should be linted
-        stdout = ""
-        stderr = ""
-        passed = True
 
-        # Pass each file to the mypy_wrapper script
-        # TODO: Fix mypy wrapper to mock mypy's args and take in N files instead
-        # of just 1 at a time
-        for f in files:
-            f = os.path.join(REPO_ROOT, f)
-            f_passed, f_stdout, f_stderr = await shell_cmd(
-                [sys.executable, "tools/mypy_wrapper.py", f],
-                env=env,
-            )
-            if not f_passed:
-                passed = False
+        passed, stdout, stderr = await shell_cmd(
+            [sys.executable, "tools/mypy_wrapper.py"] + [
+                os.path.join(REPO_ROOT, f) for f in files
+            ],
+            env=env,
+        )
 
-            if f_stdout != "":
-                stdout += f_stdout + "\n"
-            if f_stderr != "":
-                stderr += f_stderr + "\n"
-
-        print_results("mypy (skipped typestub generation)", passed, [stdout, stderr])
+        print_results("mypy (skipped typestub generation)", passed, [
+            stdout + "\n",
+            stderr + "\n",
+        ])
         return passed
 
     # Not running quicklint, so use lint.yml

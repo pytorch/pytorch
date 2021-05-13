@@ -156,7 +156,7 @@ class DistributedOptimizer:
     by default, so that optimizer updates are not blocked by the Python Global
     Interpreter Lock (GIL) in the case of multithreaded training (e.g. Distributed
     Model Parallel). This feature is currently enabled for most optimizers. You
-    can also follow the recipe in PyTorch tutorials to enable TorchScript support
+    can also follow `the recipe`__ in PyTorch tutorials to enable TorchScript support
     for your own custom optimizers.
 
     Args:
@@ -189,6 +189,8 @@ class DistributedOptimizer:
         >>>      lr=0.05,
         >>>   )
         >>>   dist_optim.step(context_id)
+
+    __ https://github.com/pytorch/tutorials/pull/1465
     """
 
     # dict to map a user passed in optimizer_class to a functional
