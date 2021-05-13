@@ -3274,8 +3274,13 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Computes the element-wise remainder of division, with the remainder having the same
+Computes the element-wise remainder of division with the remainder having the same
 sign as the divident :attr:`input`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i - \text{{tquot}} * \text{{other}}_i
+
+where :math:`\text{tquot}` is the truncated quotient value (rounded towards zero).
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3285,6 +3290,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     When the divisor is zero, returns ``NaN`` for floating point dtypes
     on both CPU and GPU; raises ``RuntimeError`` for integer division by
     zero on CPU; Integer division by zero on GPU may return any value.
+
+.. note::
+
+   Doesn't support complex inputs.
 
 Args:
     input (Tensor): the dividend
@@ -3297,9 +3306,17 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
+.. seealso::
+
+        :func:`torch.fmod`, which computes the element-wise remainder of
+        division equivalently to the C library function ``fmod()``.
+
+        :func:`torch.fmod` uses truncated (rounded towards zero) value
+        of the quotient while :func:`torch.remainder` uses rounded
+        (towards the nearest integer) value of the quotient.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -7614,6 +7631,11 @@ remainder(input, other, *, out=None) -> Tensor
 Computes the element-wise remainder of division with the remainder having the same
 sign as the divisor :attr:`other`.
 
+.. math::
+    \text{{out}}_i = \text{{input}}_i - \text{{rquot}} * \text{{other}}_i
+
+where :math:`\text{rquot}` is the rounded quotient value (rounded towards nearest integer).
+
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
@@ -7633,13 +7655,17 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
+    tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
 
 .. seealso::
 
         :func:`torch.fmod`, which computes the element-wise remainder of
         division equivalently to the C library function ``fmod()``.
+
+        :func:`torch.remainder` uses rounded (to the nearest integer) value
+        of the quotient while :func:`torch.fmod` uses truncated (rounded
+        towards zero) value of the quotient.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
