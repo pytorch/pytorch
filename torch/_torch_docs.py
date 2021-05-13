@@ -3275,7 +3275,7 @@ add_docstr(torch.fmod,
 fmod(input, other, *, out=None) -> Tensor
 
 Computes the element-wise remainder of division with the remainder having the same
-sign as the divident :attr:`input`.
+sign as the dividend :attr:`input`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i - tquot * \text{{other}}_i
@@ -3311,9 +3311,6 @@ Example::
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 .. seealso::
-
-        :func:`torch.fmod`, which computes the element-wise remainder of
-        division equivalently to the C library function ``fmod()``.
 
         :func:`torch.fmod` uses truncated (rounded towards zero) value
         of the quotient while :func:`torch.remainder` uses rounded
