@@ -1056,13 +1056,13 @@
 - name: rsqrt(Tensor self) -> Tensor
   self: -0.5 * grad * result.pow(3).conj()
 
-- name: scatter.src(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None) -> Tensor
-  self: scatter_self_backward(grad.clone(), dim, index, src, reduce)
+- name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  self: grad.clone().scatter_(dim, index, 0)
   index: non_differentiable
-  src: scatter_src_backward(grad.clone(), self, dim, index, reduce)
+  src: grad.gather(dim, index)
 
-- name: scatter.value(Tensor self, int dim, Tensor index, Scalar value, *, str? reduce=None) -> Tensor
-  self: scatter_self_backward(grad.clone(), dim, index, value, reduce)
+- name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  self: grad.clone().scatter_(dim, index, 0)
   index: non_differentiable
 
 - name: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)

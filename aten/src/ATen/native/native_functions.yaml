@@ -5451,45 +5451,67 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: scatter.src(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None) -> Tensor
+- func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   structured_delegate: scatter.src_out
   variants: function, method
 
-- func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str? reduce=None) -> Tensor(a!)
+- func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   structured_delegate: scatter.src_out
   variants: method
 
-- func: scatter.src_out(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
+- func: scatter.src_out(Tensor self, int dim, Tensor index, Tensor src, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
     CPU, CUDA: scatter_src_out
 
-- func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str? reduce=None) -> Tensor(a!)
-  structured_delegate: scatter.value_out
-  variants: method
-
-- func: scatter.value(Tensor self, int dim, Tensor index, Scalar value, *, str? reduce=None) -> Tensor
+- func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   structured_delegate: scatter.value_out
   variants: function, method
 
-- func: scatter.value_out(Tensor self, int dim, Tensor index, Scalar value, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
+- func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  structured_delegate: scatter.value_out
+  variants: method
+
+- func: scatter.value_out(Tensor self, int dim, Tensor index, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
     CPU, CUDA: scatter_value_out
 
-- func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src, *, str? reduce=None) -> Tensor
+- func: scatter.reduce(Tensor self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor
+  structured_delegate: scatter.reduce_out
   variants: function, method
 
-- func: scatter.dimname_src_out(Tensor self, Dimname dim, Tensor index, Tensor src, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
-  variants: function
+- func: scatter_.reduce(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor(a!)
+  structured_delegate: scatter.reduce_out
+  variants: method
 
-- func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value, *, str? reduce=None) -> Tensor
+- func: scatter.reduce_out(Tensor self, int dim, Tensor index, Tensor src, *, str reduce, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU, CUDA: scatter_reduce_out
+
+- func: scatter.value_reduce(Tensor self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor
+  structured_delegate: scatter.value_reduce_out
   variants: function, method
 
-- func: scatter.dimname_value_out(Tensor self, Dimname dim, Tensor index, Scalar value, *, str? reduce=None, Tensor(a!) out) -> Tensor(a!)
+- func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
+  structured_delegate: scatter.value_reduce_out
+  variants: method
+
+- func: scatter.value_reduce_out(Tensor self, int dim, Tensor index, Scalar value, *, str reduce, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
+  dispatch:
+    CPU, CUDA: scatter_value_reduce_out
+
+- func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
+  variants: function, method
+
+- func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method

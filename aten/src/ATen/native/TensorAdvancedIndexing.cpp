@@ -109,21 +109,32 @@ void scatter_meta_impl(
 }
 
 TORCH_META_FUNC2(scatter, src)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  at::assert_no_overlap(self, src);
+  scatter_meta_impl(*this, self, dim, index, nullopt);
+}
+
+TORCH_META_FUNC2(scatter, value)
+(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+  scatter_meta_impl(*this, self, dim, index, nullopt);
+}
+
+TORCH_META_FUNC2(scatter, reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- c10::optional<c10::string_view> reduce) {
+ const c10::string_view reduce) {
   at::assert_no_overlap(self, src);
   scatter_meta_impl(*this, self, dim, index, reduce);
 }
 
-TORCH_META_FUNC2(scatter, value)
+TORCH_META_FUNC2(scatter, value_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Scalar& src,
- c10::optional<c10::string_view> reduce) {
+ const c10::string_view reduce) {
   scatter_meta_impl(*this, self, dim, index, reduce);
 }
 
@@ -1069,7 +1080,7 @@ void scatter_impl(
     int64_t dim,
     const Tensor& index,
     const T& src,
-    const c10::optional<c10::string_view>& reduce,
+    const c10::optional<c10::string_view> reduce,
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub) {
@@ -1092,9 +1103,8 @@ TORCH_IMPL_FUNC(scatter_src_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- c10::optional<c10::string_view> reduce,
  const Tensor& out) {
-  scatter_impl(self, dim, index, src, reduce, out,
+  scatter_impl(self, dim, index, src, nullopt, out,
                scatter_reduce_stub,
                scatter_stub);
 }
@@ -1104,12 +1114,34 @@ TORCH_IMPL_FUNC(scatter_value_out)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
- c10::optional<c10::string_view> reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, value, nullopt, out,
+               scatter_scalar_reduce_stub,
+               scatter_fill_stub);
+}
+
+TORCH_IMPL_FUNC(scatter_reduce_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const c10::string_view reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, src, reduce, out,
+               scatter_reduce_stub,
+               scatter_stub);
+}
+
+TORCH_IMPL_FUNC(scatter_value_reduce_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& value,
+ const c10::string_view reduce,
  const Tensor& out) {
   scatter_impl(self, dim, index, value, reduce, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
->>>>>>> a3396de2e7 (Port `scatter` to structured kernel.)
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {

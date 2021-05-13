@@ -3545,59 +3545,6 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   }
 }
 
-template <typename T>
-Tensor scatter_self_backward_impl(
-    const Tensor& grad,
-    int64_t dim,
-    const Tensor& index,
-    const T& src,
-    const c10::optional<std::string>& reduce) {
-  auto op = reduce.value_or("none");
-  if (op == "none") {
-    return grad.scatter(dim, index, 0);
-  } else if (op == "add") {
-    return grad;
-  } else if (op == "multiply") {
-    return grad.scatter(dim, index, src, "multiply");
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
-  }
-}
-
-Tensor scatter_self_backward(
-    const Tensor& grad,
-    int64_t dim,
-    const Tensor& index,
-    const Tensor& src,
-    const c10::optional<std::string>& reduce) {
-  return scatter_self_backward_impl(grad, dim, index, src, reduce);
-}
-
-Tensor scatter_self_backward(
-    const Tensor& grad,
-    int64_t dim,
-    const Tensor& index,
-    const Scalar& src,
-    const c10::optional<std::string>& reduce) {
-  return scatter_self_backward_impl(grad, dim, index, src, reduce);
-}
-
-Tensor scatter_src_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    const c10::optional<std::string>& reduce) {
-  auto op = reduce.value_or("none");
-  if (op == "none" || op == "add") {
-    return grad.gather(dim, index);
-  } else if (op == "multiply") {
-    return grad.gather(dim, index).mul(self.gather(dim, index));
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
-  }
-}
-
 } // namespace details
 } // namespace generated
 } // namespace autograd
