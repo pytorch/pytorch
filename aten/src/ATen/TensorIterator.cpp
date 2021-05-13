@@ -894,13 +894,22 @@ TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .check_all_same_dtype(false)
-    .add_output(out)
-    // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+#define NULLARY_OP_CONFIG()                                     \
+  TensorIteratorConfig()                                        \
+    .set_check_mem_overlap(true)                                \
+    .check_all_same_dtype(false)                                \
+  /* FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342 */ \
     .resize_outputs(false)
+
+TensorIterator TensorIterator::nullary_op(Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_output(out)
+    .build();
+}
+
+TensorIterator TensorIterator::borrowing_nullary_op(Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_borrowed_output(out)
     .build();
 }
 

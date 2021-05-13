@@ -35,7 +35,7 @@ Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
     result.fill_(start);
   } else {
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -196,7 +196,7 @@ Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& ste
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);
