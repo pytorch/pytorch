@@ -55,7 +55,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
-      .value("KINETO", ProfilerState::KINETO);
+      .value("KINETO", ProfilerState::KINETO)
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -99,6 +100,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
       .value("MLC", c10::DeviceType::MLC)
+      .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
@@ -179,7 +181,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // Whether this is async event or not
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
-      });
+      })
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)
