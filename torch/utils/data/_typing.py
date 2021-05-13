@@ -256,17 +256,17 @@ class _DataPipeMeta(GenericMeta):
         if '_is_protocol' not in namespace:
             namespace['_is_protocol'] = True
         if 'type' in namespace:
-            return super().__new__(cls, name, bases, namespace, **kwargs)
+            return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace['__type_class__'] = False
         # For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
-                return super().__new__(cls, name, bases, namespace, **kwargs)
+                return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace.update({'type': _DEFAULT_TYPE,
                           '__init_subclass__': _dp_init_subclass})
-        return super().__new__(cls, name, bases, namespace, **kwargs)
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     @_tp_cache
     def __getitem__(self, param):
