@@ -46,7 +46,7 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf)
+                                                        skipCUDAIf, skipMeta)
 
 _END_SENTINEL = object()
 
@@ -7823,6 +7823,7 @@ class TestAutogradDeviceType(TestCase):
                     param.grad = None
                 inp.grad = None
 
+    @skipMeta  # LSTM cell reuses output which was resized
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
@@ -7830,6 +7831,7 @@ class TestAutogradDeviceType(TestCase):
             mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
 
+    @skipMeta  # GRU cell reuses output which was resized
     def test_GRU_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
