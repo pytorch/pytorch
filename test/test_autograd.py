@@ -391,6 +391,19 @@ class TestAutograd(TestCase):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
 
+    def test_unrelated_inputs(self):
+        # test to ensure grad(grad)check runs successfully even if there is an
+        # unrelated (but differentiable) inputs
+
+        def my_function(x, y):
+            return x * x
+
+        x = torch.rand(10, dtype=torch.double, requires_grad=True)
+        y = torch.rand(10, dtype=torch.double, requires_grad=True)
+
+        gradcheck(my_function, (x, y))
+        gradgradcheck(my_function, (x, y))
+
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
@@ -1590,8 +1603,7 @@ class TestAutograd(TestCase):
             warnings.simplefilter("always")
             x = torch.randn((3, 3), requires_grad=True)
             y = torch.randn((3, 3), requires_grad=True)
-            model = MyFunction()
-            model.apply(x, y).sum().backward()
+            MyFunction.apply(x, y).sum().backward()
 
             has_deprecated = map(lambda warn:
                                  'deprecated' in str(warn) and
@@ -2115,45 +2127,42 @@ class TestAutograd(TestCase):
         for _ in range(10):
             CollectOnDelete().forward(torch.randn(1, requires_grad=True)).backward()
 
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_variable_grad_fn(self):
+    def test_naughty_autograd_function_attribute_access(self):
         class Id(Function):
-            def forward(self, x):
+            @staticmethod
+            def forward(ctx, x):
                 return x
 
-            def backward(self, grad_x):
+            @staticmethod
+            def backward(ctx, grad_x):
                 return grad_x
 
-        self.assertRaises(RuntimeError, lambda: Variable(torch.zeros(1), _grad_fn=Id()))
+        with self.assertWarnsRegex(DeprecationWarning, "should not be instantiated"):
+            f = Id()
 
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_function_backward_before_forward(self):
-        class Id(Function):
-            def forward(self, x):
-                return x
+        # # After raising warning, should still return an instance
+        self.assertIsInstance(f, Id)
+        x = torch.zeros(1, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "non-static forward method is deprecated"):
+            f(x)
+        t = Id.apply(x)
+        self.assertEqual(t.grad_fn.name(), "IdBackward")
 
-            def backward(self, grad_x):
-                return grad_x
-
-        f = Id()
-        self.assertRaises(RuntimeError, lambda: f._do_backward((torch.zeros(0), ), False))
-
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_function_early_access(self):
-        class Id(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_x):
-                return grad_x
-
-        f = Id()
-        # A legacy autograd function is not fully initialized until you actually
-        # apply it.  That means a lot of accessors on them don't actually work.
-        # Test that we properly error in this case.
-        self.assertRaises(RuntimeError, lambda: f.register_hook(lambda x, y: None))
-        self.assertRaises(RuntimeError, lambda: f.next_functions)
-        self.assertRaises(RuntimeError, lambda: f.metadata)
+        # THPFunction is the base class of both grad_fn and autograd functions,
+        # which means that a lot of accessors on them may segfault. Test that we
+        # properly error in this case.
+        t = torch.ones(1, requires_grad=True)
+        t._backward_hooks = dict()
+        with self.assertRaisesRegex(RuntimeError, "Attribute '_register_hook_dict' is invalid"):
+            f._register_hook_dict(t)
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'register_hook' is invalid"):
+            f.register_hook(lambda x, y: None)
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'next_functions' is invalid"):
+            f.next_functions
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
+            f.name()
+        with self.assertRaisesRegex(RuntimeError, "underlying PyNode has already been deallocated"):
+            f.metadata
 
     @unittest.expectedFailure
     def test_naughty_anomaly_access(self):
@@ -2448,10 +2457,9 @@ class TestAutograd(TestCase):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5, requires_grad=True)
 
-        fn = Inplace(True)
-        q, p = fn.apply(x, y)
+        q, p = Inplace.apply(x, y)
         self.assertIs(q, x)
-        self.assertIs(q.grad_fn.__class__, fn._backward_cls)
+        self.assertIs(q.grad_fn.__class__, Inplace._backward_cls)
         self.assertTrue(q.requires_grad)
         q.sum().backward()
         self.assertEqual(y.grad, torch.ones(5, 5))
@@ -3721,7 +3729,7 @@ class TestAutograd(TestCase):
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.eig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfNoLapack
@@ -3735,7 +3743,7 @@ class TestAutograd(TestCase):
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfNoLapack
@@ -7125,14 +7133,13 @@ class TestAutogradForwardMode(TestCase):
             self.assertIsNone(gfoo)
             self.assertEqual(gbar, torch.ones_like(bar))
 
-            # Check that forward gradients are not impacted by detach
+            # Check that forward gradients are impacted by detach()
             detached_dual = dual.detach()
             out = detached_dual * 2
             p, t = fwAD.unpack_dual(out)
             self.assertFalse(p.requires_grad)
-            self.assertFalse(t.requires_grad)
             self.assertEqual(p, foo * 2)
-            self.assertEqual(t, bar * 2)
+            self.assertIsNone(t)
 
             # Check that forward gradients are not impacted by no_grad
             with torch.no_grad():
@@ -7149,9 +7156,8 @@ class TestAutogradForwardMode(TestCase):
             out = dual * 2
             p, t = fwAD.unpack_dual(out)
             self.assertFalse(p.requires_grad)
-            self.assertFalse(t.requires_grad)
             self.assertEqual(p, foo * 2)
-            self.assertEqual(t, bar * 2)
+            self.assertIsNone(t)
 
     def test_view_inplace_non_differentiable_views(self):
         original_foo = torch.rand(2, dtype=torch.double)
@@ -7228,11 +7234,11 @@ class TestAutogradForwardMode(TestCase):
             # Unused values get a gradient of 0
             self.assertEqual(fwAD.unpack_dual(baz)[1][1], 0.)
 
-            # Check that backward non-differentiable views don't prevent gradient update
+            # Check that forward non-differentiable views do prevent gradient update
             baz = torch.rand(2)
             view = baz.detach()
             view += dual
-            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+            self.assertIsNone(fwAD.unpack_dual(baz)[1])
 
     def test_grad_cleanup(self):
         foo = torch.rand(2)
@@ -7255,6 +7261,16 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(dual_primal, new_dual_primal)
             self.assertIsNone(dual_tangent)
             self.assertEqual(new_dual_tangent, baz)
+
+    def test_detach_view_tracking(self):
+        # Default detach is both forward and backward non-differentiable
+        foo = torch.rand(2)
+        foo_weak = torch._C._WeakTensorRef(foo)
+
+        out = foo.detach()
+
+        del foo
+        self.assertTrue(foo_weak.expired())
 
 
 # Generic device type autograd tests.
@@ -8230,32 +8246,6 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
-
-    @slowTest
-    def test_lu_backward(self, device):
-        def run_test(*sizes):
-            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
-
-            gradcheck(lambda x: x.lu(get_infos=True), x)
-            gradgradcheck(lambda x: x.lu(get_infos=True), x)
-
-            gradcheck(lambda x: x.lu(get_infos=False), x)
-            gradgradcheck(lambda x: x.lu(get_infos=False), x)
-
-            # there is no pivot-less LU factorization on CPU
-            if x.device.type == 'cuda':
-                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
-                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
-
-                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
-                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
-
-        run_test(3, 3)
-        run_test(3, 3, 3)
-        run_test(3, 3, 3, 3)
-        run_test(5, 5)
-        run_test(3, 5, 5)
-        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
