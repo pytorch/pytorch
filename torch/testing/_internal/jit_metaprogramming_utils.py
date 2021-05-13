@@ -486,7 +486,6 @@ def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='m
     # to clean up IR
     torch._C._jit_pass_inline(CU.the_method.graph)
     torch._C._jit_pass_constant_propagation(CU.the_method.graph)
-    torch._C._jit_pass_dce(CU.the_method.graph)
     torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
