@@ -256,7 +256,7 @@ TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
-TORCH_API void addMetadata(
+TORCH_API void addMetadataJson(
     const std::string& key, const std::string& value);
 #endif // USE_KINETO
 
