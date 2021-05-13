@@ -267,7 +267,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
-        num_args);
+        num_args,
+        model_version);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));

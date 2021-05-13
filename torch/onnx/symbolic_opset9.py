@@ -1855,8 +1855,13 @@ def slice(g, self, *args):
         step = _parse_arg(step, 'i')
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        if start.node().kind() != 'onnx::Constant' or \
-                end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
+        is_start_onnx_const = start.node().kind() == 'onnx::Constant'
+        is_end_onnx_const = end.node().kind() == 'onnx::Constant'
+        if ((not is_start_none) and (not is_start_onnx_const)) or \
+           ((not is_end_none) and (not is_end_onnx_const)) or \
+           dim.node().kind() != 'onnx::Constant':
             if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
                                    'is a deprecated experimental op. Please use statically allocated '
@@ -1867,16 +1872,18 @@ def slice(g, self, *args):
                 dim_unsqueezed = sym_help._unsqueeze_helper(g, dim, [0])
                 return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
         else:
-            start = _parse_arg(start, 'i')
-            end = _parse_arg(end, 'i')
+            start = 0 if is_start_none else _parse_arg(start, 'i')
+            end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
             dim = _parse_arg(dim, 'i')
             return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     elif len(args) == 3:
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        start = _parse_arg(start, 'i')
-        end = _parse_arg(end, 'i')
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
+        start = 0 if is_start_none else _parse_arg(start, 'i')
+        end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     else:
         raise NotImplementedError("Unknown aten::slice signature")
@@ -2575,8 +2582,8 @@ def gather(g, self, dim, index, sparse_grad=False):
     return sym_help._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
 
 
-@parse_args('v', 'is', 'b', 'i')
-def _var_mean(g, input, dim, unbiased, keepdim):
+@parse_args('v', 'is', 'i', 'i')
+def _var_mean(g, input, dim, correction, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
         t_mean = mean
@@ -2592,60 +2599,41 @@ def _var_mean(g, input, dim, unbiased, keepdim):
     sqr_sub = g.op("Mul", sub_v, sub_v)
     keepdim_mean = 0 if dim is None else keepdim
     var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
-    # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
-    if unbiased:
+    # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+    if correction is None:
+        correction = 1
+    if correction != 0:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
-        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.float))
+        one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
         mul = g.op("Mul", var, num_elements)
         var = g.op("Div", mul, g.op("Sub", num_elements, one))
     return var, mean
 
 
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::std(input, unbiased)
-# at::std(input, dim, unbiased, keepdim)
 def std(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var_mean(g, input, *args)
-    else:
-        var, _ = _var_mean(g, input, None, args[0], None)
+    var, _ = var_mean(g, input, *args)
     return g.op("Sqrt", var)
 
 
-# Since position of optional arguments can change for var, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::var(input, unbiased)
-# at::var(input, dim, unbiased, keepdim)
 def var(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var_mean(g, input, *args)
-    else:
-        var, _ = _var_mean(g, input, None, args[0], None)
+    var, _ = var_mean(g, input, *args)
     return var
 
 
-# Since position of optional arguments can change for var_mean, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::var_mean(input, unbiased)
-# at::var_mean(input, dim, unbiased, keepdim)
+# var_mean (and all variance-related functions) has multiple signatures, so need to manually figure
+# out the correct arguments:
+# aten::var_mean(Tensor self, bool unbiased)
+# aten::var_mean(Tensor self, int[1] dim, bool unbiased, bool keepdim=False)
+# aten::var_mean(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False)
 def var_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var_mean(g, input, *args)
+    if len(args) == 1:
+        return _var_mean(g, input, None, args[0], None)
     else:
-        var, mean = _var_mean(g, input, None, args[0], None)
-    return var, mean
+        return _var_mean(g, input, *args)
 
 
-# Since position of optional arguments can change for std_mean, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::std_mean(input, unbiased)
-# at::std_mean(input, dim, unbiased, keepdim)
 def std_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var_mean(g, input, *args)
-    else:
-        var, mean = _var_mean(g, input, None, args[0], None)
+    var, mean = var_mean(g, input, *args)
     return g.op("Sqrt", var), mean
 
 
