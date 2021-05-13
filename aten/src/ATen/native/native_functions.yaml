@@ -4971,7 +4971,7 @@
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: quantize_per_channel_cpu
+    CPU, CUDA: quantize_per_channel_cpu
 
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method

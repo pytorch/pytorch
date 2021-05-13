@@ -137,6 +137,7 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
     return Xq, loss
 
+
 class TestQuantizedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
     def test_qtensor_cuda(self):
@@ -144,6 +145,38 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_cpu(self):
         self._test_qtensor(torch.device('cpu'))
+
+    def test_cuda_quantized_tensor(self):
+        assert(torch.cuda.is_available())
+        xf = torch.randn(2, 2).to('cuda')
+
+        # working (CUDA backend listed in native_functions.yaml))
+        x = torch.quantize_per_tensor(xf, scale=2.0, zero_point=0, dtype=torch.quint8)  # works
+        assert('cuda' in str(x.device))
+        print(x.qscheme())  # works
+        print(x.dequantize().to('cpu'))  # works
+        print(x.q_scale())  # works
+        print(x.q_zero_point())  # workss
+        x = torch._empty_affine_quantized([10, 2], scale=1, zero_point=0,
+                                          dtype=torch.qint8, device='cuda')  # works
+        assert('cuda' in str(x.device))
+        print(x.qscheme())  # works
+        print(x.dequantize().to('cpu'))  # works
+        print(x.q_scale())  # works
+        print(x.q_zero_point())  # works
+
+        # not working (quantize_tensor_per_channel_float_qparams only supports CPU device type.)
+        # xf1 = torch.randn(2, 2).to('cuda')
+        # x,x1 = torch.quantize_per_tensor(tensors=(xf,xf1), scales=torch.Tensor([2.0, 3.0]).to('cuda'), zero_points=torch.Tensor([0,0]).to('cuda'), dtype = torch.qint8)
+        # assert('cuda' in str(x.device))
+        # assert('cuda' in str(x1.device))
+
+        # not working (no CUDA backend listed in native_functions.yaml)
+
+        x = torch.quantize_per_channel(xf, scales=torch.Tensor([2.0, 3.0]).to(
+            'cuda'), zero_points=torch.Tensor([0, 0]).to('cuda'), axis=0, dtype=torch.qint8)  # fails
+        assert('cuda' in str(x.device))
+        print(x.q_per_channel_axis())  # ?
 
     def _test_qtensor(self, device):
         device = str(device)

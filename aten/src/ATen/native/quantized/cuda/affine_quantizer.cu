@@ -56,6 +56,71 @@ void dequantize_tensor_per_tensor_affine_cuda(
       });
 }
 
+void quantize_tensor_per_channel_affine_cuda(
+  Tensor rtensor,
+  Tensor qtensor,
+  Tensor scales,
+  Tensor zero_points,
+  int64_t axis) {
+
+  std::vector<int64_t> expected_shape(rtensor.dim(), 1);
+  expected_shape[axis] = rtensor.size(axis);
+
+  auto iter = TensorIteratorConfig()
+  .check_all_same_dtype(false)
+  .add_output(qtensor)
+  .add_input(rtensor)
+  .add_input(qtensor)
+  .add_input(native::_unsafe_view(scales, expected_shape))
+  .add_input(native::_unsafe_view(zero_points, expected_shape))
+  .build();
+
+
+
+  AT_DISPATCH_QINT_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda", [&]() {
+      constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+      constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
+
+      gpu_kernel(
+          iter,
+          [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, float scale, int64_t zero_point) -> scalar_t {
+            int64_t qvalue =
+                static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
+            qvalue = std::max<int64_t>(qvalue, qmin);
+            qvalue = std::min<int64_t>(qvalue, qmax);
+            quantized_val.val_ = qvalue;
+            return quantized_val;
+          });
+    });
+}
+
+void dequantize_tensor_per_channel_affine_cuda(
+  Tensor qtensor,
+  Tensor rtensor,
+  Tensor scales,
+  Tensor zero_points,
+  int64_t axis) {
+
+  std::vector<int64_t> expected_shape(rtensor.dim(), 1);
+  expected_shape[axis] = rtensor.size(axis);
+
+  AT_DISPATCH_QINT_TYPES(
+    qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cuda", [&]() {
+      auto iter = TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .add_output(rtensor)
+        .add_input(qtensor)
+        .add_input(native::_unsafe_view(scales, expected_shape))
+        .add_input(native::_unsafe_view(zero_points, expected_shape))
+        .build();
+
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, float scale, int64_t zero_point) -> float {
+        return (static_cast<float>(value.val_) - zero_point) * scale;
+      });
+    });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(
@@ -64,6 +129,11 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     dequantize_tensor_per_tensor_affine_stub,
     &dequantize_tensor_per_tensor_affine_cuda);
-
+REGISTER_DISPATCH(
+    quantize_tensor_per_channel_affine_stub,
+    &quantize_tensor_per_channel_affine_cuda);
+REGISTER_DISPATCH(
+  dequantize_tensor_per_channel_affine_stub,
+  &dequantize_tensor_per_channel_affine_cuda);
 } // namespace native
 } // namespace at
