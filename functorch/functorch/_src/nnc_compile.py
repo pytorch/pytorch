@@ -271,6 +271,9 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             raise RuntimeError("not yet implemented")
 
 
+    if len(compute_stmts) == 0:
+        raise RuntimeError("Doesn't support compiling empty")
+
     loopnest = te.LoopNest(te.Stmt(compute_stmts), outs[0])
     if get_loopnest:
         return loopnest
