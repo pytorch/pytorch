@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests
 import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes, TrainingMode
-from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
+from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
 import caffe2.python.onnx.backend as backend
@@ -33,14 +33,23 @@ class TestUtilityFuns(TestCase):
                         do_constant_folding=True,
                         example_outputs=None,
                         training=TrainingMode.EVAL,
-                        operator_export_type=OperatorExportTypes.ONNX):
+                        operator_export_type=OperatorExportTypes.ONNX,
+                        input_names=None,
+                        dynamic_axes=None):
 
-        return utils._model_to_graph(model, input,
-                                     do_constant_folding=do_constant_folding,
-                                     _disable_torch_constant_prop=True,
-                                     operator_export_type=operator_export_type,
-                                     training=training,
-                                     example_outputs=example_outputs)
+        # Need disable onnx_shape_inference for this test because it puts const node to initializers.
+        _set_onnx_shape_inference(False)
+        utils._validate_dynamic_axes(dynamic_axes, model, None, None)
+        graph, params_dict, torch_out = utils._model_to_graph(model, input,
+                                                              do_constant_folding=do_constant_folding,
+                                                              _disable_torch_constant_prop=True,
+                                                              operator_export_type=operator_export_type,
+                                                              training=training,
+                                                              example_outputs=example_outputs,
+                                                              input_names=input_names,
+                                                              dynamic_axes=dynamic_axes)
+        _set_onnx_shape_inference(True)
+        return graph, params_dict, torch_out
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -83,7 +92,8 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 4)
         t = torch.randn(2, 7)
-        graph, _, _ = utils._model_to_graph(SplitModule(), (x, y, t))
+        graph, _, _ = self._model_to_graph(SplitModule(), (x, y, t), input_names=['x', 'y', 't'],
+                                           dynamic_axes={'x': [0, 1], 'y': [0, 1], 't': [0, 1]})
         for node in graph.nodes():
             assert node.kind() != "onnx::SplitToSequence"
 
@@ -97,7 +107,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(3, 2)
-        graph, _, __ = self._model_to_graph(TransposeModule(), (x, ))
+        graph, _, __ = self._model_to_graph(TransposeModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
@@ -115,7 +126,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(2, 3)
-        graph, _, __ = self._model_to_graph(ReduceModule(), (x, ))
+        graph, _, __ = self._model_to_graph(ReduceModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::ReduceL2"
@@ -131,7 +143,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(2, 3)
-        graph, _, __ = self._model_to_graph(NormModule(), (x, ))
+        graph, _, __ = self._model_to_graph(NormModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::ReduceL1"
@@ -147,7 +160,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(1, 3)
-        graph, _, __ = self._model_to_graph(NarrowModule(), (x, ))
+        graph, _, __ = self._model_to_graph(NarrowModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -165,7 +179,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(1, 3)
-        graph, _, __ = self._model_to_graph(SliceIndexExceedsDimModule(), (x, ))
+        graph, _, __ = self._model_to_graph(SliceIndexExceedsDimModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -185,7 +200,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(1, 3)
-        graph, _, __ = self._model_to_graph(SliceNegativeIndexModule(), (x, ))
+        graph, _, __ = self._model_to_graph(SliceNegativeIndexModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -205,7 +221,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(1, 3)
         model = GatherModule()
         model(x)
-        graph, _, __ = self._model_to_graph(GatherModule(), (x, ))
+        graph, _, __ = self._model_to_graph(GatherModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Gather"
@@ -220,7 +237,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(1, 2, 3)
-        graph, _, __ = self._model_to_graph(UnsqueezeModule(), (x, ))
+        graph, _, __ = self._model_to_graph(UnsqueezeModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1, 2]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Unsqueeze"
@@ -241,7 +259,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.randn(2, 3, 4, 5, 8, 7)
-        graph, _, __ = self._model_to_graph(PReluModel(), x)
+        graph, _, __ = self._model_to_graph(PReluModel(), x, input_names=['x'],
+                                            dynamic_axes={'x': [0, 1, 2, 3, 4, 5]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Unsqueeze"
@@ -258,8 +277,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(2, 3)
-        graph, _, __ = self._model_to_graph(SqueezeModule(), (x, ))
-        print(graph)
+        graph, _, __ = self._model_to_graph(SqueezeModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
             assert node.kind() != "onnx::Squeeze"
             assert node.kind() != "onnx::Cast"
@@ -275,7 +294,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(2, 3)
-        graph, _, __ = self._model_to_graph(SqueezeAxesModule(), (x, ))
+        graph, _, __ = self._model_to_graph(SqueezeAxesModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Squeeze"
@@ -310,7 +330,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.ones(2, 3)
-        graph, _, __ = self._model_to_graph(ConcatModule(), (x, ))
+        graph, _, __ = self._model_to_graph(ConcatModule(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Concat"
@@ -331,7 +352,8 @@ class TestUtilityFuns(TestCase):
         _set_operator_export_type(OperatorExportTypes.ONNX)
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
-        graph, _, __ = self._model_to_graph(GruNet(), (input, h0))
+        graph, _, __ = self._model_to_graph(GruNet(), (input, h0), input_names=['input', 'h0'],
+                                            dynamic_axes={'input': [0, 1, 2], 'h0': [0, 1, 2]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -356,7 +378,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         A = torch.randn(2, 3)
-        graph, _, __ = self._model_to_graph(MatMulNet(), (A, ))
+        graph, _, __ = self._model_to_graph(MatMulNet(), (A, ),
+                                            input_names=['A'], dynamic_axes={'A': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
@@ -375,7 +398,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         x = torch.randn(4, 5)
-        graph, _, __ = self._model_to_graph(ReshapeModule(), (x, ))
+        graph, _, __ = self._model_to_graph(ReshapeModule(), (x, ),
+                                            input_names=['x'], dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Reshape"
@@ -394,7 +418,8 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = self._model_to_graph(Module(), (x, ))
+        graph, _, __ = self._model_to_graph(Module(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Div"
@@ -413,7 +438,8 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = self._model_to_graph(Module(), (x, ))
+        graph, _, __ = self._model_to_graph(Module(), (x, ), input_names=['x'],
+                                            dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Mul"
@@ -432,9 +458,10 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, params_dict, __ = utils._model_to_graph(
+        graph, params_dict, __ = self._model_to_graph(
             Module(), (x, ), do_constant_folding=True,
-            operator_export_type=OperatorExportTypes.ONNX)
+            operator_export_type=OperatorExportTypes.ONNX,
+            input_names=['x'], dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
             self.assertTrue(node.kind() != "onnx::Add")
         self.assertEqual(len(list(graph.nodes())), 1)
@@ -457,9 +484,9 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, params_dict, __ = utils._model_to_graph(
+        graph, params_dict, __ = self._model_to_graph(
             Module(), (x, ), do_constant_folding=True,
-            operator_export_type=OperatorExportTypes.ONNX)
+            operator_export_type=OperatorExportTypes.ONNX, input_names=['x'], dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
             assert node.kind() != "onnx::Sub"
         self.assertEqual(len(list(graph.nodes())), 1)
@@ -482,7 +509,7 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = self._model_to_graph(Module(), (x, ))
+        graph, _, __ = self._model_to_graph(Module(), (x, ), input_names=['x'], dynamic_axes={'x': [0, 1]})
         for node in graph.nodes():
             assert node.kind() != "onnx::Sqrt"
         assert len(list(graph.nodes())) == 1
@@ -500,7 +527,7 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = self._model_to_graph(ShapeModule(), (x, ))
+        graph, _, __ = self._model_to_graph(ShapeModule(), (x, ), input_names=['x'], dynamic_axes={'x': [0, 1]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Shape"
@@ -593,7 +620,8 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 3, 4)
         _set_opset_version(self.opset_version)
         graph, _, __ = self._model_to_graph(Module(), (x, ),
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "aten::triu"
@@ -627,7 +655,9 @@ class TestUtilityFuns(TestCase):
         y = torch.randn(2, 3, 4, requires_grad=False)
         model = FooModel()
         graph, _, __ = self._model_to_graph(model, (x, y),
-                                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH)
+                                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
+                                            input_names=['x', 'y'],
+                                            dynamic_axes={'x': [0, 1, 2], 'y': [0, 1, 2]})
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
 
@@ -638,7 +668,9 @@ class TestUtilityFuns(TestCase):
         model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 
         graph, _, __ = self._model_to_graph(model, (x, y),
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                                            input_names=['x', 'y'],
+                                            dynamic_axes={'x': [0, 1], 'y': [0, 1]})
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "onnx::Constant"
@@ -667,7 +699,9 @@ class TestUtilityFuns(TestCase):
         output = q_model(*pt_inputs)
 
         graph, _, __ = self._model_to_graph(q_model, pt_inputs, example_outputs=output,
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                                            input_names=['pt_inputs'],
+                                            dynamic_axes={'pt_inputs': [0, 1, 2, 3]})
 
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
@@ -694,7 +728,8 @@ class TestUtilityFuns(TestCase):
         output = model(x)
         model.eval()
         graph, _, __ = self._model_to_graph(model, (x,), example_outputs=output,
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                                            input_names=['x'], dynamic_axes={'x': [0]})
         iter = graph.nodes()
         assert next(iter).kind() == "prim::ListConstruct"
 
@@ -715,7 +750,8 @@ class TestUtilityFuns(TestCase):
         model = Custom()
         batch = torch.FloatTensor(1, 3)
 
-        graph, _, _ = utils._model_to_graph(model, batch)
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           input_names=['batch'], dynamic_axes={'batch': [0, 1]})
         iter = graph.nodes()
         assert next(iter).kind() == "CustomNamespace::Custom"
 
@@ -733,8 +769,10 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(20, 16, 50, 100)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        _, params_dict, __ = utils._model_to_graph(Model(), (x, ), do_constant_folding=False,
-                                                   operator_export_type=OperatorExportTypes.ONNX)
+        _, params_dict, __ = self._model_to_graph(Model(), (x, ), do_constant_folding=False,
+                                                  operator_export_type=OperatorExportTypes.ONNX,
+                                                  input_names=['x'],
+                                                  dynamic_axes={'x': [0, 1, 2, 3]})
 
         assert len(params_dict) == 2
 
@@ -756,8 +794,9 @@ class TestUtilityFuns(TestCase):
         f = io.BytesIO()
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = utils._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
-                                             operator_export_type=OperatorExportTypes.ONNX)
+        graph, _, __ = self._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
+                                            operator_export_type=OperatorExportTypes.ONNX,
+                                            input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         graph_input_params = [param.debugName() for param in graph.inputs()]
         assert all(item in graph_input_params for item in dict(model.named_parameters())), \
@@ -790,7 +829,8 @@ class TestUtilityFuns(TestCase):
 
         x = torch.randn(2, 3, 2, 2, requires_grad=True)
         graph, _, __ = self._model_to_graph(Fuse(), (x, ),
-                                            training=TrainingMode.EVAL)
+                                            training=TrainingMode.EVAL, input_names=['x'],
+                                            dynamic_axes={'x': [0, 1, 2, 3]})
         for node in graph.nodes():
             assert node.kind() != "onnx::BatchNormalization"
             assert node.kind() == "onnx::Conv"
@@ -800,7 +840,8 @@ class TestUtilityFuns(TestCase):
     def test_fuse_resnet18(self):
         model = torchvision.models.resnet18(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        graph, _, __ = self._model_to_graph(model, (x, ))
+        graph, _, __ = self._model_to_graph(model, (x, ),
+                                            input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         for node in graph.nodes():
             assert node.kind() != "onnx::BatchNormalization"
@@ -824,8 +865,10 @@ class TestUtilityFuns(TestCase):
         input_2 = torch.tensor(12)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = utils._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
-                                             operator_export_type=OperatorExportTypes.ONNX)
+        graph, _, __ = self._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
+                                            operator_export_type=OperatorExportTypes.ONNX,
+                                            input_names=['input_1', 'input_2'],
+                                            dynamic_axes={'input_1': [0], 'input_2': [0]})
         # Check that the prim::Constant node in the graph for representing the
         # scripted function `f` is removed and the following prim::CallFunction
         # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
