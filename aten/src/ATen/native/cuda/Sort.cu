@@ -1,6 +1,7 @@
 #include <limits>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/core/Array.h>
@@ -265,6 +266,9 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     sortKeyValueInplace(values, indices, dim, descending);
     return std::forward_as_tuple(values, indices);
   }
+
+  TORCH_CHECK(get_overlap_status(self, values) == MemOverlapStatus::NO,
+	      "Passed output tensor that overlaps with input tensor to cuda sort");
 
   Tensor self_;
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
