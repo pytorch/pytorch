@@ -567,8 +567,8 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large):
             a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max,
                               size=(curr_size,), dtype=dtype, device=device)
-            sort_topk = a.sort()[0][-(curr_size//2):].flip(0)
-            topk = a.topk(curr_size//2)
+            sort_topk = a.sort()[0][-(curr_size // 2):].flip(0)
+            topk = a.topk(curr_size // 2)
             self.assertEqual(sort_topk, topk[0])      # check values
             self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
