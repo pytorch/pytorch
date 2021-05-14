@@ -1,0 +1,15 @@
+[run]
+plugins =
+    coverage_plugins.jit_plugin
+omit =
+    */tmp*
+    */Temp/*
+    */usr/local/lib*
+    *test/*
+
+[report]
+omit =
+    */tmp*
+    */Temp/*
+    */usr/local/lib*
+    *test/*

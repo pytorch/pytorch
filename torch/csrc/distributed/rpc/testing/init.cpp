@@ -66,15 +66,27 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   shared_ptr_class_<FaultyProcessGroupAgent>(
       module, "FaultyProcessGroupAgent", rpc_module.attr("ProcessGroupAgent"))
       .def(
-          py::init<
-              const c10::intrusive_ptr<::c10d::Store>,
-              std::string,
-              c10::intrusive_ptr<::c10d::ProcessGroup>,
-              int,
-              std::chrono::milliseconds,
-              const std::vector<std::string>&,
-              const std::unordered_map<std::string, float>&,
-              int>(),
+          py::init([](const c10::intrusive_ptr<::c10d::Store> store,
+                      std::string name,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
+                      int num_send_recv_threads,
+                      std::chrono::milliseconds rpc_timeout,
+                      const std::vector<std::string>& messages_to_fail,
+                      const std::unordered_map<std::string, float>&
+                          messages_to_delay,
+                      int failNumSends) {
+            return std::shared_ptr<FaultyProcessGroupAgent>(
+                new FaultyProcessGroupAgent(
+                    store,
+                    std::move(name),
+                    process_group,
+                    num_send_recv_threads,
+                    rpc_timeout,
+                    messages_to_fail,
+                    messages_to_delay,
+                    failNumSends),
+                impl::destroy_without_gil<FaultyProcessGroupAgent>);
+          }),
           py::arg("store"),
           py::arg("name"),
           py::arg("process_group"),
