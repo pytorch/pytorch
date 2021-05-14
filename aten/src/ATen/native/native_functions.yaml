@@ -3892,6 +3892,8 @@
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
+  dispatch:
+    CompositeImplicitAutograd: square_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
