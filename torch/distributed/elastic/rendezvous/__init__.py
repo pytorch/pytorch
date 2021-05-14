@@ -92,7 +92,6 @@ functionalities, which are technically not part of the rendezvous process:
 
 2. Setting the rendezvous *closed* to signal all nodes not to participate in
    next rendezvous.
-|
 
 **DynamicRendezvousHandler**:
 
@@ -111,7 +110,7 @@ of the following implementations that come with PyTorch:
 - :py:class:`.EtcdRendezvousBackend`: Supersedes the legacy
   :py:class:`.EtcdRendezvousHandler` class. Passing an
   :py:class:`.EtcdRendezvousBackend` instance to
-  :py:class:`.DynamicRendezvousHandler` is functionaly equivalent to
+  :py:class:`.DynamicRendezvousHandler` is functionally equivalent to
   instantiating an :py:class:`.EtcdRendezvousHandler`.
 
   ::

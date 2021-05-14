@@ -80,7 +80,6 @@ class EtcdRendezvousHandler(RendezvousHandler):
     :py:class:`torch.distributed.elastic.rendezvous.RendezvousHandler` interface
     backed by
     :py:class:`torch.distributed.elastic.rendezvous.etcd_rendezvous.EtcdRendezvous`.
-
     ``EtcdRendezvousHandler`` uses a URL to configure the type of rendezvous to
     use and to pass implementation specific configurations to the rendezvous
     module. The basic etcd rendezvous configuration URL looks like the following
