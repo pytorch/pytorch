@@ -68,8 +68,9 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
 //  0x5L: (update) Update tensor storage schema. For bytecode archive, the
-//  root key of tensor storage is updated from {index} to {archive_name/index}.
-//  Forward-compatibility change.
+//  root key of tensor storage is updated from {index} to {the_pointer_value_the_tensor.storage}.
+//  for example: `140245072983168.storage`
+//  Forward-compatibility change. Model size reduced by up to 50%.
 constexpr uint64_t kProducedBytecodeVersion = 0x5L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
