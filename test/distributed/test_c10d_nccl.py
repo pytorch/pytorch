@@ -1574,6 +1574,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook_nccl_static_graph(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(static_graph=True)
@@ -1745,7 +1746,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         )
         if static_graph:
             ddp_model._set_static_graph()
-        self.assertEqual(ddp_model.get_ddp_logging_data().get("static_graph", 0), static_graph)
+        self.assertEqual(ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph)
         input, ddp_input, target, ddp_target = self._prepare_dummy_data()
         loss = nn.MSELoss()
         for i in range(5):
