@@ -74,7 +74,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[0], sym1)
         self.assertEqual(output_shape[1], sym2)
         self.assertEqual(output_shape[2], sym3)
-        
+
     def test_sharing_of_list_len(self):
         # testing generic sharing of logic, a la _convolution and conv2s
         @torch.jit.script

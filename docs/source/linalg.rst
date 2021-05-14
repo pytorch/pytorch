@@ -13,32 +13,82 @@ function for details.
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
 
-Functions
----------
+Matrix Properties
+-----------------
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-
-    cholesky
-    cond
+    norm
+    vector_norm
+    matrix_norm
     det
     slogdet
+    cond
+    matrix_rank
+
+Decompositions
+--------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cholesky
+    qr
     eig
     eigvals
     eigh
     eigvalsh
-    matrix_power
-    matrix_rank
-    multi_dot
-    norm
-    vector_norm
-    pinv
     svd
+    svdvals
+
+Solvers
+-------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     solve
+    lstsq
+
+Inverses
+--------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    inv
+    pinv
+
+Matrix Products
+---------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    matrix_power
+    multi_dot
+    householder_product
+
+Tensor Operations
+-----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     tensorinv
     tensorsolve
-    inv
-    qr
-    lstsq
-    householder_product
+
+Experimental Functions
+----------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cholesky_ex
