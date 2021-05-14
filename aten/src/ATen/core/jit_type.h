@@ -158,6 +158,51 @@ inline c10::optional<T> merge_primitive(
   return c10::optional<T>{};
 }
 
+/* Not needed in the initial implementation, so comment it out for now
+//
+// Non-shape properties of a Tensor (such as scalarType, is_contiguous,
+// memory_format, layout, device) represented with SymbolicTensorProperties. It
+// is used in the forward propagation analysis and can represent precise or
+// widened tensor properties.
+//
+// Known limitations (TODOs):
+// - Current implementation supports only scalarType property
+// - Do not support set-union of dtypes (all set-union is widened into AnyType,
+// i.e., type lattice bottom)
+struct TORCH_API SymbolicTensorProperties {
+  // Default symbolic tensor properties constructor.
+  // Question (penguin): would default initialize optional to nullptr?
+  SymbolicTensorProperties() = default;
+
+  // Known rank but unknown dimentions.
+  SymbolicTensorProperties(c10::optional<at::ScalarType> scalarType)
+      : scalar_type_(scalarType) {}
+
+  void dump() const;
+
+  c10::optional<at::ScalarType> scalarType() const {
+    return scalar_type_;
+  }
+
+  // Checks whether the scalarType is a concrete type (i.e., FloatType is
+  // concrete but AnyType is not) Note that scalarType represents element types
+  // for tensors
+  bool isDTypeConcrete() const {
+    return (scalar_type_.has_value());
+  }
+
+  // Create new SymbolicTensorProperties that is result of merging self and
+  // another SymbolicTensorProperties.
+  SymbolicTensorProperties merge(const SymbolicTensorProperties& other) const;
+
+ private:
+  // TODO (penguin): ScalarType is always a concrete type, if we were to
+  // represent symbolic shapes or set union of scalar types, may need different
+  // representation
+  c10::optional<at::ScalarType> scalar_type_;
+};
+*/
+
 // If we see `a + b + c`  and know that a, b, and c are the same size and have
 // two dimensions (WxH), then we can generate a fused kernel for them. That
 // fused kernel would likely have indexing math to handling both the W and H
