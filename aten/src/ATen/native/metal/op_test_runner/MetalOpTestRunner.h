@@ -1,12 +1,13 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #import <Foundation/Foundation.h>
+#include <unordered_map>
 
 @interface MetalOpTestRunner : NSObject
 
-// result dict
-// key: test name
-// value: rest result (@(1): succeeded, @(0): failed)
-+ (NSDictionary<NSString *, NSNumber *> *)testMPSCNNOps;
+typedef BOOL(^testBlock)(void);
+
++ (instancetype)sharedInstance;
+- (NSDictionary<NSString *, testBlock> *)getTests;
 
 @end
