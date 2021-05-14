@@ -243,7 +243,7 @@ RRef
 ----
 
 .. warning ::
-    RRefs are not currently supported when using CUDA tensors
+    When CUDA tensors are used, RRefs are only supported on `TensorPipe <https://pytorch.org/docs/stable/rpc.html#tensorpipe-backend>`__ backend
 
 An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
 (e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
@@ -270,7 +270,8 @@ RemoteModule
 ------------
 
 .. warning ::
-    RemoteModule is not currently supported when using CUDA tensors
+    When CUDA tensors are used, RemoteModule is only supported on `TensorPipe <https://pytorch.org/docs/stable/rpc.html#tensorpipe-backend>`__ backend
+
 
 ``RemoteModule`` is an easy way to create an nn.Module remotely on a different
 process. The actual module resides on a remote host, but the local host has a
@@ -286,7 +287,8 @@ Distributed Autograd Framework
 ------------------------------
 
 .. warning ::
-    Distributed autograd is not currently supported when using CUDA tensors
+    When CUDA tensors are used, distributed autograd is only supported on `TensorPipe <https://pytorch.org/docs/stable/rpc.html#tensorpipe-backend>`__ backend
+
 
 This module provides an RPC-based distributed autograd framework that can be
 used for applications such as model parallel training. In short, applications
@@ -308,7 +310,8 @@ Distributed Optimizer
 ---------------------
 
 .. warning ::
-    Distributed optimizer is not currently supported when using CUDA tensors
+    When CUDA tensors are used, distributed optimizer is only supported on `TensorPipe <https://pytorch.org/docs/stable/rpc.html#tensorpipe-backend>`__ backend
+
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
