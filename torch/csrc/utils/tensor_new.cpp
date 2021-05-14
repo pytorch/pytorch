@@ -350,7 +350,6 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 // TODO: Make this accept options instead of dispatch key
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
-    
     TORCH_CHECK(dispatchKeyToDeviceType(dispatch_key) == device.value().type(),
              "legacy constructor expects device type: ", dispatchKeyToDeviceType(dispatch_key),
              "but device type: ", device.value().type(), " was passed");
@@ -801,11 +800,10 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
         bool type_inference = r.isNone(1);
         bool pin_memory = r.toBool(3);
         auto sizes = compute_sizes(data);
-        
         Tensor new_tensor;
         new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalar_type).pinned_memory(pin_memory));
         bool args_requires_grad = r.toBool(4);
-        new_tensor.detach_(); // ensure new_tensor a leaf node
+        new_tensor.detach_();
         new_tensor.set_requires_grad(args_requires_grad);
 
         return new_tensor;
