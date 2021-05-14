@@ -75,6 +75,9 @@
   REG_TEST("test_mean_dim", test_mean_dim);
   REG_TEST("test_mean_dim2", test_mean_dim2);
   REG_TEST("test_mean_dim3", test_mean_dim3);
+  REG_TEST("test_chunk", test_chunk);
+  REG_TEST("test_chunk2", test_chunk2);
+  REG_TEST("test_chunk3", test_chunk3);
   REG_TEST("test_reflection_pad2d", test_reflection_pad2d);
 }
 
