@@ -440,6 +440,8 @@ with torch.profiler(): # or torch.autograd.profiler
     dist.all_reduce(tensor)
 ```
 
+Please refer to the `profiler documentation <https://pytorch.org/docs/stable/profiler.html>`__ for a full overview of profiler features.
+
 Autograd-enabled communication primitives
 -----------------------------------------
 
