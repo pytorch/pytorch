@@ -165,6 +165,17 @@ class BackwardHook(object):
                 self.grad_outputs = self._pack_with_none(self.output_tensors_index,
                                                          grad_output,
                                                          self.n_outputs)
+
+                # Special case if no input required gradients, this hook should call the user
+                # hook directly
+                if self.input_tensors_index is None:
+                    grad_inputs = self._pack_with_none([], [], self.n_inputs)
+                    for user_hook in self.user_hooks:
+                        res = user_hook(self.module, grad_inputs, self.grad_outputs)
+                        if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
+                            raise RuntimeError("Backward hook for Modules where no input requires "
+                                               "gradient should always return None or None for all gradients.")
+
             grad_fn.register_hook(hook)
 
         is_tuple = True
