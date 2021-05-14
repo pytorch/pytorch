@@ -24,11 +24,18 @@ def is_tensor(typ: str) -> bool:
         return True
     return False
 
+def is_optional_tensor(typ: str) -> bool:
+    if typ == 'c10::optional<Tensor>':
+        return True
+    if typ == 'const c10::optional<Tensor> &':
+        return True
+    return False
+
 def add_bdim_after_tensor(types: Tuple[str]) -> Tuple[str]:
     result = []
     for typ in types:
         result.append(typ)
-        if is_tensor(typ):
+        if is_tensor(typ) or is_optional_tensor(typ):
             result.append('c10::optional<int64_t>')
     return tuple(result)
 
@@ -50,6 +57,15 @@ def unwrap_tensor(name: str) -> List[str]:
     std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, cur_level);"""
     return deindent(result).split('\n')
 
+def unwrap_optional_tensor(name: str) -> List[str]:
+    result = f"""\
+    optional<Tensor> {name}_value;
+    optional<int64_t> {name}_bdim;
+    if ({name}) {{
+        std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), cur_level);
+    }}"""
+    return deindent(result).split('\n')
+
 def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -> str:
     arg_types, arg_names = zip(*args)
     batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
@@ -59,15 +75,19 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
     arg_list = ', '.join([f'{arg[0]} {arg[1]}' for arg in args])
 
     tensors = [name for typ, name in zip(arg_types, arg_names) if is_tensor(typ)]
+    optional_tensors = [name for typ, name in zip(arg_types, arg_names) if is_optional_tensor(typ)]
 
     unwraps = []
     for tensor in tensors:
         unwraps += unwrap_tensor(tensor)
+
+    for opt_tensor in optional_tensors:
+        unwraps += unwrap_optional_tensor(opt_tensor)
     unwraps = ('\n' + ' ' * 6).join(unwraps)
 
     unwrapped_arg_list = []
     for arg in arg_names:
-        if arg in tensors:
+        if arg in tensors or arg in optional_tensors:
             unwrapped_arg_list += [f'{arg}_value', f'{arg}_bdim']
         else:
             unwrapped_arg_list.append(arg)
@@ -85,7 +105,6 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
         wrapped_returns = f'return {wrapped_returns[0]};'
     else:
         wrapped_returns = f'return {{ {", ".join(wrapped_returns)} }};'
-
 
     result = f"""\
     {batch_rule_typedef}
