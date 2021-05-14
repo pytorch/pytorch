@@ -35,6 +35,8 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+from torch.package import PackageExporter, PackageImporter
+from ._serialization import validate_map_location
 
 from torch.jit._monkeytype_config import (
     monkeytype_trace,
@@ -334,6 +336,18 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
+def unpackage_script_module(importer: PackageImporter, script_module_id: str) -> torch.nn.Module:
+    """
+    Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
+    """
+    cu = torch._C.CompilationUnit()
+    cpp_module = torch._C._import_ir_module_from_package(
+        cu, importer.zip_reader, validate_map_location(importer.last_map_location), script_module_id
+    )
+    return wrap_cpp_module(cpp_module)
+
+
 if _enabled:
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
@@ -405,6 +419,19 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
+        def __reduce_package__(self, exporter: PackageExporter):
+            """
+            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
+            saving TorchScript objects. Performs act of saving a ScriptModule inside of
+            a ``torch.package`` archive.
+
+            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
+            Pickler's ``persistent_load`` function.
+            """
+            script_module_id = exporter.get_unique_id()
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
