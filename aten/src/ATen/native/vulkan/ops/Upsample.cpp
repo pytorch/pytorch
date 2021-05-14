@@ -101,7 +101,7 @@ Tensor upsample_nearest2d(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("upsample_nearest2d", TORCH_FN(upsample_nearest2d));
+  m.impl(TORCH_SELECTIVE_NAME("upsample_nearest2d"), TORCH_FN(upsample_nearest2d));
 }
 
 #endif /* USE_VULKAN_API */

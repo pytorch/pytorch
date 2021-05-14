@@ -45,7 +45,7 @@ Tensor view(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("view", TORCH_FN(view));
+  m.impl(TORCH_SELECTIVE_NAME("view"), TORCH_FN(view));
 }
 
 #endif /* USE_VULKAN_API */

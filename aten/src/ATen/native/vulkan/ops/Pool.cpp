@@ -240,8 +240,8 @@ Tensor avg_pool2d(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("_adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
-  m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("_adaptive_avg_pool2d"), TORCH_FN(adaptive_avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("avg_pool2d"), TORCH_FN(avg_pool2d));
 }
 
 #endif /* USE_VULKAN_API */

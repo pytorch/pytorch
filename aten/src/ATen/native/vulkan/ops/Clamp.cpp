@@ -300,18 +300,18 @@ Tensor& sigmoid_(Tensor& self) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("clamp", TORCH_FN(clamp));
-  m.impl("clamp_", TORCH_FN(clamp_));
-  m.impl("hardsigmoid", hardsigmoid);
-  m.impl("hardsigmoid_", hardsigmoid_);
-  m.impl("hardswish", hardswish);
-  m.impl("hardswish_", hardswish_);
-  m.impl("hardtanh", hardtanh);
-  m.impl("hardtanh_", hardtanh_);
-  m.impl("sigmoid", sigmoid);
-  m.impl("sigmoid_", sigmoid_);
-  m.impl("relu", relu);
-  m.impl("relu_", relu_);
+  m.impl(TORCH_SELECTIVE_NAME("clamp"), TORCH_FN(clamp));
+  m.impl(TORCH_SELECTIVE_NAME("clamp_"), TORCH_FN(clamp_));
+  m.impl(TORCH_SELECTIVE_NAME("hardsigmoid"), hardsigmoid);
+  m.impl(TORCH_SELECTIVE_NAME("hardsigmoid_"), hardsigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("hardswish"), hardswish);
+  m.impl(TORCH_SELECTIVE_NAME("hardswish_"), hardswish_);
+  m.impl(TORCH_SELECTIVE_NAME("hardtanh"), hardtanh);
+  m.impl(TORCH_SELECTIVE_NAME("hardtanh_"), hardtanh_);
+  m.impl(TORCH_SELECTIVE_NAME("sigmoid"), sigmoid);
+  m.impl(TORCH_SELECTIVE_NAME("sigmoid_"), sigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("relu"), relu);
+  m.impl(TORCH_SELECTIVE_NAME("relu_"), relu_);
 }
 
 #endif /* USE_VULKAN_API */

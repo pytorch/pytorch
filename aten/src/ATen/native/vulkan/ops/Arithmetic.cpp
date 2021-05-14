@@ -412,22 +412,22 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
-  m.impl("add_.Scalar", TORCH_FN(add_scalar_));
-  m.impl("add.Tensor", TORCH_FN(add_tensor));
-  m.impl("add_.Tensor", TORCH_FN(add_tensor_));
-  m.impl("sub.Scalar", TORCH_FN(sub_scalar));
-  m.impl("sub_.Scalar", TORCH_FN(sub_scalar_));
-  m.impl("sub.Tensor", TORCH_FN(sub_tensor));
-  m.impl("sub_.Tensor", TORCH_FN(sub_tensor_));
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("mul_.Scalar", TORCH_FN(mul_scalar_));
-  m.impl("mul.Tensor", TORCH_FN(mul_tensor));
-  m.impl("mul_.Tensor", TORCH_FN(mul_tensor_));
-  m.impl("div.Scalar", TORCH_FN(div_scalar));
-  m.impl("div_.Scalar", TORCH_FN(div_scalar_));
-  m.impl("div.Tensor", TORCH_FN(div_tensor));
-  m.impl("div_.Tensor", TORCH_FN(div_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("add.Scalar"), TORCH_FN(add_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("add_.Scalar"), TORCH_FN(add_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("add.Tensor"), TORCH_FN(add_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("add_.Tensor"), TORCH_FN(add_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("sub.Scalar"), TORCH_FN(sub_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("sub_.Scalar"), TORCH_FN(sub_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("sub.Tensor"), TORCH_FN(sub_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("sub_.Tensor"), TORCH_FN(sub_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("mul.Scalar"), TORCH_FN(mul_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("mul_.Scalar"), TORCH_FN(mul_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("mul.Tensor"), TORCH_FN(mul_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("mul_.Tensor"), TORCH_FN(mul_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("div.Scalar"), TORCH_FN(div_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("div_.Scalar"), TORCH_FN(div_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("div.Tensor"), TORCH_FN(div_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("div_.Tensor"), TORCH_FN(div_tensor_));
 }
 
 #endif /* USE_VULKAN_API */
