@@ -23,6 +23,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
   if (block_size == 128) {
@@ -127,6 +128,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -212,6 +214,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -271,6 +274,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -317,6 +321,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -370,6 +375,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
@@ -554,6 +560,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -639,6 +646,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -698,6 +706,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -744,6 +753,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -797,6 +807,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
@@ -877,6 +888,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
   if (block_size == 128) {
@@ -1041,6 +1053,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1156,6 +1169,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1230,6 +1244,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1284,6 +1299,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1291,6 +1307,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
@@ -1344,6 +1361,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
@@ -1588,6 +1606,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1703,6 +1722,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1777,6 +1797,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1831,6 +1852,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1838,6 +1860,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
@@ -1891,6 +1914,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
@@ -1971,6 +1995,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
   if (block_size == 128) {
@@ -2003,6 +2028,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2137,6 +2163,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2178,6 +2205,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2255,6 +2283,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2284,6 +2313,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2333,6 +2363,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2356,6 +2387,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2391,6 +2423,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2417,6 +2450,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2451,6 +2485,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
@@ -2563,6 +2598,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2697,6 +2733,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2738,6 +2775,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2815,6 +2853,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2844,6 +2883,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2893,6 +2933,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2916,6 +2957,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2951,6 +2993,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2977,6 +3020,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -3011,6 +3055,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
