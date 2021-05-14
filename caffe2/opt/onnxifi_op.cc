@@ -538,6 +538,15 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(
   }
 }
 
+string mapOnnxStateToString(onnxEventState state) {
+  switch (state) {
+    case ONNXIFI_EVENT_STATE_NONSIGNALLED:
+      return "ONNXIFI_EVENT_STATE_NONSIGNALLED";
+    default:
+      return "ONNXIFI_EVENT_STATE_STRING_NOT_MAPPED";
+  }
+}
+
 string mapOnnxStatusToString(onnxStatus status) {
   switch (status) {
     case ONNXIFI_STATUS_SUCCESS:
@@ -725,7 +734,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         ONNXIFI_EVENT_STATE_SIGNALLED,
         "Onnxifi run timeouted out after ",
         timeout_,
-        " ms.");
+        " ms.",
+        "Reason: Onnxifi run returned event state code ",
+        mapOnnxStateToString(eventState));
     if (eventStatus != ONNXIFI_STATUS_SUCCESS) {
       if (messageLength == 0) {
         CAFFE_THROW("onnxifi internal error");
