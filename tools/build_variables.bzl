@@ -296,6 +296,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
+    "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -790,6 +791,7 @@ aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
 aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/Activation.cpp",
+    "aten/src/ATen/native/cpu/AvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",
