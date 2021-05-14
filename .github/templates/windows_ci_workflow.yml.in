@@ -53,6 +53,8 @@ jobs:
           path: C:\w\build-results
   test:
     runs-on: !{{ test_runner_type }}
+    env:
+      JOB_BASE_NAME: !{{ build_environment }}-test
     needs:
       - build
     steps:

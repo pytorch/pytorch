@@ -54,6 +54,8 @@ jobs:
           path: C:\w\build-results
   test:
     runs-on: windows.4xlarge
+    env:
+      JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
     needs:
       - build
     steps:
