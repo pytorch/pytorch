@@ -82,12 +82,16 @@ void insertCopies(
       auto copyFromNode = copyFromFn(nn->dataFlow);
       auto copyFromOp = nn::get<NeuralNetOperator>(copyFromNode);
       do {
+        // NOLINTNEXTLINE(bugprone-terminating-continue)
         NOM_REQUIRE_OR_CONT(nn::hasProducer(input));
         const auto& producer = nn::getProducer(input);
         const auto& producerOp = nn::get<NeuralNetOperator>(producer);
+        // NOLINTNEXTLINE(bugprone-terminating-continue)
         NOM_REQUIRE_OR_CONT(producerOp->getKind() == copyFromOp->getKind());
+        // NOLINTNEXTLINE(bugprone-terminating-continue)
         NOM_REQUIRE_OR_CONT(nn::hasInputs(producer));
         auto oldInputs = nn::getInputs(producer);
+        // NOLINTNEXTLINE(bugprone-terminating-continue)
         NOM_REQUIRE_OR_CONT(oldInputs.size() == 1);
         nn->dataFlow.deleteNode(copyNode);
         newInput = oldInputs.front();

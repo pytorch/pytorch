@@ -26,6 +26,7 @@ struct THPEngine {
     PyObject_HEAD
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
@@ -47,6 +48,10 @@ Engine& PythonEngine::get_python_engine() {
     _reinitialize_engine = false;
   }
   return engine;
+}
+
+PythonEngine::~PythonEngine() {
+  Engine::stop();
 }
 
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
@@ -76,7 +81,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
 
 #ifdef IS_PYTHON_3_9_PLUS
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
-  if (_Py_IsFinalizing()) {
+  if (!Py_IsInitialized()) {
     no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
     gil.release();
@@ -135,6 +140,7 @@ std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 }}} // namespace torch::autograd::python
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
@@ -305,6 +311,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   return type->tp_alloc(type, 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward",
     castPyCFunctionWithKeywords(THPEngine_run_backward),
@@ -315,12 +322,14 @@ static struct PyMethodDef THPEngine_methods[] = {
 };
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                      /* tp_name */
   sizeof(THPEngine),                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

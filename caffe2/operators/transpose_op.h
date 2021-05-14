@@ -24,6 +24,7 @@ class TransposeOp : public Operator<Context> {
     std::vector<int> axes_sorted = axes_;
     std::sort(axes_sorted.begin(), axes_sorted.end());
     for (std::size_t i = 0; i < axes_sorted.size(); ++i) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (axes_sorted[i] != i) {
         CAFFE_THROW("Axes should be a permutation of 0 to ndim.");
       }

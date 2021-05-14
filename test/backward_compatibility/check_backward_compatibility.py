@@ -30,6 +30,8 @@ allow_list = [
     # Internal
     ("static", datetime.date(9999, 1, 1)),
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
+    ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
+    ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -38,9 +40,13 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::linalg_svd", datetime.date(2021, 5, 15)),
+    ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
+    ("aten::linalg_lstsq", datetime.date(2021, 5, 1)),
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
@@ -70,6 +76,8 @@ allow_list = [
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
     ("aten::div", datetime.date(2021, 4, 28)),
     ("aten::divide", datetime.date(2021, 4, 28)),
+    ("aten::_var", datetime.date(2021, 5, 28)),
+    ("aten::_std", datetime.date(2021, 5, 28)),
     ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
     ("aten::assert_async", datetime.date(2021, 5, 1)),
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
@@ -77,6 +85,9 @@ allow_list = [
     ("aten::_addmv_impl_", datetime.date(2021, 5, 15)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::_amp_update_scale", datetime.date(2021, 6, 1)),
+    ("aten::randperm", datetime.date(9999, 1, 1)),
+    ("aten::linalg_vector_norm", datetime.date(2021, 5, 15)),
 ]
 
 def allow_listed(schema, allow_list):

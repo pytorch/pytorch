@@ -55,8 +55,7 @@ class Reducer {
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
-  void prepare_for_backward(
-      const std::vector<at::Tensor>& outputs);
+  void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
   // Called at the begginning of forward() inside DistributedDataParallel,
   // right now it caputures the starting time of forward in each iteration.
@@ -125,6 +124,9 @@ class Reducer {
   // first 10 iterations, after 10 iteratons time stats will be
   // recorded once every "sample_rate" training iterations.
   void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
+  // Specify the training graph is static.
+  void set_static_graph();
 
  protected:
   // Forward declaration.
@@ -206,9 +208,7 @@ class Reducer {
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
-  void runGradCallbackForVariable(
-      at::Tensor& variable,
-      GradCallback&& cb);
+  void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -422,10 +422,20 @@ class Reducer {
   // Division factor for reduction of gradients.
   int divFactor_;
 
+  bool static_graph_;
+
  private:
+  // reset counting for buckets before backward starts
   void reset_bucket_counting();
+  // search unused parameters beore backward starts
   void search_unused_parameters(
-    const std::vector<torch::autograd::Variable>& outputs);
+      const std::vector<torch::autograd::Variable>& outputs);
+  void set_divide_factor();
+  // kick off all reduce for the ready bucket
+  void all_reduce_bucket(Bucket& bucket);
+  // kick off all reduce to local used map, it can help find global unused parameters
+  void all_reduce_local_used_map();
+
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Current thread local state

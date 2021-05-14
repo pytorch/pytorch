@@ -117,6 +117,7 @@ class ShapeProp(torch.fx.Interpreter):
         if found_tensor:
             n.meta['tensor_meta'] = meta
 
+        n.meta['type'] = type(result)
         return result
 
     def propagate(self, *args):

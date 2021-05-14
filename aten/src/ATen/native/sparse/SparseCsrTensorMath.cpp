@@ -142,6 +142,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
                &out_stride1,
                &dim_k]() {
                 scalar_t cast_alpha = alpha.to<scalar_t>();
+                // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
                 scalar_t cast_beta = beta.to<scalar_t>();
                 scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
                 scalar_t* out_ptr = out.data_ptr<scalar_t>();

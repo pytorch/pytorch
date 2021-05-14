@@ -490,6 +490,7 @@ class ShapePropagator {
         cat_node->kind() == prim::FusedConcat) {
       auto tensors = list_node->inputs();
       if (!tensors.empty()) {
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if (propagate_complete(cat_node, tensors)) {
           return;
         } else if (propagate(cat_node, tensors)) {
@@ -1295,6 +1296,7 @@ class ShapePropagator {
         } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
           type = type->withScalarType(at::kLong);
         }
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
@@ -1826,6 +1828,7 @@ class ShapePropagator {
         if (dim1 == 1 && dim2 == 1) {
           // Dot product
           return tensor_types.at(0)->withDim(0);
+          // NOLINTNEXTLINE(bugprone-branch-clone)
         } else if (dim1 == 2 && dim2 == 2) {
           // Matrix multiply
           return tensor_types.at(0);
@@ -2069,6 +2072,7 @@ class ShapePropagator {
                    /*const_inputs=*/attr::size)) {
       auto sizes = node->get<c10::List<int64_t>>(attr::size).value();
       bool inferred = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t inferred_idx;
       int64_t size_product = 1;
       for (size_t i = 0; i < sizes.size(); ++i) {
@@ -2114,8 +2118,8 @@ class ShapePropagator {
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(
-          std::get<0>(sizesAndStrides), std::get<1>(sizesAndStrides)));
+      node->output()->setType(
+          tp->withSizesStrides(sizesAndStrides.sizes, sizesAndStrides.strides));
       return true;
     } else if (
         node->matches(

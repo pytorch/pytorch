@@ -62,12 +62,14 @@ TORCH_META_FUNC(replication_pad1d_backward) (
 
   if (input.ndimension() == 3)
   {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     nbatch = input.size(0);
     dimw++;
     dimslices++;
   }
 
   /* sizes */
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
@@ -234,6 +236,7 @@ static void replication_pad1d_out_frame(
   int oStartX = std::max(0, pad_l);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
     for (auto k = start; k < end; k++)
     {
@@ -286,6 +289,7 @@ static void replication_pad1d_backward_out_frame(
   int oStartX = std::max(0, pad_l);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
     for (auto k = start; k < end; k++)
     {
@@ -342,6 +346,7 @@ static void replication_pad2d_out_frame(
   int oStartY = std::max(0, pad_t);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++)
     {
@@ -410,6 +415,7 @@ static void replication_pad2d_backward_out_frame(
   int oStartY = std::max(0, pad_t);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++)
     {
@@ -565,6 +571,7 @@ static void replication_pad3d_out_frame(
   int oStartZ = std::max(0, pfront);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
     for (auto k = start; k < end; k++) {
       for (int64_t z = 0; z < odepth; z++) {
@@ -650,6 +657,7 @@ static void replication_pad3d_backward_out_frame(
   int oStartZ = std::max(0, pfront);
 
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
     for (auto k = start; k < end; k++) {
       for (int64_t z = 0; z < odepth; z++) {
