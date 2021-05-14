@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_win32,
     create_device,
+    with_dist_debug_levels,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -210,37 +211,69 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         opts._threads = threads
         return opts
 
-    def _create_wrapper_pg(self):
+    def _create_wrapper_pg(self, with_new_group=False):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
-        _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
-        pg = c10d.create_process_group_wrapper(
-            _pg,
-            "unused",
-            store,
-            self.rank,
-            self.world_size,
-        )
+        if with_new_group:
+            pg = c10d.new_group(backend="gloo")
+        else:
+            _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+            pg = c10d.create_process_group_wrapper(
+                _pg,
+                "unused",
+                store,
+                self.rank,
+                self.world_size,
+            )
         return pg
 
-    def test_collectives_op_mismatch(self):
-        pg = self._create_wrapper_pg()
+    # NOTE: these tests are separated by debug level instead of combined into
+    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
+    # combined after that is resolved.
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
         self._test_collectives_op_mismatch(pg)
 
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg)
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg)
+
+    @with_dist_debug_levels(levels=["OFF"])
     def test_collective_shape_mismatch(self):
-        pg = self._create_wrapper_pg()
+        pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg)
 
     @skip_if_lt_x_gpu(4)
-    def test_collectives_op_mismatch_cuda(self):
-        pg = self._create_wrapper_pg()
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
         self._test_collectives_op_mismatch(pg, use_cuda=True)
 
     @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch_cuda(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
+
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
+
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["OFF"])
     def test_collective_shape_mismatch_cuda(self):
-        pg = self._create_wrapper_pg()
+        pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 @requires_gloo()
