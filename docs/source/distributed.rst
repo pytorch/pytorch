@@ -438,7 +438,6 @@ Note that you can use ``torch.profiler`` or ``torch.autograd.profiler`` to profi
 
     import torch
     import torch.distributed as dist
-    
     with torch.profiler():
         tensor = torch.randn(20, 10)
         dist.all_reduce(tensor)
