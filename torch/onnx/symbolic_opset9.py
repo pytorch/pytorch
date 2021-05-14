@@ -1421,6 +1421,8 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
             bias = g.op("Constant", value_t=bias_value)
         return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
     else:
+        # Now if track_running_stats is set to True it would get the same result with batchnorm. The PyTorch internal
+        # implementation of instance_norm may have a problem with running_mean and running_var repeat, will open a github issue.
         return batch_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled)
 
 
