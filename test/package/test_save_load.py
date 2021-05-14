@@ -56,29 +56,12 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    def test_save_module_with_module_object(self):
-        """
-        Test that save_module works with a module object
-        instead of a module name.
-        """
-        buffer = BytesIO()
-
-        with PackageExporter(buffer, verbose=False) as he:
-            import module_a
-
-            he.save_module(module_a)
-
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
-        module_a_i = hi.import_module("module_a")
-        self.assertEqual(module_a_i.result, "module_a")
-        self.assertIsNot(module_a, module_a_i)
-
     def test_dunder_imports(self):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             import package_b
             obj = package_b.PackageBObject
+            he.intern("**")
             he.save_pickle("res", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -129,6 +112,7 @@ class TestSaveLoad(PackageTestCase):
 
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
+            he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
         hi = PackageImporter(filename)
 
@@ -156,6 +140,7 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         importer1 = PackageImporter(f1)
@@ -163,8 +148,6 @@ class TestSaveLoad(PackageTestCase):
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
             pe.save_module(loaded1.__module__)
 
@@ -181,6 +164,7 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
 
         importer1 = PackageImporter(f1)
