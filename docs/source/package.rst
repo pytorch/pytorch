@@ -5,7 +5,7 @@ torch.package
 
 .. warning::
 
-    This module is experimental and has not yet been publically released.
+    This module is experimental and has not yet been publicly released.
 
 API Reference
 -------------
@@ -22,3 +22,6 @@ API Reference
   :members:
 
   .. automethod:: __init__
+
+.. autoclass:: torch.package.Directory
+  :members:

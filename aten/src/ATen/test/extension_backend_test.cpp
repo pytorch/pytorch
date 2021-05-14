@@ -8,6 +8,7 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int test_int;
 
 Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
@@ -47,6 +48,7 @@ TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
   m.impl("aten::add.Tensor",           add_override);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendExtensionTest, TestRegisterOp) {
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);

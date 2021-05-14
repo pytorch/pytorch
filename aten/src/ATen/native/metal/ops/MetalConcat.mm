@@ -147,7 +147,7 @@ Tensor cat(const TensorList tensors, int64_t dim) {
       "Output tensor must be a texture array");
   MetalTensorImplStorage mt{result_size};
   mt.texture()->setCommandBuffer(commandBuffer);
-  mt.texture()->allocateTemporaryTextureStorage(result_size, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(result_size, commandBuffer);
 
   if (dim == 1) {
     return cat_feature(tensors, mt);

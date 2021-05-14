@@ -2,7 +2,7 @@ r"""
 `torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 
-NOTE: This module is deprecated, use torch.distributed.elastic_launch.
+NOTE: This module is deprecated, use torch.distributed.run.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -140,7 +140,7 @@ will not pass ``--local_rank`` when you specify this flag.
 
 import logging
 
-from torch.distributed.elastic_launch import get_args_parser, run
+from torch.distributed.run import get_args_parser, run
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def main(args=None):
     logger.warn(
         "The module torch.distributed.launch is deprecated "
         "and going to be removed in future."
-        "Migrate to torch.distributed.elastic_launch"
+        "Migrate to torch.distributed.run"
     )
     args = parse_args(args)
     run(args)
