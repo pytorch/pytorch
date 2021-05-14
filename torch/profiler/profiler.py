@@ -214,10 +214,6 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
-        for activity in self.activities:
-            if activity not in supported_activities():
-                warn("Unsupported profiler activity specified (" + str(activity) + ")")
-        self.activities = self.activities.intersection(supported_activities())
         assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
@@ -364,9 +360,18 @@ class profile(object):
 
     def add_metadata(self, key: str, value: str):
         """
-        Adds a user defined key/value metadata into the trace file
+        Adds a user defined metadata with a string key and a string value
+        into the trace file
         """
-        torch.autograd._add_metadata(key, value)
+        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
+        torch.autograd._add_metadata_json(key, wrapped_value)
+
+    def add_metadata_json(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a valid json value
+        into the trace file
+        """
+        torch.autograd._add_metadata_json(key, value)
 
     def _get_distributed_info(self):
         import torch.distributed as dist
@@ -416,7 +421,7 @@ class profile(object):
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
-                self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
+                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
 
     def _stop_trace(self):
         assert self.profiler is not None

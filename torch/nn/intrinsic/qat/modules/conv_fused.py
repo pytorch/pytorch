@@ -91,7 +91,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return self
 
     def _forward(self, input):
-        assert isinstance(self.bn.running_var, torch.Tensor)
+        assert self.bn.running_var is not None
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)

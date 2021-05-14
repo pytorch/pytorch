@@ -947,9 +947,15 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_GENERIC_BINARY_OP(
+        aten::log,
+        std::log(a) / std::log(b),
+        float,
+        complex),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
-    DEFINE_SCALAR_SCALAR_BINARY_OP(
+    DEFINE_INT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
+    DEFINE_FLOAT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::log,
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
@@ -967,7 +973,7 @@ RegisterOperators reg2({
         float,
         float),
     DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
-    DEFINE_SCALAR_SCALAR_BINARY_OP(
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::atan2,
         std::atan2(a, b),
         std::atan2(a, b),
@@ -995,6 +1001,18 @@ RegisterOperators reg2({
     DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isnan,
+        std::isnan(a.real()) || std::isnan(a.imag()),
+        bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isfinite,
+        std::isfinite(a.real()) && std::isfinite(a.imag()),
+        bool),
+    DEFINE_UNARY_COMPLEX_OP(
+        aten::isinf,
+        std::isinf(a.real()) || std::isinf(a.imag()),
+        bool),
     DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
     DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
     DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
@@ -1076,6 +1094,17 @@ RegisterOperators reg2({
           auto sum = 0.0;
           for (const auto& elem : l) {
             sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.complex(complex[] self) -> complex",
+        [](Stack* stack) {
+          c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
+          c10::complex<double> sum = 0.0;
+          for (int i = 0; i < l.size(); i++) {
+            sum = sum + l.extract(i);
           }
           push(stack, sum);
         },
