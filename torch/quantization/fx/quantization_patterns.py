@@ -50,7 +50,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List, Set
+from typing import Any, Callable, Dict, Union, Optional, Tuple, List
 
 # -------------------------
 # Pattern Registrations
@@ -110,16 +110,6 @@ class QuantizeHandler(ABC):
         # TODO(future PR): potentially clean up and deduplicate these
         # mappings.
         return self.all_node_args_are_tensors and self.input_output_observed()
-
-    def should_mark_output_observed_from_input_observed_status(
-        self,
-        observed_node_names_set: Set[str],
-    ) -> bool:
-        """
-        Returns true if the output of this pattern instance should be marked
-        as observed based on the observed status of inputs to this pattern.
-        """
-        return False
 
     def should_mark_output_quantized_from_input_quantized_status(
         self,
@@ -264,29 +254,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         else:
             return False
 
-    def should_mark_output_observed_from_input_observed_status(
-        self,
-        observed_node_names_set: Set[str],
-    ) -> bool:
-        if self.num_tensor_args == 1:
-            # If only one of the inputs is a tensor, the output is
-            # observed if the tensor input is observed
-            def input_is_observed(arg):
-                return (isinstance(arg, Node) and
-                        arg.name in observed_node_names_set)
-            # This is checking if one of the argument of add/mul
-            # is an observed node
-            # If both of the inputs are number,
-            # we will not consider the output to be observed
-            return (
-                input_is_observed(self.binary_op_node.args[0]) or
-                input_is_observed(self.binary_op_node.args[1])
-            )
-        else:
-            # If either none or both inputs are tensors, this code
-            # path will not be hit.
-            return False
-
     def input_output_observed(self):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
@@ -313,11 +280,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(quantizer)
                 assert activation_post_process is not None
-                if False:
-                    cur_idx = quantizer.activation_post_process_indexes[node.name]
-                    activation_post_process = \
-                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                    quantizer.activation_post_process_indexes[node.name] += 1
                 return quantize_node(
                     quantizer, op_out, activation_post_process,
                     node, is_input=False)
@@ -349,11 +311,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(quantizer)
                     assert activation_post_process is not None
-                    if False:
-                        cur_idx = quantizer.activation_post_process_indexes[node.name]
-                        activation_post_process = \
-                            quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                        quantizer.activation_post_process_indexes[node.name] += 1
                     scale, zero_point = activation_post_process.calculate_qparams()
                     scale = float(scale)
                     zero_point = int(zero_point)
@@ -415,8 +372,6 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        if False:
-            quantizer.activation_post_process_indexes[node.name] += 1
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=True))
 
 # handle conv, maybe followed by relu
@@ -511,11 +466,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 self._maybe_get_last_node_only_observer(quantizer)
             assert output_activation_post_process is not None
             self.conv.activation_post_process = output_activation_post_process
-            if False:
-                cur_idx = quantizer.activation_post_process_indexes[node.name]
-                self.conv.activation_post_process = \
-                    quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                quantizer.activation_post_process_indexes[node.name] += 1
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
                 type(self.conv), additional_static_quant_mapping)
@@ -549,11 +499,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(quantizer)
                     assert activation_post_process is not None
-                    if False:
-                        cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
-                        activation_post_process = \
-                            quantizer.modules[quantizer.activation_post_process_map[act_post_process_name][cur_idx]]
-                        quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     return quantize_node(
                         quantizer, op_out, activation_post_process,
                         act_post_process_node, is_input=False)
@@ -590,12 +535,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                         self._maybe_get_last_node_only_observer(quantizer)
                     assert activation_post_process is not None
 
-                    if False:
-                        act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
-                        cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
-                        activation_post_process = \
-                            quantizer.modules[quantizer.activation_post_process_map[act_post_process_name][cur_idx]]
-                        quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
@@ -681,15 +620,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
             # 1. attach output activation post process to linear module
-            if False:
-                if node.name in quantizer.activation_post_process_map:
-                    # this is the static quantization case
-                    cur_idx = quantizer.activation_post_process_indexes[node.name]
-                    output_activation_post_process = \
-                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                    quantizer.activation_post_process_indexes[node.name] += 1
-                else:
-                    output_activation_post_process = None
 
             if output_activation_post_process:
                 self.linear.activation_post_process = output_activation_post_process
@@ -739,11 +669,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(quantizer)
                     assert activation_post_process is not None
-                    if False:
-                        cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
-                        activation_post_process = \
-                            quantizer.modules[quantizer.activation_post_process_map[act_post_process_name][cur_idx]]
-                        quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     return quantize_node(
                         quantizer,
                         op_out,
@@ -786,12 +711,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(quantizer)
                     assert activation_post_process is not None
-                    if False:
-                        act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
-                        cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
-                        activation_post_process = \
-                            quantizer.modules[quantizer.activation_post_process_map[act_post_process_name][cur_idx]]
-                        quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
 
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point)
@@ -856,11 +775,6 @@ class BatchNormQuantizeHandler(QuantizeHandler):
             self._maybe_get_last_node_only_observer(quantizer)
         assert activation_post_process is not None
         self.bn.activation_post_process = activation_post_process
-        if False:
-            cur_idx = quantizer.activation_post_process_indexes[node.name]
-            self.bn.activation_post_process = \
-                quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-            quantizer.activation_post_process_indexes[node.name] += 1
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
@@ -1056,11 +970,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(quantizer)
                 assert activation_post_process is not None
-                if False:
-                    cur_idx = quantizer.activation_post_process_indexes[node.name]
-                    activation_post_process = \
-                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                    quantizer.activation_post_process_indexes[node.name] += 1
                 if node.op == 'call_module':
                     module = quantizer.modules[node.target]
                     module.activation_post_process = activation_post_process
@@ -1113,11 +1022,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(quantizer)
                 assert activation_post_process is not None
-                if False:
-                    cur_idx = quantizer.activation_post_process_indexes[node.name]
-                    activation_post_process = \
-                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-                    quantizer.activation_post_process_indexes[node.name] += 1
                 return quantize_node(
                     quantizer, op_out, activation_post_process,
                     node, is_input=False)
@@ -1135,11 +1039,6 @@ class ELUQuantizeHandler(QuantizeHandler):
         activation_post_process = \
             self._maybe_get_last_node_only_observer(quantizer)
         assert activation_post_process is not None
-        if False:
-            cur_idx = quantizer.activation_post_process_indexes[node.name]
-            activation_post_process = \
-                quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-            quantizer.activation_post_process_indexes[node.name] += 1
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
@@ -1181,18 +1080,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         else:
             # in PTQ, only insert observers when emulating fp16
             return activation_dtype(qconfig) == torch.float16
-
-    def should_mark_output_observed_from_input_observed_status(
-        self,
-        observed_node_names_set: Set[str],
-    ) -> bool:
-        # For these ops if input is observed, output is also observed
-        def is_observed(input_arg):
-            if isinstance(input_arg, Node):
-                return input_arg.name in observed_node_names_set
-            elif isinstance(input_arg, list):
-                return all(map(is_observed, input_arg))
-        return is_observed(self.node.args[0])
 
     def should_mark_output_quantized_from_input_quantized_status(
         self,
