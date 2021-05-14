@@ -141,6 +141,15 @@ TEST(StaticRuntime, Clone) {
   testStaticRuntime(clone_script_1, args_1);
 }
 
+TEST(StaticRuntime, Clamp) {
+  auto a = at::randn({2, 3});
+  auto max_t = at::full_like(a, 1);
+  auto min_t = at::full_like(a, -1);
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t});
+}
+
 TEST(StaticRuntime, Logit) {
   auto a = at::ones({2, 3});
   double b = 1e-6;
