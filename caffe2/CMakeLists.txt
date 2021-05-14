@@ -803,7 +803,7 @@ endif()
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
-    scalaropts transformutils native orcjit)
+    scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
 
