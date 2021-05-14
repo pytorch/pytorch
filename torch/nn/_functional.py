@@ -172,8 +172,7 @@ __all__ = ['Tensor',
 '_single',
 '_pair',
 '_triple',
-'_list_with_default',
-'torch._C'
+'_list_with_default'
 ]
 
 from typing import Callable, List, Optional, Tuple
@@ -181,7 +180,6 @@ import math
 import warnings
 import torch
 from torch import _VF
-import torch._C
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
 from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
