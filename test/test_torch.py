@@ -4272,49 +4272,46 @@ else:
 
     @dtypes(torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
-        def check(t, *args, **kwargs):
-            actual = torch.cov(t, *args, **kwargs)
-            expected = np.array(np.cov(t.cpu().numpy(), *args, **kwargs))
-            self.assertEqual(actual, expected)
+        def check(t, correction=1, fweights=None, aweights=None):
+            actual = torch.cov(t, correction=correction, fweights=fweights, aweights=aweights)
+            t = t.cpu().numpy()
+            fweights = fweights.cpu().numpy() if fweights is not None else None
+            aweights = aweights.cpu().numpy() if aweights is not None else None
+            expected = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
+            expected = torch.from_numpy(np.array(expected))
+            self.assertEqual(actual, expected, atol=1e-05, rtol=1e-05)
 
         def generate_input_tensors():
-            yield torch.empty(0, dtype=dtype, device=device)
             yield torch.tensor(1, dtype=dtype, device=device)
-            yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
+            yield make_tensor((1,), device, dtype)
             yield make_tensor((10,), device, dtype)
             yield make_tensor((5, 1), device, dtype)
-            yield make_tensor((10, 10), device, dtype)
-            yield make_tensor((10, 10), device, dtype, noncontiguous=True)
+            yield make_tensor((5, 10), device, dtype)
+            yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+            yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
+        check(torch.empty(0))
         for t in generate_input_tensors():
             check(t)
+            num_observations = t.numel() if t.ndim < 2 else t.size(1)
+            fweights = torch.randint(1, 10, (num_observations,), device=device)
+            aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1)
+            for correction in [0, 1, 2]:
+                check(t, correction, fweights, aweights)
 
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False))
-    def test_cov_error(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "cov: expected Input1 to have two or fewer dimensions, but got 3!"):
-            invalid = make_tensor((5, 10, 20), device, dtype, low=-50, high=50)
-            torch.cov(invalid)
+    def test_cov_error(self, device):
+        def check(error, msg, *args, **kwargs):
+            with self.assertRaisesRegex(error, r'cov\(\):.*' + msg + r'.*'):
+                torch.cov(*args, **kwargs)
 
-        with self.assertRaisesRegex(RuntimeError, "fweights must be integer."):
-            fwt = torch.randn((10, 1), dtype=dtype, device=device)
-            invalid = make_tensor((10, 1), device, dtype, low=-50, high=50)
-            torch.cov(invalid, fweights=fwt)
-
-
-        with self.assertRaisesRegex(RuntimeError, "fweights cannot be negative."):
-            fwt = make_tensor((10,), device, dtype=torch.int64, low=-10, high=10) * -1
-            invalid = make_tensor((10,), device, dtype, low=-50, high=50)
-            torch.cov(invalid, fweights=fwt)
-
-        with self.assertRaises(RuntimeError):
-            fwt = make_tensor((2,), device, dtype=torch.int64, low=-10, high=10)
-            invalid = make_tensor((10,), device, dtype, low=-50, high=50)
-            torch.cov(invalid, fweights=fwt)
-
-        with self.assertRaisesRegex(RuntimeError, "cov: expected fweights to have one or fewer dimensions, but got 2!"):
-            fwt = make_tensor((1, 2), device, dtype=torch.int64, low=-10, high=10)
-            invalid = make_tensor((10,), device, dtype, low=-50, high=50)
-            torch.cov(invalid, fweights=fwt)
+        a = torch.rand(2)
+        check(RuntimeError, r'has more than 2 dimensions', torch.rand(2, 2, 2))
+        check(RuntimeError, r'has more than 1 dimension', a, fweights=torch.rand(2, 2))
+        check(RuntimeError, r'has more than 1 dimension', a, aweights=torch.rand(2, 2))
+        check(RuntimeError, r'must be integral dtype', a, fweights=torch.rand(2))
+        check(RuntimeError, r'must be floating point dtype', a, aweights=torch.tensor([1, 1]))
+        check(RuntimeError, r'incompatible number of', a, fweights=torch.tensor([1]))
+        check(RuntimeError, r'incompatible number of', a, aweights=torch.rand(1))
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())

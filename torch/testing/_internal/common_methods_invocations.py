@@ -2349,7 +2349,21 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
-    pass
+    def generate_input_tensors():
+        yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+        yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad)
+        yield make_tensor((2, 5), device, dtype, requires_grad=requires_grad)
+
+    inputs = []
+    for t in generate_input_tensors():
+        inputs.append(SampleInput(t))
+        num_observations = t.numel() if t.ndim < 2 else t.size(1)
+        fweights = torch.randint(1, 10, (num_observations,), device=device)
+        aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1)
+        for correction in [0, 1, 2]:
+            inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fweights, 'aweights': aweights}))
+
+    return inputs
 
 
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
@@ -4183,9 +4197,11 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
     OpInfo('cov',
-           dtypes=all_types_and_complex(),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cov,
-           supports_out=False,),
+           supports_out=False,
+           # JIT test not working for tensor kwargs
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
