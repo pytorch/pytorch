@@ -90,53 +90,14 @@ struct ListLenRefiner {
               ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
               : BooleanRefinementMapping::FalseRefinements(std::move(refine));
         }
-      }
-      if (n->kind() == prim::RaiseException) {
-        throwing_blocks_.insert(b);
-      }
-      if (n->kind() == aten::len) {
+      } else if (n->kind() == aten::len) {
         if (auto maybe_len = tryFindRefinement(n->input(0))) {
           changed_ = true;
           WithInsertPoint guard(n);
           n->output()->replaceAllUsesWith(
               graph_->insertConstant(static_cast<int64_t>(*maybe_len)));
         }
-      }
-      if (n->kind() == aten::__not__ &&
-          n->inputs().at(0)->type()->cast<BoolType>()) {
-        // __not__(inp) -> reverse refinements
-        if (boolean_value_refinements_.count(n->input())) {
-          auto& input_ref = boolean_value_refinements_[n->input()];
-          boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-              input_ref.false_refine(), input_ref.true_refine());
-        }
-      }
-      if (n->matches("aten::eq(bool a, bool b) -> bool") ||
-          (n->matches("aten::ne(bool a, bool b) -> bool"))) {
-        for (size_t const_index : {0, 1}) {
-          if (n->input(const_index)->node()->kind() != prim::Constant) {
-            continue;
-          }
-          auto const_input = constant_as<bool>(n->input(const_index)).value();
-          auto non_const_input = n->input(1 - const_index);
-          if (!boolean_value_refinements_.count(non_const_input)) {
-            continue;
-          }
-          // value == False / value != True -> equivalent to __not__ value
-          // value == True / value != False -> equivalent to value
-          auto& input_ref = boolean_value_refinements_[non_const_input];
-          if ((!const_input && n->kind() == aten::eq) ||
-              (const_input && n->kind() == aten::ne)) {
-            boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-                input_ref.false_refine(), input_ref.true_refine());
-          } else {
-            boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-                input_ref.true_refine(), input_ref.false_refine());
-          }
-        }
-      }
-
-      if (n->kind() == prim::If) {
+      } else if (n->kind() == prim::If) {
         IfView if_n(n);
         bool has_cond_ref = boolean_value_refinements_.count(if_n.cond()) != 0;
         ListRefinement empty;
@@ -150,7 +111,16 @@ struct ListLenRefiner {
                 ? boolean_value_refinements_[if_n.cond()].false_refine()
                 : empty);
 
-        joinIfRefinements(n, throwing_blocks_, block_refinements, true_block_refinements, false_block_refinements, boolean_value_refinements_);
+        joinIfRefinements(
+            n,
+            throwing_blocks_,
+            block_refinements,
+            true_block_refinements,
+            false_block_refinements,
+            boolean_value_refinements_);
+      } else {
+        handleCommonRefinentOperators(
+            n, throwing_blocks_, boolean_value_refinements_);
       }
     }
     active_refinements_.pop_back();

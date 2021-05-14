@@ -37,7 +37,6 @@ namespace jit {
 // desugar to something similar. Additionally, any True refinements that were
 // present on `cond` can also be associated with the if node True output value.
 
-
 // The intersection of the refinements is the Value* which are in both
 // refinements and are refined to the same length
 // in an example like:
@@ -87,7 +86,8 @@ void joinIfRefinements(
     ListRefinement& curr_block_refinements,
     ListRefinement& true_block_refinements,
     ListRefinement& false_block_refinements,
-    std::unordered_map<Value*, BooleanRefinementMapping>& boolean_value_refinements) {
+    std::unordered_map<Value*, BooleanRefinementMapping>&
+        boolean_value_refinements) {
   IfView if_n(if_node);
   Block* b = if_node->owningBlock();
 
@@ -117,8 +117,7 @@ void joinIfRefinements(
       if (boolean_value_refinements.count(
               non_throwing_block->outputs().at(i))) {
         boolean_value_refinements[if_node->outputs().at(i)] =
-            boolean_value_refinements[non_throwing_block->outputs().at(
-                i)];
+            boolean_value_refinements[non_throwing_block->outputs().at(i)];
       }
     }
     return;
@@ -182,14 +181,60 @@ void joinIfRefinements(
             boolean_value_refinements[true_v].true_refine(),
             true_block_refinements));
       }
-    } else if (boolean_value_refinements.count(true_v) &&
+    } else if (
+        boolean_value_refinements.count(true_v) &&
         boolean_value_refinements.count(false_v)) {
-      out = boolean_value_refinements[true_v]
-                .intersectBooleanRefinementMapping(
-                    boolean_value_refinements[false_v]);
+      out = boolean_value_refinements[true_v].intersectBooleanRefinementMapping(
+          boolean_value_refinements[false_v]);
     }
     boolean_value_refinements[if_n.outputs().at(i)] = out;
   }
+}
+
+bool handleCommonRefinentOperators(
+    Node* n,
+    std::unordered_set<Block*>& throwing_blocks,
+    std::unordered_map<Value*, BooleanRefinementMapping>& info) {
+  if (n->kind() == prim::RaiseException) {
+    throwing_blocks.insert(n->owningBlock());
+    return true;
+  }
+  if (n->kind() == aten::__not__ &&
+      n->inputs().at(0)->type()->cast<BoolType>()) {
+    // __not__(inp) -> reverse refinements
+    if (info.count(n->input())) {
+      auto& input_ref = info[n->input()];
+      info[n->output()] = BooleanRefinementMapping(
+          input_ref.false_refine(), input_ref.true_refine());
+    }
+    return true;
+  }
+  if (n->matches("aten::eq(bool a, bool b) -> bool") ||
+      (n->matches("aten::ne(bool a, bool b) -> bool"))) {
+    for (size_t const_index : {0, 1}) {
+      if (n->input(const_index)->node()->kind() != prim::Constant) {
+        continue;
+      }
+      auto const_input = constant_as<bool>(n->input(const_index)).value();
+      auto non_const_input = n->input(1 - const_index);
+      if (!info.count(non_const_input)) {
+        continue;
+      }
+      // value == False / value != True -> equivalent to __not__ value
+      // value == True / value != False -> equivalent to value
+      auto& input_ref = info[non_const_input];
+      if ((!const_input && n->kind() == aten::eq) ||
+          (const_input && n->kind() == aten::ne)) {
+        info[n->output()] = BooleanRefinementMapping(
+            input_ref.false_refine(), input_ref.true_refine());
+      } else {
+        info[n->output()] = BooleanRefinementMapping(
+            input_ref.true_refine(), input_ref.false_refine());
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 } // namespace jit
