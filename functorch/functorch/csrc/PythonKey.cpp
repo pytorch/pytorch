@@ -1,6 +1,7 @@
 #include <functorch/csrc/PythonKey.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+
 namespace at {
 namespace functorch {
 // The following are publically exposed as methods of Tensor
@@ -139,6 +140,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::string func_name = op.operator_name().name;
   std::string delimiter = "aten::";
   func_name = func_name.substr(func_name.find(delimiter) + delimiter.size());
+
   py::object torch_api_function =
       PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
 
