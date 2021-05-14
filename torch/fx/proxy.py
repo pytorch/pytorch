@@ -134,8 +134,13 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return an iterator.
         """
-        raise TraceError('Proxy object cannot be iterated. '
-                         'This can be attempted when used in a for loop or as a *args or **kwargs function argument.')
+        raise TraceError('Proxy object cannot be iterated. This can be '
+                         'attempted when the Proxy is used in a loop or'
+                         ' as a *args or **kwargs function argument. '
+                         'Consider factoring out the untraceable logic '
+                         'using torch.fx.wrap. See the torch.fx docs on'
+                         ' pytorch.org for a more detailed explanation '
+                         'of what types of control flow can be traced.')
 
     def keys(self, obj: 'Proxy') -> Any:
         """Called when a proxy object is has the keys() method called.
