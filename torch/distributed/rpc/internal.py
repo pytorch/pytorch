@@ -9,7 +9,6 @@ from enum import Enum
 
 import torch
 import torch.distributed as dist
-
 from torch._C._distributed_rpc import _get_current_rpc_agent
 
 
@@ -42,6 +41,13 @@ class _InternalRPCPickler:
         # Ignore type error because dispatch_table is defined in third-party package
         self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore[attr-defined]
         self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        # Used for registering customized picklers.
+        self._class_reducer_dict = {}
+
+    def _register_reducer(self, obj_class, reducer):
+        # For the same class, only register the reducer once.
+        if obj_class not in self._class_reducer_dict:
+            self._class_reducer_dict[obj_class] = reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -106,6 +112,11 @@ class _InternalRPCPickler:
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
+
+        # Install customized picklers.
+        for class_name in self._class_reducer_dict.keys():
+            p.dispatch_table[class_name] = self._class_reducer_dict[class_name]  # type: ignore[index]
+
         # Add dispatch pickling for ScriptModule if needed.
         if isinstance(obj, torch.jit.ScriptModule):
             # Ignore type error because dispatch_table is defined in third-party package
