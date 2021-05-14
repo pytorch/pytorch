@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <limits>
 #include <sstream>
 #include <cstring>
@@ -533,6 +534,16 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
   bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   return vector_case;
+}
+
+static inline bool checkMklDnnBf16GemmUsable(const Tensor& mat1, const Tensor& mat2, const Tensor& bias, const Tensor& result, const Scalar& alpha) {
+  return (
+    mkldnn_bf16_device_check() &&
+    mat1.scalar_type() == kBFloat16 && mat1.numel() != 0 &&
+    mat2.scalar_type() == kBFloat16 && mat2.numel() != 0 &&
+    (bias.defined() ? (bias.scalar_type() ==  kBFloat16 && bias.numel() != 0) : true) &&
+    (alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() != 0.0f &&
+    (result.defined() ? result.scalar_type() ==  kBFloat16 : true));
 }
 
 }}  // namespace at::native

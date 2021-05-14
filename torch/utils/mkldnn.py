@@ -14,6 +14,10 @@ class MkldnnLinear(torch.jit.ScriptModule):
             self.register_buffer(
                 'bias',
                 torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
+        self.weight_prepack()
+
+    def weight_prepack(self):
+        self.weight = torch._C._nn.mkldnn_linear_weight_pack(self.weight)
 
     @torch.jit.script_method
     def __getstate__(self):
@@ -27,9 +31,13 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
-        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        # for float input, mkldnn linear only process mkldnn input 
+        if x.dtype == torch.float:
+            x = x if x.is_mkldnn else x.to_mkldnn()
+        y = torch._C._nn.mkldnn_linear(x, self.weight, self.bias)
+        # mkldnn in, mkldnn out
+        if x.dtype == torch.float:
+            y = y if y.is_mkldnn else y.to_mkldnn()
         return y
 
 
