@@ -43,7 +43,7 @@ bool update_bytecode_version(
 void selective_copy(
     PyTorchStreamReader& reader,
     PyTorchStreamWriter& writer,
-    const std::vector<std::regex>& excluded_regex_patterns) {
+    const std::unordered_set<std::string>& excluded_patterns) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
     // Don't copy archive in excluded_files, usually archive `version` and
@@ -54,9 +54,8 @@ void selective_copy(
     // is one file with path to parent folder, for example:
     // `bytecode/140245072983168.storage`
     bool skip = false;
-    for (const auto& excluded_regex_pattern : excluded_regex_patterns) {
-      bool find = std::regex_match(record, excluded_regex_pattern);
-      if (find) {
+    for (const auto& excluded_pattern : excluded_patterns) {
+      if (record.find(excluded_pattern) != std::string::npos) {
         skip = true;
         break;
       }
@@ -145,14 +144,14 @@ bool backport_v5_to_v4(
   // patterns Skip the pattern that matches exact `constants.pkl`,
   // `bytecode.pkl` and `version`. Also skip all tensors under `constant` folder
   // and `bytecode` folder like `bytecode/140245072983168.storage`.
-  std::vector<std::regex> excluded_regex_patterns{
-      std::regex("constants.pkl"),
-      std::regex("constants\\/.*"),
-      std::regex("bytecode.pkl"),
-      std::regex("bytecode\\/.*"),
-      std::regex("version"),
+  std::unordered_set<std::string> excluded_patterns{
+      "constants.pkl",
+      "constants/",
+      "bytecode.pkl",
+      "bytecode/",
+      "version",
   };
-  selective_copy(reader, writer, excluded_regex_patterns);
+  selective_copy(reader, writer, excluded_patterns);
 
   // 3) write `bytecode` archive
   // Update the bytecode version in bytecode.pkl
