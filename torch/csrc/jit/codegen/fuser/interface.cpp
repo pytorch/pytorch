@@ -8,8 +8,13 @@
 #include <c10/util/Flags.h>
 #include <stdexcept>
 
+#ifdef FBCODE_CAFFE2
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(torch_jit_enable_cpu_fusion, true, "enable cpu fusion");
+#else
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
+#endif
 
 namespace torch {
 namespace jit {
@@ -46,6 +51,7 @@ bool canFuseOnGPU() {
 
 void overrideCanFuseOnCPU(bool value) {
   detail::cpu_fuser_enabled = value;
+  FLAGS_torch_jit_enable_cpu_fusion = value;
 }
 
 void overrideCanFuseOnGPU(bool value) {
