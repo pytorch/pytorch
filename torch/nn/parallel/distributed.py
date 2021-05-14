@@ -122,25 +122,36 @@ class _DDPSink(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         state_dict = ctx.state_dict
-        if state_dict['grad_enabled_in_fwd_pass'] and state_dict['require_backward_grad_sync']:
-            if state_dict['find_unused_parameters'] and not state_dict['static_graph']:
-                used_inputs = []
-                outputs_unused_indices = []
-                for idx, inp in enumerate(ctx.inputs):
-                    incoming_grad_for_output = grad_outputs[idx]
-                    if incoming_grad_for_output.sum().item() != 0:
-                        used_inputs.append(inp)
-                    else:
-                        outputs_unused_indices.append(idx)
-                ctx.reducer.prepare_for_backward(used_inputs)
-                ctx.reducer.set_per_iteration_param_outputs_unused(outputs_unused_indices)
-            else:
-                ctx.reducer.prepare_for_backward([])
-        # In static graph training, enqueue delay_all_reduce for the first
-        # iteration. This will allow DDP to bake in assumptions about how many
-        # times parameters get a gradient and calculate unused parameters.
-        if ctx.state_dict['static_graph'] and ctx.state_dict['num_iterations'] == 1:
+        static_graph_training = ctx.state_dict['static_graph']
+        if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+            return (None, None, *grad_outputs)
+        # Check all state that indicates we need to find unused parameters.
+        find_unused = all([
+            state_dict['grad_enabled_in_fwd'],
+            state_dict['require_backward_grad_sync'],
+            state_dict['find_unused_parameters'],
+            (not static_graph_training)
+        ])
+        if find_unused:
+            # First type of unused params: parameters that did not participate
+            # in computing model outputs.
+            # Second type of unused params: params taht won't get gradient
+            # because outputs they produced do not get used in computing loss
+            # for this call to backward.
+            used_inputs = []
+
+            outputs_unused_indices = []
+            for idx, inp in enumerate(ctx.inputs):
+                # TODO: this comparison can probably be sped-up by comparing to
+                # a pre-allocated cuda tensor instead of triggered d2h copy.
+                if grad_outputs[idx].sum().item() != 0:
+                    used_inputs.append(inp)
+                else:
+                    outputs_unused_indices.append(idx)
+            ctx.reducer.prepare_for_backward(used_inputs)
+            ctx.reducer.set_per_iteration_param_outputs_unused(outputs_unused_indices)
+
         return (None, None, *grad_outputs)
 
 class DistributedDataParallel(Module):
@@ -821,30 +832,29 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            grad_enabled = torch.is_grad_enabled()
-            if grad_enabled and self.require_backward_grad_sync:
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
+                if not self.find_unused_parameters or self.static_graph:
+                    self.reducer.prepare_for_backward([])
             else:
                 self.require_forward_param_sync = False
 
-        # This sink can help capture more accurate backward start time as well.
-        # Need to grab list of tensors from user output in order to pass
-        # to custom autograd function.
-        state_dict = {
-            'static_graph': self.static_graph,
-            'grad_enabled_in_fwd_pass': grad_enabled,
-            'require_backward_grad_sync': self.require_backward_grad_sync,
-            'find_unused_parameters': self.find_unused_parameters,
-            'num_iterations': self.num_iterations,
-        }
-        output_tensor_list, treespec = tree_flatten(output)
-        passthrough_tensor_list = _DDPSink.apply(
-            self.reducer,
-            state_dict,
-            *output_tensor_list
-        )
-        # Reconstruct output data structure.
-        output = tree_unflatten(passthrough_tensor_list, treespec)
+        if (self.find_unused_parameters and not self.static_graph) or (self.static_graph and self.num_iterations == 1):
+            state_dict = {
+                'static_graph': self.static_graph,
+                'grad_enabled_in_fwd': torch.is_grad_enabled(),
+                'require_backward_grad_sync': self.require_backward_grad_sync,
+                'find_unused_parameters': self.find_unused_parameters,
+                'num_iterations': self.num_iterations,
+            }
+            output_tensor_list, treespec = tree_flatten(output)
+            passthrough_tensor_list = _DDPSink.apply(
+                self.reducer,
+                state_dict,
+                *output_tensor_list,
+            )
+            # Reconstruct output data structure
+            output = tree_unflatten(passthrough_tensor_list, treespec)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -1197,6 +1207,8 @@ class DistributedDataParallel(Module):
 
                              We also provide an API called ``get_future`` to retrieve a
                              Future associated with the completion of ``c10d.ProcessGroup.work``.
+                             ``get_future`` is currently supported for MPI and also supported for most
+                             operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
             Grad bucket's tensors will not be predivided by world_size. User is responsible
@@ -1215,7 +1227,8 @@ class DistributedDataParallel(Module):
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
-            ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
+            ``get_future`` API supports NCCL, and partially GLOO and MPI backends (no support
+            for peer-to-peer operations like send/recv) and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
             ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
@@ -1394,7 +1407,7 @@ class DistributedDataParallel(Module):
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
-    def get_ddp_logging_data(self):
+    def _get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
@@ -1407,7 +1420,7 @@ class DistributedDataParallel(Module):
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
-    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
+    def _set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the

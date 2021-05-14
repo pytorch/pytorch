@@ -2136,7 +2136,7 @@ class TestNN(NNTestCase):
                 # Cayley map
                 # If X is skew-symmetric it returns an orthogonal matrix
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.solve(Id - X, Id + X).solution
+                return torch.linalg.solve(Id + X, Id - X)
 
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
@@ -2301,7 +2301,7 @@ class TestNN(NNTestCase):
             def forward(self, X):
                 A = X.triu(1)
                 A = A - A.T
-                return self.B @ torch.solve(self.id - A, self.id + A).solution
+                return self.B @ torch.linalg.solve(self.id + A, self.id - A)
 
         def get_model():
             model = torch.nn.Sequential(
@@ -2356,9 +2356,9 @@ class TestNN(NNTestCase):
                 super().__init__()
                 self.register_buffer("B", torch.eye(n))
 
-            def forward(self, A):
+            def forward(self, X):
                 Id = torch.eye(X.size(0))
-                return self.B @ torch.solve(Id - A, Id + A).solution
+                return self.B @ torch.linalg.solve(Id + X, Id - X)
 
             def is_orthogonal(self, X):
                 Id = torch.eye(X.size(0))
@@ -2448,7 +2448,7 @@ class TestNN(NNTestCase):
         class Orthogonal(nn.Module):
             def forward(self, X):
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.solve(Id - X, Id + X).solution
+                return torch.linalg.solve(Id + X, Id - X)
 
         model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", Skew())
@@ -12544,11 +12544,12 @@ class TestNNDeviceType(NNTestCase):
         self._test_module_empty_input(mod, inp)
 
     def test_one_hot(self, device):
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+        if self.device_type != 'cuda':  # cuda throws device assert for invalid data
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
 
         t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
