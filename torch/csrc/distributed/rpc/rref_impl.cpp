@@ -1,10 +1,12 @@
+#include <torch/csrc/distributed/rpc/rref_impl.h>
+
 #include <ATen/record_function.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -25,6 +27,16 @@ std::string getTypeStr(const c10::TypePtr& type) {
       return type->annotation_str();
   }
 }
+
+void blockCurrentStreams(const std::vector<c10::Event>& events) {
+  for (const c10::Event& event : events) {
+    c10::Device device{event.device_type(), event.device_index()};
+    c10::Stream stream =
+        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
+    event.block(stream);
+  }
+}
+
 } // namespace
 
 namespace torch {
@@ -230,6 +242,28 @@ RRefForkData UserRRef::fork() const {
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    std::vector<c10::Device> devices)
+    : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
+
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    c10::optional<IValue> value,
+    std::vector<c10::Device> devices)
+    : RRef(ownerId, rrefId, type) {
+  future_ = c10::make_intrusive<JitFuture>(
+      at::AnyClassType::get(), std::move(devices));
+
+  if (value.has_value()) {
+    future_->markCompleted(value.value());
+  }
+}
+
 const IValue& OwnerRRef::getValue() const {
   TORCH_CHECK(
       !getTimedOut(),
@@ -239,6 +273,9 @@ const IValue& OwnerRRef::getValue() const {
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.
   }
+  // Before accessing the value in this RRef, current CUDA streams must wait
+  // for pending CUDA operations that create the value.
+  blockCurrentStreams(events_);
   return future_->constValue();
 }
 
@@ -246,7 +283,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 
@@ -272,7 +309,7 @@ void OwnerRRef::recordAllStreams(
 void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
-      event.block(ctx->getStream(event.device_index()));
+      event.block(ctx->getStream(event.device()));
     }
   }
 }

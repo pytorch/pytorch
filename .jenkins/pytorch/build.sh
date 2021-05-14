@@ -184,6 +184,11 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
+# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
@@ -197,6 +202,10 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-build || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-build ]]; then
+  export USE_GLOO_WITH_OPENSSL=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
@@ -240,8 +249,11 @@ else
       cp build/.ninja_log dist
     fi
 
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
     # Build custom operator tests.
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
@@ -253,7 +265,7 @@ else
     assert_git_not_dirty
 
     # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
@@ -265,7 +277,7 @@ else
     assert_git_not_dirty
 
     # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"

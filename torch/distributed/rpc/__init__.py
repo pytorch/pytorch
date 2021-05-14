@@ -1,8 +1,8 @@
 import logging
 import threading
 import warnings
-
 from typing import Generator, Tuple
+
 import torch
 import torch.distributed as dist
 
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 _init_counter = 0
 _init_counter_lock = threading.Lock()
 
+
 def is_available():
     return hasattr(torch._C, "_rpc_init")
 
@@ -22,7 +23,7 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from . import api, backend_registry, functions
+    from torch._C._distributed_c10d import Store
     from torch._C._distributed_rpc import (
         _disable_jit_rref_pickle,
         _enable_jit_rref_pickle,
@@ -61,16 +62,18 @@ if is_available():
         _UNSET_RPC_TIMEOUT,
         _DEFAULT_RPC_TIMEOUT_SEC,
     )  # noqa: F401
-    from torch._C._distributed_c10d import Store
+
+    from . import api, backend_registry, functions
     from .api import *  # noqa: F401,F403
-    from .options import TensorPipeRpcBackendOptions  # noqa: F401
+    import numbers
+
+    import torch.distributed.autograd as dist_autograd
+
     from .backend_registry import BackendType
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
-    import torch.distributed.autograd as dist_autograd
-
-    import numbers
 
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
@@ -111,12 +114,14 @@ if is_available():
                 are available.
         """
 
-        if backend is not None and not isinstance(backend, backend_registry.BackendType):
-            raise TypeError(
-                "Argument backend must be a member of BackendType"
-            )
+        if backend is not None and not isinstance(
+            backend, backend_registry.BackendType
+        ):
+            raise TypeError("Argument backend must be a member of BackendType")
 
-        if rpc_backend_options is not None and not isinstance(rpc_backend_options, RpcBackendOptions):
+        if rpc_backend_options is not None and not isinstance(
+            rpc_backend_options, RpcBackendOptions
+        ):
             raise TypeError(
                 "Argument rpc_backend_options must be an instance of RpcBackendOptions"
             )
@@ -182,7 +187,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
-            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
+            store = dist.PrefixStore(str("rpc_prefix_{}".format(_init_counter)), store)
             _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
@@ -196,7 +201,6 @@ if is_available():
         _set_profiler_node_id(rank)
         # Initialize RPC.
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
-
 
     def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
         type_mapping = {
@@ -214,7 +218,6 @@ if is_available():
                         arg, arg_type, type(arg)
                     )
                 )
-
 
     def _init_rpc_backend(
         backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
@@ -241,7 +244,6 @@ if is_available():
         )
 
         api._init_rpc_states(rpc_agent)
-
 
     @api._require_initialized
     def _get_debug_info():
