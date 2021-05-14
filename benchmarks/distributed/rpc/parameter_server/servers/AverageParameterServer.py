@@ -9,9 +9,6 @@ from .ParameterServerBase import ParameterServerBase
 
 class AverageParameterServer(AverageParameterServerBase):
 
-    master_lock = threading.Lock()
-    locks = []
-
     def __init__(
         self,
         rank,
@@ -21,16 +18,12 @@ class AverageParameterServer(AverageParameterServerBase):
     ):
         super().__init__(rank)
 
+        self.lock = threading.Lock()
+
         self.rank = rank
         self.trainer_count = trainer_count
         self.lc = lc
         self.use_cuda_rpc = use_cuda_rpc
-
-        with AverageParameterServer.master_lock:
-            if len(AverageParameterServer.locks) == 0:
-                AverageParameterServer.locks = [None] * lc
-            if AverageParameterServer.locks[rank % lc] is None:
-                AverageParameterServer.locks[rank % lc] = threading.Lock()
 
         self.batch_number = 0
         self.futures = {}
@@ -84,7 +77,7 @@ class AverageParameterServer(AverageParameterServerBase):
         if not self.use_cuda_rpc:
             gradient = gradient.cuda(self.rank)
         fut = torch.futures.Future()
-        with AverageParameterServer.locks[self.rank % self.lc]:
+        with self.lock:
             if self.batch_number < received_batch_number:
                 self.batch_number = received_batch_number
                 self.clear_batch_state()
@@ -100,6 +93,6 @@ class AverageParameterServer(AverageParameterServerBase):
                 if param_loc_avg.is_sparse:
                     param_loc_avg = self.sparse_tensor_to_rpc_format(param_loc_avg)
                 for cur_fut in self.futures[param_loc]:
-                    cur_fut.set_result(param_loc_avg)
+                    cur_fut.set_result([param_loc_avg])
                 self.record_batch_end(self.param_key(param_loc))
         return fut
