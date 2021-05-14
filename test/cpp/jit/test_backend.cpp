@@ -24,7 +24,6 @@ TEST(BackendTest, ToBackend) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs).toTuple()->elements();
@@ -97,7 +96,6 @@ TEST(BackendTest, ToBackendNotAvailable) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs).toTuple()->elements();
@@ -126,7 +124,6 @@ TEST(BackendTest, TestCompiler) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs);
@@ -467,8 +464,6 @@ TEST(
   }
 
   std::stringstream ss;
-  c._save_for_mobile(
-      "/tmp/delegated_submodule_with_debug_info.ptl", ExtraFilesMap(), true);
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   /*
