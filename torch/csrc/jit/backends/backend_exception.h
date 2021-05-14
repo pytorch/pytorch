@@ -2,7 +2,7 @@
 #include <c10/util/Exception.h>
 
 namespace c10 {
-class C10_API BackendRuntimeException : public c10::Error {
+class TORCH_API BackendRuntimeException : public c10::Error {
  public:
   // Use debug_handle to throw exception
   BackendRuntimeException(

@@ -64,8 +64,8 @@ namespace jit {
  *
  *  Now how does BackendDebugHandleManager capture all of the above?
  *  By providing two API.
- *  1. getNextDebugHandleForInlinedCallStackPtr which given a Node*
- *     returns a unique debug handle, that will uniquely identify DebugInfoPair.
+ *  1. getNextDebugHandle which given a Node* returns a unique debug handle,
+ *     that will uniquely identify DebugInfoPair.
  *     and
  *  2. getCallStackPtrMap which returns the map
  *     [debug-handle, DebugInfoPair]
@@ -109,21 +109,7 @@ namespace jit {
  *  mul's source range and inlined CS both.
  */
 using DebugHandleType = int64_t;
-class TORCH_API BackendDebugHandleManager {
- public:
-  BackendDebugHandleManager() = default;
-  int64_t getNextDebugHandleForInlinedCallStackPtr(const Node* node);
-  std::unordered_map<DebugHandleType, DebugInfoPair> getCallStackPtrMap();
 
- private:
-  static std::atomic<DebugHandleType> unique_debug_handle_;
-  std::unordered_map<DebugHandleType, DebugInfoPair>
-      handles_to_inlined_callstack_ptrs_;
-};
-
-// Copied from torch/csrc/jit/api/object.h
-// to avoid including that file.
-using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 using BackendDebugInfoMapType =
     std::unordered_map<DebugHandleType, DebugInfoPair>;
 
@@ -135,20 +121,28 @@ using BackendDebugInfoMapType =
  * finishes, calling stopRecording will return debug info map from
  * debug_handle_manager
  */
-class BackendModuleDebugInfoRecorder {
+class TORCH_API BackendDebugInfoRecorder {
  public:
-  BackendModuleDebugInfoRecorder() throw();
-  ~BackendModuleDebugInfoRecorder();
+  BackendDebugInfoRecorder() = default;
+
+  int64_t getNextDebugHandle(const Node* node);
   // Reason this is not done as RAII is that work done in stopRecording
   // can throw, and throwing with dtor will call terminate and thus voids any
   // exception catching at a higher level.
   BackendDebugInfoMapType stopRecording();
 
  private:
-  BackendDebugHandleManager debug_handle_manager_;
+  static std::atomic<DebugHandleType> unique_debug_handle_;
+  BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
 
-BackendDebugHandleManager* getBackendDebugHandleManager();
+class WithBackendDebugInfoRecorder {
+ public:
+  WithBackendDebugInfoRecorder(BackendDebugInfoRecorder* recorder) throw();
+  ~WithBackendDebugInfoRecorder();
+};
+
+BackendDebugInfoRecorder* getBackendDebugInfoRecorder();
 
 } // namespace jit
 } // namespace torch
