@@ -1390,6 +1390,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
+
         self.assertTrue('typing.List[float]' in str(graph))
 
     def test_ellipsis(self):
@@ -1820,7 +1821,7 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
-        self.assertIn("-> typing.List[str]", traced._code)
+        self.assertIn("-> typing_List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
@@ -2293,8 +2294,8 @@ class TestFX(JitTestCase):
 
         traced(x, y)
 
-        FileCheck().check("typing.Tuple[()]")   \
-                   .check("typing.Tuple[str,typing.Tuple[()]]") \
+        FileCheck().check("_Tuple[()]")   \
+                   .check("typing_Tuple[str,typing_Tuple[()]]") \
                    .run(traced.code)
 
         scripted = torch.jit.script(traced)

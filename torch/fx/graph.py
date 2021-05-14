@@ -3,7 +3,6 @@ import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
-import typing as _python_typing
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -50,7 +49,6 @@ def _register_custom_builtin(name: str, import_str: str, obj: Any):
 _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
-_register_custom_builtin('typing', 'import typing', _python_typing)
 _register_custom_builtin('torch', 'import torch', torch)
 _register_custom_builtin('device', 'from torch import device', torch.device)
 _register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
@@ -124,9 +122,6 @@ class _Namespace:
 
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
-
-        if candidate.startswith("typing_"):
-            candidate = "typing." + candidate.partition("typing_")[2]
 
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
