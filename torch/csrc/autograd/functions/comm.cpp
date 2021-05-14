@@ -18,8 +18,10 @@ namespace torch {
 namespace autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
@@ -28,6 +30,7 @@ Scatter::Scatter(
       streams_(streams),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 Scatter::~Scatter() {}
 
 variable_list Scatter::apply(variable_list&& inputs) {
@@ -45,6 +48,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
     return device.index();
   });
   auto tensors = torch::cuda::scatter(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(input), device_indices, chunk_sizes_, dim_, streams_);
 
   std::vector<Variable> variables;
@@ -69,6 +73,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 Gather::~Gather() {}
 
 variable_list Gather::apply(variable_list&& inputs) {
@@ -124,7 +129,7 @@ variable_list Gather::apply(variable_list&& inputs) {
   // so no need for extra logic here
   at::Tensor variable;
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     // This is special logic for torch::cuda::gather!
     const auto destination_index =
         destination_device_.is_cpu() ? -1 : destination_device_.index();

@@ -308,10 +308,12 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 }
 
 void runCanonicalOptimizations(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  // Not sure if we have models running on mobile that require loop unrolling.
-  // Perhaps language/speech models? Conservatively setting that to false.
-  runOptimization(graph, false /* no loop unrolling */);
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    // Not sure if we have models running on mobile that require loop unrolling.
+    // Perhaps language/speech models? Conservatively setting that to false.
+    runOptimization(graph, false /* no loop unrolling */);
+  }
 }
 
 } // namespace
@@ -332,12 +334,14 @@ void insertPrePackedOps(script::Module& module) {
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  fuseReluWithPackedOps(graph);
-  fuseHardtanhWithPackedOps(graph);
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    fuseReluWithPackedOps(graph);
+    fuseHardtanhWithPackedOps(graph);
 
-  // Ignore user defined classes for later passes
-  ConstantPropagation(graph, true);
+    // Ignore user defined classes for later passes
+    ConstantPropagation(graph, true);
+  }
 }
 
 void FoldPrePackingOps(script::Module& m) {
@@ -352,9 +356,11 @@ void FoldPrePackingOps(script::Module& m) {
                 "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
-  auto graph = m.get_method("forward").graph();
-  // Folding requires a const propagation through user defined classes
-  ConstantPropagation(graph, false);
+  for (auto& method : m.get_methods()) {
+    auto graph = method.graph();
+    // Folding requires a const propagation through user defined classes
+    ConstantPropagation(graph, false);
+  }
 }
 
 script::Module optimizeForMobile(
@@ -368,8 +374,14 @@ script::Module optimizeForMobile(
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
+  // Many optimizations require a frozen module, but ConvBatchNorm requires
+  // an unfrozen module
+  cloned_module = freeze_module(cloned_module, preserved_methods);
+
   if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    // TODO fix duplication caused by referencing same op across multiple
+    // functions
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_methods);
     fusePrePackedLinearConvWithClamp(cloned_module);
@@ -377,7 +389,8 @@ script::Module optimizeForMobile(
   }
 
   if (!optimization_blocklist.count(
-          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS) &&
+      cloned_module.find_method("forward")) {
     // freeze again in case it was not done in previous optional passes
     cloned_module = freeze_module(cloned_module, preserved_methods);
     HoistConvPackedParams(cloned_module);
@@ -391,11 +404,18 @@ script::Module optimizeForMobile(
   runCanonicalOptimizations(cloned_module);
 
   if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
-    removeDropout(cloned_module);
+    for (const auto& method : cloned_module.get_methods()) {
+      auto graph = method.graph();
+      // Module must be not be in training mode but optimize calls eval()
+      removeDropout(graph);
+    }
   }
 
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
-    FuseAddRelu(cloned_module);
+    for (const auto& method : cloned_module.get_methods()) {
+      auto graph = method.graph();
+      FuseAddRelu(graph);
+    }
   }
   cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;

@@ -261,6 +261,7 @@ void SpatialBNOp<CUDAContext>::ComputeFusedParam(
   ComputeFusedParamCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C, static_cast<T>(epsilon_), scale, bias, mean, var, alpha, beta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -278,6 +279,7 @@ void SpatialBNOp<CUDAContext>::ComputeBatchMoments(
   ComputeBatchMomentsCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C, scale, batch_mean_sum, batch_var_sum, mean, var);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -310,6 +312,7 @@ void SpatialBNOp<CUDAContext>::ComputeRunningMomentsAndFusedParam(
           rstd,
           alpha,
           beta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -347,6 +350,7 @@ void SpatialBNGradientOp<CUDAContext>::
           alpha,
           beta,
           gamma);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -430,6 +434,7 @@ void SpatialBNGradientOp<CUDAContext>::ComputeScaleBiasGradientsAndFusedParams(
             alpha,
             beta,
             gamma);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -450,6 +455,7 @@ void SpatialBNGradientOp<CUDAContext>::ComputeXGradient(
     ComputeXGradientNCHWCUDAKernel<T>
         <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             C, M, HxW, dY, X, alpha, beta, gamma, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
     ComputeXGradientNHWCCUDAKernel<T>
@@ -457,6 +463,7 @@ void SpatialBNGradientOp<CUDAContext>::ComputeXGradient(
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(C, HxW, dY, X, alpha, beta, gamma, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 

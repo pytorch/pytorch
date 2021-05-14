@@ -20,6 +20,8 @@ from caffe2.proto import caffe2_pb2
 import numpy as np
 
 
+# pyre-fixme[13]: Pyre can't detect attribute initialization through the
+#    super().__new__ call
 class OpSpec(namedtuple("OpSpec", "type input output arg")):
 
     def __new__(cls, op_type, op_input, op_output, op_arg=None):

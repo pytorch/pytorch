@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
@@ -565,7 +566,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
     if (input->node()->kind() == prim::ListConstruct) {
       auto* lc_node = input->node();
       TypePtr elem =
-          lc_node->output()->type()->cast<ListType>()->getElementType();
+          lc_node->output()->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         // ListConstruct Int[] output case, we need to transform to ONNX
         // Concat to ensure the output is a single tensor(dynamic) type in
@@ -623,6 +624,47 @@ static void eraseListConstruct(Block* block, int opset_version) {
   eraseListConstruct(block->return_node(), opset_version);
 }
 
+static void eraseListUnpack(Block* block, int opset_version);
+
+static void eraseListUnpack(Node* n, int opset_version) {
+  for (auto b : n->blocks()) {
+    eraseListUnpack(b, opset_version);
+  }
+
+  if (n->kind() == prim::ListUnpack) {
+    if (opset_version < OPSET_VERSION_11) {
+      // onnx::SequenceAt was introduced in onnx opset version 11
+      throw std::runtime_error(
+          "Unsupported: ONNX export of prim::ListUnpack in opset " +
+          c10::to_string(opset_version) + ". Please try opset version 11.");
+    }
+
+    auto g = n->owningGraph();
+    for (size_t i = 0; i < n->outputs().size(); ++i) {
+      auto seq_idx_n = g->create(onnx::Constant, 1);
+      seq_idx_n->t_(attr::value, at::scalar_to_tensor(at::Scalar(int64_t(i))));
+      seq_idx_n->insertBefore(n);
+
+      auto seq_at_n = g->create(onnx::SequenceAt, 1);
+      seq_at_n->addInput(n->input());
+      seq_at_n->addInput(seq_idx_n->output());
+      seq_at_n->output()->setType(n->output(i)->type());
+      seq_at_n->insertBefore(n);
+      n->output(i)->replaceAllUsesWith(seq_at_n->output());
+    }
+  }
+}
+
+static void eraseListUnpack(Block* block, int opset_version) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    Node* n = *it;
+    ++it;
+
+    eraseListUnpack(n, opset_version);
+  }
+}
+
 // For ops such as meshgrid where output is a list of Tensors
 // (returns prim::ListConstruct), we need to unpack the list
 // before the pass which deletes ListConstruct.
@@ -667,7 +709,26 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Node* origLogSoftmaxNode;
+
+      // Check for patterns especially in cases with autocasting enabled
+      // in which a cast node is inserted before the NegativeLogLikelihoodLoss
+      // node and this causes the patterns below not to be recognizable by the
+      // fuseLogSoftmaxNllLoss function
+      // For example if the input is 2D
+      // graph(%input : Half(3, 5),
+      // %target : Long(3)):
+      // %4 : Half(3, 5) = onnx::LogSoftmaxaxis=1
+      // %8 : Float = onnx::Cast[to=1](%4)
+      // %9 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+      // return (%8)
+      Node* castNode = nullptr;
+      if (prev->kind() == onnx::Cast) {
+        castNode = prev;
+        prev = prev->input(0)->node();
+      }
+
       if (prev->kind() == onnx::LogSoftmax) {
         // if the input is 2D
         // graph(%input : Float(3, 5),
@@ -675,7 +736,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
         // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
         // return (%8)
-        origLogSoftmaxNode = it->input(0)->node();
+        origLogSoftmaxNode = prev;
       } else if (
           prev->kind() == onnx::Transpose &&
           prev->input(0)->node()->kind() == onnx::LogSoftmax) {
@@ -715,10 +776,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
         // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22,
         // %26) return (%30)
-        TORCH_INTERNAL_ASSERT(
-            prev->input(1)->node()->input(0)->node()->kind() == onnx::Gather);
-        TORCH_INTERNAL_ASSERT(
-            prev->input(1)->node()->input(1)->node()->kind() == onnx::Gather);
         origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
         TORCH_INTERNAL_ASSERT(transpose->kind() == onnx::Transpose);
@@ -749,6 +806,19 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         }
       } else {
         continue;
+      }
+
+      // If the pattern indeed consists of a cast node before the
+      // NegativeLogLikelihoodLoss node, place a cast node in the beginning
+      // of the pattern instead
+      if (castNode != nullptr) {
+        auto onnx_type = castNode->i(attr::to);
+        Node* cast_node = b->owningGraph()->create(onnx::Cast, 1);
+        cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
+        cast_node->i_(attr::to, onnx_type);
+        cast_node->insertBefore(origLogSoftmaxNode);
+        origLogSoftmaxNode->replaceInputWith(
+            origLogSoftmaxNode->inputs().at(0), cast_node->output());
       }
 
       Node* softmaxCrossEntropyNode = b->owningGraph()->create(
@@ -820,6 +890,28 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+static void insertIdentityForInputUsedAsOutput(Block* b) {
+  // Resolving limitation from ONNX that the block input cannot be used directly
+  // as block output. Inserting an Identity node inside
+  // the block, linking with the value as workaround.
+  for (auto out : b->outputs()) {
+    auto n = out->node();
+    if (nullptr != n && n->kind() == prim::Param) {
+      Node* id_node = b->owningGraph()->create(onnx::Identity);
+      id_node->insertBefore(b->return_node());
+      id_node->addInput(out);
+      id_node->output()->setType(out->type());
+      b->return_node()->replaceInputWith(out, id_node->output());
+    }
+  }
+
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      insertIdentityForInputUsedAsOutput(child_block);
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -861,8 +953,14 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
+  EliminateDeadCode(
+      graph->block(),
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  eraseListUnpack(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
+  insertIdentityForInputUsedAsOutput(graph->block());
 }
 
 } // namespace jit

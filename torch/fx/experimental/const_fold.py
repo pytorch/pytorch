@@ -2,7 +2,7 @@ import operator
 from typing import Dict, Set, List, Optional
 
 import torch.fx
-from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.passes.split_module import split_module
 import re
 
 

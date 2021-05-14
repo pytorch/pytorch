@@ -157,6 +157,21 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
           return false;
         }
         break;
+      case AttributeKind::c:
+        if (n1->c(attr_name) != n2->c(attr_name)) {
+          GRAPH_DEBUG(
+              "Nodes did not match because attribute '",
+              attr_name.toQualString(),
+              "' did not match:",
+              n1->c(attr_name),
+              " != ",
+              n2->c(attr_name),
+              " \n",
+              *n1,
+              *n2);
+          return false;
+        }
+        break;
       case AttributeKind::f:
         if (n1->f(attr_name) != n2->f(attr_name)) {
           GRAPH_DEBUG(

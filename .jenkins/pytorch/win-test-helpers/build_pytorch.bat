@@ -22,10 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses )
-
-git submodule sync --recursive
-git submodule update --init --recursive
+if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses typing_extensions )
 
 :: Override VS env here
 pushd .
@@ -110,12 +107,18 @@ if "%REBUILD%" == "" (
     aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
   )
 )
+:: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
+if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
+   set BUILD_SPLIT_CUDA=ON
+)
 
 python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+
+    :: export test times so that potential sharded tests that'll branch off this build will use consistent data
+    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
   )
 )
-

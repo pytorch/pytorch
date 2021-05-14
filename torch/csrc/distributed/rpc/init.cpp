@@ -120,7 +120,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
           .def(
-              "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
+              "join",
+              &RpcAgent::join,
+              py::call_guard<py::gil_scoped_release>(),
+              py::arg("shutdown") = false)
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
@@ -140,6 +143,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_device_map",
+              &RpcAgent::getDeviceMap,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_debug_info",
@@ -167,6 +174,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
               JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
               lead to errors.
+
+          Args:
+              value (object): The value to be wrapped by this RRef.
+              type_hint (Type, optional): Python type that should be passed to
+                  ``TorchScript`` compiler as type hint for ``value``.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -402,13 +414,17 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               // retrieve cached type py::object
               &PyRRef::getRRefType,
               py::arg("timeout") = kUnsetRpcTimeout,
+              py::arg("blocking") = true,
               R"(
-                  Returns the type of the data object referenced by this
-                  ``RRef``. On the owner, this is same as
-                  ``type(rref.local_value())``. On a user, this will trigger an
-                  RPC to fetch the ``type`` object from the owner. After this
-                  function is run once, the ``type`` object is cached by the
-                  ``RRef``, and subsequent invocations no longer trigger RPC.
+                  If ``blocking=True``, returns the type of the data object
+                  referenced by this ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. Otherwise, returns a future to
+                  this result. On a user, this will trigger an RPC to fetch the
+                  ``type`` object from the owner. After this function is run
+                  once, the ``type`` object is cached by the ``RRef``, and
+                  subsequent invocations no longer trigger RPC. Note that this is
+                  true regardless of the ``blocking`` argument of subsequent
+                  calls.
 
                   Args:
                     rref (torch.distributed.rpc.RRef): The RRef to get type of.
@@ -417,6 +433,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                           this timeframe, an exception indicating so will be
                           raised. If this argument is not provided, the default
                           RPC timeout will be used.
+                    blocking (bool, optional): Whether to synchronously wait on
+                          the RPC triggered by the first call and return the
+                          type. If ``False``, will return a future. Default is
+                          ``True``.
               )")
           .def(
               "_get_future",
@@ -531,16 +551,20 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init([](std::string workerName,
+      .def(py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                       std::string workerName,
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
-        return std::make_unique<ProcessGroupAgent>(
-            std::move(workerName),
-            pg,
-            numSendRecvThreads,
-            rpcTimeout,
-            std::make_unique<RequestCallbackImpl>());
+        return std::shared_ptr<ProcessGroupAgent>(
+            new ProcessGroupAgent(
+                store,
+                std::move(workerName),
+                pg,
+                numSendRecvThreads,
+                rpcTimeout,
+                std::make_unique<RequestCallbackImpl>()),
+            impl::destroy_without_gil<ProcessGroupAgent>);
       }))
       .def(
           "get_worker_info",
@@ -563,9 +587,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_get_device_map",
+          (DeviceMap(ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
+              ProcessGroupAgent::getDeviceMap,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
@@ -587,14 +617,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               optional<std::vector<std::string>>,
               float,
               std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
+              std::unordered_map<std::string, DeviceMap>,
+              std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
-          py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>())
+          py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
+          py::arg("devices") = std::vector<c10::Device>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -607,7 +638,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "device_maps",
           &TensorPipeRpcBackendOptions::deviceMaps,
           R"(The device map locations.)")
-      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
+      .def_readwrite(
+          "devices",
+          &TensorPipeRpcBackendOptions::devices,
+          R"(All devices used by the local agent.)")
+      .def("_set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
@@ -620,14 +655,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       int worldSize,
                       c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
-            return std::make_shared<TensorPipeAgent>(
-                store,
-                std::move(selfName),
-                selfId,
-                worldSize,
-                std::move(processGroup),
-                std::move(opts),
-                std::make_unique<RequestCallbackImpl>());
+            return std::shared_ptr<TensorPipeAgent>(
+                new TensorPipeAgent(
+                    store,
+                    std::move(selfName),
+                    selfId,
+                    worldSize,
+                    std::move(processGroup),
+                    std::move(opts),
+                    std::make_unique<RequestCallbackImpl>()),
+                impl::destroy_without_gil<TensorPipeAgent>);
           }),
           py::arg("store"),
           py::arg("name"),
@@ -638,7 +675,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &TensorPipeAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &TensorPipeAgent::shutdown,
@@ -662,6 +700,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_device_map",
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
+              TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_reverse_device_maps",
@@ -742,26 +785,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
-        return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(
-                dst,
-                pickledPythonUDF,
-                tensors,
-                rpcTimeoutSeconds,
-                isAsyncExecution),
-            /* unwrap_func */ [](const py::object& value) {
-              py::gil_scoped_release release;
-              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-              // This will unwrap RemoteException and raise the contained
-              // server-side Python exception on client side. A caveat here is
-              // that the exception must be raise in the client thread calling
-              // the pybind "wait" API, so that it can be correctly shown to
-              // user. A wrong way is to raise it in RPC server thread, where
-              // the exception would be swallowed in the ThreadPool task, and
-              // also no pybind handling code can help shown the Python
-              // exception.
-              pythonRpcHandler.handleException(value);
-            });
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
+            dst,
+            pickledPythonUDF,
+            tensors,
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 

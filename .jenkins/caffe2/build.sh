@@ -2,6 +2,7 @@
 
 set -ex
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
@@ -210,7 +211,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  pip install --user dataclasses
+  pip install --user dataclasses typing_extensions
 
   $PYTHON setup.py install --user
 

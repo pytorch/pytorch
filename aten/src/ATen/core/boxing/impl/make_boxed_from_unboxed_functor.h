@@ -9,6 +9,59 @@ namespace c10 {
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
 class OperatorHandle;
 
+/*
+ * [Note: Argument forwarding in the dispatcher]
+ *
+ * The dispatcher uses a somewhat unusual way to forward arguments through several layers of
+ * wrapper functions. This can be confusing because an experienced C++ programmer would look at this
+ * and think "oh this is supposed to be forwarding a universal reference but the && is missing. This is a bug.".
+ * It is not a bug. The common way in C++ to forward arguments is to use universal references:
+ *
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ * but that relies on inferring the correct reference type (i.e. value vs & vs &&) from the argument.
+ * In our case, we cannot rely on the argument as supplied by the caller, because that could infer a
+ * different reference type than was used in the kernel function. The correct reference type
+ * is dictated by the kernel signature and must be identical since we cast function pointers
+ * through void* pointers and mismatches would be UB. So we need a forwarding pattern that determines
+ * the reference type to use by looking at the explicitly supplied operator signature, not by looking at
+ * the argument we're calling it with.
+ *
+ * What does std::forward do, exactly?
+ * ------------------------------------
+ * std::forward<T>(t) is a way to cast t to the reference type supplied in T.
+ * Let's assume decay_t<T> == U and T is either U or some reference of U.
+ *  - std::forward<T&>(t) will return U&, no matter what kind of reference t is.
+ *  - std::forward<T&&>(t) will return U&&, no matter what kind of reference t is.
+ *  - std::forward<T>(t) will return U&& (not U!), no matter what kind of reference t is.
+ *
+ * For universal references, that means that in the following function
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ *  - when called with arg being a rvalue reference or non-reference value, T gets inferred to be
+ *    a non-reference U, and std::forward<T>(t) will return U&&, correctly moving the argument.
+ *  - when called with arg behind a lvalue reference, T gets inferred to be U& because that's the only
+ *    way to match the signature (in C++, a type that is (T&)&& will collapse to T&).
+ *    That means std::forward<T>(t) will return U& and the value will not be moved but passed on as
+ *    a lvalue reference.
+ *
+ * How do we use that?
+ * ------------------------------------
+ * But std::forward can also be used outside of the common "universal forwarding" pattern to change
+ * reference types. So instead of following the common C++ pattern, we notice what
+ * std::forward<T>() actually does, and that is it takes a value and changes its reference to the
+ * type of reference passed in as T. If we don't infer T but explicitly specify it, we can use this
+ * to forward based on an explicitly specified reference type instead of the inferred argument type.
+ *
+ * This is why many of the dispatcher functions look like
+ * > template<class T> func(T t) { func2<T>(std::forward<T>(t)); }
+ * instead of the common
+ * > template<class T> func(T&& t) { func2(std::forward<T>(t)); }
+ *
+ * and are expected to be called by explicitly specifying the template parameters in a way that matches
+ * the expected operator signature at each call site.
+ */
+
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
  *
@@ -249,11 +302,50 @@ namespace impl {
 
   // ivalue_to_arg
 
+  template<class T>
+  struct decay_if_not_tensor final {
+    using type = std::decay_t<T>;
+  };
+
+  template<>
+  struct decay_if_not_tensor<at::Tensor&> final {
+    using type = at::Tensor&;
+  };
+
+  template<>
+  struct decay_if_not_tensor<const at::Tensor&> final {
+    using type = const at::Tensor&;
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg final {
-    static T call(IValue&& v) {
+    static decltype(auto) call(IValue& v) {
       assert_is_valid_input_type<T, AllowDeprecatedTypes>();
       return std::move(v).to<T>();
+    }
+  };
+
+  // The following two specializations take advantage of specialized
+  // `toTensor()` overloads on IValue to avoid copying.
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::Tensor&, AllowDeprecatedTypes> final {
+    // We cannot use the default implementation if they asked for a
+    // `at::Tensor&` because it moves from the IValue, so it can't get
+    // an lvalue reference.
+    static at::Tensor& call(IValue& v) {
+      // Tensor& is valid, don't bother asserting
+      return v.toTensor();
+    }
+  };
+
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<const at::Tensor&, AllowDeprecatedTypes> final {
+    // We should not use the default implementation if they asked for
+    // a `const at::Tensor&` because it moves from the IValue and they
+    // didn't ask for that.
+    static const at::Tensor& call(IValue& v) {
+      // const Tensor& is valid, don't bother asserting
+      return v.toTensor();
     }
   };
 
@@ -261,8 +353,8 @@ namespace impl {
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
     // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
-    static std::vector<T> call(IValue&& v) {
-      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static std::vector<T> call(IValue& v) {
+      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
     }
   };
   template<class T, bool AllowDeprecatedTypes>
@@ -270,8 +362,8 @@ namespace impl {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
     // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
     // to optional<ArrayRef<T>>.
-    static OptionalArray<T> call(IValue&& v) {
-      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
   };
 
@@ -285,6 +377,10 @@ namespace impl {
       assert_is_valid_output_type<T, AllowDeprecatedTypes>();
       return c10::ivalue::from(std::move(v));
     }
+    static IValue copy(const T& v) {
+      assert_is_valid_output_type<T, AllowDeprecatedTypes>();
+      return IValue(v);
+    }
   };
 
   // Special case to allow kernels to return `Tensor&`.
@@ -294,53 +390,102 @@ namespace impl {
     static IValue call(at::Tensor& v) {
       return c10::ivalue::from(v);
     }
+    static IValue copy(at::Tensor& v) {
+      return IValue(v);
+    }
   };
 
-  // reference_cast allows casting references, e.g. T&& to T&:
-  //    T make_t() {}
-  //    T& v = reference_cast<T&>(make_t()); // make_t() returns a T&& which is cast to T&.
-  // If the target is a non-reference value, then it gets moved:
-  //    T make_t() {}
-  //    T v = reference_cast<T>(make_t()); // no copies involved
-  // The first example actually also shows why reference_cast is usually a very bad idea. v now is a lvalue
-  // reference to a dead temporary. Use with caution!
-  template<class T, class U>
-  T reference_cast(U&& t) {
-      return std::forward<T>(t);
-  }
+  // wrap_kernel_functor_unboxed_
 
-  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
+  template<class KernelFunctor, class OpSignature>
+  struct wrap_kernel_functor_unboxed_ final {};
+
+  // This specialization is for kernels with a first argument that is NOT of type DispatchKeySet
+  // This includes kernels with 0 arguments.
+  template<class KernelFunctor, class ReturnType, class... ParameterTypes>
+  struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(ParameterTypes...)> final {
+    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
+      "Return type mismatch");
+    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
+      "Parameter types mismatch");
+
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
+    static ReturnType call(OperatorKernel* functor, DispatchKeySet, ParameterTypes... args) {
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      // Note [Plumbing Keys Through The Dispatcher 2]
+      // See Note [Plumbing Keys Through The Dispatcher] for the background.
+      // This functor explicitly takes in a dispatchKeySet and drops it on the floor- it does not forward it to the registered kernel.
+      //
+      // This is due to the calling convention within the dispatcher, which expects all registered kernels to have a first argument of type
+      // DispatchKeySet.
+      // This is not the case for pretty much all manually written kernels, however- this functor serves to separate the calling convention
+      // of the dispatcher from the calling convention of manually written kernels.
+      return (*functor_)(std::forward<ParameterTypes>(args)...);
+    }
+  };
+
+  // This specialization is for kernels with a first argument of type DispatchKeySet
+  template<class KernelFunctor, class ReturnType, class... ParameterTypes>
+  struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(DispatchKeySet, ParameterTypes...)> final {
+    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
+      "Return type mismatch");
+    static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
+      "Parameter types mismatch");
+
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
+    static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
+      // See Note [Plumbing Keys Through The Dispatcher 2] for details.
+      return (*functor_)(dispatchKeySet, std::forward<ParameterTypes>(args)...);
+    }
+  };
+
+  template<class KernelFunctor>
+  using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
+
+  // call_functor_with_args_from_stack
+
+  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices,  typename... ArgTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>, guts::typelist::typelist<ArgTypes...>*) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
-    /*
-     * For ops that take "Tensor&" as an argument, ivalue_to_arg would still return a "Tensor" by value
-     * and C++ doesn't allow us to call (*functor) with a temporary "Tensor" when it expects "Tensor&".
-     * We use reference_cast to explicitly cast our temporary to a "Tensor&" and make it pass the compiler.
-     * Even though usually dangerous, this is ok here because temporaries live until the end of the statement.
-     * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
-     */
-    using ArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
-      ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
-        std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
-    ))...);
+    // We're explicitly filtering out DispatchKeySet from the argument list.
+    // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+    // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+    // See Note [Plumbing Keys Through The Dispatcher] for the background.
+    return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet,
+      ivalue_to_arg<typename decay_if_not_tensor<ArgTypes>::type, AllowDeprecatedTypes>::call(
+        torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices))
+    )...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
-    constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
-    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
+  call_functor_with_args_from_stack(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack) {
+    // We're explicitly filtering out DispatchKeySet from the argument list.
+    // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+    // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+    // See Note [Plumbing Keys Through The Dispatcher] for the background.
+    using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<Functor>::parameter_types;
+    constexpr size_t num_ivalue_args = guts::typelist::size<ArgTypes>::value;
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>(), static_cast<ArgTypes*>(nullptr));
   }
 
   // push_outputs
 
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
+    // Contrary to [Note: Argument forwarding in the dispatcher], we use OutputType&& here
+    // to avoid one extra call to the move constructor in this case. This is still not a
+    // universal reference though because OutputType is an explicitly specified class
+    // template parameter.
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
+    }
+    static void copy(const OutputType& output, Stack* stack) {
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
@@ -348,16 +493,25 @@ namespace impl {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
+    static void copy(const std::tuple<OutputTypes...>& output, Stack* stack) {
+      copy_(output, stack, std::make_index_sequence<sizeof...(OutputTypes)>());
+    }
 
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
+    template<size_t... indices>
+    static void copy_(const std::tuple<OutputTypes...>& output, Stack* stack, std::index_sequence<indices...>) {
+      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
+    }
   };
   template<bool AllowDeprecatedTypes>
   struct push_outputs<void, AllowDeprecatedTypes> final {
     static void call(int /*dummy*/, Stack* /*stack*/) {
+    }
+    static void copy(int /*dummy*/, Stack* /*stack*/) {
     }
   };
 
@@ -368,47 +522,45 @@ namespace impl {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value,
       "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
-      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-
+    static void call(OperatorKernel* functor, const OperatorHandle&, DispatchKeySet dispatchKeySet, Stack* stack) {
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
+      // We're explicitly filtering out DispatchKeySet from the argument list.
+      // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+      // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+      // See Note [Plumbing Keys Through The Dispatcher] for the background.
+      using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
+      constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
+#ifdef __cpp_if_constexpr
+      if constexpr (has_outputs) {
+#else
       guts::if_constexpr<has_outputs>([&] (auto delay_check) {
+#endif
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
+#ifdef __cpp_if_constexpr
+        using ReturnType_ = std::decay_t<ReturnType>;
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
+#else
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
-        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, delay_check(stack));
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
+#endif
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+#ifdef __cpp_if_constexpr
+      } else {
+#else
       }, /* else */ [&] {
-        call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
+#endif
+        call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
+#ifdef __cpp_if_constexpr
+      }
+#else
       });
+#endif
     }
   };
-
-  // wrap_kernel_functor_unboxed_
-
-  template<class KernelFunctor, class OpSignature>
-  struct wrap_kernel_functor_unboxed_ final {};
-
-  template<class KernelFunctor, class ReturnType, class... ParameterTypes>
-  struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(ParameterTypes...)> final {
-    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
-      "Return type mismatch");
-    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
-      "Parameter types mismatch");
-
-    static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
-      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-      return (*functor_)(std::forward<ParameterTypes>(args)...);
-    }
-  };
-
-  template<class KernelFunctor>
-  using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
-
 } // namespace impl
 
 } // namespace c10

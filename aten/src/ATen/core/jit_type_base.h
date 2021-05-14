@@ -21,7 +21,7 @@ namespace c10 {
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexDoubleType)      \
+  _(ComplexType)      \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -162,7 +162,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T>
   const T* castRaw() const {
     if (T::Kind == kind()) {
-      return static_cast<T*>(this);
+      return static_cast<const T*>(this);
     }
     return nullptr;
   }

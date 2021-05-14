@@ -80,7 +80,7 @@ def _create_batched_inputs(
     batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [arg if in_dim is None else
-                      torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                      torch._add_batch_dim(arg, in_dim, vmap_level)
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
@@ -100,8 +100,8 @@ def _unwrap_batched(
     # with '_', see #40397.
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
-        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)  # type: ignore
+        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
+    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
                  for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
@@ -153,15 +153,20 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     examples with `vmap(func)`. vmap can also be used to compute batched
     gradients when composed with autograd.
 
+    .. note::
+        We are actively developing a different and improved vmap prototype
+        `here. <https://github.com/zou3519/functorch>`_ The improved
+        prototype is able to arbitrarily compose with gradient computation.
+        Please give that a try if that is what you're looking for.
+
+        Furthermore, if you're interested in using vmap for your use case,
+        please `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
+        We're interested in gathering feedback from early adopters to inform
+        the design.
+
     .. warning::
         torch.vmap is an experimental prototype that is subject to
         change and/or deletion. Please use at your own risk.
-
-    .. note::
-        If you're interested in using vmap for your use case, please
-        `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
-        We're interested in gathering feedback from early adopters to inform
-        the design.
 
     Args:
         func (function): A Python function that takes one or more arguments.
@@ -245,7 +250,10 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
         'before the call to `vmap`.',
         stacklevel=2)
+    return _vmap(func, in_dims, out_dims)
 
+# A version of vmap but without the initial "experimental prototype" warning
+def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)

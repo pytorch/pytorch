@@ -5,7 +5,7 @@ set -eu -o pipefail
 export ANDROID_NDK_HOME=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
-export GRADLE_VERSION=4.10.3
+export GRADLE_VERSION=6.8.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 
@@ -35,7 +35,9 @@ else
   echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
 
   echo "SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" >> $GRADLE_PROPERTIES
+  echo "mavenCentralRepositoryUsername=${SONATYPE_NEXUS_USERNAME}" >> $GRADLE_PROPERTIES
   echo "SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" >> $GRADLE_PROPERTIES
+  echo "mavenCentralRepositoryPassword=${SONATYPE_NEXUS_PASSWORD}" >> $GRADLE_PROPERTIES
 
   echo "signing.keyId=${ANDROID_SIGN_KEY}" >> $GRADLE_PROPERTIES
   echo "signing.password=${ANDROID_SIGN_PASS}" >> $GRADLE_PROPERTIES

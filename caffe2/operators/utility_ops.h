@@ -63,6 +63,7 @@ class IsNanOp final : public Operator<Context> {
     auto* Y = Output(0, X.sizes(), at::dtype<uint8_t>());
     const auto* X_data = X.template data<T>();
     uint8_t* Y_data = Y->template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < X.numel(); i++) {
       Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
     }
@@ -367,13 +368,16 @@ class WeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     const int size = X0.numel();
     // Note: removed Aliasing check, since Output already has
     // caching capability
     auto* Y = Output(0, X0.sizes(), at::dtype<T>());
     T* Y_data = Y->template mutable_data<T>();
+    if (X0.numel() == 0) {
+      return true;
+    }
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
     if (input_size == 2) {
       math::Scale<float, T>(
           size,
@@ -546,6 +550,9 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
+    if (X0.numel() == 0) {
+      return true;
+    }
     CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
@@ -667,6 +674,7 @@ class ScatterAssignOp : public Operator<Context> {
     const auto dataType = TypeMetaToDataType(data.dtype());
     const auto slicesType = TypeMetaToDataType(slices.dtype());
     const auto indicesType = TypeMetaToDataType(indices.dtype());
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
@@ -1235,6 +1243,7 @@ class GatherRangesOp : public Operator<Context> {
     auto* outputLengthsPtr = outputLengths->template mutable_data<int32_t>();
     size_t start = 0;
     size_t blockSize = ranges.size_from_dim(1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < batchSize; ++i) {
       auto end = start + blockSize;
       outputLengthsPtr[i] = accumulate(rangesData, start, end);
@@ -1308,6 +1317,7 @@ class LengthsGatherOp : public Operator<Context> {
     const auto* indices_data = indices.template data<Index>();
 
     int64_t total_length = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       CAFFE_ENFORCE_LT(idx, lengths.numel());

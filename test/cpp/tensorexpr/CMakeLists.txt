@@ -4,8 +4,11 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_aten.cpp
   ${TENSOREXPR_TEST_ROOT}/test_boundsinference.cpp
   ${TENSOREXPR_TEST_ROOT}/test_conv.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_cpp_codegen.cpp
   ${TENSOREXPR_TEST_ROOT}/test_expr.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_external_calls.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ir_printer.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_ir_verifier.cpp
   ${TENSOREXPR_TEST_ROOT}/test_kernel.cpp
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp

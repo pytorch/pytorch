@@ -155,6 +155,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
@@ -511,9 +512,20 @@ struct TORCH_API CastValue : public BuiltinFunction {
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     if (args.size() == 1 && kwargs.size() == 0) {
+      auto len_op = std::make_shared<BuiltinFunction>(aten::len, at::nullopt);
+      auto gt_op = std::make_shared<BuiltinFunction>(aten::gt, at::nullopt);
+      auto zero = m.graph()->insertConstant(0);
+
       auto v = args[0].value(*m.graph());
       if (v->type()->isSubtypeOf(type_)) {
         return std::make_shared<SimpleValue>(v);
+      } else if (
+          *type_ == *BoolType::get() &&
+          (v->type()->isSubtypeOf(AnyListType::get()) ||
+           v->type()->isSubtypeOf(StringType::get()) ||
+           v->type()->cast<DictType>())) {
+        auto len = len_op->call(loc, m, {v}, {}, 1);
+        return gt_op->call(loc, m, {len->asValue(loc, m), zero}, {}, 1);
       }
     }
     return BuiltinFunction::call(loc, m, args, kwargs, n_binders);

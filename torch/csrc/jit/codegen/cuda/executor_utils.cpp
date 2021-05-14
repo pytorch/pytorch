@@ -281,6 +281,9 @@ NvrtcFunction nvrtcCompile(
 
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 40200
+  args.push_back("-hip-pch");
+#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if CUDA_VERSION >= 11010
@@ -303,10 +306,16 @@ NvrtcFunction nvrtcCompile(
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
+#ifdef __HIP_PLATFORM_HCC__
+    TORCH_WARN_ONCE(
+        "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
+#else
     args.push_back("--fmad=false");
+#endif
   }
 
   const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t jit_opt_level;
 
   std::vector<CUjit_option> options;
@@ -336,6 +345,7 @@ NvrtcFunction nvrtcCompile(
         program, args.size(), args.data());
 
     if (result != NVRTC_SUCCESS) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t logsize;
       at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
       std::vector<char> log(logsize);
@@ -398,6 +408,7 @@ NvrtcFunction nvrtcCompile(
       myPtxFile.close();
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUlinkState linkState;
 
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
@@ -413,7 +424,9 @@ NvrtcFunction nvrtcCompile(
         options.data(),
         option_vals.data()));
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t cubinSize;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* cubin;
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkComplete(
         linkState, &cubin, &cubinSize));

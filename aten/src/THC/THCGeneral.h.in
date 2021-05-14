@@ -13,6 +13,10 @@
 #include <cusparse.h>
 
 #cmakedefine USE_MAGMA
+/* Needed for hipMAGMA to correctly identify implementation */
+#if defined(USE_MAGMA) && defined(__HIP_PLATFORM_HCC__)
+#define HAVE_HIP 1
+#endif
 
 #ifndef THAssert
 #define THAssert(exp)                                                   \
@@ -31,22 +35,22 @@ typedef struct _THCCudaResourcesPerDevice {
   size_t scratchSpacePerStream;
 } THCCudaResourcesPerDevice;
 
-TORCH_CUDA_CU_API THCState* THCState_alloc(void);
-TORCH_CUDA_CU_API void THCState_free(THCState* state);
+TORCH_CUDA_CPP_API THCState* THCState_alloc(void);
+TORCH_CUDA_CPP_API void THCState_free(THCState* state);
 
-TORCH_CUDA_CU_API void THCudaInit(THCState* state);
-TORCH_CUDA_CU_API void THCudaShutdown(THCState* state);
+TORCH_CUDA_CPP_API void THCudaInit(THCState* state);
+TORCH_CUDA_CPP_API void THCudaShutdown(THCState* state);
 
 /* If device `dev` can access allocations on device `devToAccess`, this will return */
 /* 1; otherwise, 0. */
-TORCH_CUDA_CU_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
+TORCH_CUDA_CPP_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
-TORCH_CUDA_CU_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
+TORCH_CUDA_CPP_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
 
-TORCH_CUDA_CU_API void THCMagma_init(THCState *state);
+TORCH_CUDA_CPP_API void THCMagma_init(THCState *state);
 
 /* For the current device and stream, returns the allocated scratch space */
-TORCH_CUDA_CU_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
+TORCH_CUDA_CPP_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 
 #define THCAssertSameGPU(expr) if (!expr) THError("arguments are located on different GPUs")
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
@@ -54,16 +58,16 @@ TORCH_CUDA_CU_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* sta
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 #define THCusparseCheck(err)  __THCusparseCheck(err,  __FILE__, __LINE__)
 
-TORCH_CUDA_CU_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
-TORCH_CUDA_CU_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
-TORCH_CUDA_CU_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
-TORCH_CUDA_CU_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
+TORCH_CUDA_CPP_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
+TORCH_CUDA_CPP_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
+TORCH_CUDA_CPP_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
+TORCH_CUDA_CPP_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-TORCH_CUDA_CU_API void* THCudaMalloc(THCState *state, size_t size);
-TORCH_CUDA_CU_API void THCudaFree(THCState *state, void* ptr);
+TORCH_CUDA_CPP_API void* THCudaMalloc(THCState *state, size_t size);
+TORCH_CUDA_CPP_API void THCudaFree(THCState *state, void* ptr);
 
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
 
-TORCH_CUDA_CU_API void THCudaHostRecord(THCState *state, void *ptr);
+TORCH_CUDA_CPP_API void THCudaHostRecord(THCState *state, void *ptr);
 
 #endif

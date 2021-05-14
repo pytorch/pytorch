@@ -306,5 +306,14 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_str_join, ())
 
+        def test_bool_conversion(a: str):
+            if a:
+                return a
+            else:
+                return "default"
+
+        self.checkScript(test_bool_conversion, ("nonempty",))
+        self.checkScript(test_bool_conversion, ("",))
+
 if __name__ == '__main__':
     run_tests()

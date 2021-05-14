@@ -10,7 +10,9 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
@@ -60,7 +62,6 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(
       quant_min <= quant_max,
       "`quant_min` should be less than or \
@@ -90,7 +91,6 @@ Returns:
 Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
   TORCH_CHECK(mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",
@@ -110,7 +110,8 @@ int64_t _get_zero_point_from_tensor(
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
   zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
-  float zero_point_clamped = std::min(std::max(zero_point_fp, quant_min), quant_max);
+  float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
+                                       static_cast<float>(quant_max));
   return static_cast<int64_t>(zero_point_clamped);
 }
 
@@ -119,7 +120,8 @@ Tensor _fake_quantize_learnable_per_tensor_affine(
     const Tensor& scale,
     const Tensor& zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   float scale_val = scale[0].item<float>();
   int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, true);
   return native::fake_quantize_per_tensor_affine(
@@ -132,7 +134,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     const Tensor& scale,
     const Tensor& zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   /* The gradients for scale and zero point are calculated as below:
      Let Xfq be the fake quantized version of X.
      Let Xq be the quantized version of X (clamped at qmin and qmax).
@@ -184,7 +187,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     .build();
 
   fake_quant_grad_learnable_tensor_stub(
-    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max);
+    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max, grad_factor);
 
   // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
   auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());

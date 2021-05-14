@@ -85,6 +85,21 @@ TypePtr tryInferTypeWithTypeHint(
         "type_hint should only be specified when the RRef being created contains a ScriptModule.");
   }
 
+  // Check if value is an instance of a ScriptClass. If not, skip type inference
+  // because it will try to script the class that value is in instance of, and
+  // this should be avoided.
+  py::bool_ can_compile = py::module::import("torch._jit_internal")
+                              .attr("can_compile_class")(value.get_type());
+
+  if (py::cast<bool>(can_compile)) {
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(value.get_type());
+
+    if (existing_ty.is_none()) {
+      return PyObjectType::get();
+    }
+  }
+
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
   // excluding ScripModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
@@ -109,7 +124,7 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+    : PyRRef([&value, &type_hint]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         // jit::toIValue takes a py::handle as the first argument, and it calls
@@ -251,17 +266,17 @@ py::object PyRRef::createRRefProxy(
   }
 }
 
-py::object PyRRef::getRRefType(float timeout) {
+py::object PyRRef::getRRefType(float timeout, bool blocking) {
   // GIL is not released when calling this function.
   if (!type_.has_value()) {
     pybind11::gil_scoped_release release;
     auto& pythonRpcHandler = PythonRpcHandler::getInstance();
     auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
     pybind11::gil_scoped_acquire acquire;
-    type_ = isOwner() ? typeFuncs.onOwner_(*this)
-                      : typeFuncs.onUser_(*this, timeout);
+    type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
+                      : typeFuncs.onUser_(*this, timeout, blocking);
   }
-
+  // Returns py::object that can be Python type or future.
   return *type_;
 }
 

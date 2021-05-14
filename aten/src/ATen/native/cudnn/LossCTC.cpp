@@ -61,7 +61,7 @@ bool _use_cudnn_ctc_loss(
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for CuDNN
       use_cudnn &=
-          (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
+          (target_lengths[b] < 256) & (target_lengths[b] <= input_lengths[b]);
     }
   }
   return use_cudnn;

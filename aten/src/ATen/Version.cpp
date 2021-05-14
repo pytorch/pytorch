@@ -114,7 +114,7 @@ std::string used_cpu_capability() {
     case native::CPUCapability::AVX2:
       ss << "AVX2";
       break;
-#endif      
+#endif
     default:
       break;
   }
@@ -194,6 +194,7 @@ std::string show_config() {
 
   // TODO: do HIP
   // TODO: do XLA
+  // TODO: do MLC
 
   return ss.str();
 }

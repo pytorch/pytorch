@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 import torch
-import torch.optim.functional as F
+import torch.optim._functional as F
 
 from torch import Tensor
 
@@ -91,9 +91,9 @@ class _FunctionalRMSprop(object):
                       square_avgs,
                       grad_avgs,
                       momentum_buffer_list,
-                      lr,
-                      alpha,
-                      eps,
-                      weight_decay,
-                      momentum,
-                      self.centered)
+                      lr=lr,
+                      alpha=alpha,
+                      eps=eps,
+                      weight_decay=weight_decay,
+                      momentum=momentum,
+                      centered=self.centered)

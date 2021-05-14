@@ -118,7 +118,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     embed_params = False
-    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -136,8 +135,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, example_outputs=None,
-                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-                       use_new_jit_passes=use_new_jit_passes):
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -160,8 +158,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       opset_version=self.opset_version,
                                       keep_initializers_as_inputs=True,
                                       add_node_names=False,
-                                      operator_export_type=operator_export_type,
-                                      use_new_jit_passes=use_new_jit_passes)
+                                      operator_export_type=operator_export_type)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -173,7 +170,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                         example_outputs=None, do_constant_folding=True,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-                        use_new_jit_passes=use_new_jit_passes):
+                        input_names=None, dynamic_axes=None,
+                        remained_onnx_input_idx=None):
         """
         This is what the user facing version will look like
         """
@@ -198,12 +196,16 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                       opset_version=self.opset_version,
                       keep_initializers_as_inputs=True,
                       operator_export_type=operator_export_type,
-                      use_new_jit_passes=use_new_jit_passes)
+                      input_names=input_names,
+                      dynamic_axes=dynamic_axes,
+                      remained_onnx_input_idx=remained_onnx_input_idx)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                        example_outputs=None, do_constant_folding=True,
-                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+                       input_names=None, dynamic_axes=None,
+                       remained_onnx_input_idx=None):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         # NOTE: do_constant_folding is turned on only when model has
         # parameters embedded (which are needed for constant folding),
@@ -215,12 +217,13 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                  example_outputs=example_outputs,
                                  do_constant_folding=do_constant_folding,
                                  operator_export_type=operator_export_type,
-                                 use_new_jit_passes=self.use_new_jit_passes)
+                                 input_names=input_names,
+                                 dynamic_axes=dynamic_axes,
+                                 remained_onnx_input_idx=remained_onnx_input_idx)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
                                 use_gpu=use_gpu_, example_outputs=example_outputs,
-                                operator_export_type=operator_export_type,
-                                use_new_jit_passes=self.use_new_jit_passes)
+                                operator_export_type=operator_export_type)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -466,11 +469,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                                   do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 879
-            assert len(prepared.predict_net.op) == 133
+            assert len(prepared.init_net.op) == 950
+            assert len(prepared.predict_net.op) == 101
         else:
-            assert len(prepared.init_net.op) == 12
-            assert len(prepared.predict_net.op) == 1000
+            assert len(prepared.init_net.op) == 83
+            assert len(prepared.predict_net.op) == 968
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -1184,7 +1187,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(1, 2, requires_grad=True)
         y = torch.randn(2, 4, requires_grad=True)
-        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=["x", "y"], dynamic_axes={"x": [0, 1], "y": [0, 1]})
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[0])
 
     def test_mean(self):
         shape = (3, 4, 5)
@@ -1235,7 +1240,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x):
                 return (torch.randn(1, 2, 3, 4) + x).shape
         self.run_model_test(MyModule(), train=False, input=(x),
-                            batch_size=BATCH_SIZE, use_gpu=False)
+                            batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     def test_rand(self):
         x = torch.randn(1, 2, 3, 4)
@@ -1244,7 +1249,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x):
                 return (torch.rand(1, 2, 3, 4) + x).shape
         self.run_model_test(MyModule(), train=False, input=(x),
-                            batch_size=BATCH_SIZE, use_gpu=False)
+                            batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
@@ -1425,7 +1430,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return x.zero_()
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
@@ -1434,8 +1441,13 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return x.fill_(3)
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
+    # ConstantFill is a deprecated experimental op (used in opsets < 9).
+    # Shape inference does not cover this op.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_arithmetic(self):
         class Arithmetic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1458,7 +1470,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch.zeros(x.size()) + torch.ones(x.size())
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, remained_onnx_input_idx=[])
 
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -1468,7 +1483,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
-                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            remained_onnx_input_idx=[])
 
     def test_tensor_like_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -1480,7 +1499,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
-                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        remained_onnx_input_idx = None if self.opset_version < 9 else []
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            remained_onnx_input_idx=remained_onnx_input_idx)
 
     def test_full(self):
         class FullModel(torch.nn.Module):
@@ -1783,7 +1807,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 )
                 return output
 
-        feature = torch.Tensor(img_count, A, H, W)
+        feature = torch.empty(img_count, A, H, W)
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (feature, im_info, anchors)
@@ -2105,7 +2129,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch.arange(input.size(0)), torch.arange(input.size(-1))
 
         x = torch.randn(5, 3, 2)
-        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE, remained_onnx_input_idx=[])
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):
@@ -2526,8 +2552,7 @@ TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9_new_jit_API = type(str("TestCaffe2BackendEmbed_opset9_new_jit_API"),
                                                  (unittest.TestCase,),
-                                                 dict(TestCaffe2Backend_opset9.__dict__, embed_params=True,
-                                                 use_new_jit_passes=True))
+                                                 dict(TestCaffe2Backend_opset9.__dict__, embed_params=True))
 
 if __name__ == '__main__':
     unittest.main()

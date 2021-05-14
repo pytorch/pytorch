@@ -10,7 +10,7 @@ import torch.jit
 import torch.autograd
 import torch.serialization
 import re
-from torch._six import container_abcs
+import collections
 import contextlib
 import numbers
 import warnings
@@ -30,7 +30,7 @@ def is_in_onnx_export():
     return __IN_ONNX_EXPORT
 
 # Skip check due to cannot import IValue from torch._C
-_params_dict = {}  # type: ignore
+_params_dict = {}  # type: ignore[var-annotated]
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -56,7 +56,7 @@ def select_model_mode_for_export(model, mode):
             from torch.onnx.symbolic_helper import _export_onnx_opset_version
             if _export_onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
-                              "Opset versions lower than opset 12 will not be able to export nodes such as"
+                              "Opset versions lower than opset 12 will not be able to export nodes such as "
                               "Dropout and BatchNorm correctly.".format(_export_onnx_opset_version))
             is_export_training = True
 
@@ -124,19 +124,14 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None):
+                    params_dict=None, dynamic_axes=None, input_names=None, module=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-
-    if use_new_jit_passes:
-        torch._C._jit_pass_lower_all_tuples(graph)
-        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph)
-    else:
-        torch._C._jit_pass_remove_inplace_ops(graph)
+    torch._C._jit_pass_lower_all_tuples(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -144,6 +139,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # without implementing symbolics for all of them
     if _disable_torch_constant_prop is False:
         torch._C._jit_pass_constant_propagation(graph)
+
     _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
@@ -152,10 +148,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     torch._C._jit_pass_canonicalize_graph_fuser_ops(graph)
     torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
+    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
 
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_peephole(graph, True)
@@ -166,9 +162,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # until the point where it is unpacked by listUnpack node.
         # This pass does a preprocess, and prepares the nodes such that enough context can be received
         # by the symbolic function.
+        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
         torch._C._jit_pass_onnx_preprocess(graph)
-        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -198,7 +193,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
 
-        from torch.onnx.symbolic_helper import _onnx_shape_inference
         if _onnx_shape_inference:
             input_names = [] if input_names is None else input_names
             dynamic_axes = {} if dynamic_axes is None else dynamic_axes
@@ -206,13 +200,11 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 
-        torch._C._jit_pass_onnx_scalar_type_analysis(graph)
+        torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
         torch._C._jit_pass_lint(graph)
 
-        if dynamic_axes is None or not bool(dynamic_axes):
-            torch._C._jit_pass_onnx_fold_if(graph)
+        torch._C._jit_pass_onnx_fold_if(graph)
 
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
 
@@ -225,7 +217,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
-    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
     if _onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(graph, params_dict, _export_onnx_opset_version)
     return graph
@@ -344,12 +335,15 @@ def _decide_input_format(model, args):
             args = tuple(args)
         return args
     # Cases of models without forward functions and dict inputs
-    except AttributeError:
+    except (AttributeError, ValueError):
         warnings.warn("Model has no forward function")
         return args
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args")
+        return args
+    except Exception as e:
+        warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
         return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
@@ -384,33 +378,44 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
+def _get_param_count_list(method_graph, args_params):
+    param_count_list = []
+    for input_, arg_params_ in zip(method_graph.inputs(), args_params):
+        if "PackedParams" in str(input_.type()):
+            in_vars, _ = torch.jit._flatten(arg_params_)
+            param_count_list.append(len(in_vars))
+        else:
+            param_count_list.append(1)
+    return param_count_list
+
+
+def _create_jit_graph(model, args, _retain_param_name):
     torch_out = None
     params: Union[List, Tuple]
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
-            if not use_new_jit_passes:
-                method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
-            else:
-                freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
-                freezed_m, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-                method_graph = freezed_m._get_method('forward').graph
-                method_graph.eraseInput(0)  # Remove 'self' from model inputs
-
-            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+            module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
+            method_graph = module._get_method('forward').graph
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
             graph = _propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), False, False)
+                method_graph, tuple(in_vars), param_count_list, False, False)
         except AttributeError as e:
             raise RuntimeError('\'forward\' method must be a script method') from e
+        return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
+        param_count_list = _get_param_count_list(graph, args)
         graph = _propagate_and_assign_input_shapes(
-            graph, tuple(in_vars), False, False)
+            graph, tuple(in_vars), param_count_list, False, False)
+        return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
@@ -423,7 +428,8 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
         torch._C._jit_pass_onnx_function_substitution(graph)
-    return graph, params, torch_out
+        return graph, params, torch_out, None
+
 
 def _get_named_param_dict(graph, params):
     input_and_param_names = [val.debugName() for val in graph.inputs()]
@@ -431,33 +437,32 @@ def _get_named_param_dict(graph, params):
     _params_dict = dict(zip(param_names, params))
     return _params_dict
 
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, use_new_jit_passes=True,
-                    dynamic_axes=None):
+                    training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
+    if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
-    if isinstance(example_outputs, torch.Tensor):
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
-    graph, params, torch_out = _create_jit_graph(model, args,
-                                                 _retain_param_name,
-                                                 use_new_jit_passes)
+    graph, params, torch_out, module = _create_jit_graph(model, args,
+                                                         _retain_param_name)
 
     params_dict = _get_named_param_dict(graph, params)
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            use_new_jit_passes=use_new_jit_passes,
-                            dynamic_axes=dynamic_axes, input_names=input_names)
+                            dynamic_axes=dynamic_axes, input_names=input_names,
+                            module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
@@ -472,9 +477,9 @@ def _model_to_graph(model, args, verbose=False,
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
-            output_wrapped = [torch_out]  # type: ignore
+            output_wrapped = [torch_out]
         else:
-            output_wrapped = torch_out  # type: ignore
+            output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
@@ -625,10 +630,6 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
-# use_new_jit_passes is a flag which enables new jit scripting API for ONNX export.
-# The purpose of this flag is to enable the new API temporarily for testing purposes.
-# Once these jit APIs are fully tested, they will become part of production code-path by
-# removing this flag.
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
@@ -636,7 +637,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True, use_new_jit_passes=True):
+            onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
@@ -689,7 +690,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                use_new_jit_passes=use_new_jit_passes,
                                 dynamic_axes=dynamic_axes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
@@ -768,13 +768,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def _run_symbolic_method(op_name, symbolic_fn, args):
+def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
     try:
-        return symbolic_fn(*args)
+        return symbolic_fn(g, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -786,7 +786,7 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
 def _is_onnx_list(value):
     if not isinstance(value, string_classes) and \
             not isinstance(value, torch.Tensor) and \
-            isinstance(value, container_abcs.Iterable):
+            isinstance(value, collections.abc.Iterable):
         return True
     return False
 
@@ -942,7 +942,7 @@ def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_t
     return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
-def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
+def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
@@ -965,9 +965,12 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
         if ns == "onnx":
-            # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
+            if op_name == "Placeholder":
+                return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)
+            else:
+                # Use the original node directly
+                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+                return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
 
         elif ns == "aten":
             is_exportable_aten_op = sym_registry.is_registered_op(op_name, '', opset_version)
@@ -1012,35 +1015,82 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
             elif op_name == 'Loop' or op_name == 'If':
-                new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
-                new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
-                for b in n.blocks():
-                    new_block = new_node.addBlock()
-                    # Copy input metadata to subblock
+                static_if = (op_name == "If" and inputs[0].node().kind() == "onnx::Constant")
+                is_sub_block = False
+                if static_if:
+                    # Fold static if
                     #
-                    # If format:
-                    #   prim::If(cond)
-                    #     block0()
-                    #     block1()
+                    # The torch IR
+                    # graph(%embedding_matrix.1 : Float(10, 15, strides=[15, 1], requires_grad=0, device=cpu),
+                    #    %input.1 : Long(6, strides=[1], requires_grad=0, device=cpu), ...
+                    # %65 : Bool(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    # %21 : Long(device=cpu) = aten::eq(%20, %64)
+                    # %22 : Long(device=cpu) = prim::If(%21)
+                    #     block0():
+                    #     %23 : Long(device=cpu) = aten::is_floating_point(%input.1)
+                    #     -> (%23)
+                    #     block1():
+                    #     -> (%65)
+                    # %input.53 : Tensor, %weight : Tensor = prim::If(%22)
+                    #     block0():
+                    #     -> (%embedding_matrix.1, %input.1)
+                    #     block1():
+                    #     -> (%input.1, %embedding_matrix.1)
+                    # %26 : int[] = aten::size(%input.53)
                     #
-                    # Loop format:
-                    #   prim::Loop(iter, cond, input_1, ..., input_n)
-                    #     block0(iter, input_1, ..., input_n)
-                    #
-                    # For `If` node, there is nothing to copy.
-                    # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-                    for i, b_in in enumerate(b.inputs()):
-                        if i == 0 and i < len(inputs):
-                            b_in.setType(inputs[i].type())
-                        if i > 0 and (i + 1) < len(inputs):
-                            b_in.setType(inputs[i + 1].type())
-                    torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
-                new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
-                # Process Loop and If after subblock is converted.
-                from torch.onnx.symbolic_helper import _onnx_shape_inference
-                if _onnx_shape_inference:
-                    torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
-                return new_op_outputs
+                    # The converted ONNX graph
+                    # %10 : Bool(device=cpu) = onnx::Constant[value={0}]()
+                    # %14 : Bool(device=cpu) = onnx::Equal(%13, %8)
+                    # %15 : Bool(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+                    # %16 : Long(1, strides=[1], device=cpu) = onnx::Shape(%input.1)
+                    input_flag = inputs[0].node()['value'].tolist()
+                    const_value = all(input_flag) if isinstance(input_flag, list) else bool(input_flag)
+                    block_idx = 0 if const_value else 1
+                    current_b = list(n.blocks())[block_idx]
+                    is_sub_block = True
+                    env = torch._C._jit_pass_onnx_block(current_b, block, operator_export_type, env,
+                                                        is_sub_block)
+                    if_output_list = list(n.outputs())
+                    current_b_list = list(current_b.outputs())
+
+                    final_b_list = []
+                    for idx in range(len(if_output_list)):
+                        if current_b_list[idx] not in env:
+                            raise RuntimeError("The sub block ATen output " + current_b_list[idx] + " is not in env.")
+                        onnx_b = env[current_b_list[idx]]
+                        final_b_list.append(onnx_b)
+                    return final_b_list
+                else:
+                    new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
+                    new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
+                    for b in n.blocks():
+                        new_block = new_node.addBlock()
+                        # Copy input metadata to subblock
+                        #
+                        # If format:
+                        #   prim::If(cond)
+                        #     block0()
+                        #     block1()
+                        #
+                        # Loop format:
+                        #   prim::Loop(iter, cond, input_1, ..., input_n)
+                        #     block0(iter, input_1, ..., input_n)
+                        #
+                        # For `If` node, there is nothing to copy.
+                        # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
+                        for i, b_in in enumerate(b.inputs()):
+                            if i == 0 and i < len(inputs):
+                                b_in.setType(inputs[i].type())
+                            if i > 0 and (i + 1) < len(inputs):
+                                b_in.setType(inputs[i + 1].type())
+                        torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env,
+                                                      is_sub_block)
+                    new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
+                    # Process Loop and If after subblock is converted.
+                    from torch.onnx.symbolic_helper import _onnx_shape_inference
+                    if _onnx_shape_inference:
+                        torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
+                    return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
                 domain = ''
@@ -1049,6 +1099,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
+                if op_name == 'PythonOp':
+                    inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":
@@ -1123,7 +1175,7 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
     else:
         raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
-    tensor.fill_(value)  # type: ignore
+    tensor.fill_(value)  # type: ignore[call-overload]
     if isscalar:
         return g.op("Constant", *args, value_z=tensor, **kwargs)
     return g.op("Constant", *args, value_t=tensor, **kwargs)
@@ -1196,8 +1248,8 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
             dynamic_axes[key] = value_dict
 
 
-torch._C.Graph.op = _graph_op  # type: ignore
-torch._C.Graph.at = _graph_at  # type: ignore
-torch._C.Block.op = _block_op  # type: ignore
-torch._C.Graph.constant = _graph_constant  # type: ignore
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore
+torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
+torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
+torch._C.Block.op = _block_op  # type: ignore[attr-defined]
+torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc]

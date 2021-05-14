@@ -24,7 +24,16 @@ namespace kernels {
 // The expectXXX() functions further below use these invariants
 // to check that calling a specific kernels works correctly.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 optional<tuple<int64_t, int64_t>> called_with_args;
+
+
+// The calling convention in the dispatcher requires that calls to KernelFunction::call()/callBoxed()
+// take in a DispatchKeySet.
+// The value itself is meaningless for all of the tests that use kernels without a DispatchKeySet argument.
+// See Note [Plumbing Keys Through The Dispatcher] for details.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
 
 void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
@@ -92,11 +101,13 @@ void unboxed_function_without_return(int64_t a, int64_t b) {
   called_with_args = tuple<int64_t, int64_t>(a, b);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto unboxed_lambda_with_return = [] (int64_t a, int64_t b) -> int64_t {
   called_with_args = tuple<int64_t, int64_t>(a, b);
   return 5;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto unboxed_lambda_without_return = [] (int64_t a, int64_t b) -> void{
   called_with_args = tuple<int64_t, int64_t>(a, b);
 };
@@ -143,30 +154,6 @@ void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* sta
 }
 
 void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  // (Tensor(a!), Tensor(b!), Scalar, Scalar) -> (Tensor(a!), Tensor(b!))
-  EXPECT_EQ(4, stack->size());
-
-  ASSERT_TRUE(stack->at(0).isTensor());
-  auto t1 = stack->at(0).toTensor();
-
-  ASSERT_TRUE(stack->at(1).isTensor());
-  auto t2 = stack->at(1).toTensor();
-
-  ASSERT_TRUE(stack->at(2).isScalar());
-  auto s1 = stack->at(2).toScalar();
-
-  ASSERT_TRUE(stack->at(3).isScalar());
-  auto s2 = stack->at(3).toScalar();
-
-  t1.add_(s1);
-  t2.add_(s2);
-
-  stack->clear();
-  torch::jit::push(stack, t1);
-  torch::jit::push(stack, t2);
-}
-
-void boxed_func_for_legacy_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
   // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
   EXPECT_EQ(4, stack->size());
 
@@ -201,7 +188,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -215,7 +202,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -227,7 +214,7 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -248,7 +235,7 @@ void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto t = at::zeros({1});
   auto s = 1.0f;
   vector<IValue> stack {t, s};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -263,7 +250,7 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto s = 1.0f;
   auto t = at::zeros({1});
   vector<IValue> stack {s, t};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it on the stack
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -275,32 +262,12 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
 void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto t1 = at::zeros({1});
-  auto t2 = at::zeros({1});
-  auto s1 = 1.0f;
-  auto s2 = 2.0f;
-  vector<IValue> stack {t1, t2, s1, s2};
-  func.callBoxed(dummy, &stack);
-
-  // kernel should have updated output args and returned them on the stack
-  EXPECT_EQ(t1.item().toFloat(), 1.0f);
-  EXPECT_EQ(t2.item().toFloat(), 2.0f);
-  EXPECT_EQ(2, stack.size());
-  EXPECT_TRUE(stack[0].isTensor());
-  EXPECT_TRUE(stack[0].toTensor().is_same(t1));
-  EXPECT_TRUE(stack[1].isTensor());
-  EXPECT_TRUE(stack[1].toTensor().is_same(t2));
-}
-
-void expectLegacyOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
   auto s1 = 1.0f;
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
   vector<IValue> stack {s1, s2, t1, t2};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated output args and returned them on the stack
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -318,7 +285,7 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, &stack);
+    func.callBoxed(dummy, CPU_TEST_SET, &stack);
   }, errorMessage);
 }
 
@@ -334,7 +301,7 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, 3, 4);
+  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -347,7 +314,7 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.call<void, int64_t, int64_t>(dummy, 3, 4);
+  func.call<void, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -360,7 +327,7 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, 3, 4);
+  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -374,7 +341,7 @@ void expectInPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, t, 1.0f);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, CPU_TEST_SET, t, 1.0f);
 
   // should have updated first arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -385,7 +352,7 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, 1.0f, t);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, CPU_TEST_SET, 1.0f, t);
 
   // should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -395,31 +362,6 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
 void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto t1 = at::zeros({1});
-  auto t2 = at::zeros({1});
-  auto s1 = 1.0f;
-  auto s2 = 2.0f;
-
-  std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
-    std::tuple<at::Tensor&, at::Tensor&>, at::Tensor&, at::Tensor&, at::Scalar, at::Scalar
-  >(dummy, t1, t2, s1, s2);
-
-  // kernel should have updated out args and returned them in a tuple
-  EXPECT_EQ(t1.item().toFloat(), 1.0f);
-  EXPECT_EQ(t2.item().toFloat(), 2.0f);
-
-  auto t1_out = std::get<0>(tup);
-  EXPECT_EQ(t1_out.item().toFloat(), 1.0f);
-  EXPECT_TRUE(t1_out.is_same(t1));
-
-  auto t2_out = std::get<1>(tup);
-  EXPECT_EQ(t2_out.item().toFloat(), 2.0f);
-  EXPECT_TRUE(t2_out.is_same(t2));
-}
-
-void expectLegacyOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
   auto s1 = 1.0f;
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
@@ -427,7 +369,7 @@ void expectLegacyOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) 
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
-  >(dummy, s1, s2, t1, t2);
+  >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
   // kernel should have updated out args and returned them in a tuple
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -446,16 +388,19 @@ void expectLegacyOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) 
 
 // functional, boxed calling
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
   kernels::expectBoxedCallingWithMultiReturnWorks(func);
@@ -463,38 +408,39 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_the
 
 // in/out, boxed calling
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceBoxedCallingWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceBoxedCallingWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiBoxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withLegacyOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_legacy_outofplace_multi_op>();
-  kernels::expectLegacyOutOfPlaceMultiBoxedCallingWorks(func);
-}
-
 // functional, unboxed calling
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
   kernels::expectUnboxedCallingWithMultiReturnWorks(func);
@@ -502,103 +448,117 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_t
 
 // in/out, unboxed calling
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceUnboxedCallingWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceUnboxedCallingWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiUnboxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withLegacyOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_legacy_outofplace_multi_op>();
-  kernels::expectLegacyOutOfPlaceMultiUnboxedCallingWorks(func);
-}
-
 // functors etc.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
