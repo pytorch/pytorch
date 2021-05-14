@@ -173,7 +173,6 @@ __all__ = ['Tensor',
 '_pair',
 '_triple',
 '_list_with_default',
-'torch._C',
 'torch',
 '_jit_internal'
 ]
