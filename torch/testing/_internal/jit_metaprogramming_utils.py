@@ -80,7 +80,7 @@ nn_functional_tests = [
     ('relu', (S, S, S), (), '', (True,)),
     ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5), '', (True,)),
     ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
     ('relu6', (S, S, S), (),),
     ('relu6', (S, S, S), (True), 'inplace'),
