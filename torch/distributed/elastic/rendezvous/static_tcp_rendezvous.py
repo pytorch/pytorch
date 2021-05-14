@@ -58,6 +58,7 @@ class StaticTCPRendezvous(RendezvousHandler):
                 self.world_size,
                 is_master,
                 self.timeout,
+                multi_tenant=True,
             )
         store = PrefixStore(self.run_id, self._store)
         return store, self.rank, self.world_size
