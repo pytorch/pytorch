@@ -3236,6 +3236,7 @@ class TestNN(NNTestCase):
         computed_mask = p.compute_mask(t, default_mask)
         expected_mask = torch.tensor([[0, 0, 0, 0], [0, 0, 1, 1]])
         self.assertEqual(computed_mask, expected_mask)
+        self.assertEqual(computed_mask.dtype, default_mask.dtype)
 
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,
