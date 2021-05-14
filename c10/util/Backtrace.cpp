@@ -251,7 +251,8 @@ std::string get_backtrace(
   return stream.str();
 #elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
   // This backtrace retrieval is implemented on Windows via the Windows
-  // API using `CaptureStackBackTrace`, `SymFromAddr` and `SymGetLineFromAddr64`.
+  // API using `CaptureStackBackTrace`, `SymFromAddr` and
+  // `SymGetLineFromAddr64`.
   // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
   // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
   // https://docs.microsoft.com/en-us/windows/win32/debug/capturestackbacktrace
@@ -313,7 +314,8 @@ std::string get_backtrace(
            << back_trace[i_frame] << std::dec;
     if (with_symbol) {
       stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-             << p_symbol->Address << std::dec << " " << module << "!" << p_symbol->Name;
+             << p_symbol->Address << std::dec << " " << module << "!"
+             << p_symbol->Name;
     } else {
       stream << " <unknown symbol address> " << module << "!<unknown symbol>";
     }

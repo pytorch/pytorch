@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
+#include <ATen/native/xnnpack/Engine.h>
 
 
 namespace at {
@@ -28,7 +29,9 @@ namespace {
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
     int64_t channels  = input.size(-3);
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     int64_t input_height = input.size(-2);
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     int64_t input_width = input.size(-1);
     int64_t output_height = output_size[0];
     int64_t output_width = output_size[1];
@@ -101,6 +104,12 @@ namespace {
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
+      #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+      if (xnnpack::use_global_average_pool(input)) {
+        return xnnpack::global_average_pool(input);
+      }
+      #endif
+
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
@@ -134,7 +143,9 @@ namespace {
     return grad_input;
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
 } // at::native

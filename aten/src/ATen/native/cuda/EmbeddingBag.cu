@@ -294,7 +294,8 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
+  const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
   return _embedding_bag_cuda(
       weight,
@@ -316,7 +317,8 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
+  const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag_cuda", indices_arg, {kLong, kInt});
@@ -398,7 +400,8 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
                                    int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
+  const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in

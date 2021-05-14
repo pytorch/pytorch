@@ -63,6 +63,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   tupleElements.pop_back();
 
   // Build AutogradMetadata.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t autogradContextId, autogradMessageId;
   autogradMessageId = tupleElements.back().toInt();
   tupleElements.pop_back();
@@ -77,6 +78,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
     grads[i] = tupleElements[i].toTensor();
   }
 
+  // NOLINTNEXTLINE(modernize-make-unique)
   return std::unique_ptr<PropagateGradientsReq>(
       new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
 }
