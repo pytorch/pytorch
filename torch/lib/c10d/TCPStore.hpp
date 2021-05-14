@@ -125,6 +125,21 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
   bool callbackRegisteredData_ = false;
 };
 
+namespace detail {
+
+class TCPServer;
+
+class TCPClient;
+
+class TCPCallbackClient;
+
+struct SocketAddress {
+  std::string host{};
+  PortType port{};
+};
+
+} // namespace detail
+
 struct TCPStoreOptions {
   static constexpr PortType kDefaultPort = 29500;
 
@@ -188,33 +203,32 @@ class TCPStore : public Store {
   void waitForWorkers();
 
   // Returns the hostname used by the TCPStore.
-  const std::string& getHost() const noexcept;
+  const std::string& getHost() const noexcept {
+    return addr_.host;
+  }
 
   // Returns the port used by the TCPStore.
-  PortType getPort() const noexcept;
+  PortType getPort() const noexcept {
+    return addr_.port;
+  }
 
  private:
-  int64_t addHelper_(const std::string& key, int64_t value);
-  std::vector<uint8_t> getHelper_(const std::string& key);
-  void waitHelper_(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout);
+  int64_t incrementValueBy(const std::string& key, int64_t delta);
 
-  std::mutex watchKeyMutex_;
-  bool isServer_;
-  int storeSocket_ = -1;
-  int listenSocket_ = -1;
-  int masterListenSocket_ = -1;
+  std::vector<uint8_t> doGet(const std::string& key);
 
-  std::string tcpStoreAddr_;
-  PortType tcpStorePort_;
+  void doWait(
+      c10::ArrayRef<std::string> keys,
+      std::chrono::milliseconds timeout);
 
+  detail::SocketAddress addr_;
+  std::shared_ptr<detail::TCPServer> server_;
+  std::unique_ptr<detail::TCPClient> client_;
+  std::unique_ptr<detail::TCPCallbackClient> callback_client_;
   c10::optional<std::size_t> numWorkers_;
-  const std::string initKey_ = "init/";
-  const std::string regularPrefix_ = "/";
 
-  std::unique_ptr<TCPStoreMasterDaemon> tcpStoreMasterDaemon_ = nullptr;
-  std::unique_ptr<TCPStoreWorkerDaemon> tcpStoreWorkerDaemon_ = nullptr;
+  const std::string initKey_ = "init/";
+  const std::string keyPrefix_ = "/";
 };
 
 } // namespace c10d

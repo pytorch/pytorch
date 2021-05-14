@@ -8,10 +8,10 @@
 #include <unistd.h>
 #endif
 
-#include <utility>
 #include <fcntl.h>
 #include <algorithm>
 #include <system_error>
+#include <utility>
 
 namespace c10d {
 
@@ -591,6 +591,229 @@ void TCPStoreMasterDaemon::run() {
 }
 #endif
 
+namespace detail {
+namespace {
+
+// Offers RAII for TCP sockets.
+class TCPSocket {
+ public:
+  TCPSocket() noexcept = default;
+
+  /* implicit */ TCPSocket(int handle) noexcept : handle_{handle} {}
+
+  TCPSocket(const TCPSocket& other) = delete;
+
+  TCPSocket& operator=(const TCPSocket& other) = delete;
+
+  TCPSocket(TCPSocket&& other) noexcept : handle_{other.handle_} {
+    other.handle_ = c10::nullopt;
+  }
+
+  TCPSocket& operator=(TCPSocket&& other) noexcept {
+    closeSocket();
+
+    handle_ = std::exchange(other.handle_, c10::nullopt);
+
+    return *this;
+  }
+
+  ~TCPSocket() {
+    closeSocket();
+  }
+
+  int handle() const noexcept {
+    return handle_.value_or(-1);
+  }
+
+ private:
+  void closeSocket() noexcept {
+    if (handle_) {
+      tcputil::closeSocket(*handle_);
+    }
+  }
+
+  c10::optional<int> handle_{};
+};
+
+} // namespace
+
+// Manages the lifecycle of a server daemon.
+class TCPServer {
+ public:
+  static std::shared_ptr<TCPServer> start(const TCPStoreOptions& opts);
+
+  PortType port() const noexcept {
+    return port_;
+  }
+
+  explicit TCPServer(
+      TCPSocket&& socket,
+      PortType port,
+      std::unique_ptr<TCPStoreMasterDaemon>&& daemon)
+      : socket_{std::move(socket)}, port_{port}, daemon_{std::move(daemon)} {}
+
+ private:
+  TCPSocket socket_;
+  PortType port_;
+  std::unique_ptr<TCPStoreMasterDaemon> daemon_;
+};
+
+std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
+  if (opts.multiTenant) {
+    LOG(WARNING)
+        << "The multi-tenant feature of TCPStore is not implemented yet.";
+  }
+
+  TCPSocket socket{};
+  PortType port{};
+
+  std::tie(socket, port) = tcputil::listen(opts.port);
+
+  auto daemon = std::make_unique<TCPStoreMasterDaemon>(socket.handle());
+
+  return std::make_shared<TCPServer>(
+      std::move(socket), port, std::move(daemon));
+}
+
+class TCPClient {
+ public:
+  static std::unique_ptr<TCPClient> connect(
+      const SocketAddress& addr,
+      const TCPStoreOptions& opts);
+
+  void sendCommand(QueryType type) {
+    tcputil::sendValue<QueryType>(socket_.handle(), type);
+  }
+
+  void sendCommandForKey(QueryType type, const std::string& key);
+
+  void sendBits(const std::vector<std::uint8_t>& value) {
+    tcputil::sendVector<std::uint8_t>(socket_.handle(), value);
+  }
+
+  void sendStrings(c10::ArrayRef<std::string> value);
+
+  template <typename T>
+  void sendValue(const T& value) {
+    tcputil::sendValue<T>(socket_.handle(), value);
+  }
+
+  std::vector<std::uint8_t> receiveBits() {
+    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+  }
+
+  template <typename T>
+  T receiveValue() {
+    return tcputil::recvValue<T>(socket_.handle());
+  }
+
+  void setTimeout(std::chrono::milliseconds value);
+
+  explicit TCPClient(TCPSocket&& socket) : socket_{std::move(socket)} {}
+
+ private:
+  TCPSocket socket_;
+};
+
+std::unique_ptr<TCPClient> TCPClient::connect(
+    const SocketAddress& addr,
+    const TCPStoreOptions& opts) {
+  TCPSocket socket =
+      tcputil::connect(addr.host, addr.port, /* wait */ true, opts.timeout);
+
+  return std::make_unique<TCPClient>(std::move(socket));
+}
+
+void TCPClient::sendCommandForKey(QueryType type, const std::string& key) {
+  tcputil::sendValue<QueryType>(socket_.handle(), type);
+
+  bool withValue = type == QueryType::SET || type == QueryType::COMPARE_SET ||
+      type == QueryType::ADD;
+
+  tcputil::sendString(socket_.handle(), key, withValue);
+}
+
+void TCPClient::sendStrings(c10::ArrayRef<std::string> value) {
+  std::size_t size = value.size();
+
+  tcputil::sendBytes<std::size_t>(socket_.handle(), &size, 1, size > 0);
+
+  if (value.empty()) {
+    return;
+  }
+
+  for (auto pos = value.begin(), last = value.end() - 1; pos <= last; ++pos) {
+    tcputil::sendString(socket_.handle(), *pos, pos != last);
+  }
+}
+
+void TCPClient::setTimeout(std::chrono::milliseconds value) {
+  if (value == std::chrono::milliseconds::zero()) {
+    return;
+  }
+
+#ifdef _WIN32
+  struct timeval timeoutTV = {value.count() / 1000,
+                              (value.count() % 1000) * 1000};
+#else
+  struct timeval timeoutTV = {.tv_sec = value.count() / 1000,
+                              .tv_usec = (value.count() % 1000) * 1000};
+#endif
+  SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
+      socket_.handle(),
+      SOL_SOCKET,
+      SO_RCVTIMEO,
+      reinterpret_cast<char*>(&timeoutTV),
+      sizeof(timeoutTV)));
+}
+
+class TCPCallbackClient {
+ public:
+  static std::unique_ptr<TCPCallbackClient> connect(
+      const SocketAddress& addr,
+      const TCPStoreOptions& opts);
+
+  void setCallback(const std::string& key, WatchKeyCallback callback);
+
+  explicit TCPCallbackClient(
+      TCPSocket&& socket,
+      std::unique_ptr<TCPStoreWorkerDaemon>&& daemon)
+      : socket_{std::move(socket)}, daemon_{std::move(daemon)} {}
+
+ private:
+  TCPSocket socket_;
+  std::unique_ptr<TCPStoreWorkerDaemon> daemon_;
+  std::mutex mutex_;
+};
+
+std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
+    const SocketAddress& addr,
+    const TCPStoreOptions& opts) {
+  TCPSocket socket =
+      tcputil::connect(addr.host, addr.port, /* wait */ true, opts.timeout);
+
+  auto daemon = std::make_unique<TCPStoreWorkerDaemon>(socket.handle());
+
+  return std::make_unique<TCPCallbackClient>(
+      std::move(socket), std::move(daemon));
+}
+
+void TCPCallbackClient::setCallback(
+    const std::string& key,
+    WatchKeyCallback callback) {
+  std::lock_guard<std::mutex> guard{mutex_};
+
+  daemon_->setCallback(key, callback);
+
+  tcputil::sendValue<QueryType>(socket_.handle(), QueryType::WATCH_KEY);
+
+  tcputil::sendString(socket_.handle(), key);
+
+  daemon_->waitForCallbackRegistration();
+}
+
+} // namespace detail
+
 // TCPStore class methods
 TCPStore::TCPStore(
     const std::string& masterAddr,
@@ -610,78 +833,43 @@ TCPStore::TCPStore(
 
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
-      isServer_{opts.isServer},
-      tcpStoreAddr_{std::move(host)},
-      tcpStorePort_{opts.port},
+      addr_{std::move(host)},
       numWorkers_{opts.numWorkers} {
   tcputil::socketInitialize();
-  if (isServer_) {
-    if (opts.multiTenant) {
-      LOG(WARNING) <<
-          "The multi-tenant feature of TCPStore is not implemented yet.";
-    }
 
-    // Opening up the listening socket
-    std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(opts.port);
-  }
-  try {
-    if (isServer_) {
-      // Now start the daemon
-      tcpStoreMasterDaemon_ =
-          std::make_unique<TCPStoreMasterDaemon>(masterListenSocket_);
-    }
-    // Connect to the daemon
-    storeSocket_ = tcputil::connect(
-        tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-    if (opts.waitWorkers) {
-      waitForWorkers();
-    }
+  if (opts.isServer) {
+    server_ = detail::TCPServer::start(opts);
 
-    // socket to handle requests from server
-    listenSocket_ = tcputil::connect(
-        tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-    tcpStoreWorkerDaemon_ =
-        std::make_unique<TCPStoreWorkerDaemon>(listenSocket_);
-  } catch (const std::exception&) {
-    if (isServer_) {
-      tcpStoreMasterDaemon_ = nullptr;
-      tcputil::closeSocket(masterListenSocket_);
-    }
-    tcpStoreWorkerDaemon_ = nullptr;
-    if (listenSocket_ != -1) {
-      tcputil::closeSocket(listenSocket_);
-    }
-    if (storeSocket_ != -1) {
-      tcputil::closeSocket(storeSocket_);
-    }
-    throw;
+    addr_.port = server_->port();
+  } else {
+    addr_.port = opts.port;
   }
+
+  client_ = detail::TCPClient::connect(addr_, opts);
+
+  if (opts.waitWorkers) {
+    waitForWorkers();
+  }
+
+  callback_client_ = detail::TCPCallbackClient::connect(addr_, opts);
 }
 
-TCPStore::~TCPStore() {
-  if (isServer_) {
-    // Store daemon should end because of closed connection.
-    // daemon destructor should join the thread
-    tcpStoreMasterDaemon_ = nullptr;
-    tcputil::closeSocket(masterListenSocket_);
-  }
-  tcpStoreWorkerDaemon_ = nullptr;
-  tcputil::closeSocket(listenSocket_);
-  tcputil::closeSocket(storeSocket_);
-}
+TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   if (numWorkers_ == c10::nullopt) {
     return;
   }
 
-  addHelper_(initKey_, 1);
+  incrementValueBy(initKey_, 1);
+
   // Let server block until all workers have completed, this ensures that
   // the server daemon thread is always running until the very end
-  if (isServer_) {
+  if (server_) {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
-      std::vector<uint8_t> value = getHelper_(initKey_);
+      //TODO: Any chance to make this cleaner?
+      std::vector<uint8_t> value = doGet(initKey_);
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
@@ -700,92 +888,74 @@ void TCPStore::waitForWorkers() {
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
-  std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::SET);
-  tcputil::sendString(storeSocket_, regKey, true);
-  tcputil::sendVector<uint8_t>(storeSocket_, data);
+  client_->sendCommandForKey(QueryType::SET, keyPrefix_ + key);
+  client_->sendBits(data);
 }
 
 std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
-  std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_SET);
-  tcputil::sendString(storeSocket_, regKey, true);
-  tcputil::sendVector<uint8_t>(storeSocket_, expectedValue);
-  tcputil::sendVector<uint8_t>(storeSocket_, desiredValue);
-  return tcputil::recvVector<uint8_t>(storeSocket_);
+  client_->sendCommandForKey(QueryType::COMPARE_SET, keyPrefix_ + key);
+  client_->sendBits(expectedValue);
+  client_->sendBits(desiredValue);
+
+  return client_->receiveBits();
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
-  std::string regKey = regularPrefix_ + key;
-  return getHelper_(regKey);
+  return doGet(keyPrefix_ + key);
 }
 
-std::vector<uint8_t> TCPStore::getHelper_(const std::string& key) {
-  waitHelper_({key}, timeout_);
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::GET);
-  tcputil::sendString(storeSocket_, key);
-  return tcputil::recvVector<uint8_t>(storeSocket_);
+std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
+  doWait(key, timeout_);
+  client_->sendCommandForKey(QueryType::GET, key);
+  return client_->receiveBits();
 }
 
 int64_t TCPStore::add(const std::string& key, int64_t value) {
-  std::string regKey = regularPrefix_ + key;
-  return addHelper_(regKey, value);
+  return incrementValueBy(keyPrefix_ + key, value);
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
-  std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE_KEY);
-  tcputil::sendString(storeSocket_, regKey);
-  auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
-  return (numDeleted == 1);
+  client_->sendCommandForKey(QueryType::DELETE_KEY, keyPrefix_ + key);
+  auto numDeleted = client_->receiveValue<std::int64_t>();
+  return numDeleted == 1;
 }
 
 void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
-  // Only allow one thread to perform watchKey() at a time
-  const std::lock_guard<std::mutex> watchKeyLock(watchKeyMutex_);
-
-  // Register callback with TCPStoreMasterDaemon to call TCPStoreWorkerDaemon on
-  // key change
-  std::string regKey = regularPrefix_ + key;
-  tcpStoreWorkerDaemon_->setCallback(regKey, callback);
-  tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
-  tcputil::sendString(listenSocket_, regKey);
-
-  // Block until callback has been registered successfully
-  tcpStoreWorkerDaemon_->waitForCallbackRegistration();
+  callback_client_->setCallback(keyPrefix_ + key, callback);
 }
 
-int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::ADD);
-  tcputil::sendString(storeSocket_, key, true);
-  tcputil::sendValue<int64_t>(storeSocket_, value);
-  return tcputil::recvValue<int64_t>(storeSocket_);
+int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
+  client_->sendCommandForKey(QueryType::ADD, key);
+  client_->sendValue<std::int64_t>(delta);
+  return client_->receiveValue<std::int64_t>();
 }
 
 int64_t TCPStore::getNumKeys() {
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::GETNUMKEYS);
-  return tcputil::recvValue<int64_t>(storeSocket_);
+  client_->sendCommand(QueryType::GETNUMKEYS);
+  return client_->receiveValue<std::int64_t>();
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::CHECK);
-  SizeType nkeys = keys.size();
-  tcputil::sendBytes<SizeType>(storeSocket_, &nkeys, 1, (nkeys > 0));
-  for (size_t i = 0; i < nkeys; i++) {
-    std::string regKey = regularPrefix_ + keys[i];
-    tcputil::sendString(storeSocket_, regKey, (i != (nkeys - 1)));
+  std::vector<std::string> prefixedKeys{};
+  prefixedKeys.reserve(keys.size());
+  for (const std::string& key : keys) {
+    prefixedKeys.emplace_back(keyPrefix_ + key);
   }
-  auto checkResponse = tcputil::recvValue<CheckResponseType>(storeSocket_);
-  if (checkResponse == CheckResponseType::READY) {
+
+  client_->sendCommand(QueryType::CHECK);
+  client_->sendStrings(prefixedKeys);
+
+  auto response = client_->receiveValue<CheckResponseType>();
+  if (response == CheckResponseType::READY) {
     return true;
-  } else if (checkResponse == CheckResponseType::NOT_READY) {
-    return false;
-  } else {
-    throw std::runtime_error("ready or not_ready response expected");
   }
+  if (response == CheckResponseType::NOT_READY) {
+    return false;
+  }
+  throw std::runtime_error("ready or not_ready response expected");
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
@@ -795,52 +965,28 @@ void TCPStore::wait(const std::vector<std::string>& keys) {
 void TCPStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
-  std::vector<std::string> regKeys;
-  regKeys.resize(keys.size());
-  for (size_t i = 0; i < keys.size(); ++i) {
-    regKeys[i] = regularPrefix_ + keys[i];
+  std::vector<std::string> prefixedKeys{};
+  prefixedKeys.reserve(keys.size());
+  for (const std::string& key : keys) {
+    prefixedKeys.emplace_back(keyPrefix_ + key);
   }
-  waitHelper_(regKeys, timeout);
+
+  doWait(prefixedKeys, timeout);
 }
 
-void TCPStore::waitHelper_(
-    const std::vector<std::string>& keys,
-    const std::chrono::milliseconds& timeout) {
-  // Set the socket timeout if there is a wait timeout
-  if (timeout != kNoTimeout) {
-#ifdef _WIN32
-    struct timeval timeoutTV = {
-        timeout.count() / 1000, (timeout.count() % 1000) * 1000};
-#else
-    struct timeval timeoutTV = {
-        .tv_sec = timeout.count() / 1000,
-        .tv_usec = (timeout.count() % 1000) * 1000};
-#endif
-    SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
-        storeSocket_,
-        SOL_SOCKET,
-        SO_RCVTIMEO,
-        reinterpret_cast<char*>(&timeoutTV),
-        sizeof(timeoutTV)));
-  }
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::WAIT);
-  SizeType nkeys = keys.size();
-  tcputil::sendBytes<SizeType>(storeSocket_, &nkeys, 1, (nkeys > 0));
-  for (size_t i = 0; i < nkeys; i++) {
-    tcputil::sendString(storeSocket_, keys[i], (i != (nkeys - 1)));
-  }
-  auto waitResponse = tcputil::recvValue<WaitResponseType>(storeSocket_);
-  if (waitResponse != WaitResponseType::STOP_WAITING) {
+void TCPStore::doWait(
+    c10::ArrayRef<std::string> keys,
+    std::chrono::milliseconds timeout) {
+  //TODO: Should we revert to the original timeout at the end of the call?
+  client_->setTimeout(timeout);
+
+  client_->sendCommand(QueryType::WAIT);
+  client_->sendStrings(keys);
+
+  auto response = client_->receiveValue<WaitResponseType>();
+  if (response != WaitResponseType::STOP_WAITING) {
     throw std::runtime_error("Stop_waiting response is expected");
   }
-}
-
-const std::string& TCPStore::getHost() const noexcept {
-  return tcpStoreAddr_;
-}
-
-PortType TCPStore::getPort() const noexcept {
-  return tcpStorePort_;
 }
 
 } // namespace c10d
