@@ -1,5 +1,4 @@
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <iostream>
 
 namespace at { namespace functorch {
 

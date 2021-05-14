@@ -1,5 +1,6 @@
 import torch.utils._pytree as _pytree
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from typing import List, Any
 
 # TODO: The following function should only be used with vmap.
 # torch.return_types should be registered as PyTree nodes.
@@ -19,8 +20,8 @@ def tree_flatten_hack(pytree):
     child_pytrees, context = flatten_fn(pytree)
 
     # Recursively flatten the children
-    result : List[Any] = []
-    children_specs : List['TreeSpec'] = []
+    result: List[Any] = []
+    children_specs: List['TreeSpec'] = []
     for child in child_pytrees:
         flat, child_spec = tree_flatten_hack(child)
         result += flat

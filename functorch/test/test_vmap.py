@@ -8,7 +8,7 @@ import warnings
 import unittest
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import ops, onlyCPU
 from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import parameterized, instantiate_parameterized_methods
 import types
@@ -93,7 +93,7 @@ class TestVmapAPI(TestCase):
         self.assertEqual(outputs[0], x * x)
         self.assertEqual(outputs[1], x * x * x)
 
-    def test_multiple_outputs(self):
+    def test_multiple_outputs2(self):
         # This is the same thing as
         # def returns_tuple_of_tensors(x):
         #     return x, x
