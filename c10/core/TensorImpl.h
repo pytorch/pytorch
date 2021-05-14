@@ -8,17 +8,17 @@
 #include <c10/core/Backend.h>
 #include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/core/impl/SizesAndStrides.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
-#include <c10/util/accumulate.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -35,7 +35,6 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
 
 namespace at {
 class Tensor;
@@ -135,12 +134,19 @@ struct C10_API PlacementDeleteContext {
 struct TensorImpl;
 
 struct C10_API AutogradMetaInterface {
-  virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
+  virtual void set_requires_grad(
+      bool requires_grad,
+      at::TensorImpl* self_impl) = 0;
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
-  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const = 0;
-  virtual void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self)
+      const = 0;
+  virtual void set_fw_grad(
+      const at::Tensor& new_grad,
+      const at::Tensor& self,
+      uint64_t level,
+      bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -172,25 +178,24 @@ struct C10_API AutogradMetaFactoryRegisterer {
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface() {};
+  virtual ~NamedTensorMetaInterface(){};
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
-      false,
-      "Not implemented: NamedTensorMetaInterface::clone");
+        false, "Not implemented: NamedTensorMetaInterface::clone");
   };
   virtual int64_t slow_dim() const {
     TORCH_INTERNAL_ASSERT(
-      false,
-      "Not implemented: NamedTensorMetaInterface::slow_dim");
+        false, "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
 };
 
 // NOTE [ Version Counter Sharing ]
 //
-// Every Tensor has a version counter. Version counters are incremented whenever the
-// data or size of a tensor changes through in-place Variable operations. Version
-// counters are used to detect modifications to saved variables which would result in
-// incorrect gradient calculations. Version counters may be shared between Variables:
+// Every Tensor has a version counter. Version counters are incremented whenever
+// the data or size of a tensor changes through in-place Variable operations.
+// Version counters are used to detect modifications to saved variables which
+// would result in incorrect gradient calculations. Version counters may be
+// shared between Variables:
 //
 // 1. A view shares the version counter of the base Variable,
 // 2. `x.detach()` shares the version counter of `x`,
@@ -198,27 +203,32 @@ struct C10_API NamedTensorMetaInterface {
 //
 // Version counters are not shared in these scenarios:
 //
-// 1. When we replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`,
+// 1. When we replace a `Variable`'s underlying `Tensor` by calling
+// `set_data(...)`,
 // 2. `x.data` does not share the version counter of `x`. (See discussion at
 // https://github.com/pytorch/pytorch/issues/5396)
 //
-// Question: Why do we put the version counter in TensorImpl instead of AutogradMeta?
+// Question: Why do we put the version counter in TensorImpl instead of
+// AutogradMeta?
 //
-// Answer: After the Variable/Tensor merge, a tensor will not have AutogradMeta when
-// its `requires_grad_` is false, but when we use this tensor in the forward pass of
-// a function that requires saving this tensor for backward, we need to keep track of
-// this tensor's version to make sure it's always valid in the autograd graph.
+// Answer: After the Variable/Tensor merge, a tensor will not have AutogradMeta
+// when its `requires_grad_` is false, but when we use this tensor in the
+// forward pass of a function that requires saving this tensor for backward, we
+// need to keep track of this tensor's version to make sure it's always valid in
+// the autograd graph.
 //
-// To achieve this goal, we put the version counter in TensorImpl instead of AutogradMeta,
-// and have it always be available. This allows us to have the optimization of not
-// carrying AutogradMeta when a tensor doesn't require gradient.
+// To achieve this goal, we put the version counter in TensorImpl instead of
+// AutogradMeta, and have it always be available. This allows us to have the
+// optimization of not carrying AutogradMeta when a tensor doesn't require
+// gradient.
 //
-// A hypothetical alternative way to achieve this goal is to initialize AutogradMeta and
-// create the version counter for the non-requires-grad tensor only when it's saved for
-// backward. However, since saving a tensor for backward happens in the forward pass, and
-// our invariant is that forward pass needs to be thread-safe, lazy-initializing AutogradMeta
-// when saving a tensor can introduce race conditions when we are running the forward
-// pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
+// A hypothetical alternative way to achieve this goal is to initialize
+// AutogradMeta and create the version counter for the non-requires-grad tensor
+// only when it's saved for backward. However, since saving a tensor for
+// backward happens in the forward pass, and our invariant is that forward pass
+// needs to be thread-safe, lazy-initializing AutogradMeta when saving a tensor
+// can introduce race conditions when we are running the forward pass in
+// multi-thread scenarios, thus making the forward pass not thread-safe anymore,
 // which breaks the invariant.
 struct C10_API VariableVersion {
  private:
@@ -238,7 +248,8 @@ struct C10_API VariableVersion {
   // Example use cases are:
   //  - Inference tensors don't track version counter, so they'll just always
   //    have disbaled VariableVersion.
-  //  - In SavedVariable class we override version_counter_ inside its construtor
+  //  - In SavedVariable class we override version_counter_ inside its
+  //  construtor
   //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
@@ -254,7 +265,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled=DISABLED) {}
+  VariableVersion(Disabled = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -277,16 +288,17 @@ struct C10_API VariableVersion {
   //
   // 2. Inplace update to inference tensor in inference tensor doesn't bump
   //    version counter.
-  //    * It either doesn't call bump() by skipping InplaceOrView kernel,
+  //    * It either doesn't call bump() by skipping ADInplaceOrView kernel,
   //      - e.g. inference_tensor.add_(1)
   //    * or bump() is a no-op for inference tensor.
   //      - e.g. inference_tensor.add_(normal_tensor)
   void bump() {
     // TODO: Replace the link to the documentation once it's available.
-    TORCH_CHECK(version_counter_ || InferenceMode::is_enabled(),
-      "Inplace update to inference tensor outside InferenceMode is not allowed."
-      "You can make a clone to get a normal tensor before doing inplace update."
-      "See https://github.com/pytorch/rfcs/pull/17 for more details.");
+    TORCH_CHECK(
+        version_counter_ || InferenceMode::is_enabled(),
+        "Inplace update to inference tensor outside InferenceMode is not allowed."
+        "You can make a clone to get a normal tensor before doing inplace update."
+        "See https://github.com/pytorch/rfcs/pull/17 for more details.");
     if (version_counter_) {
       ++version_counter_->version_;
     }
@@ -295,7 +307,8 @@ struct C10_API VariableVersion {
   // Inference tensor doesn't have version counter so it shouldn't be
   // accessed.
   uint32_t current_version() const {
-    TORCH_CHECK(version_counter_, "Inference tensor do not track version counter.");
+    TORCH_CHECK(
+        version_counter_, "Inference tensor do not track version counter.");
     return version_counter_->version_;
   }
 };
@@ -414,7 +427,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
-  TensorImpl(DispatchKeySet, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt);
+  TensorImpl(
+      DispatchKeySet,
+      const caffe2::TypeMeta data_type,
+      c10::optional<c10::Device> device_opt);
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
@@ -426,15 +442,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             std::move(storage),
             DispatchKeySet(dispatch_key),
             data_type) {}
-  TensorImpl(DispatchKey dispatch_key, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl(DispatchKeySet(dispatch_key), data_type, device_opt) {}
+  TensorImpl(
+      DispatchKey dispatch_key,
+      const caffe2::TypeMeta data_type,
+      c10::optional<c10::Device> device_opt)
+      : TensorImpl(DispatchKeySet(dispatch_key), data_type, device_opt) {}
 
  private:
   // This constructor is private, because the data_type is redundant with
   // storage.  Still, we pass it in separately because it's easier to write
   // the initializer list if we're not worried about storage being moved out
   // from under us.
-  TensorImpl(Storage&& storage, DispatchKeySet, const caffe2::TypeMeta data_type, c10::optional<c10::Device>);
+  TensorImpl(
+      Storage&& storage,
+      DispatchKeySet,
+      const caffe2::TypeMeta data_type,
+      c10::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -454,7 +477,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * all of the DispatchKeys that this Tensor identifies as.  This is the
    * information used to dispatch operations on this tensor.
    */
-  DispatchKeySet key_set() const { return key_set_; }
+  DispatchKeySet key_set() const {
+    return key_set_;
+  }
 
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
@@ -466,7 +491,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_and_strides_.sizes_arrayref();
   }
 #else
-  ;
+      ;
 #endif
 
   /**
@@ -485,19 +510,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_and_strides_.size();
   }
 #else
-  ;
+      ;
 #endif
 
   /**
    * True if this tensor has storage. See storage() for details.
    */
 #ifdef DEBUG
-// Allow subclasses to check that their storage_ is never getting set in debug builds.
+  // Allow subclasses to check that their storage_ is never getting set in debug
+  // builds.
   virtual
 #else
   TENSORIMPL_MAYBE_VIRTUAL
 #endif
-  bool has_storage() const
+      bool
+      has_storage() const
   // NOTE: we devirtualize this because it arguably shouldn't be an
   // error just to ask subclasses if they have storage.
   // This used to throw for most subclasses, but OpaqueTensorImpl
@@ -508,7 +535,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_;
   }
 #else
-  ;
+      ;
 #endif
 
   /**
@@ -556,15 +583,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * backward compatibility. See `set_has_contiguity_policy` and
    * `is_contiguous_custom` for the encouraged customization point.
    */
-  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(has_contiguity_ != static_cast<uint8_t>(HasContiguityPolicy::Default))) {
+  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(
+            has_contiguity_ !=
+            static_cast<uint8_t>(HasContiguityPolicy::Default))) {
       return is_contiguous_nondefault_policy_impl(memory_format);
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
     if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
-    }
-    else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
@@ -583,43 +612,51 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
   bool is_sparse() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
         key_set_.has(DispatchKey::SparseCUDA) ||
         key_set_.has(DispatchKey::SparseHIP) ||
         key_set_.has(DispatchKey::SparseXPU);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR format.
+  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
+  // format.
   bool is_sparse_csr() const {
     return key_set_.has(DispatchKey::SparseCsrCPU) ||
-           key_set_.has(DispatchKey::SparseCsrCUDA);
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_quantized() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::QuantizedCPU) ||
         key_set_.has(DispatchKey::QuantizedCUDA) ||
         key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_meta() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::Meta);
   }
 
   bool is_cpu() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::CPU) ||
         key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
         key_set_.has(DispatchKey::QuantizedCPU) ||
         key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::CUDA) ||
         key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA) ||
         key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
@@ -636,9 +673,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_hip() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
     return key_set_.has(DispatchKey::HIP) ||
-           key_set_.has(DispatchKey::SparseHIP);
+        key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_mkldnn() const {
@@ -657,7 +695,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::MLC);
   }
 
-  // TODO: remove this once we don't automatically enabled Autograd dispatch keys
+  // TODO: remove this once we don't automatically enabled Autograd dispatch
+  // keys
   //       in TensorImpl constructor.
   // DON'T USE THIS API!! It's only created for testing purpose in
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
@@ -665,29 +704,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
-  // Inference tensor doesn't have autograd or InplaceOrView key.
+  // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference_tensor() {
-    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
     bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(no_InplaceOrView == no_Autograd,
-      "InplaceOrView and Autograd keys must be on/off at the same time.");
-    return no_InplaceOrView && no_Autograd;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        no_ADInplaceOrView == no_Autograd,
+        "ADInplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_ADInplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
-    TORCH_CHECK(
-        device_opt_.has_value(),
-        "tensor does not have a device");
+    TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
     // See NOTE [c10::optional operator usage in CUDA]
     return (*device_opt_).index();
   }
 
   Device device() const {
-    TORCH_CHECK(
-        device_opt_.has_value(),
-        "tensor does not have a device");
+    TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
     // See NOTE [c10::optional operator usage in CUDA]
     return *device_opt_;
   }
@@ -696,6 +732,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
+    } else if (is_sparse_csr()) {
+      return kSparseCsr;
     } else if (is_mkldnn()) {
       return kMkldnn;
     } else {
@@ -791,9 +829,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "level" allows to specify the level of forward AD nesting for which the
    *     gradient should be returned. Note that since levels are not fully
    *     supported yet, this argument should be 0. See documentation for
-   *     torch::autograd::enter_dual_level for more details about forward AD nesting.
-   *   - "self" should represent the Tensor whose forward grad is accessed. It is
-   *     required when dealing with view.
+   *     torch::autograd::enter_dual_level for more details about forward AD
+   * nesting.
+   *   - "self" should represent the Tensor whose forward grad is accessed. It
+   * is required when dealing with view.
    */
   const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
@@ -804,18 +843,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This is an internal API that should never be used by end users.
    *
    * The API is as follows:
-   *   - "new_grad" is a Tensor containing the new value of the gradient that should
-   *     be set
-   *   - "self" should represent the Tensor whose forward grad is accessed. It is
-   *     required when dealing with view.
+   *   - "new_grad" is a Tensor containing the new value of the gradient that
+   * should be set
+   *   - "self" should represent the Tensor whose forward grad is accessed. It
+   * is required when dealing with view.
    *   - "level" allows to specify the level of forward AD nesting for which the
    *     gradient should be set. Note that since levels are not fully supported
-   *     yet, this argument should be 0. See documentation for torch::autograd::enter_dual_level
-   *     for more details about forward AD nesting.
-   *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
-   *     by an inplace operation or an out of place one. This allows better error checking.
+   *     yet, this argument should be 0. See documentation for
+   * torch::autograd::enter_dual_level for more details about forward AD
+   * nesting.
+   *   - "is_inplace_op" is a boolean flag that tells if this gradient was
+   * generated by an inplace operation or an out of place one. This allows
+   * better error checking.
    */
-  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(
+      const at::Tensor& new_grad,
+      const at::Tensor& self,
+      uint64_t level,
+      bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -831,7 +876,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T * data() const {
+  inline T* data() const {
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
@@ -848,8 +893,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T * data_ptr_impl() const {
-    TORCH_CHECK(has_storage(),
+  inline T* data_ptr_impl() const {
+    TORCH_CHECK(
+        has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
         storage_initialized(),
@@ -871,9 +917,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* data() const {
-    TORCH_CHECK(has_storage(),
+    TORCH_CHECK(
+        has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(dtype_initialized(),
+    TORCH_CHECK(
+        dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
     return static_cast<void*>(
@@ -886,7 +934,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * that all invariants required by data() are upheld here.
    */
   template <typename T>
-  inline T * unsafe_data() const {
+  inline T* unsafe_data() const {
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -902,7 +950,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the size of a single element of this tensor in bytes.
    */
   size_t itemsize() const {
-    TORCH_CHECK(dtype_initialized(),
+    TORCH_CHECK(
+        dtype_initialized(),
         "Cannot report itemsize of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
     return data_type_.itemsize();
@@ -948,7 +997,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_size ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_size ",
+        err_msg_tensor_metadata_change_not_allowed);
     sizes_and_strides_.size_at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -961,7 +1013,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_stride ",
+        err_msg_tensor_metadata_change_not_allowed);
     sizes_and_strides_.stride_at_unchecked(dim) = new_stride;
     refresh_contiguous();
   }
@@ -974,7 +1029,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_storage_offset ",
+        err_msg_tensor_metadata_change_not_allowed);
     storage_offset_ = storage_offset;
   }
 
@@ -986,7 +1044,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_sizes_contiguous ",
+        err_msg_tensor_metadata_change_not_allowed);
 
     sizes_and_strides_.set_sizes(new_size);
 
@@ -1002,7 +1063,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_sizes_and_strides ",
+        err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -1015,7 +1079,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
-      for (size_t dim = new_dim - 1; ; dim--) {
+      for (size_t dim = new_dim - 1;; dim--) {
         if (new_stride[dim] >= 0) {
           sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
         } else {
@@ -1027,11 +1091,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           } else {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
-              std::max<int64_t>(sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-              sizes_and_strides_.stride_at_unchecked(dim + 1);
+                std::max<int64_t>(
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
+                sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
-        if (dim == 0) break;
+        if (dim == 0)
+          break;
       }
     }
 
@@ -1050,16 +1116,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t stride(int64_t d) const;
 
   /**
-   * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
-   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
+   * Set whether a tensor allows changes to its metadata (e.g. sizes / strides /
+   * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor
+   * ] for details.
    */
   void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
   /**
-   * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
-   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
+   * True if a tensor allows changes to its metadata (e.g. sizes / strides /
+   * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor
+   * ] for details.
    */
   bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
@@ -1068,7 +1136,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the pointer to autograd metadata.
    */
-  void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
+  void set_autograd_meta(
+      std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
   /**
    * Return the pointer to autograd metadata.  May return nullptr if the
@@ -1079,7 +1148,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the pointer to named tensor metadata.
    */
-  void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+  void set_named_tensor_meta(
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
     TORCH_WARN_ONCE(
         "Named tensors and all their associated APIs are an experimental feature ",
         "and subject to change. Please do not use them for anything important ",
@@ -1112,34 +1182,44 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return named_tensor_meta_ != nullptr;
   }
 
-
   // NOTE [ TensorImpl Shallow-Copying ]
   //
-  // TensorImpl shallow-copying is used when we want to have two Variables share the same tensor metadata
-  // (e.g. sizes / strides / storage pointer / storage_offset), but each with a different autograd history.
-  // Example call sites:
+  // TensorImpl shallow-copying is used when we want to have two Variables share
+  // the same tensor metadata (e.g. sizes / strides / storage pointer /
+  // storage_offset), but each with a different autograd history. Example call
+  // sites:
   //
-  // 1. `var_detached = var.detach()` uses `shallow_copy_and_detach()` to create `var_detached` that shares
-  // the same tensor metadata with `var`, but with a completely new autograd history.
-  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy tensor metadata from
-  // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
+  // 1. `var_detached = var.detach()` uses `shallow_copy_and_detach()` to create
+  // `var_detached` that shares the same tensor metadata with `var`, but with a
+  // completely new autograd history.
+  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy tensor
+  // metadata from `tensor` into `var`, while keeping `var`'s original
+  // AutogradMeta.
   //
-  // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` / `shallow_copy_from()` /
-  // `copy_tensor_metadata()`) copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
-  // storage_offset) by value. However, the following fields are not copied:
+  // Functions that shallow-copy a TensorImpl (such as
+  // `shallow_copy_and_detach()` / `shallow_copy_from()` /
+  // `copy_tensor_metadata()`) copy the tensor metadata fields (e.g. sizes /
+  // strides / storage pointer / storage_offset) by value. However, the
+  // following fields are not copied:
   //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because the destination TensorImpl's version counter is either set to the
-  // passed-in `version_counter` (in `shallow_copy_and_detach()` and `copy_tensor_metadata()`), or it is kept
-  // intact (in `shallow_copy_from()`). See NOTE [ Version Counter Sharing ] for details.
+  // 2. the version counter, because the destination TensorImpl's version
+  // counter is either set to the passed-in `version_counter` (in
+  // `shallow_copy_and_detach()` and `copy_tensor_metadata()`), or it is kept
+  // intact (in `shallow_copy_from()`). See NOTE [ Version Counter Sharing ] for
+  // details.
   //
-  // In `shallow_copy_and_detach()` and `copy_tensor_metadata()`, the passed-in `allow_tensor_metadata_change`
-  // determines whether the TensorImpl shallow-copy allows changes to its metadata (e.g. sizes / strides /
-  // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  // In `shallow_copy_and_detach()` and `copy_tensor_metadata()`, the passed-in
+  // `allow_tensor_metadata_change` determines whether the TensorImpl
+  // shallow-copy allows changes to its metadata (e.g. sizes / strides / storage
+  // / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for
+  // details.
   //
-  // In `shallow_copy_from()`, we don't check the destination TensorImpl's `allow_tensor_metadata_change_`,
-  // because `shallow_copy_from()` is used for implementing functions such as `var.set_data(tensor)`, which
-  // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
+  // In `shallow_copy_from()`, we don't check the destination TensorImpl's
+  // `allow_tensor_metadata_change_`, because `shallow_copy_from()` is used for
+  // implementing functions such as `var.set_data(tensor)`, which changes
+  // `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to
+  // be ignored.
 
   /**
    * One TensorImpl can be copied to another TensorImpl if they have the same
@@ -1157,7 +1237,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
           ts.has(DispatchKey::SparseXPU);
     };
-    return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
+    return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
+        (is_sparse(key_set_) && is_sparse(from));
   }
 
   /**
@@ -1183,32 +1264,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
    *
-   * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
-   * see NOTE [ TensorImpl Shallow-Copying ].
+   * For why this function doesn't check this TensorImpl's
+   * `allow_tensor_metadata_change_`, see NOTE [ TensorImpl Shallow-Copying ].
    */
   virtual void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
     copy_tensor_metadata(
-      /*src_impl=*/impl.get(),
-      /*dest_impl=*/this,
-      /*version_counter=*/version_counter(),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+        /*src_impl=*/impl.get(),
+        /*dest_impl=*/this,
+        /*version_counter=*/version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
     refresh_numel();
     refresh_contiguous();
   }
 
   // Inference tensor doesn't have version counter,
   // set_version_counter is no-op for them.
-  void set_version_counter(
-    const c10::VariableVersion& version_counter) {
-    TORCH_CHECK(!(is_inference_tensor() && version_counter.enabled()),
-      "Cannot set version_counter for inference tensor");
+  void set_version_counter(const c10::VariableVersion& version_counter) {
+    TORCH_CHECK(
+        !(is_inference_tensor() && version_counter.enabled()),
+        "Cannot set version_counter for inference tensor");
     version_counter_ = version_counter;
   }
 
-  void set_version_counter(
-    c10::VariableVersion&& version_counter) {
-    TORCH_CHECK(!(is_inference_tensor() && version_counter.enabled()),
-      "Cannot set version_counter for inference tensor");
+  void set_version_counter(c10::VariableVersion&& version_counter) {
+    TORCH_CHECK(
+        !(is_inference_tensor() && version_counter.enabled()),
+        "Cannot set version_counter for inference tensor");
     version_counter_ = std::move(version_counter);
   }
 
@@ -1237,14 +1318,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  public:
-
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
   DeviceType device_type() const {
     // TODO: A useful internal assert would be to show that device_opt_ is null
     // only if you are an undefined tensor
-    TORCH_CHECK(device_opt_.has_value(), "device_type cannot be run on undefined Tensor");
+    TORCH_CHECK(
+        device_opt_.has_value(),
+        "device_type cannot be run on undefined Tensor");
     // See NOTE [c10::optional operator usage in CUDA]
     return (*device_opt_).type();
   }
@@ -1267,29 +1349,33 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Right now Extend is only supported for contiguous Tensor.");
     using SizesVector = SmallVector<int64_t, 5>;
-    SizesVector newDims(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+    SizesVector newDims(
+        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newDims[0] += num;
     if (!storage_.data()) {
       Resize(newDims);
       return;
     }
-    const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
+    const auto newNumel =
+        c10::multiply_integers(newDims.begin(), newDims.end());
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_and_strides_.set_sizes(newDims);
       numel_ = newNumel;
       return;
     }
-    SizesVector newCapacity(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+    SizesVector newCapacity(
+        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newCapacity[0] = std::max(
-        newDims[0], static_cast<int64_t>(std::ceil(sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+        newDims[0],
+        static_cast<int64_t>(std::ceil(
+            sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
     auto oldData = std::move(storage_.data_ptr());
     auto oldSize = numel_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(data_type_);
     if (data_type_.copy()) {
       TORCH_CHECK(
-          device_type() == DeviceType::CPU,
-          "non-POD types work only on CPU");
+          device_type() == DeviceType::CPU, "non-POD types work only on CPU");
       data_type_.copy()(oldData.get(), newData, oldSize);
     } else {
       // The following copy uses the current (thread local) stream for copying
@@ -1328,7 +1414,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
     // TODO: eliminate newCapacity.
-    SmallVector<int64_t, 5> newCapacity(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+    SmallVector<int64_t, 5> newCapacity(
+        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newCapacity[0] = outer_dim;
     auto newNumel = c10::multiply_integers(newCapacity);
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
@@ -1337,7 +1424,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Old data is discarded
     storage_.data_ptr().clear();
     auto oldSize = numel_;
-    SmallVector<int64_t, 5> oldDims(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+    SmallVector<int64_t, 5> oldDims(
+        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     Resize(newCapacity);
     // Allocate new memory but don't copy over the data
     raw_mutable_data(data_type_);
@@ -1412,7 +1500,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = 0;
   }
 
-   /**
+  /**
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
@@ -1437,10 +1525,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // know what to share yet.
     // TODO: Add the assert after all uninitialized states are eliminated
     // TORCH_CHECK(src.dtype_initialized(),
-    //            "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)");
+    //            "Source tensor don't have a data type (did you call
+    //            mutable_data<T> on the tensor?)");
     if (!src.dtype_initialized()) {
-      C10_LOG_EVERY_MS(WARNING, 1000) <<
-                   "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
     }
     TORCH_CHECK(
         src.storage_initialized(),
@@ -1500,7 +1589,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
-      return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
+      return static_cast<void*>(
+          static_cast<char*>(storage_.data()) +
+          storage_offset_ * meta.itemsize());
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
@@ -1513,7 +1604,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       if (numel_ == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
            (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
-        TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
+        TORCH_INTERNAL_ASSERT(
+            storage_offset_ == 0); // because we just reallocated
         return storage_.data();
       }
       const Allocator* allocator = storage_.allocator();
@@ -1540,7 +1632,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             allocator->allocate(numel_ * data_type_.itemsize()));
       }
       storage_.set_nbytes(numel_ * data_type_.itemsize());
-      TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
+      TORCH_INTERNAL_ASSERT(
+          storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
       return storage_.data();
     }
@@ -1570,7 +1663,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const {
-    TORCH_CHECK(has_storage(), "cannot call storage_initialized on tensor that does not have storage");
+    TORCH_CHECK(
+        has_storage(),
+        "cannot call storage_initialized on tensor that does not have storage");
     return storage_.data() || numel_ == 0;
   }
 
@@ -1584,7 +1679,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage_keep_dtype(at::Storage storage) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_storage ",
+        err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
     device_opt_ = storage_.device();
   }
@@ -1599,15 +1697,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the strides of the tensor to match memory_format
    *
-   * WARNING: This function doesn't rearrange data and assumes tensor is a memory
-   * contiguous
+   * WARNING: This function doesn't rearrange data and assumes tensor is a
+   * memory contiguous
    */
   void empty_tensor_restride(MemoryFormat memory_format) {
-    #ifdef DEBUG
-        TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
+#ifdef DEBUG
+    TORCH_INTERNAL_ASSERT(
+        compute_numel() == numel_,
         "If you are seeing this error, that means empty_tensor_restride was "
         "called before setting correct numel");
-    #endif
+#endif
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
@@ -1617,15 +1716,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) = sizes_and_strides_.stride_at_unchecked(i + 1) * std::max<int64_t>(sizes_and_strides_.size_at_unchecked(i + 1), 1);
+            sizes_and_strides_.stride_at_unchecked(i) =
+                sizes_and_strides_.stride_at_unchecked(i + 1) *
+                std::max<int64_t>(
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
           }
         }
         break;
       }
       case MemoryFormat::ChannelsLast: {
         TORCH_CHECK(
-            dim() == 4,
-            "required rank 4 tensor to use channels_last format");
+            dim() == 4, "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
         break;
       }
@@ -1659,7 +1760,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_;
   }
 
-private:
+ private:
   void HandleResize();
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
@@ -1715,7 +1816,11 @@ private:
     return SetDims(IntArrayRef{d0, d1, d2});
   }
 
-  bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
+  bool SetDims(
+      const int64_t d0,
+      const int64_t d1,
+      const int64_t d2,
+      const int64_t d3) {
     return SetDims(IntArrayRef{d0, d1, d2, d3});
   }
 
@@ -1746,7 +1851,7 @@ private:
 
   bool compute_non_overlapping_and_dense() const;
 
-protected:
+ protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
    */
@@ -1762,41 +1867,51 @@ protected:
     is_contiguous_ = compute_contiguous();
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
-    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this point)
-    // Dim 4+ is possibly be a channels last 3d format (Dim 5 only at this point)
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
+    // point) Dim 4+ is possibly be a channels last 3d format (Dim 5 only at
+    // this point)
     switch (dim()) {
       case 4:
         is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
         is_channels_last_3d_contiguous_ = false;
         is_channels_last_ = compute_strides_like_channels_last_2d();
         is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        is_non_overlapping_and_dense_ = is_contiguous_ ||
+            is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
         break;
       case 5:
         is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
-        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
-        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ &&
+            compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ &&
+            compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ =
+            !is_channels_last_ && compute_strides_like_channels_last_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ ||
+            is_channels_last_contiguous_ || is_channels_last_3d_contiguous_ ||
+            compute_non_overlapping_and_dense();
         break;
       default:
         is_channels_last_contiguous_ = false;
         is_channels_last_3d_contiguous_ = false;
-        // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
-        // Being channels_last_contiguous doesn't necessarily mean the tensor is
-        // strided like channels_last: for strides on channel dimension could suggest
-        // desired memory_layout, but it doesn't affect memory storage
+        // is_channels_last_ and is_channels_last_3d_ are suggested
+        // memory_format. Being channels_last_contiguous doesn't necessarily
+        // mean the tensor is strided like channels_last: for strides on channel
+        // dimension could suggest desired memory_layout, but it doesn't affect
+        // memory storage
         is_channels_last_ = false;
         is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
+        is_non_overlapping_and_dense_ =
+            is_contiguous_ || compute_non_overlapping_and_dense();
     }
   }
 
   /**
-   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
-   * from one TensorImpl to another TensorImpl.
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
+   * storage_offset) from one TensorImpl to another TensorImpl.
    *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE
+   * [ TensorImpl Shallow-Copying ].
    */
   static void copy_tensor_metadata(
       const TensorImpl* src_impl,
@@ -1805,10 +1920,11 @@ protected:
       bool allow_tensor_metadata_change);
 
   /**
-   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
-   * from one TensorImpl to another TensorImpl.
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
+   * storage_offset) from one TensorImpl to another TensorImpl.
    *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE
+   * [ TensorImpl Shallow-Copying ].
    */
   static void copy_tensor_metadata(
       const TensorImpl* src_impl,
@@ -1816,25 +1932,25 @@ protected:
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change);
 
-private:
+ private:
   static void copy_tensor_metadata_except_version_counter(
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       bool allow_tensor_metadata_change);
 
-protected:
+ protected:
   // Error message to show when the user tries to change tensor metadata on
   // Tensor created from .data or .detach().
   //
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
-  static const char * const err_msg_tensor_metadata_change_not_allowed;
+  static const char* const err_msg_tensor_metadata_change_not_allowed;
 
-public:
+ public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
   }
 
-protected:
+ protected:
   // Policy for adjusting the behavior of is_contiguous(). Allows
   // subclass customization while still being able to inline
   // is_contiguous() in the common case.
@@ -1855,11 +1971,10 @@ protected:
 
   Storage storage_;
 
-private:
-  // This pointer points to an AutogradMeta struct that stores autograd-specific fields
-  // (such as grad_ / grad_fn_ / grad_accumulator_).
-  // This pointer always has unique ownership (meaning only one TensorImpl can own it
-  // at a time).
+ private:
+  // This pointer points to an AutogradMeta struct that stores autograd-specific
+  // fields (such as grad_ / grad_fn_ / grad_accumulator_). This pointer always
+  // has unique ownership (meaning only one TensorImpl can own it at a time).
   //
   // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
   // equivalent to having an autograd_meta_ pointing to a default constructed
@@ -1882,7 +1997,7 @@ private:
   //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
-protected:
+ protected:
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
   c10::VariableVersion version_counter_;
@@ -1937,7 +2052,8 @@ protected:
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
 
-  // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
+  // default member initializers for bit-fields only available with -std=c++2a
+  // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
     has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
@@ -1963,18 +2079,18 @@ protected:
   bool is_channels_last_contiguous_ : 1;
 
   // Tensor is stored in the channels last 3d memory format, when dimensions
-  // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (< N-strides)
-  // (If size of any dimension is equal to 1, this dimension strides value
-  // is not taken into account).
+  // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (<
+  // N-strides) (If size of any dimension is equal to 1, this dimension strides
+  // value is not taken into account).
   bool is_channels_last_3d_ : 1;
 
   // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
   // contiguous memory block.
   bool is_channels_last_3d_contiguous_ : 1;
 
-  // Dense tensor is the tensor that store values in a contiguous block of memory.
-  // Non-overlapping tensor is the tensor in which elements occupy individual
-  // non-repetitive memory.
+  // Dense tensor is the tensor that store values in a contiguous block of
+  // memory. Non-overlapping tensor is the tensor in which elements occupy
+  // individual non-repetitive memory.
   bool is_non_overlapping_and_dense_ : 1;
 
   bool is_wrapped_number_ : 1;
@@ -2006,7 +2122,8 @@ protected:
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
   //
-  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>
+  // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 };
 
@@ -2059,8 +2176,9 @@ protected:
 //    data type, device, is_contiguous, storage_access_should_throw_, bitfields
 //    DispatchKeySet
 //
-static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 23,
-              "You changed the size of TensorImpl on 64-bit arch."
-              "See Note [TensorImpl size constraints] on how to proceed.");
+static_assert(
+    sizeof(void*) != sizeof(int64_t) || // if 64-bit...
+        sizeof(TensorImpl) == sizeof(int64_t) * 23,
+    "You changed the size of TensorImpl on 64-bit arch."
+    "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

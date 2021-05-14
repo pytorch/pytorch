@@ -279,6 +279,7 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       size.size() == sparse_dim + dense_dim,
       "number of dimensions must be sparse_dim (",
       sparse_dim,
@@ -365,6 +366,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, I
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   Tensor values = expand_values_if_needed(values_);
@@ -406,8 +408,8 @@ SparseTensor clone_sparse(
  * reshaping methods
  ******************************************************************************/
 
-SparseTensor& sparse_resize_(
-    SparseTensor& self,
+const SparseTensor& sparse_resize_(
+    const SparseTensor& self,
     ArrayRef<int64_t> size,
     int64_t sparse_dim,
     int64_t dense_dim) {
@@ -415,8 +417,8 @@ SparseTensor& sparse_resize_(
   return self;
 }
 
-SparseTensor& sparse_resize_and_clear_(
-    SparseTensor& self,
+const SparseTensor& sparse_resize_and_clear_(
+    const SparseTensor& self,
     ArrayRef<int64_t> size,
     int64_t sparse_dim,
     int64_t dense_dim) {
@@ -434,7 +436,7 @@ bool _is_same_size_as_sparse(
 } // namespace
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)
-SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
+const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
   }
@@ -573,7 +575,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES(values.scalar_type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -701,7 +703,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });
@@ -757,6 +759,7 @@ Tensor sparse_mask_helper_cpu(
 
   // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this
   // flatten value `index` to the original position `i`
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto t_indices_accessor = t_i.accessor<int64_t, 2>();
   for (int64_t i = 0; i < t_nnz; i++) {
     int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
