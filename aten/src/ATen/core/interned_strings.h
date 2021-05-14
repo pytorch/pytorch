@@ -208,6 +208,7 @@ namespace c10 {
   _(aten, linalg_multi_dot)          \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
+  _(aten, linalg_matrix_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

@@ -278,6 +278,9 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
+    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
@@ -325,6 +328,10 @@ if(WIN32)
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
+endif()
+
+if(USE_GLOO_WITH_OPENSSL)
+  set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
