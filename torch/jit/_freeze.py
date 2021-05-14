@@ -21,7 +21,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
     Freezing currently only accepts ScriptModules that are in eval mode.
 
     Freezing applies generic optimization that will speed up your model regardless of machine.
-    To further optimize using server-specific settings, run `prepare_for_inference` after
+    To further optimize using server-specific settings, run `optimize_for_inference` after
     freezing.
 
     Args:
@@ -166,14 +166,14 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
 def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
-    purposes of inference. If the model is not already frozen, prepare_for_inference
+    purposes of inference. If the model is not already frozen, optimize_for_inference
     will invoke `torch.jit.freeze` automatically.
 
     In addition to generic optimizations that should speed up your model regardless
     of environment, prepare for inference will also bake in build specific settings
     such as the presence of CUDNN or MKLDNN, and may in the future make transformations
     which speed things up on one machine but slow things down on another. Accordingly,
-    serialization is not implemented following invoking `prepare_for_inference` and
+    serialization is not implemented following invoking `optimize_for_inference` and
     is not guaranteed.
 
     This is still in prototype, and may have the potential to slow down your model.
@@ -182,7 +182,7 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     """
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
-            "prepare_for_inference expects a ScriptModule as input. "
+            "optimize_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
 
     if hasattr(mod, "training"):
