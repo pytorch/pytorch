@@ -2,28 +2,24 @@
     "AverageCpuParameterServer": {
         "ps_class": "AverageParameterServer",
         "configurations": {
-            "lock_count": 1,
             "use_cuda_rpc": false
         }
     },
     "AverageCudaParameterServer": {
         "ps_class": "AverageParameterServer",
         "configurations": {
-            "lock_count": 1,
             "use_cuda_rpc": true
         }
     },
     "AverageBatchCpuParameterServer": {
         "ps_class": "AverageBatchParameterServer",
         "configurations": {
-            "lock_count": 1,
             "use_cuda_rpc": false
         }
     },
     "AverageBatchCudaParameterServer": {
         "ps_class": "AverageBatchParameterServer",
         "configurations": {
-            "lock_count": 1,
             "use_cuda_rpc": true
         }
     }
