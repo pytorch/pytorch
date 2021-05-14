@@ -68,7 +68,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
     @property
     def name(self) -> str:
         """See base class."""
-        return "etcd-experimental"
+        return "etcd-v2"
 
     @property
     def client(self) -> EtcdClient:
@@ -100,17 +100,26 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token]]:
+    ) -> Optional[Tuple[bytes, Token, bool]]:
         """See base class."""
         base64_state = codecs.encode(state, "base64").decode()
 
         kwargs = {}
 
+        def get_state():
+            result = self.get_state()
+            if result is not None:
+                tmp = *result, False
+                # Python 3.6 does not support tuple unpacking in return
+                # statements.
+                return tmp
+            return None
+
         if token:
             try:
                 token = int(token)
             except ValueError:
-                return self.get_state()
+                return get_state()
 
         if token:
             kwargs["prevIndex"] = token
@@ -127,9 +136,10 @@ class EtcdRendezvousBackend(RendezvousBackend):
             ) from exc
 
         if result is None:
-            return self.get_state()
+            return get_state()
 
-        return self._decode_state(result)
+        tmp = *self._decode_state(result), True
+        return tmp
 
     def _decode_state(self, result: EtcdResult) -> Tuple[bytes, Token]:
         base64_state = result.value.encode()
@@ -210,6 +220,4 @@ def create_backend(params: RendezvousParameters) -> EtcdRendezvousBackend:
     """
     client = _create_etcd_client(params)
 
-    return EtcdRendezvousBackend(
-        client, params.run_id, key_prefix="/torch/elastic/rendezvous"
-    )
+    return EtcdRendezvousBackend(client, params.run_id, key_prefix="/torch/elastic/rendezvous")

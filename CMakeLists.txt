@@ -254,6 +254,7 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
+option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
@@ -277,15 +278,20 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
+    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
+option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+option(WERROR "Build with -Werror supported by the compiler" OFF)
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -324,6 +330,10 @@ if(WIN32)
   endif()
 endif()
 
+if(USE_GLOO_WITH_OPENSSL)
+  set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
+endif()
+
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
 # directory.
@@ -341,6 +351,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
   set(USE_SYSTEM_SLEEF ON)
@@ -644,6 +655,10 @@ if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
 
+if(USE_SOURCE_DEBUG_ON_MOBILE)
+  string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
+endif()
+
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 
@@ -682,6 +697,31 @@ if(NOT MSVC)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
   endif()
+
+  # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
+  if(USE_GOLD_LINKER)
+    if(USE_DISTRIBUTED AND USE_MPI)
+      # Same issue as here with default MPI on Ubuntu
+      # https://bugs.launchpad.net/ubuntu/+source/deal.ii/+bug/1841577
+      message(WARNING "Refusing to use gold when USE_MPI=1")
+    else()
+      execute_process(
+        COMMAND
+        "${CMAKE_C_COMPILER}" -fuse-ld=gold -Wl,--version
+         ERROR_QUIET
+         OUTPUT_VARIABLE LD_VERSION)
+      if(NOT "${LD_VERSION}" MATCHES "GNU gold")
+        message(WARNING "USE_GOLD_LINKER was set but ld.gold isn't available, turning it off")
+        set(USE_GOLD_LINKER OFF)
+      else()
+        message(STATUS "ld.gold is available, using it to link")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=gold")
+        set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=gold")
+      endif()
+    endif()
+  endif()
+
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=pedantic")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=redundant-decls")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=old-style-cast")

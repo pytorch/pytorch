@@ -77,7 +77,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Cast* v);
   virtual const Expr* mutate(const BitCast* v);
   virtual const Expr* mutate(const Var* v);
-  virtual const Expr* mutate(const Buf* v);
+  virtual const Expr* mutate(Buf* v);
   virtual const Expr* mutate(const Ramp* v);
   virtual const Expr* mutate(const Load* v);
   virtual const Expr* mutate(const Broadcast* v);

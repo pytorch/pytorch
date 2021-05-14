@@ -84,6 +84,7 @@ void OfflineTensorShapeFunctions::SetupExternalTensorDescriptor(
   desc->isOffline = 1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<OfflineTensor>()),
     OfflineTensorShapeFunctions);

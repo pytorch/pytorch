@@ -16,6 +16,7 @@ from torch.distributed.elastic.utils.distributed import (
     get_free_port,
     get_socket_with_port,
 )
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, IS_MACOS
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size):
@@ -26,6 +27,7 @@ def _create_c10d_store_mp(is_server, server_addr, port, world_size):
     store.set(f"test_key/{os.getpid()}", "test_value".encode("UTF-8"))
 
 
+@unittest.skipIf(IS_WINDOWS or IS_MACOS, "tests incompatible with tsan or asan")
 class DistributedUtilTest(unittest.TestCase):
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())
@@ -125,3 +127,7 @@ class DistributedUtilTest(unittest.TestCase):
                     server_port=port,
                     timeout=1,
                 )
+
+
+if __name__ == "__main__":
+    run_tests()
