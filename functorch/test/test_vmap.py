@@ -2537,6 +2537,13 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
+    def test_log_softmax(self, device):
+        op = functools.partial(torch.log_softmax, dim=-1)
+        x = torch.randn(3, 2, device=device, requires_grad=True)
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_expand(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
 
