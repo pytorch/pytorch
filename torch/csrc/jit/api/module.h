@@ -283,7 +283,7 @@ TORCH_API Module freeze(
     bool optimize_numerics = true);
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
-//  there for details.
+// there for details.
 TORCH_API Module optimize_for_inference(Module& module);
 
 namespace detail {
