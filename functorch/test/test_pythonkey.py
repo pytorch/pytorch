@@ -50,6 +50,27 @@ class TestPythonKey(TestCase):
         inp = [torch.randn(3)]
         self.assertEqual(jit_f(inp), f(inp))
 
+    def test_external_calls(self, device):
+        def f(a, b):
+            return torch.mv(a, b)
+        jit_f = nnc_jit(f)
+        inp = [torch.randn(3, 3), torch.randn(3)]
+        self.assertEqual(jit_f(*inp), f(*inp))
+
+    def test_nnc_passthrough(self, device):
+        def f(x, y):
+            return x + y, y
+        inp = (torch.randn(3), torch.randn(3))
+        jit_f = nnc_jit(f)
+        self.assertEqual(jit_f(*inp), f(*inp))
+
+        def f(x):
+            x['a'] = x['a'] * 2
+            return x
+        inp = ({'a': torch.randn(3), 'b': torch.randn(3)},)
+        jit_f = nnc_jit(f)
+        self.assertEqual(jit_f(*inp), f(*inp))
+
 
 
 only_for = ("cpu")
