@@ -2611,6 +2611,12 @@ def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **
         samples.append(SampleInput(a))
     return samples
 
+def sample_inputs_hardshrink(op_info, device, dtype, requires_grad=False, **kwargs):
+    N = 10
+    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
+               requires_grad=requires_grad)) for _ in range(1, N)]
+    return tensors
+
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
                           low=None, high=None)
@@ -5014,6 +5020,16 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.hardshrink',
+           aten_name="hardshrink",
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=True,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_hardshrink,
+           supports_gradgrad=True,
+           supports_out=False,
+           autodiff_nonfusible_nodes=["aten::hardshrink"]),
     OpInfo('mm',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
