@@ -554,7 +554,13 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/"",
+      type_resolver,
+      obj_loader,
+      device_,
+      *reader_.get());
   return ivalues;
 }
 
