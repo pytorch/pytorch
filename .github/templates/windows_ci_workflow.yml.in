@@ -87,9 +87,9 @@ jobs:
         run: |
           7z e artifacts.zip
       - name: Install build artifacts
-        shell: powershell
+        shell: bash
         run: |
-          python -mpip install dist\*.whl
+          python -mpip install dist/*.whl
       - name: Run test scripts
         shell: bash
         run: |
