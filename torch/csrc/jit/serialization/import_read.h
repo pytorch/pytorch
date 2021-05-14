@@ -14,6 +14,8 @@ namespace jit {
 
 TORCH_API IValue readArchiveAndTensors(
     const std::string& archive_name,
+    const std::string& pickle_prefix,
+    const std::string& tensor_prefix,
     c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
