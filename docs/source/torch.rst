@@ -305,6 +305,7 @@ Pointwise Ops
     digamma
     erf
     erfc
+    erfcx
     erfinv
     exp
     exp2

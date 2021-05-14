@@ -439,6 +439,12 @@ Tensor special_erf(const Tensor& self) { return self.erf(); }
 Tensor& special_erfc_out(const Tensor& self, Tensor& result) { return at::erfc_out(result, self); }
 Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 
+// special_erfcx, alias for erfcx
+Tensor& special_erfcx_out(const Tensor& self, Tensor& result) {
+  return unary_op_impl_float_out(result, self, erfcx_stub);
+}
+Tensor special_erfcx(const Tensor& self) { return unary_op_impl_float(self, erfcx_stub); }
+
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
@@ -745,6 +751,7 @@ DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-globa
 DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(erfcx_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exp2_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

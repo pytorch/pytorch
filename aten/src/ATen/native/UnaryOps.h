@@ -30,6 +30,7 @@ DECLARE_DISPATCH(unary_fn, digamma_stub);
 DECLARE_DISPATCH(unary_fn, special_entr_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
+DECLARE_DISPATCH(unary_fn, erfcx_stub);
 DECLARE_DISPATCH(unary_fn, erfinv_stub);
 DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, exp2_stub);
