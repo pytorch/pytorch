@@ -35,9 +35,17 @@ c10::IValue readArchive(
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     return objLoaderMobile(type, input, mobile_compilation_unit);
   };
-
+  bool bytecode_tensor_in_constants_archive =
+      (archive_name == "bytecode" && !isTensorInBytecodeArchive(stream_reader));
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device, stream_reader);
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/
+      bytecode_tensor_in_constants_archive ? "constants/" : "",
+      type_resolver,
+      obj_loader,
+      device,
+      stream_reader);
   return ivalues;
 }
 

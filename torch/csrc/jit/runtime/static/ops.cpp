@@ -425,7 +425,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(in0_t);
         }
         auto& out_t = p_node->Output(0).toTensor();
-        at::native::leaky_relu_out(in0_t, in1_s, out_t);
+        at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
       };
     });
 
