@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
+#include <regex>
 
 namespace torch {
 namespace jit {
@@ -37,22 +38,25 @@ bool update_bytecode_version(
   return false;
 }
 
-// Copy files from source to destination except those in the exclued list
+// Copy files from source to destination except the files matches one the regex
+// patterns
 void selective_copy(
     PyTorchStreamReader& reader,
     PyTorchStreamWriter& writer,
-    const std::unordered_set<std::string>& excluded_files) {
+    const std::vector<std::regex>& excluded_regex_patterns) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
-    // Don't copy archive in excluded_files, usually archive `version` and `bytecode`
-    // Archvie `version` will be written when PyTorchStreamWriter is going to
-    // finalize and run writeEndOfFile()
+    // Don't copy archive in excluded_files, usually archive `version` and
+    // `bytecode`. Archvie `version` will be written when PyTorchStreamWriter is
+    // going to finalize and run writeEndOfFile()
 
-    // records is the list of all files names in the zip file, and each record is one file
-    // with path to parent folder, for example: script_module_v4_unify/constants/0
+    // records is the list of all files names in the zip file, and each record
+    // is one file with path to parent folder, for example:
+    // `bytecode/140245072983168.storage`
     bool skip = false;
-    for (const auto& excluded_file : excluded_files) {
-      if (record.find(excluded_file) != std::string::npos) {
+    for (const auto& excluded_regex_pattern : excluded_regex_patterns) {
+      bool find = std::regex_match(record, excluded_regex_pattern);
+      if (find) {
         skip = true;
         break;
       }
@@ -137,10 +141,18 @@ bool backport_v5_to_v4(
   std::vector<IValue> constants_values =
       readArchive(kArchiveNameConstants, reader).toTuple()->elements();
 
-  // 2) Copy everything to new output, except a few files
-  std::unordered_set<std::string> excluded_file{
-      kArchiveNameBytecode, kArchiveNameVersion, kArchiveNameConstants};
-  selective_copy(reader, writer, excluded_file);
+  // 2) Copy everything to new output, except the files matches one the regex
+  // patterns Skip the pattern that matches exact `constants.pkl`,
+  // `bytecode.pkl` and `version`. Also skip all tensors under `constant` folder
+  // and `bytecode` folder like `bytecode/140245072983168.storage`.
+  std::vector<std::regex> excluded_regex_patterns{
+      std::regex("constants.pkl"),
+      std::regex("constants\\/.*"),
+      std::regex("bytecode.pkl"),
+      std::regex("bytecode\\/.*"),
+      std::regex("version"),
+  };
+  selective_copy(reader, writer, excluded_regex_patterns);
 
   // 3) write `bytecode` archive
   // Update the bytecode version in bytecode.pkl

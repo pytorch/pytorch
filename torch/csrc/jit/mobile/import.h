@@ -89,7 +89,10 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     at::StrongTypePtr type,
     at::IValue input,
     std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit);
-bool tensorInConstantsArchive(
+
+// Given a reader, which has access to a model file,
+// return true if there exists tensors in `bytecode` archive
+bool isTensorInBytecodeArchive(
     caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 namespace mobile {

@@ -36,7 +36,7 @@ c10::IValue readArchive(
     return objLoaderMobile(type, input, mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =
-      (archive_name == "bytecode" && tensorInConstantsArchive(stream_reader));
+      (archive_name == "bytecode" && !isTensorInBytecodeArchive(stream_reader));
   auto ivalues = torch::jit::readArchiveAndTensors(
       archive_name,
       /*pickle_prefix=*/"",

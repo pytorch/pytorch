@@ -180,11 +180,11 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
   }
 }
 
-bool tensorInConstantsArchive(
+bool isTensorInBytecodeArchive(
     caffe2::serialize::PyTorchStreamReader& stream_reader) {
   auto records = stream_reader.getAllRecords();
   for (const auto& record : records) {
-    if (record.find("constants/") != std::string::npos) {
+    if (record.find("bytecode/") != std::string::npos) {
       return true;
     }
   }
@@ -267,10 +267,18 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() == 2, "There should be two parts in an operator name.");
+        op_item.size() >= 2,
+        "There should be either two parts (name and overload name), ",
+        "or three parts (name, overload name and number of specified args) ",
+        "for an operator");
+    c10::optional<int> num_args;
+    if (op_item.size() > 2) {
+      num_args = op_item[2].toInt();
+    }
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
+        num_args,
         model_version);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
@@ -557,7 +565,8 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   bool bytecode_tensor_in_constants_archive =
-      (archive_name == "bytecode" && tensorInConstantsArchive(*reader_.get()));
+      (archive_name == "bytecode" &&
+       !isTensorInBytecodeArchive(*reader_.get()));
 
   auto ivalues = torch::jit::readArchiveAndTensors(
       archive_name,
