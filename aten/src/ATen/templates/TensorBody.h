@@ -979,6 +979,14 @@ struct MaybeOwnedTraits<at::Tensor> {
 } // namespace c10
 
 namespace at {
+
+inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
+    const c10::optional<Tensor>& opt) {
+  return opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+}
+
 inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_format) const & {
   if (is_contiguous(memory_format)) {
     return c10::MaybeOwned<Tensor>::borrowed(*this);

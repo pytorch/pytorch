@@ -266,11 +266,16 @@ class Binding:
             argument=self.argument,
         )
 
-    def decl(self) -> str:
+    def decl(self, *, func_ptr_cast: bool = False) -> str:
         mb_default = ""
         if self.default is not None:
             mb_default = f"={self.default}"
-        return f"{self.type} {self.name}{mb_default}"
+
+        # casting only needs to know the type
+        if func_ptr_cast:
+            return f"{self.type}"
+        else:
+            return f"{self.type} {self.name}{mb_default}"
 
     # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
     # TODO: Kill this when we eventually remove it!
@@ -407,6 +412,12 @@ class DispatcherSignature:
     def name(self) -> str:
         return dispatcher.name(self.func)
 
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.defn() for a in self.arguments())
         if name is None:
@@ -418,6 +429,10 @@ class DispatcherSignature:
 
     def returns_type(self) -> CType:
         return dispatcher.returns_type(self.func.returns)
+
+    def ptr_type(self) -> str:
+        dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{self.returns_type().cpp_type()} (*)({dispatcher_args_types_str})'
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
@@ -437,6 +452,12 @@ class NativeSignature:
 
     def name(self) -> str:
         return self.prefix + native.name(self.func)
+
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
 
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.defn() for a in self.arguments())

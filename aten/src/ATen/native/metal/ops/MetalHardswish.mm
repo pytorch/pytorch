@@ -19,8 +19,8 @@ Tensor& hardswish_(Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
-  std::vector<int64_t> textureSize = computeTextureSize(outputSize);
-  MPSImage* Y = createTemporaryImage(commandBuffer, textureSize);
+  std::vector<int64_t> imageSize = computeImageSize(outputSize);
+  MPSImage* Y = createTemporaryImage(commandBuffer, imageSize);
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
@@ -44,7 +44,7 @@ Tensor& hardswish_(Tensor& input) {
   [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->setTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 

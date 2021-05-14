@@ -16,12 +16,7 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
-  const Tensor weightContig = weight.contiguous();
-  const auto ws = weightContig.sizes();
-  auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
-  auto packedWeight = at::empty(ws);
-  int64_t size_bytes = c10::multiply_integers(ws) * sizeof(float);
-  memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
+  auto packedWeight = weight.contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
       std::move(bias),
