@@ -789,31 +789,13 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
-<<<<<<< HEAD
-=======
-    at::Device device = r.string(2);
-    if(device==at::Device(DeviceType::Meta) && r.pyobject(0)==Py_Ellipsis){
-        bool type_inference = r.isNone(1);
-        at::ScalarType scalar_type_ = r.scalartypeWithDefault(1, scalar_type);
-        ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type_;
-        bool pin_memory = r.toBool(3);
-        auto sizes = compute_sizes(data);
-        Tensor new_tensor;
-        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-        bool args_requires_grad = r.toBool(4);
-        new_tensor.detach_();
-        new_tensor.set_requires_grad(args_requires_grad);
-
-        return new_tensor;
-    }
-
->>>>>>> e622600511dff6c4fa84467abdf1672196cd6053
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
         "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
       if (ret != 0) throw python_error();
     }
+
     bool type_inference = r.isNone(1);
     bool pin_memory = r.toBool(3);
     bool args_requires_grad = r.toBool(4);
@@ -830,7 +812,7 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
     }
-    new_tensor.detach_();// ensure new_tensor a leaf node
+    new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
