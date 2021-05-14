@@ -574,12 +574,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/random.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
     list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
