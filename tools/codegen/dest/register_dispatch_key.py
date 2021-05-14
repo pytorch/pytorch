@@ -2,12 +2,15 @@ from typing import List, Optional, Union
 import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
+import textwrap
 
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
-                                 TensorOptionsArguments, assert_never,
+                                 TensorOptionsArguments,
+                                 DeviceCheckType, Argument,
+                                 assert_never,
                                  is_cuda_dispatch_key,
                                  is_structured_dispatch_key)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -54,6 +57,19 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
+
+    @staticmethod
+    def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
+        if type == DeviceCheckType.NoCheck:
+            return '  // No device check\n'
+
+        device_check = 'c10::optional<Device> common_device = nullopt;'
+        for arg in args:
+            # Only tensor like arguments are eligible
+            if arg.type.is_tensor_like():
+                device_check += f"""
+  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");"""
+        return device_check
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -155,8 +171,15 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            device_guard = "// DeviceGuard omitted"  # default
+            device_check = '  // No device check\n'
+            if is_cuda_dispatch_key(self.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
+            device_guard = "// DeviceGuard omitted"  # default
             if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
@@ -184,6 +207,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
+  {device_check}
+
   {device_guard}
   return {impl_name}({args_exprs_str});
 }}
@@ -220,11 +245,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
-    {self.gen_class_set_output_body(k)}
-    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+    if (!names.empty()) {{
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
-    {set_output_super}
+{textwrap.indent(set_output_super, "    ")}
 }}
 """
 
@@ -239,8 +266,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
   guard_.reset_device(options.device());
 }
 """
+            maybe_set_guard_line = maybe_set_guard + "\n"
         else:
-            maybe_set_guard = ''
+            maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
@@ -266,8 +294,7 @@ if (strides.empty()) {
                     empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
-                return f"""
-{maybe_set_guard}
+                return f"""{maybe_set_guard_line}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
@@ -278,8 +305,7 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
-            return f"""
-{maybe_set_guard}
+            return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
 TORCH_CHECK(options.dtype() == out.dtype(),
     "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
@@ -336,17 +362,20 @@ if (resized) {{
         else:
             guard_field = ''
 
-        return f"""
-struct {class_name} final : public {parent_class} {{
-    {self.gen_class_ctor(k, class_name, len(f.func.returns))}
-    {self.gen_class_set_output(k, parent_class, generate_super)}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-    {guard_field}
-}};
-"""
+        indent = " " * 4
+        class_ctor_str = self.gen_class_ctor(k, class_name, len(f.func.returns))
+        lines = (
+            f"struct {class_name} final : public {parent_class} {{",
+            f"{textwrap.indent(class_ctor_str, indent)}",
+            f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
+            "    const Tensor& maybe_get_output(int64_t output_idx) override {",
+            "        return outputs_[output_idx];",
+            "    }",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
+            f"{textwrap.indent(guard_field, indent)}",
+            "};"
+        )
+        return '\n'.join(line for line in lines if line)
 
     @method_with_native_function
     def gen_one(self, f: NativeFunction) -> Optional[str]:
@@ -422,6 +451,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             else:
                 class_name = f"structured_{self.g.out.dispatch[self.dispatch_key]}_{k.name}"
                 parent_class = f"at::native::structured_{self.g.out.dispatch[self.dispatch_key]}"
+
+            if is_cuda_dispatch_key(self.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), sig.name()))
 
             if k is SchemaKind.functional:
                 sig_body.append(f"{class_name} op;")

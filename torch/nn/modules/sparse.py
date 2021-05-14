@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from typing import Optional
 
 import torch
@@ -260,7 +259,7 @@ class EmbeddingBag(Module):
                                       is equivalent to the size of `indices`. This matches the CSR format.
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
-                                     during training, i.e. it remains as a fixed “pad”. For a newly constructed
+                                     during training, i.e. it remains as a fixed "pad". For a newly constructed
                                      EmbeddingBag, the embedding vector at :attr:`padding_idx` will default to all
                                      zeros, but can be updated to another value to be used as the padding vector.
                                      Note that the embedding vector at :attr:`padding_idx` is excluded from the

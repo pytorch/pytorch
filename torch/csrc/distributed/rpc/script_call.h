@@ -42,6 +42,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   Message toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~ScriptCall() = default;
 
  protected:
