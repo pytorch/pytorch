@@ -5024,6 +5024,7 @@
 - func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
     CPU: make_per_channel_quantized_tensor_cpu
+    CUDA: make_per_channel_quantized_tensor_cuda
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method

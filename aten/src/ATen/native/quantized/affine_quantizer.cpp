@@ -144,7 +144,6 @@ Tensor quantize_tensor_per_channel_affine(
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  //checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
@@ -180,7 +179,6 @@ Tensor quantize_tensor_per_channel_float_qparams(
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  //checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
@@ -242,7 +240,6 @@ Tensor dequantize_tensor_per_channel_affine(
   static const auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  //checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
@@ -277,7 +274,6 @@ Tensor dequantize_tensor_per_channel_float_qparams(
   static const auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  //checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
