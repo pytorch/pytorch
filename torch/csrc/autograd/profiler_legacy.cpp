@@ -153,6 +153,10 @@ inline const CUDAStubs*& cuda_stubs() {
 }
 }
 
+const CUDAStubs* cudaStubs() {
+  return cuda_stubs();
+}
+
 // Profiler state
 const ProfilerConfig& ProfilerThreadLocalState::config() const {
   return config_;
