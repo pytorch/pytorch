@@ -36,7 +36,7 @@ const std::string shape_compute_functions =
           return expandedSizes
 
         def adaptive_avg_pool2d(self: List[int], out: List[int]):
-          # TODO: return out directly, list len refiner would need to 
+          # TODO: return out directly, list len refiner would need to
           # annotate the List Type with len directly in IR
           assert len(out) == 2
           return [out[0], out[1]]
