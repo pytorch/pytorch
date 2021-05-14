@@ -323,7 +323,7 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
   }
 }
 
-void hardsigmoid_kernel(TensorIterator& iter) {
+void hardsigmoid_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
