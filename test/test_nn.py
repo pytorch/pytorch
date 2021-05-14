@@ -16052,7 +16052,6 @@ class TestNNDeviceType(NNTestCase):
         output = model(input)
         torch.autograd.gradcheck(model, input)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
