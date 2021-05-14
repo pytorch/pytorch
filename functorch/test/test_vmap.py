@@ -2706,7 +2706,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     @skipCUDAIfNoMagma
     @allowVmapFallbackUsage
-    @unittest.expectedFailure
     def test_symeig(self, device):
         def op(x):
             return torch.symeig(x, eigenvectors=True)[0]
@@ -2718,7 +2717,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
-
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
@@ -2791,7 +2789,18 @@ class TestVmapOperatorsOpInfo(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        op_skip = {'__getitem__', 'broadcast_to', 'dsplit', 'hsplit', 'vsplit', 'moveaxis', 'positive', 'tensor_split', 'unfold'}
+        op_skip = {
+            '__getitem__',
+            'broadcast_to',
+            'dsplit',
+            'hsplit',
+            'vsplit',
+            'moveaxis',
+            'positive',
+            'tensor_split',
+            'unfold',
+            'squeeze',
+        }
         # Unsupported input types
         if op.name in op_skip:
             return
