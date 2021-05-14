@@ -37,7 +37,13 @@ c10::IValue readArchive(
   };
 
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device, stream_reader);
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/"",
+      type_resolver,
+      obj_loader,
+      device,
+      stream_reader);
   return ivalues;
 }
 

@@ -154,10 +154,10 @@ class DistributedOptimizer:
 
     `DistributedOptimizer` creates the local optimizer with TorchScript enabled
     by default, so that optimizer updates are not blocked by the Python Global
-    Interpreter Lock (GIL) during multithreaded training (e.g. Distributed Model
-    Parallel). This feature is currently in beta stage, enabled for optimizers
-    including `Adagrad`, `Adam`, `SGD`, `RMSprop`, `AdamW` and `Adadelta`. We
-    are increasing the coverage to all optimizers in future releases.
+    Interpreter Lock (GIL) in the case of multithreaded training (e.g. Distributed
+    Model Parallel). This feature is currently enabled for most optimizers. You
+    can also follow `the recipe`__ in PyTorch tutorials to enable TorchScript support
+    for your own custom optimizers.
 
     Args:
         optimizer_class (optim.Optimizer): the class of optimizer to
@@ -189,6 +189,8 @@ class DistributedOptimizer:
         >>>      lr=0.05,
         >>>   )
         >>>   dist_optim.step(context_id)
+
+    __ https://github.com/pytorch/tutorials/pull/1465
     """
 
     # dict to map a user passed in optimizer_class to a functional
