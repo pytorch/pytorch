@@ -24,7 +24,9 @@ retry sudo apt-get -y install \
 echo "== DOCKER VERSION =="
 docker version
 
-retry sudo pip -q install awscli==1.16.35
+if ! command -v aws >/dev/null; then
+  retry sudo pip3 -q install awscli==1.19.64
+fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
