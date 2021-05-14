@@ -464,7 +464,7 @@ def insert_observer_rewrite(
             'call_module', observer_name, (node,), {})
     return new_obs
 
-def get_target_dtype_for_node_rewrite(
+def get_target_activation_dtype_for_node_rewrite(
     node: Node,
     qconfig: QConfigAny,
     inputs_seen_counter: int,
@@ -479,6 +479,8 @@ def get_target_dtype_for_node_rewrite(
     Returns the expected dtype of the input and output of this node after
     convert. If the value is not None, it represents the dtype of the
     Tensor. If the value is None, it means the value is not a Tensor.
+
+    Note: this is for activations only, weight dtypes are not handled here.
 
     TODO(future PR, if needed): explicitly spell out the non-Tensor
     dtypes.
@@ -497,6 +499,12 @@ def get_target_dtype_for_node_rewrite(
                 node, modules, cache_for_no_tensor_check)
         if args_have_no_tensors:
             return None
+
+        # TODO(future PR): consider stopping matching getitem
+        is_getitem = node.op == 'call_function' and \
+            node.target == operator.getitem
+        if is_getitem:
+            return torch.float
 
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
@@ -849,7 +857,7 @@ def adjust_observers_for_cat_rewrite(
     while not is_activation_post_process_node(first_arg_arg, modules):
         first_arg_arg = first_arg_arg.args[0]
         iteration_guard += 1
-        if iteration_guard > 10:
+        if iteration_guard > 10000:
             raise AssertionError('Unable to find observer of previous node')
 
     assert isinstance(first_arg_arg, Node)
@@ -865,7 +873,7 @@ def adjust_observers_for_cat_rewrite(
         while not is_activation_post_process_node(input_arg, modules):
             input_arg = input_arg.args[0]
             iteration_guard += 1
-            if iteration_guard > 10:
+            if iteration_guard > 10000:
                 raise AssertionError('Unable to find observer of previous node')
 
         parent_name, name = _parent_name(input_arg.target)
@@ -937,7 +945,7 @@ def insert_observers_for_model_rewrite(
     for node in model.graph.nodes:
         root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
-        node_name_to_target_dtype[node.name] = get_target_dtype_for_node_rewrite(
+        node_name_to_target_dtype[node.name] = get_target_activation_dtype_for_node_rewrite(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
             modules, cache_for_no_tensor_check)
@@ -1042,13 +1050,6 @@ def insert_observers_for_model_rewrite(
                             modules, observed_graph,
                             node_name_to_target_dtype,
                             qhandler, prepare_custom_config_dict)
-            else:
-                # if we skipped observation and we have a copy node,
-                # assign the dtype to the dtype of the previous node
-                # new_node.dtype = new_node.args[0].dtype
-                if is_getitem:
-                    node_name_to_target_dtype[new_node.name] = \
-                        torch.float
 
         #
         # After this point, the current node has input and output observers
