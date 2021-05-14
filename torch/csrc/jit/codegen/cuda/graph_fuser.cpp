@@ -63,11 +63,12 @@ Value* createConditionalConstant(Node* profile_ivalue) {
         static_cast<bool>(profile_ivalue->i(Symbol::attr("profiled_bool"))));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
-    TORCH_INTERNAL_ASSERT(
-        false,
+    TORCH_WARN(
         __func__,
-        " gets unidentified type: ",
-        profile_ivalue->ty(attr::profiled_type));
+        " profile_node ",
+        *profile_ivalue,
+        " does not have profile information");
+    return nullptr;
   }
 
   return graph->insertConstant(val);
@@ -1245,6 +1246,10 @@ void guardFusionGroup(Node* fusion) {
       // remove inputs to fusion, and update check logic for fallback
       auto profiled_ival = fusion->input(offset)->node()->input();
       auto const_o = createConditionalConstant(fusion->input(offset)->node());
+      TORCH_INTERNAL_ASSERT(
+          const_o,
+          "profile_ivalue node are expected to have profile information, at node: ",
+          *fusion->input(offset)->node());
       const_o->node()->moveBefore(versioning_if);
       Value* ivalue_check = nullptr;
 
@@ -1351,16 +1356,6 @@ void guardFusionGroups(Block* block) {
   // step 2: restore conditional constant to non-constant outside of
 }
 
-void ExtractProfileIValue(Node* profile_ivalue) {
-  auto const_o = createConditionalConstant(profile_ivalue);
-  auto const_n = const_o->node();
-  const_n->moveAfter(profile_ivalue);
-  profile_ivalue->output()->replaceAllUsesAfterNodeWith(const_n, const_o);
-  // special wiring, we add this input to constant simply in order to create
-  // dependency, which we can trace and remove later;
-  const_n->addInput(profile_ivalue->output());
-}
-
 void RemoveProfileIValue(Node* profile_ivalue) {
   for (const auto& use : profile_ivalue->output()->uses()) {
     if (use.user->kind() == prim::Constant) {
@@ -1370,6 +1365,21 @@ void RemoveProfileIValue(Node* profile_ivalue) {
   }
   profile_ivalue->output()->replaceAllUsesWith(profile_ivalue->input());
   profile_ivalue->destroy();
+}
+
+void ExtractProfileIValue(Node* profile_ivalue) {
+  auto const_o = createConditionalConstant(profile_ivalue);
+  if (const_o) {
+    auto const_n = const_o->node();
+    const_n->moveAfter(profile_ivalue);
+    profile_ivalue->output()->replaceAllUsesAfterNodeWith(const_n, const_o);
+    // special wiring, we add this input to constant simply in order to create
+    // dependency, which we can trace and remove later;
+    const_n->addInput(profile_ivalue->output());
+  } else {
+    // no profile value available, remove profile_ivalue node;
+    RemoveProfileIValue(profile_ivalue);
+  }
 }
 
 void traverseProfileIValues(
