@@ -30,6 +30,7 @@ struct TORCH_API PartitionDesc {
       // so dim - 1 is no longer contiguous
       cont[dim_ - 1] = false;
     }
+    // NOLINTNEXTLINE(modernize-make-shared)
     subTensorDesc_.reset(new TensorDesc(_desc.scalar_type, cont));
   }
 

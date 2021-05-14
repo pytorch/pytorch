@@ -5,9 +5,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace {
 
 // A helper function to construct a vector of tensors from raw buffer arguments
 std::vector<at::Tensor> constructTensors(
@@ -43,6 +41,16 @@ std::vector<at::Tensor> constructTensors(
   return tensors;
 }
 
+} // namespace
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+#ifdef C10_MOBILE
+extern "C" {
+#endif
+
 void nnc_aten_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -68,9 +76,7 @@ void nnc_aten_conv2d(
     int64_t paddingH = extra_args[2];
     int64_t paddingW = extra_args[3];
     int64_t dilationH = extra_args[4];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t dilationW = extra_args[5];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t groups = extra_args[6];
 
     try {
@@ -196,6 +202,47 @@ void nnc_aten_mean(
   }
 }
 
+void nnc_aten_addmm(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& y = tensors[2];
+  const at::Tensor& z = tensors[3];
+  try {
+    at::addmm_out(r, x, y, z, extra_args[0], extra_args[1]);
+  } catch (...) {
+  }
+}
+
+void nnc_aten_digamma(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  try {
+    at::digamma_out(r, x);
+  } catch (...) {
+  }
+}
+
+#ifndef C10_MOBILE
+
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
@@ -210,6 +257,18 @@ const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
 const static RegisterNNCExternalFunction nnc_mean(
     "nnc_aten_mean",
     nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_addmm(
+    "nnc_aten_addmm",
+    nnc_aten_addmm);
+const static RegisterNNCExternalFunction nnc_digamma(
+    "nnc_aten_digamma",
+    nnc_aten_digamma);
+
+#endif
+
+#ifdef C10_MOBILE
+} // extern "C"
+#endif
 
 } // namespace tensorexpr
 } // namespace jit
