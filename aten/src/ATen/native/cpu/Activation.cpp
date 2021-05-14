@@ -598,7 +598,7 @@ void glu_backward_kernel(TensorIterator& iter) {
   });
 }
 
-void silu_kernel(TensorIterator& iter) {
+void silu_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       kBFloat16, iter.dtype(), "silu_cpu", [&]() {
         const Vec256<scalar_t> kOneVec(scalar_t(1));
