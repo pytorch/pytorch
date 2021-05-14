@@ -14,7 +14,7 @@ bool InferenceMode::is_enabled() {
   return InferenceMode_enabled;
 }
 
-void InferenceMode::set_enabled(bool enabled) {
+void InferenceMode::_set_enabled(bool enabled) {
   InferenceMode_enabled = enabled;
 }
 } // namespace c10
