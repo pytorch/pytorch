@@ -339,8 +339,14 @@ extern "C" {
 DeployModuleInfo __deploy_module_info;
 }
 
+struct SymbolProvider {
+  virtual at::optional<Elf64_Addr> sym(const char* name) const = 0;
+  virtual at::optional<TLSIndex> tls_sym(const char* name) const = 0;
+  virtual ~SymbolProvider() {}
+};
+
 // RAII wrapper around dlopen
-struct SystemLibrary {
+struct SystemLibrary : public SymbolProvider {
   SystemLibrary() : SystemLibrary(RTLD_DEFAULT, false) {}
   SystemLibrary(void* handle, bool steal)
       : handle_(handle), own_handle_(steal && handle != RTLD_DEFAULT) {}
@@ -354,23 +360,24 @@ struct SystemLibrary {
     return handle_ != nullptr;
   }
 
-  void* sym(const char* name) const {
-    return dlsym(handle_, name);
+  at::optional<Elf64_Addr> sym(const char* name) const override {
+    void* r = dlsym(handle_, name);
+    if (!r) {
+      return at::nullopt;
+    }
+    return (Elf64_Addr)r;
   }
+
+  at::optional<TLSIndex> tls_sym(const char* name) const override;
+
   const char* last_error() const {
     return dlerror();
   }
 
-  // rule of 5:
+  // rule of 3:
   SystemLibrary(const SystemLibrary& rhs) = delete;
   SystemLibrary& operator=(const SystemLibrary& rhs) = delete;
-  SystemLibrary(SystemLibrary&& rhs) : SystemLibrary() {
-    swap(rhs);
-  }
-  SystemLibrary& operator=(SystemLibrary&& rhs) {
-    swap(rhs);
-    return *this;
-  }
+
   ~SystemLibrary() {
     if (own_handle_) {
       dlclose(handle_);
@@ -674,7 +681,6 @@ struct AlreadyLoadedSymTable {
     return dyninfo_.sym(name);
   }
 };
-
 static int iterate_cb(struct dl_phdr_info* info, size_t size, void* data) {
   auto fn = (std::function<int(struct dl_phdr_info * info, size_t size)>*)data;
   return (*fn)(info, size);
@@ -684,8 +690,8 @@ static int iterate_cb(struct dl_phdr_info* info, size_t size, void* data) {
 // with a normal dlsym call. Instead we iterate through all loaded libraries and
 // check their symbol tables for the symbol. The value of the symbol is the TLS
 // offset. When we find the library we also get the module id.
-bool slow_find_tls_symbol_offset(const char* sym_name, TLSIndex* result) {
-  bool found = false;
+at::optional<TLSIndex> slow_find_tls_symbol_offset(const char* sym_name) {
+  at::optional<TLSIndex> result = at::nullopt;
   std::function<int(struct dl_phdr_info*, size_t)> cb =
       [&](struct dl_phdr_info* info, size_t size) {
         // std::cout << "SEARCHING .. " << info->dlpi_name << "\n";
@@ -698,16 +704,42 @@ bool slow_find_tls_symbol_offset(const char* sym_name, TLSIndex* result) {
         if (sym_addr) {
           // std::cout << "FOUND IT IN: " << info->dlpi_name << " it has modid:
           // " << info->dlpi_tls_modid << "\n";
-          result->module_id = info->dlpi_tls_modid;
-          result->offset = *sym_addr;
-          found = true;
+          result = TLSIndex{info->dlpi_tls_modid, *sym_addr};
           return 1;
         }
         return 0;
       };
 
   dl_iterate_phdr(iterate_cb, (void*)&cb);
-  return found;
+  return result;
+}
+
+at::optional<TLSIndex> SystemLibrary::tls_sym(const char* name) const {
+  if (!sym(name)) {
+    return at::nullopt; // before we do a bunch of slow lookups to find the
+                        // module_id, check that this even defines the symbol
+  }
+  if (handle_ == RTLD_DEFAULT) {
+    return slow_find_tls_symbol_offset(name);
+  }
+
+  struct link_map* lm = 0;
+  DEPLOY_CHECK(
+      0 == dlinfo(handle_, RTLD_DI_LINKMAP, &lm), "failed to query dlinfo");
+  std::cout << "TLS dlinfo LOOKUP " << lm->l_name << " " << name << " "
+            << "\n";
+
+  ElfDynamicInfo info;
+  info.initialize_from_dynamic_section(lm->l_name, lm->l_ld, lm->l_addr, true);
+  auto r = info.sym(name);
+  if (r) {
+    size_t module_id = 0;
+    DEPLOY_CHECK(
+        0 == dlinfo(handle_, RTLD_DI_TLS_MODID, &module_id),
+        "failed to query dlinfo for module_id");
+    return TLSIndex{module_id, *r};
+  }
+  return at::nullopt;
 }
 
 // dlopen does not accept additional search paths as an argument.
@@ -716,7 +748,7 @@ bool slow_find_tls_symbol_offset(const char* sym_name, TLSIndex* result) {
 // get the same behavior. We can find the dependencies by reading the libraries
 // dynamic section for recursive DT_NEEED entries.
 void resolve_needed_libraries(
-    std::vector<SystemLibrary>& system_libraries,
+    std::vector<std::shared_ptr<SymbolProvider>>& libraries,
     const std::string& origin_relative,
     std::vector<std::string>& search_path,
     const std::string& runpath_template,
@@ -744,10 +776,11 @@ void resolve_needed_libraries(
 
     // (1) the library is already loaded
     const int base_flags = RTLD_LAZY | RTLD_LOCAL;
-    SystemLibrary already_loaded(name, base_flags | RTLD_NOLOAD);
-    if (already_loaded.loaded()) {
+    auto already_loaded =
+        std::make_shared<SystemLibrary>(name, base_flags | RTLD_NOLOAD);
+    if (already_loaded->loaded()) {
       // std::cout << "ALREADY LOADED " << name << "\n";
-      system_libraries.emplace_back(std::move(already_loaded));
+      libraries.emplace_back(std::move(already_loaded));
       continue;
     }
 
@@ -767,7 +800,7 @@ void resolve_needed_libraries(
       }
     }
 
-    std::vector<SystemLibrary>
+    std::vector<std::shared_ptr<SymbolProvider>>
         sublibraries; // these need to say loaded until we open library_path
                       // otherwise we might dlclose a sublibrary
 
@@ -791,13 +824,14 @@ void resolve_needed_libraries(
     // resolved.
 
     // std::cout << "OPENING " << library_path << "\n";
-    SystemLibrary try_open(library_path.c_str(), base_flags);
+    auto try_open =
+        std::make_shared<SystemLibrary>(library_path.c_str(), base_flags);
     DEPLOY_CHECK(
-        try_open.loaded(),
+        try_open->loaded(),
         "{}: could not load library, dlopen says: {}",
         name,
-        try_open.last_error());
-    system_libraries.emplace_back(std::move(try_open));
+        try_open->last_error());
+    libraries.emplace_back(std::move(try_open));
   }
 
   // unwind search_path stack
@@ -807,7 +841,7 @@ void resolve_needed_libraries(
 
 extern "C" void* __dso_handle;
 
-struct ElfFile : public std::enable_shared_from_this<ElfFile> {
+struct ElfFile : public std::enable_shared_from_this<ElfFile>, SymbolProvider {
   ElfFile(const ElfFile&) = delete;
   ElfFile(const char* filename, int argc, const char** argv)
       : contents_(filename),
@@ -821,10 +855,11 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile> {
     program_headers_ = (Elf64_Phdr*)(data_ + header_->e_phoff);
     n_program_headers_ = header_->e_phnum;
     // system library search path starts with the process global symbols.
-    system_libraries_.emplace_back(SystemLibrary());
+    symbol_search_path_.emplace_back(std::make_shared<SystemLibrary>());
   }
   void add_system_library(void* handle) {
-    system_libraries_.emplace_back(SystemLibrary(handle, false));
+    symbol_search_path_.emplace_back(
+        std::make_shared<SystemLibrary>(handle, false));
   }
   void reserve_address_space() {
     Elf64_Addr min_vaddr, max_vaddr;
@@ -948,68 +983,126 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile> {
       }
     }
   }
+  size_t module_id() const {
+    size_t this_as_number = (size_t)this;
+    return this_as_number | TLS_LOCAL_FLAG;
+  }
+
   void read_dynamic_section() {
     dyninfo_.initialize_from_dynamic_section(
         name_, dynamic_, load_bias_, false);
     std::vector<std::string> empty_search_path;
     resolve_needed_libraries(
-        system_libraries_,
+        symbol_search_path_,
         name_,
         empty_search_path,
         dyninfo_.runpath_,
         dyninfo_.needed_);
   }
 
-  at::optional<Elf64_Addr> lookup_symbol(const char* name) {
-    for (const auto& sys_lib : system_libraries_) {
-      void* r = sys_lib.sym(name);
+  at::optional<Elf64_Addr> lookup_symbol(Elf64_Xword r_info) {
+    const uint32_t r_type = ELF64_R_TYPE(r_info);
+    const uint32_t r_sym = ELF64_R_SYM(r_info);
+
+    if (r_sym == 0) {
+      return (Elf64_Addr)0;
+    }
+    auto sym_st = dyninfo_.symtab_[r_sym];
+    const char* sym_name = dyninfo_.get_string(sym_st.st_name);
+    if (r_type == R_X86_64_JUMP_SLOT &&
+        strcmp(sym_name, "__tls_get_addr") == 0) {
+      return (Elf64_Addr)local__tls_get_addr;
+    }
+    for (const auto& sys_lib : symbol_search_path_) {
+      auto r = sys_lib->sym(sym_name);
       if (r) {
-        return (Elf64_Addr)r;
+        return r;
       }
     }
-    return dyninfo_.sym(name);
+    auto r = sym(sym_name);
+    if (r) {
+      return r;
+    }
+    if (ELF64_ST_BIND(sym_st.st_info) != STB_WEAK) {
+      DEPLOY_ERROR(
+          "{}: '{}' symbol not found in ElfFile lookup",
+          name_.c_str(),
+          sym_name);
+    }
+    return at::nullopt;
   }
-  void relocate_one(const Elf64_Rela& reloc) {
-    void* const rel_target =
-        reinterpret_cast<void*>(reloc.r_offset + load_bias_);
-    const uint32_t r_type = ELF64_R_TYPE(reloc.r_info);
-    const uint32_t r_sym = ELF64_R_SYM(reloc.r_info);
 
-    const char* sym_name = nullptr;
-    at::optional<Elf64_Addr> sym_addr = at::nullopt;
+  at::optional<TLSIndex> tls_lookup_symbol(Elf64_Xword r_info) {
+    const uint32_t r_type = ELF64_R_TYPE(r_info);
+    const uint32_t r_sym = ELF64_R_SYM(r_info);
+
+    if (r_sym == 0) {
+      return TLSIndex{
+          module_id(),
+          0}; // note: offset is not queried when the symbol is blank
+    }
+
+    auto sym_st = dyninfo_.symtab_[r_sym];
+    const char* sym_name = dyninfo_.get_string(sym_st.st_name);
+    for (const auto& sys_lib : symbol_search_path_) {
+      auto r = sys_lib->tls_sym(sym_name);
+      if (r) {
+        return r;
+      }
+    }
+    auto r = tls_sym(sym_name);
+    if (r) {
+      return r;
+    }
+
+    if (ELF64_ST_BIND(sym_st.st_info) != STB_WEAK) {
+      DEPLOY_ERROR(
+          "{}: '{}' symbol not found in ElfFile lookup",
+          name_.c_str(),
+          sym_name);
+    }
+    return at::nullopt;
+  }
+
+  void relocate_one(const Elf64_Rela& reloc) {
+    const uint32_t r_type = ELF64_R_TYPE(reloc.r_info);
 
     if (r_type == 0) {
       return;
     }
-    if (r_sym != 0) {
-      auto sym_st = dyninfo_.symtab_[r_sym];
-      sym_name = dyninfo_.get_string(sym_st.st_name);
-      // std::cout << "PROCESSING SYMBOL: " << sym_name << "\n";
-      if (r_type == R_X86_64_JUMP_SLOT &&
-          strcmp(sym_name, "__tls_get_addr") == 0) {
-        sym_addr = (Elf64_Addr)local__tls_get_addr;
-      } else {
-        sym_addr = lookup_symbol(sym_name);
+
+    void* const rel_target =
+        reinterpret_cast<void*>(reloc.r_offset + load_bias_);
+
+    // TLS relocations need to lookup symbols differently so we can get the
+    // module_id
+    if (r_type == R_X86_64_DTPMOD64 || r_type == R_X86_64_DTPOFF64) {
+      auto tls_index = tls_lookup_symbol(reloc.r_info);
+      if (!tls_index) {
+        return; // skip weak relocation that wasn't found
       }
-      if (!sym_addr) {
-        if (ELF64_ST_BIND(sym_st.st_info) == STB_WEAK) {
-          // std::cout << "SKIPPING RELOCATION FOR WEAK THING: " << sym_name <<
-          // "\n";
-          return;
-        } else {
-          DEPLOY_ERROR(
-              "{}: '{}' symbol not found in ElfFile lookup",
-              name_.c_str(),
-              sym_name);
-        }
+      switch (r_type) {
+        case R_X86_64_DTPMOD64:
+          *static_cast<size_t*>(rel_target) = tls_index->module_id;
+          break;
+        case R_X86_64_DTPOFF64:
+          *static_cast<Elf64_Addr*>(rel_target) =
+              tls_index->offset + reloc.r_addend;
+          break;
       }
+      return;
+    }
+
+    auto sym_addr = lookup_symbol(reloc.r_info);
+    if (!sym_addr) {
+      return; // skip weak relocation that wasn't found
     }
 
     switch (r_type) {
       case R_X86_64_JUMP_SLOT:
       case R_X86_64_64:
       case R_X86_64_GLOB_DAT: {
-        const Elf64_Addr result = sym_addr.value_or(0) + reloc.r_addend;
+        const Elf64_Addr result = *sym_addr + reloc.r_addend;
         *static_cast<Elf64_Addr*>(rel_target) = result;
       } break;
       case R_X86_64_RELATIVE: {
@@ -1020,44 +1113,21 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile> {
         *static_cast<Elf64_Addr*>(rel_target) = result;
       } break;
       case R_X86_64_32: {
-        const Elf32_Addr result = sym_addr.value_or(0) + reloc.r_addend;
+        const Elf32_Addr result = *sym_addr + reloc.r_addend;
         *static_cast<Elf32_Addr*>(rel_target) = result;
       } break;
       case R_X86_64_PC32: {
-        const Elf64_Addr target = sym_addr.value_or(0) + reloc.r_addend;
+        const Elf64_Addr target = *sym_addr + reloc.r_addend;
         const Elf64_Addr base = reinterpret_cast<Elf64_Addr>(rel_target);
         const Elf32_Addr result = target - base;
         *static_cast<Elf32_Addr*>(rel_target) = result;
-      } break;
-      case R_X86_64_DTPMOD64: {
-        if (sym_addr && dyninfo_.sym(sym_name) != sym_addr) {
-          TLSIndex entry;
-          if (!slow_find_tls_symbol_offset(sym_name, &entry)) {
-            DEPLOY_ERROR("{}: FAILED TO FIND TLS ENTRY {}", name_, sym_name);
-          }
-          *static_cast<size_t*>(rel_target) = entry.module_id;
-        } else {
-          size_t this_as_number = (size_t)this;
-          *static_cast<size_t*>(rel_target) = this_as_number | TLS_LOCAL_FLAG;
-        }
-      } break;
-      case R_X86_64_DTPOFF64: {
-        if (sym_addr && dyninfo_.sym(sym_name) != sym_addr) {
-          TLSIndex entry;
-          if (!slow_find_tls_symbol_offset(sym_name, &entry)) {
-            DEPLOY_ERROR("{}: FAILED TO FIND TLS ENTRY {}", name_, sym_name);
-          }
-          *static_cast<Elf64_Addr*>(rel_target) = entry.offset + reloc.r_addend;
-        } else {
-          const Elf64_Addr result = sym_addr.value_or(0) + reloc.r_addend;
-          *static_cast<Elf64_Addr*>(rel_target) = result;
-        }
       } break;
       default:
         DEPLOY_ERROR("unknown reloc type {} in \"{}\"", r_type, name_.c_str());
         break;
     }
   }
+
   void relocate() {
     for (size_t i = 0; i < dyninfo_.n_rela_; ++i) {
       relocate_one(dyninfo_.rela_[i]);
@@ -1125,8 +1195,16 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile> {
     f(argc_, argv_, environ);
   }
 
-  void* sym(const char* name) const {
-    return (void*)dyninfo_.sym(name).value_or(0);
+  at::optional<Elf64_Addr> sym(const char* name) const override {
+    return dyninfo_.sym(name);
+  }
+
+  at::optional<TLSIndex> tls_sym(const char* name) const override {
+    auto r = dyninfo_.sym(name);
+    if (r) {
+      return TLSIndex{module_id(), *r};
+    }
+    return at::nullopt;
   }
 
   void* tls_addr(size_t offset) {
@@ -1170,7 +1248,7 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile> {
   size_t tls_file_size_;
   size_t tls_mem_size_;
 
-  std::vector<SystemLibrary> system_libraries_;
+  std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
 };
 
 static void* local__tls_get_addr(TLSIndex* idx) {
@@ -1207,7 +1285,7 @@ extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
   lib.load();
   std::stringstream ss;
   ss << prefix << "_" << shortname;
-  auto r = (dl_funcptr)lib.sym(ss.str().c_str());
+  auto r = (dl_funcptr)lib.sym(ss.str().c_str()).value();
   assert(r);
   // std::cout << "LOADED " << pathname << "\n";
   return r;
