@@ -864,7 +864,7 @@ def max_pool2d_with_indices(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
-    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+    return max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 def _max_pool2d(
