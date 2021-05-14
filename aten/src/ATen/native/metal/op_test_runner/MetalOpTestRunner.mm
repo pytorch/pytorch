@@ -75,9 +75,10 @@
   REG_TEST("test_mean_dim", test_mean_dim);
   REG_TEST("test_mean_dim2", test_mean_dim2);
   REG_TEST("test_mean_dim3", test_mean_dim3);
+  REG_TEST("test_reflection_pad2d", test_reflection_pad2d);
 }
 
-- (NSDictionary *) getTests {
+- (NSDictionary *) tests {
   return _tests;
 }
 

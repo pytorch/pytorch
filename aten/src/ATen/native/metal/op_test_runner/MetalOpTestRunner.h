@@ -8,6 +8,6 @@
 typedef BOOL(^testBlock)(void);
 
 + (instancetype)sharedInstance;
-- (NSDictionary<NSString *, testBlock> *)getTests;
+- (NSDictionary<NSString *, testBlock> *)tests;
 
 @end
