@@ -146,7 +146,6 @@ ProcessGroupWrapper::ProcessGroupWrapper(
   if (pg_->getSequenceNumberForGroup() == 0) {
     // Set the sequence number for the underlying process group.
     pg_->setSequenceNumberForGroup();
-    auto s = pg_->getSequenceNumberForGroup();
   }
 }
 
