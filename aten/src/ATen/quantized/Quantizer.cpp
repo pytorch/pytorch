@@ -150,13 +150,20 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
   Tensor rtensor = at::empty(
-      qtensor.sizes(),
+      {0},
       qtensor.options()
           .dtype(at::kFloat)
           .memory_format(qtensor.suggest_memory_format()));
-  qtensor = qtensor.contiguous(qtensor.suggest_memory_format());
+  return dequantize_out(rtensor, qtensor);
+}
+
+Tensor& PerTensorAffineQuantizer::dequantize_out(
+    Tensor& rtensor, const Tensor& qtensor) {
+  rtensor.resize_(qtensor.sizes());
+  const auto qtensor_contig =
+    qtensor.expect_contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_tensor_affine(
-      qtensor, rtensor, scale_, zero_point_);
+      *qtensor_contig, rtensor, scale_, zero_point_);
   return rtensor;
 }
 
@@ -177,13 +184,20 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
 
 Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
   Tensor rtensor = at::empty(
-      qtensor.sizes(),
+      {0},
       qtensor.options()
           .dtype(at::kFloat)
           .memory_format(qtensor.suggest_memory_format()));
-  qtensor = qtensor.contiguous(qtensor.suggest_memory_format());
+  return dequantize_out(rtensor, qtensor);
+}
+
+Tensor& PerChannelAffineQuantizer::dequantize_out(
+    Tensor& rtensor, const Tensor& qtensor) {
+  rtensor.resize_(qtensor.sizes());
+  const auto qtensor_contig =
+    qtensor.expect_contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_channel_affine(
-      qtensor, rtensor, scales_, zero_points_, axis_);
+      *qtensor_contig, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
@@ -201,10 +215,16 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(Tensor rtensor) {
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
-  qtensor = qtensor.contiguous();
+  Tensor rtensor = at::empty({0}, qtensor.options().dtype(at::kFloat));
+  return dequantize_out(rtensor, qtensor);
+}
+
+Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
+    Tensor& rtensor, const Tensor& qtensor) {
+  rtensor.resize_(qtensor.sizes());
+  const auto qtensor_contig = qtensor.expect_contiguous();
   native::dequantize_tensor_per_channel_float_qparams(
-    qtensor, rtensor, scales_, zero_points_, axis_);
+    *qtensor_contig, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
