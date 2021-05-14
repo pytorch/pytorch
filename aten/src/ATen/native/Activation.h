@@ -24,7 +24,7 @@ using shrink_fn = void (*)(TensorIterator&, const Scalar&);
 using shrink_backward_fn = void (*)(TensorIterator&, const Scalar&);
 using elu_fn = void (*)(TensorIteratorBase&, const Scalar&, const Scalar&, const Scalar&);
 using elu_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&, bool);
-using leaky_relu_fn = void (*)(TensorIterator&, const Scalar&);
+using leaky_relu_fn = void (*)(TensorIteratorBase&, const Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIterator&, const Scalar&);
 using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
 
