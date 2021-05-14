@@ -375,7 +375,7 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
-- name: aten::_amp_update_scale
+- name: aten::_amp_update_scale_
   depends:
   - name: aten::eq
   - name: aten::is_nonzero

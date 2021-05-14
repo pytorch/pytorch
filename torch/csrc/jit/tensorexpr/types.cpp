@@ -9,28 +9,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-static bool is_c10_type(const ScalarType& type) {
-  return type < ScalarType::Undefined;
-}
-
-bool is_integral(const ScalarType& type) {
-  return is_c10_type(type)
-      ? c10::isIntegralType(static_cast<c10::ScalarType>(type), true)
-      : false;
-}
-
-bool is_floating_point(const ScalarType& type) {
-  return is_c10_type(type)
-      ? c10::isFloatingType(static_cast<c10::ScalarType>(type))
-      : false;
-}
-
-bool is_signed(const ScalarType& type) {
-  return is_c10_type(type)
-      ? c10::isSignedType(static_cast<c10::ScalarType>(type))
-      : false;
-}
-
 Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
 }
@@ -43,11 +21,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
 #undef DTYPE_DEFINE
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TORCH_API Dtype kHandle(ScalarType::Handle, 1);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TORCH_API Dtype kVoid(ScalarType::None, 1);
+TORCH_API Dtype kHandle(ScalarType::Undefined, 1);
 
 Dtype ToDtype(ScalarType type) {
   switch (type) {
@@ -58,12 +32,8 @@ Dtype ToDtype(ScalarType type) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE)
 #undef TYPE_CASE
 
-    case ScalarType::Handle:
+    case ScalarType::Undefined:
       return kHandle;
-    case ScalarType::Uninitialized:
-      return kUninitialized;
-    case ScalarType::None:
-      return kVoid;
     default:
       throw unsupported_dtype();
   }
@@ -74,37 +44,6 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
   if (dtype.lanes() > 1) {
     stream << "x" << dtype.lanes();
     ;
-  }
-  return stream;
-}
-
-TORCH_API std::ostream& operator<<(
-    std::ostream& stream,
-    const ScalarType& type) {
-  switch (type) {
-// NOLINTNEXTLINE
-#define TYPE_CASE(ttt, Name) \
-  case ScalarType::Name:     \
-    stream << #ttt;          \
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    case ScalarType::Undefined:
-      stream << "Undefined";
-      break;
-    case ScalarType::Handle:
-      stream << "Handle";
-      break;
-    case ScalarType::Uninitialized:
-      stream << "Uninitialized";
-      break;
-    case ScalarType::None:
-      stream << "None";
-      break;
-    default:
-      throw unsupported_dtype();
   }
   return stream;
 }

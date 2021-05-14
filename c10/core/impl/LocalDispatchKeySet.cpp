@@ -8,12 +8,12 @@ namespace impl {
 // NB: POD, must be zero initialized!
 // Note [TLS Initialization]
 // We wanted raw_local_dispatch_key_set to be initialized with non-zero state
-// e.g. BackendSelect and InplaceOrView in included set.  But certain Windows compiler (e.g the one
-// used in ARVR tests) only allow TLS to be zero-initialized.
-// To preserve the invariant that raw TLS storage of the default state is zero,
-// we obtain the actual include keyset by XORing raw_local_dispatch_key_set.included_
-// with c10::default_included_set.  This logic is encapsulated in struct
-// PODLocalDispatchKeySet.
+// e.g. BackendSelect and ADInplaceOrView in included set.  But certain Windows
+// compiler (e.g the one used in ARVR tests) only allow TLS to be
+// zero-initialized. To preserve the invariant that raw TLS storage of the
+// default state is zero, we obtain the actual include keyset by XORing
+// raw_local_dispatch_key_set.included_ with c10::default_included_set.  This
+// logic is encapsulated in struct PODLocalDispatchKeySet.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
@@ -28,26 +28,29 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set.set_excluded(key_set.excluded_);
 }
 
-// An RAII guard could snapshot and restore the entire state (entire DispatchKeySet) as
-// opposed to only snapshotting and restoring the state of its assigned DispatchKeySet.
-// I'm not sure which is better.  If only the RAII API is used, the two choices are
-// not distinguishable.
+// An RAII guard could snapshot and restore the entire state (entire
+// DispatchKeySet) as opposed to only snapshotting and restoring the state of
+// its assigned DispatchKeySet. I'm not sure which is better.  If only the RAII
+// API is used, the two choices are not distinguishable.
 //
-// However, if the guard chooses to snapshot and restore the entire DispatchKeySet,
-// the interaction with the non-RAII API changes.  Consider this sequence of events:
-// - An RAII guard is declared for a particular DispatchKeySet, but snapshots the entire
+// However, if the guard chooses to snapshot and restore the entire
+// DispatchKeySet, the interaction with the non-RAII API changes.  Consider this
+// sequence of events:
+// - An RAII guard is declared for a particular DispatchKeySet, but snapshots
+// the entire
 //   current DispatchKeySet.
-// - A call to the non-RAII API changes the state for DispatchKeys outside the assigned
+// - A call to the non-RAII API changes the state for DispatchKeys outside the
+// assigned
 //   set.
-// - The RAII guard goes out of scope, restoring the entire DispatchKeySet it snapshotted
-//   (which restores the state for its own assigned DispatchKey and wipes out the state
-//   for the other DispatchKeys set by the non-RAII API).
+// - The RAII guard goes out of scope, restoring the entire DispatchKeySet it
+// snapshotted
+//   (which restores the state for its own assigned DispatchKey and wipes out
+//   the state for the other DispatchKeys set by the non-RAII API).
 
 // RAII API
 
 IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKeySet include)
-  : tls_(&raw_local_dispatch_key_set)
-  , include_(include - tls_->included()) {
+    : tls_(&raw_local_dispatch_key_set), include_(include - tls_->included()) {
   if (!include_.empty()) {
     tls_->set_included(tls_->included() | include_);
   }
@@ -60,8 +63,7 @@ IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
 }
 
 ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKeySet exclude)
-  : tls_(&raw_local_dispatch_key_set)
-  , exclude_(exclude - tls_->excluded()) {
+    : tls_(&raw_local_dispatch_key_set), exclude_(exclude - tls_->excluded()) {
   if (!exclude_.empty()) {
     tls_->set_excluded(tls_->excluded() | exclude_);
   }
@@ -74,7 +76,8 @@ ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
 }
 
 // Non-RAII API
-// Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h for details.
+// Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h
+// for details.
 
 bool tls_is_dispatch_key_excluded(DispatchKey x) {
   return raw_local_dispatch_key_set.excluded().has(x);
@@ -115,4 +118,5 @@ bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
 bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
   return raw_local_dispatch_key_set.included().isSupersetOf(ks);
 }
-}} // namespace c10::impl
+} // namespace impl
+} // namespace c10
