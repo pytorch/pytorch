@@ -1266,6 +1266,7 @@ class TestTEFuser(JitTestCase):
             torch.round,
             torch.trunc,
             torch.frac,
+            F.hardshrink,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
@@ -1785,6 +1786,14 @@ class TestTEFuser(JitTestCase):
         x = torch.rand(8)
         script = self.checkScript(eager, (x,))
         self.assertAllFused(script.graph_for(x))
+
+    def test_dims(self):
+        def eager(x, y):
+            return x / (y + 0.0001)
+        x = torch.linspace(-1, 1, 768, dtype=torch.float32).as_strided((1, 1, 768), (768, 1, 1))
+        y = torch.tensor([[[2.0]]], dtype=torch.float32)
+        script = self.checkScript(eager, (x, y))
+        self.assertAllFused(script.graph_for(x, y))
 
 if __name__ == '__main__':
     run_tests()
