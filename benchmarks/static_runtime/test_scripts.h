@@ -337,3 +337,15 @@ const std::string repeat = R"JIT(
   def forward(self, a: Tensor, repeats: List[int]):
       return torch.repeat(a, repeats)
 )JIT";
+
+const auto clamp_script_1 = R"JIT(
+  def forward(self, inp: Tensor, min: int, max: int):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
+
+const auto clamp_script_2 = R"JIT(
+  def forward(self, inp: Tensor, min: Tensor, max: Tensor):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
