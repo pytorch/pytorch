@@ -1820,7 +1820,7 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.freeze(scripted_mod)
+            frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
             if add_z:
                 FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
             else:
