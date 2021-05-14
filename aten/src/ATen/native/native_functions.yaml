@@ -4610,14 +4610,21 @@
     CPU, CUDA: rsub
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: heaviside_out
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: heaviside.out
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   variants: method
+  structured_delegate: heaviside.out
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -9567,14 +9574,9 @@
 
 - func: linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_eigvals
 
 - func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-    CPU, CUDA: linalg_eigvals_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
@@ -9611,17 +9613,25 @@
     CPU: _linalg_inv_out_helper_cpu
     CUDA: _linalg_inv_out_helper_cuda
 
-- func: linalg_inv(Tensor self) -> Tensor
+- func: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_inv
+    CompositeExplicitAutograd: linalg_inv_ex
+
+- func: linalg_inv_ex.inverse(Tensor self, *, bool check_errors=False, Tensor(a!) inverse, Tensor(b!) info) -> (Tensor(a!) inverse, Tensor(b!) info)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_inv_ex_out
+
+- func: linalg_inv(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_inv_out
 
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method
