@@ -73,12 +73,34 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
+        code_prefix_("code/"),
+        pickle_dir_prefix_(""),
+        tensor_dir_prefix_(""),
         source_importer_(
             compilation_unit_,
             &constants_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
-                  *reader_, export_prefix_, qualifier);
+                  *reader_, code_prefix_, qualifier);
+            },
+            reader_->version()) {}
+
+  ScriptModuleDeserializer(
+      std::shared_ptr<CompilationUnit> cu,
+      std::shared_ptr<PyTorchStreamReader> reader,
+      std::string pickle_dir_prefix,
+      std::string tensor_dir_prefix)
+      : compilation_unit_(std::move(cu)),
+        reader_(std::move(reader)),
+        code_prefix_(".data/ts_code/code/"),
+        pickle_dir_prefix_(std::move(pickle_dir_prefix)),
+        tensor_dir_prefix_(std::move(tensor_dir_prefix)),
+        source_importer_(
+            compilation_unit_,
+            &constants_table_,
+            [this](const std::string& qualifier) {
+              return findSourceInArchiveFromQualifier(
+                  *reader_, code_prefix_, qualifier);
             },
             reader_->version()) {}
 
@@ -93,8 +115,10 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
+  std::string code_prefix_;
+  std::string pickle_dir_prefix_;
+  std::string tensor_dir_prefix_;
   SourceImporter source_importer_;
-  std::string export_prefix_ = "code/";
 };
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
@@ -138,7 +162,13 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
   return readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+      /*archive_name=*/archive_name,
+      /*pickle_prefix=*/pickle_dir_prefix_,
+      /*tensor_prefix=*/tensor_dir_prefix_,
+      type_resolver,
+      obj_loader,
+      device_,
+      *reader_.get());
 }
 
 void rewriteQuantizedConvForBC(const Module& module) {
@@ -217,7 +247,7 @@ Module ScriptModuleDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
-  if (reader_->hasRecord("model.json")) {
+  if (reader_->hasRecord("model.json") && code_prefix_.compare("code/") == 0) {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
     return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
 #else
@@ -249,6 +279,21 @@ Module import_ir_module(
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+  return deserializer.deserialize(device, extra_files);
+}
+
+// For reading unified serialization format from torch.Package.
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<PyTorchStreamReader> reader,
+    c10::optional<at::Device> device,
+    std::string ts_id) {
+  ScriptModuleDeserializer deserializer(
+      std::move(cu),
+      std::move(reader),
+      /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
+      /* tensor_dir_prefix = */ ".data/");
+  ExtraFilesMap extra_files;
   return deserializer.deserialize(device, extra_files);
 }
 
