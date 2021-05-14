@@ -268,7 +268,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   }
 
   TORCH_CHECK(get_overlap_status(self, values) == MemOverlapStatus::NO,
-	      "Passed output tensor that overlaps with input tensor to cuda sort");
+	      "Sort size too large for inplace sort");
 
   Tensor self_;
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
