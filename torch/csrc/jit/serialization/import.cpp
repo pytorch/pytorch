@@ -282,7 +282,7 @@ Module import_ir_module(
   return deserializer.deserialize(device, extra_files);
 }
 
-// For reading unified serialization format from torch.Package
+// For reading unified serialization format from torch.Package.
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<PyTorchStreamReader> reader,
