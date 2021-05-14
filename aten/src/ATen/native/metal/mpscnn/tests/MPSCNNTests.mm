@@ -791,6 +791,17 @@ bool test_reshape() {
   });
 }
 
+bool test_reflection_pad2d() {
+  __block std::vector<int64_t> size{2, 3, 47, 63};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = X1.metal();
+    auto Y1 = at::reflection_pad2d(X1, {2,4,7,9});
+    auto Y2 = at::reflection_pad2d(X2, {2,4,7,9}).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
 bool test_hardtanh_() {
 #if TARGET_OS_IPHONE
   __block std::vector<int64_t> size{1, 32, 112, 112};
