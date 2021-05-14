@@ -115,8 +115,8 @@ void* DispatchStubImpl::choose_cpu_impl(
   auto capability = static_cast<int>(get_cpu_capability());
   (void)capability;
 #ifdef HAVE_AVX512_CPU_DEFINITION
-  if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-    TORCH_INTERNAL_ASSERT(AVX512, "DispatchStub: missing AVX2 kernel");
+  if (capability >= static_cast<int>(CPUCapability::AVX512)) {
+    TORCH_INTERNAL_ASSERT(AVX512, "DispatchStub: missing AVX512 kernel");
     return AVX512;
   }
 #endif
