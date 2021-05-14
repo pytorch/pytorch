@@ -40,7 +40,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertFalse(output_shape[2] in inp0_shape + inp1_shape)
 
         # XXX: symbolic shapes are represented with an increasing counter of unique
-        # values, use `_new_symbolic_shape_symbol` api instead of specifying negative # dimensions directly 
+        # values, use `_new_symbolic_shape_symbol` api instead of specifying negative # dimensions directly
         # so there is no chance of collision between manual number # and current counter value.
         sym1 = torch._C._new_symbolic_shape_symbol()
         sym2 = torch._C._new_symbolic_shape_symbol()
@@ -50,6 +50,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[0], sym1)
         self.assertEqual(output_shape[1], sym2)
         self.assertEqual(output_shape[2], sym3)
+
+    def test_sharing_of_list_len(self):
+        # testing generic sharing of logic, a la _convolution and conv2s
+        @torch.jit.script
+        def adaptive_avg_pool2d(self, out: List[int]):
+            assert len(out) == 2
+            out2 : List[int] = []
+            for elem in out:
+                out2.append(elem)
+            return out2
 
     def test_refine_list_len_with_no_input_information(self):
         @torch.jit.script
