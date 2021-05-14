@@ -588,12 +588,13 @@ class BackendMetadata:
     #
 
 
+# BackendIndex represents a backend.
 # The BackendIndex encodes per-operator information that is potentially different
 # for each backend. The most obvious example is the name of the kernel
 # (the 'dispatch' entry in native_functions.yaml).
 # However, there can be other examples of different backends having different information.
-# External backends like XLA have a different notion of "structured", which means
-# that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+# External backends can choose to opt their kernels to be structured independently from in-tree backends,
+# which means that this information isn't inherentely tied to a NativeFunction- it's different per backend.
 @dataclass(frozen=True)
 class BackendIndex:
     dispatch_key: DispatchKey
@@ -621,12 +622,12 @@ class BackendIndex:
         else:
             return g.functional
 
-    def has_backend(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
-        m = self.get(g)
+    def has_kernel(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
+        m = self.get_kernel(g)
         return m is not None
 
 
-    def get(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[BackendMetadata]:
+    def get_kernel(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[BackendMetadata]:
         if isinstance(g, NativeFunction):
             f = g
         elif isinstance(g, NativeFunctionsGroup):
@@ -1455,8 +1456,8 @@ class OperatorName:
 
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
     return f.func.kind() is not SchemaKind.functional and \
-        not b.has_backend(f) and \
-        b.has_backend(g.functional)
+        not b.has_kernel(f) and \
+        b.has_kernel(g.functional)
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
