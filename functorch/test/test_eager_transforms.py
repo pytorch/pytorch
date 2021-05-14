@@ -481,6 +481,23 @@ class TestVmapOfGrad(TestCase):
             # TODO: Check if the rtol is a problem
             self.assertEqual(r, e, atol=0, rtol=1e-4)
 
+    def test_log_softmax(self, device):
+        x = torch.randn(3, 5)
+        v = torch.randn(5)
+
+        def foo(x, v):
+            _, vjp_fn = vjp(partial(torch.log_softmax, dim=-1), x)
+            return vjp_fn(v)[0]
+
+        result = vmap(foo, (0, None))(x, v)
+
+        v = v.expand_as(x)
+        x.requires_grad_()
+        output = torch.log_softmax(x, dim=-1)
+        output.backward(v)
+        self.assertEqual(result, x.grad)
+
+
 class TestJacrev(TestCase):
     def test_simple(self, device):
         x = torch.randn(3, device=device)

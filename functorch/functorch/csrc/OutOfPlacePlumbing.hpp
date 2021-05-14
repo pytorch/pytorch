@@ -9,6 +9,8 @@ namespace at { namespace functorch {
 
 static Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
+    TORCH_INTERNAL_ASSERT(*bdim >= 0);
+    TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
     return makeBatched(tensor, {{level, bdim.value()}});
   }
   return tensor;
