@@ -378,6 +378,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor");
   m.def(
       "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def("static_runtime::dequantize_copy.self(Tensor self) -> Tensor");
 }
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
@@ -413,7 +414,9 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       {c10::Symbol::fromQualString("aten::reshape"),
        c10::Symbol::fromQualString("static_runtime::reshape_copy")},
       {c10::Symbol::fromQualString("aten::flatten"),
-       c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
+       c10::Symbol::fromQualString("static_runtime::flatten_copy")},
+      {c10::Symbol::fromQualString("aten::dequantize"),
+       c10::Symbol::fromQualString("static_runtime::dequantize_copy")}};
 
   // for ops that have overloads, match the schema
   const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {

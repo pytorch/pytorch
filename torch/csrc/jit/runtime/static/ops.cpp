@@ -11,6 +11,8 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -141,6 +143,14 @@ at::Tensor& to_copy_out(Tensor& out, const Tensor& self, bool non_blocking) {
   at::native::resize_(out, self.sizes(), c10::nullopt);
   at::native::copy_(out, self, non_blocking);
   return out;
+}
+
+at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
+  if (!self.is_quantized()) {
+    // make sure out is at::kFloat
+    return at::native::to_copy_out(out, self, true);
+  }
+  return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
 }
 } // namespace native
 } // namespace at
@@ -931,6 +941,34 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
         at::native::to_copy_out(out_t, self, non_blocking);
+      };
+    });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::dequantize_copy,
+    aten_dequantize_copy,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 1) {
+        return nullptr;
+      }
+      auto val = toIValue(n->inputs()[0]);
+      if (val && !(val->isTensor())) {
+        LOG(ERROR)
+            << "Please implement static runtime support for aten::dequantize "
+            << "w/ Tensor list";
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) =
+              create_empty_from(self, at::kFloat, self.suggest_memory_format());
+        }
+
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::dequantize_copy_out(out_t, self);
       };
     });
 
