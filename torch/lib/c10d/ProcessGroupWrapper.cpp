@@ -47,10 +47,10 @@ struct CollectiveFingerPrint {
     }
   }
 
-  // Verifies that shapes are consistent across processes. shape_tensors_to_report
-  // should be specified as the tensors to report when a shape inconsistency
-  // is found. This is not necessarily shape_tensors such as in the case we are
-  // checking shape dimensionality.
+  // Verifies that shapes are consistent across processes.
+  // shape_tensors_to_report should be specified as the tensors to report when a
+  // shape inconsistency is found. This is not necessarily shape_tensors such as
+  // in the case we are checking shape dimensionality.
   void verify_shapes(
       std::vector<at::Tensor> shape_tensors,
       std::vector<at::Tensor> shape_tensors_to_report,
@@ -61,7 +61,7 @@ struct CollectiveFingerPrint {
       auto& tensor_shape = shape_tensors[k];
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
-      for (int i = 0; i < pg->getSize() * shape_tensors.size(); ++i) {
+      for (int i = 0; i < pg->getSize(); ++i) {
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
@@ -113,15 +113,29 @@ struct CollectiveFingerPrint {
         c10d::getTensorShapes(input_tensors_);
     // Verify dimensionality of shapes. This catches errors where tensor shapes
     // have different dimensions such as torch.randn(2, 3) vs torch.randn(2, 3,
-    // 4). If we did not do this step and instead proceeded directly with verifying
-    // tensor shapes, we would have malformed input into allgather() and crash
-    // with an unhelpful error.
+    // 4). If we did not do this step and instead proceeded directly with
+    // verifying tensor shapes, we would have malformed input into allgather()
+    // and crash with an unhelpful error.
     std::vector<at::Tensor> meta_shape_tensors =
         c10d::getTensorShapes(shape_tensors);
+
     verify_shapes(
         meta_shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
-    verify_shapes(
-        shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
+
+    // If all meta shapes are 0 then we can skip the below verification since
+    // it is not possible that there would be a difference.
+    bool skip = true;
+    for (int i = 0; i < meta_shape_tensors.size(); ++i) {
+      auto& t = meta_shape_tensors[i];
+      if (t.item().to<int64_t>() != 0) {
+        skip = false;
+        break;
+      }
+    }
+    if (!skip) {
+      verify_shapes(
+          shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
+    }
   }
 };
 
@@ -231,7 +245,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& opts) {
-  // TODO
+  // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL_BASE, {});
   return pg_->alltoall_base(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
@@ -241,7 +255,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
-  // TODO
+  // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL, {});
   return pg_->alltoall(outputTensors, inputTensors, opts);
 }
@@ -257,7 +271,6 @@ void ProcessGroupWrapper::setSequenceNumberForGroup() {
   if (pg_->getSequenceNumberForGroup() == 0) {
     // Set the sequence number for the underlying process group.
     pg_->setSequenceNumberForGroup();
-    auto s = pg_->getSequenceNumberForGroup();
   }
 }
 
@@ -269,7 +282,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  // TODO.
   return pg_->send(tensors, dstRank, tag);
 }
 
@@ -277,20 +289,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  // TODO.
   return pg_->recv(tensors, srcRank, tag);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
-  // TODO.
   return pg_->recvAnysource(tensors, tag);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
-  // TODO.
   runCollectiveChecks(OpType::BARRIER, {});
   return pg_->barrier(opts);
 }
