@@ -14,27 +14,6 @@
 namespace torch {
 namespace jit {
 
-struct tensor_value_hash {
-  std::size_t operator()(const at::Tensor& tensor) const {
-    at::IValue iv(tensor);
-    return at::IValue::hash(iv);
-  }
-};
-
-struct tensor_value_equal {
-  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-    at::IValue iv_a(a);
-    at::IValue iv_b(b);
-    return at::IValue::hash(iv_a) == at::IValue::hash(iv_b);
-  }
-};
-
-using TensorIndexMap = std::unordered_map<
-    at::Tensor,
-    std::pair<std::string, int>,
-    tensor_value_hash,
-    tensor_value_equal>;
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',
@@ -150,11 +129,13 @@ class TORCH_API Pickler {
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
-      std::vector<c10::ClassTypePtr>* memoized_class_types)
+      std::vector<c10::ClassTypePtr>* memoized_class_types,
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
-        memoized_class_types_(memoized_class_types) {}
+        memoized_class_types_(memoized_class_types),
+        get_tensor_id_(std::move(get_tensor_id)) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
@@ -171,11 +152,6 @@ class TORCH_API Pickler {
 
   const std::vector<at::Tensor>& tensorData() {
     return tensor_data_;
-  }
-
-  void updateTensorsArchiveTable(const TensorIndexMap& tensors_archive_table) {
-    tensors_archive_table_.insert(
-        tensors_archive_table.begin(), tensors_archive_table.end());
   }
 
   void pushEmptyDict();
@@ -285,18 +261,14 @@ class TORCH_API Pickler {
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memoized_class_types_;
 
+  // Function to grab next id_name for tensor storage, function is responsible
+  // for returning unique ids
+  std::function<std::string(const at::Tensor&)> get_tensor_id_;
+
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
-
-  // tensors_archive_table_ is a map of (tensor) => (archive_name, index)
-  // when the tensor exists in the map, it is available under the corresponding
-  // archive, and there is no need to rewrite the tensor. It will just update
-  // archive_name.pkl with the corresponding archive path, for example:
-  // constants/0. Currently, this map is only used for bytecode archive
-  // referring constant archive.
-  TensorIndexMap tensors_archive_table_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
