@@ -172,7 +172,8 @@ __all__ = ['Tensor',
 '_single',
 '_pair',
 '_triple',
-'_list_with_default'
+'_list_with_default',
+'torch._C'
 ]
 
 from typing import Callable, List, Optional, Tuple
@@ -180,6 +181,7 @@ import math
 import warnings
 import torch
 from torch import _VF
+import torch._C
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
 from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
@@ -864,7 +866,7 @@ def max_pool2d_with_indices(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
-    return max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 def _max_pool2d(
