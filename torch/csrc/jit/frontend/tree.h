@@ -98,6 +98,7 @@ struct Tree : c10::intrusive_ptr_target {
       throw std::runtime_error(ss.str());
     }
   }
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~Tree() = default;
 
  private:

@@ -1,5 +1,6 @@
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
+#include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #ifdef USE_CUDA
@@ -16,6 +17,36 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
+ArgValue convertPyToArgValue(py::handle inp) {
+  if (py::isinstance<Placeholder>(inp)) {
+    return py::cast<Placeholder>(inp).handle();
+  } else if (py::isinstance<BufHandle>(inp)) {
+    return py::cast<BufHandle>(inp);
+  } else if (py::isinstance<VarHandle>(inp)) {
+    return py::cast<VarHandle>(inp);
+  } else if (py::isinstance<py::bool_>(inp)) {
+    return py::cast<bool>(inp);
+  } else if (py::isinstance<py::float_>(inp)) {
+    return py::cast<double>(inp);
+  } else if (py::isinstance<py::int_>(inp)) {
+    return py::cast<int64_t>(inp);
+  } else if (py::isinstance<py::none>(inp)) {
+    return ArgNone();
+  } else if (py::isinstance<py::list>(inp)) {
+    auto l = py::cast<py::list>(inp);
+    if (l.size() == 0) {
+      return std::vector<BufHandle>();
+    } else if (py::isinstance<py::int_>(l[0])) {
+      return py::cast<IntList>(inp);
+    } else if (py::isinstance<BufHandle>(l[0])) {
+      return py::cast<BufList>(inp);
+    } else {
+      throw std::runtime_error("vector conversion failed");
+    }
+  } else {
+    throw std::runtime_error("nyi");
+  }
+}
 void initTensorExprBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -435,6 +466,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             For* fused_loop;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
@@ -535,6 +567,21 @@ void initTensorExprBindings(PyObject* module) {
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  te.def(
+      "lower",
+      [](std::string op_str,
+         py::list inputs,
+         std::vector<ExprHandle> outputShape,
+         Dtype outputType) {
+        auto op = c10::Symbol::fromQualString(op_str);
+        std::vector<ArgValue> argInputs;
+        for (auto inp : inputs) {
+          argInputs.push_back(convertPyToArgValue(inp));
+        }
+        return computeOperandValue(
+            op, argInputs, outputShape, outputType.scalar_type());
+      });
+
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph&>())
@@ -634,6 +681,8 @@ void initTensorExprBindings(PyObject* module) {
         }
         return cg;
       });
+  te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
+  te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
 }
 } // namespace jit
 } // namespace torch

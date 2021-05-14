@@ -44,7 +44,7 @@ Tensor upsample_nearest2d_vec(
   MPSImage* X = imageFromTensor(input);
   MetalTensorImplStorage mt{outputSizes};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   if (@available(iOS 11.0, *)) {
     MPSCNNUpsamplingNearest* kernel = [[MPSCNNUpsamplingNearest alloc]

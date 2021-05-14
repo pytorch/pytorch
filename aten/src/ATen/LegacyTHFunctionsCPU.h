@@ -22,8 +22,7 @@ Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & 
 Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tensor & source);
 Tensor& _th_nonzero_out(const Tensor& self, Tensor& result);
 Tensor _th_nonzero(const Tensor & self);
-Tensor _th_var(const Tensor & self, bool unbiased);
-Tensor _th_std(const Tensor & self, bool unbiased);
+Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt);
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result);
 Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
 Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
@@ -31,10 +30,6 @@ Tensor & _th_histc_out(const Tensor & self, int64_t bins, const Scalar& min, con
 Tensor _th_histc(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max);
 std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2);
-std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
-Tensor & _th_ormqr_out(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose, Tensor & result);
-Tensor _th_ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose);
 
 } // namespace th
 } // namespace legacy
