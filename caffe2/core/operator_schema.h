@@ -472,7 +472,7 @@ class TORCH_API OpSchemaRegistry {
                 << " line " << schema.line();
       abort();
     }
-    m.emplace(std::make_pair(key, OpSchema(key, file, line)));
+    m.emplace(key, OpSchema(key, file, line));
     return m[key];
   }
 

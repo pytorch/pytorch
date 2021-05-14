@@ -28,6 +28,7 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
     if (index != -1 && index != cur_index) {
       return -1;
     }
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     index = cur_index;
   }
   return index;
