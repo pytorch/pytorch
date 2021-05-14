@@ -167,7 +167,8 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 )
 class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
     def setUp(self):
-        super(ProcessGroupNCCLWrapperTest, self).setUp()
+        super(AbstractProcessGroupWrapperTest, self).setUp()
+        self._spawn_processes()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
