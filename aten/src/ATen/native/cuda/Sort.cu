@@ -268,12 +268,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   }
 
   Tensor self_;
+  bool newself = false;
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
     self_ = self;
   } else {
     auto new_strides_unsort = infer_dense_strides_dim_last(self, dim);
     self_ = at::empty_strided(self.sizes(), new_strides_unsort, self.options());
     self_.copy_(self);
+    newself = true;
   }
 
   Tensor values_tmp, indices_tmp;
@@ -295,13 +297,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
     values_ptr_ = values_tmp.data_ptr();
   } else {
-    if (self_.defined() || get_overlap_status(self, values) == MemOverlapStatus::NO) {
+    if (newself || get_overlap_status(self, values) == MemOverlapStatus::NO) {
       values_ptr_ = values.data_ptr();
     } else {
       values_tmp = at::empty_like(values);
       values_ptr_ = values_tmp.data_ptr();
     }
   }
+  TORCH_WARN("AFTER");
 
   if (!indices.defined()) {
     if (is_non_overlapping_and_dense) {
