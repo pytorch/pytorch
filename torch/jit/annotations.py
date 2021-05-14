@@ -297,6 +297,8 @@ def try_ann_to_type(ann, loc):
         return TensorType.getInferred()
     if ann is None:
         return NoneType.get()
+    if ann == ():
+        return TupleType([])
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):

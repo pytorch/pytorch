@@ -2265,11 +2265,18 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(Foo())
 
+        x = ()
+        y = ("bar", ())
+
+        traced(x, y)
+
         FileCheck().check("typing.Tuple[()]")   \
                    .check("typing.Tuple[str,typing.Tuple[()]]") \
                    .run(traced.code)
 
         scripted = torch.jit.script(traced)
+
+        scripted(x, y)
 
         FileCheck().check("Tuple[()]")   \
             .check("Tuple[str, Tuple[()]]")    \

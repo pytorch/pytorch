@@ -60,6 +60,9 @@ def createResolutionCallbackFromEnv(lookup_base):
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
 
+        if expr[:i] == '()':
+            return (), i
+
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
         if i == len(expr) or expr[i] != '[':
@@ -775,7 +778,7 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann) -> bool:
-    if ann is Tuple:
+    if ann is Tuple or ann is tuple:
         raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -786,7 +789,7 @@ def is_tuple(ann) -> bool:
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann) -> bool:
-    if ann is List:
+    if ann is List or ann is list:
         raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, '__module__'):
@@ -796,7 +799,7 @@ def is_list(ann) -> bool:
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann) -> bool:
-    if ann is Dict:
+    if ann is Dict or ann is dict:
         raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, '__module__'):
