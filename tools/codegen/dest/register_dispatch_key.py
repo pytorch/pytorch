@@ -86,13 +86,13 @@ class RegisterDispatchKey:
             assert_never(f)
 
     def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
-        metadata = self.backend_index.get(g)
+        metadata = self.backend_index.get_kernel(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
-            assert not self.backend_index.has_backend(g.out), \
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
-            assert not self.backend_index.has_backend(g.out), \
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif metadata is None or not metadata.structured:
@@ -110,7 +110,7 @@ class RegisterDispatchKey:
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         inplace_meta = False
-        if not self.backend_index.has_backend(f):
+        if not self.backend_index.has_kernel(f):
             if (self.backend_index.dispatch_key == DispatchKey.Meta and
                     f.func.kind() is SchemaKind.inplace and
                     # Defer to composites for meta implementation
@@ -166,7 +166,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-            metadata = self.backend_index.get(f)
+            metadata = self.backend_index.get_kernel(f)
             if metadata is None:
                 return None
             impl_name = f"at::native::{metadata.kernel}"
@@ -450,7 +450,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
             else:
-                metadata = self.backend_index.get(self.g)
+                metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"at::native::structured_{metadata.kernel}"
