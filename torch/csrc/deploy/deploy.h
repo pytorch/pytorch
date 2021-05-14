@@ -103,6 +103,15 @@ struct TORCH_API InterpreterManager {
       // can be used for balancing work across GPUs
       I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
       // std::cerr << "Interpreter " << i << " initialized\n";
+      instances_.back().pImpl_->set_find_module(
+          [this](const std::string& name) -> at::optional<std::string> {
+            auto it = registered_module_sources_.find(name);
+            if (it != registered_module_sources_.end()) {
+              return it->second;
+            } else {
+              return at::nullopt;
+            }
+          });
     }
   }
   // get a free model, guarenteed that no other user of acquire_one has the same
@@ -126,6 +135,16 @@ struct TORCH_API InterpreterManager {
   Package load_package(const std::string& uri);
   Package load_package(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
+
+  // convience function for loading some python source code as a module across
+  // all interpreters. this can be used for writing tests of deploy that need to
+  // execute python code, or for small amounts of application logic that are
+  // best written in Python. For larger amounts of code, prefer creating and
+  // loading them as packages.
+  void register_module_source(std::string name, std::string src) {
+    registered_module_sources_[std::move(name)] = std::move(src);
+  }
+
   InterpreterManager(const InterpreterManager&) = delete;
   InterpreterManager& operator=(const InterpreterManager&) = delete;
   InterpreterManager& operator=(InterpreterManager&&) = delete;
@@ -136,6 +155,7 @@ struct TORCH_API InterpreterManager {
   size_t next_object_id_ = 0;
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
+  std::unordered_map<std::string, std::string> registered_module_sources_;
 };
 
 struct TORCH_API ReplicatedObjImpl {

@@ -134,3 +134,12 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+
+TEST(TorchpyTest, RegisterModule) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("foomodule", "def add1(x): return x + 1\n");
+  for (const auto& interp : m.all_instances()) {
+    auto I = interp.acquire_session();
+    AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
+  }
+}
