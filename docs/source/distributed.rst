@@ -431,14 +431,17 @@ Collective functions
 Profiling Collective Communication
 -----------------------------------------
 
-Note that you can use `torch.profiler` or `torch.autograd.profiler` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (`gloo`,
-`nccl`, `mpi`) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
+Note that you can use ``torch.profiler`` or ``torch.autograd.profiler`` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (``gloo``,
+``nccl``, ``mpi``) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
 
-```
-with torch.profiler(): # or torch.autograd.profiler
-    tensor = torch.randn(20, 10)
-    dist.all_reduce(tensor)
-```
+::
+
+    import torch
+    import torch.distributed as dist
+    
+    with torch.profiler():
+        tensor = torch.randn(20, 10)
+        dist.all_reduce(tensor)
 
 Please refer to the `profiler documentation <https://pytorch.org/docs/stable/profiler.html>`__ for a full overview of profiler features.
 
