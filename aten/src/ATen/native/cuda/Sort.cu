@@ -304,7 +304,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       values_ptr_ = values_tmp.data_ptr();
     }
   }
-  TORCH_WARN("AFTER");
 
   if (!indices.defined()) {
     if (is_non_overlapping_and_dense) {
