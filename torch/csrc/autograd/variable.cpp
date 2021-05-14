@@ -149,9 +149,7 @@ namespace impl {
       // See NOTE [ View + Inplace detection ]
       auto creation_meta = diff_view_meta->get_creation_meta();
       // Do not use handle_view_on_rebase here as check_inplace should have been called before this
-      // and either throw an error or clear the warning
-      // Temporary error message as a full fix is too risky for now
-      // Should be an internal assert again
+      // and either throw an error
       TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::DEFAULT);
       TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
       TORCH_INTERNAL_ASSERT(gradient_edge.function);
@@ -647,7 +645,7 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else if (creation_meta == CreationMeta::NO_GRAD_MODE) {
       TORCH_INTERNAL_ASSERT(!grad_fn);
       msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden."
-                      " You can clarify your code and remove this warning by moving both the view and the inplace either both"
+                      " You can clarify your code by moving both the view and the inplace either both"
                       " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                       " the inplace to be tracked).");
     } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
@@ -660,7 +658,7 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
       msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                       " autograd logic to handle view+inplace would override the custom backward associated with the custom"
-                      " Function, leading to incorrect gradients. This behavior is forbidden. You can remove this warning by"
+                      " Function, leading to incorrect gradients. This behavior is forbidden. You can fix this by"
                       " cloning the output of the custom Function.");
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
