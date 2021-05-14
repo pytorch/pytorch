@@ -161,12 +161,12 @@ class MklSubgraph:
 
 def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
     """
-    This generates a heuristic that can be passed into `prepare_for_inference` that
+    This generates a heuristic that can be passed into `optimize_for_inference` that
     determines whether a subgraph should be run in MKL by running it with the example_inputs.
 
     Example usage:
         heuristic = gen_mkl_autotuner(example_inputs, iters=10)
-        fast_model = optimization.prepare_for_inference(model, heuristic)
+        fast_model = optimization.optimize_for_inference(model, heuristic)
     """
     fx_model = None
     old_modules = None
@@ -199,7 +199,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
 
 def use_mkl_length(graph: MklSubgraph) -> bool:
     """
-    This is a heuristic that can be passed into `prepare_for_inference` that
+    This is a heuristic that can be passed into `optimize_for_inference` that
     determines whether a subgraph should be run in MKL by checking if there
     are more than 2 nodes in it
     """
@@ -231,7 +231,7 @@ class UnionFind:
         self.parent[b] = a
         self.size[a] += self.size[b]
 
-def prepare_for_inference(
+def optimize_for_inference(
     model: torch.nn.Module,
     pass_config: Optional[Dict[str, any]] = None,
     tracer: Type[fx.Tracer] = fx.Tracer
@@ -256,7 +256,7 @@ def prepare_for_inference(
     }
     if pass_config is None:
         pass_config = {}
-    default_pass_config = default_pass_config.update(pass_config)
+    default_pass_config.update(pass_config)
 
     if default_pass_config["conv_bn_fuse"]:
         model = fuse(model)
