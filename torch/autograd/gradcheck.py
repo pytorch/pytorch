@@ -1376,7 +1376,9 @@ def gradgradcheck(
         grad_outputs = args[-num_outputs:]
         outputs = _differentiable_outputs(func(*input_args))
         input_args = tuple(x for x in input_args if isinstance(x, torch.Tensor) and x.requires_grad)
-        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
+        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True,
+                                          allow_unused=True)
+        grad_inputs = tuple(g for g in grad_inputs if g is not None)
         return grad_inputs
 
     return gradcheck(
