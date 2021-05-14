@@ -132,6 +132,14 @@ class AbstractTestCases:
             self.assertEqual(x.half().dtype, torch.float16)
             self.assertEqual(x.int().dtype, torch.int32)
             self.assertEqual(x.bfloat16().dtype, torch.bfloat16)
+            cfloat = x.cfloat()
+            self.assertEqual(cfloat.dtype, torch.complex64)
+            self.assertEqual(cfloat.real, x.float())
+            self.assertEqual(cfloat.imag, torch.zeros_like(cfloat.imag))
+            cdouble = x.cdouble()
+            self.assertEqual(cdouble.dtype, torch.complex128)
+            self.assertEqual(cdouble.real, x.double())
+            self.assertEqual(cdouble.imag, torch.zeros_like(cdouble.imag))
 
         def test_doc_template(self) -> None:
             from torch._torch_docs import __file__ as doc_file
@@ -2931,19 +2939,6 @@ class TestTorchDeviceType(TestCase):
         return tuple(shape)
 
     @onlyCPU
-    def test_use_deterministic_algorithms_beta_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Ensures setting to false does not throw a warning
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                torch.use_deterministic_algorithms(False)
-                self.assertEqual(len(w), 0)
-
-            # Setting use_deterministic_algorithms(True) throws a warning once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
-                torch.use_deterministic_algorithms(True)
-
-    @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Calling set_deterministic throws a warning about deprecation once
@@ -5227,7 +5222,7 @@ else:
 
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
-    ) -> Tuple[torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert (dim >= 0 and dim < 3)
         a = [5, 4, 3]
         a[dim] = 2000
@@ -7968,8 +7963,6 @@ tensor_op_tests = [
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('narrow', '', _small_3d, lambda t, d: [1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('norm', '3_norm', _small_3d, lambda t, d: [3], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
@@ -8013,9 +8006,6 @@ tensor_op_tests = [
     ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('squeeze', '', _new_t((1, 2, 1, 4)), lambda t, d: [],),
-    ('squeeze', 'dim', _new_t((1, 2, 1, 4)), lambda t, d: [2], ),
-    ('squeeze', 'neg_dim', _new_t((1, 2, 1, 4)), lambda t, d: [-2], ),
     ('t', '', _new_t((1, 2)), lambda t, d: [],),
     ('take', '', _new_t((3, 4)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],

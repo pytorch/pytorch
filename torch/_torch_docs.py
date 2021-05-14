@@ -3676,6 +3676,20 @@ batched outputs `solution, LU`.
 
 Supports real-valued and complex-valued inputs.
 
+.. warning::
+
+    :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve` has its arguments reversed and does not return the
+    LU factorization of the input. To get the LU factorization see :func:`torch.lu`,
+    which may be used with :func:`torch.lu_solve` and :func:`torch.lu_unpack`.
+
+    ``X = torch.solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve(A, B)
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -8720,6 +8734,27 @@ Since the input matrix :attr:`input` is supposed to be symmetric or Hermitian,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
+
+.. warning::
+
+    :func:`torch.symeig` is deprecated in favor of :func:`torch.linalg.eigh`
+    and will be removed in a future PyTorch release. The default behavior has changed
+    from using the upper triangular portion of the matrix by default to using the
+    lower triangular portion.
+
+    ``L, _ = torch.symeig(A, upper=upper)`` should be replaced with
+
+    .. code :: python
+
+        UPLO = "U" if upper else "L"
+        L = torch.linalg.eigvalsh(A, UPLO=UPLO)
+
+    ``L, V = torch.symeig(A, eigenvectors=True, upper=upper)`` should be replaced with
+
+    .. code :: python
+
+        UPLO = "U" if upper else "L"
+        L, V = torch.linalg.eigh(A, UPLO=UPLO)
 
 .. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
           then the eigenvalues of each matrix in the batch is returned in ascending order.

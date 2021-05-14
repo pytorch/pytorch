@@ -507,8 +507,8 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i: c10::irange(dim)) {
-      indices.emplace_back();
       (void)i;
+      indices.emplace_back();
     }
     indices.emplace_back(index);
     return self.index_put_(indices, source, false);
