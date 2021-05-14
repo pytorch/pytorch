@@ -1078,11 +1078,21 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
+bool AllGraphInputsStatic(const Graph* g) {
+  for (auto n : g->inputs()) {
+    if (!n->isCompleteTensor()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update ConstantValueMap on node outputs from onnx shape inference
   // For outputs, only update static shapes. For input, we update symbolic
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
+  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i = 0; i < n->outputs().size(); i++) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1103,9 +1113,17 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
         ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
-        auto shape = input_type->symbolic_sizes();
-        if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
-          UpdateShape(n->input(i), shape);
+        // Only update shape if the input is onnx node.
+        // If it is aten operators, for example,
+        //   Float(20, 20, strides=[1, 0], requires_grad=0, device=cpu),
+        //     %399 : Float(20, 20, strides=[0, 1], requires_grad=0, device=cpu)
+        //     = prim::ListUnpack(%397)
+        // The tracer shape may not be correct when dynamic_axes is enabled.
+        if (n->input(i)->node()->kind().is_onnx() || static_input_shape) {
+          auto shape = input_type->symbolic_sizes();
+          if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
+            UpdateShape(n->input(i), shape);
+          }
         }
       }
     } else if (IsListConstructIntType(n->input(i))) {
@@ -1162,6 +1180,60 @@ void SpecialPostProcess(Node* n) {
       if (TensorTypePtr t_type = n->input(1)->type()->cast<TensorType>()) {
         if (t_type->scalarType()) {
           n->output()->setType(ListType::create(t_type));
+        }
+      }
+      break;
+    }
+    case ::c10::onnx::Cast: {
+      // ONNX shape inference is not able to assign output tensor shape,
+      // when input to onnx::Cast has incomplete tensor shape, for example
+      // missing shape, rank, dtype, etc. This postprocess sets the correct
+      // dtype for output tensor, since the dtype info is stored in Cast
+      // attribute.
+      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
+      if (nullptr != t_type && !t_type->scalarType().has_value()) {
+        auto onnx_dtype = n->i(attr::to);
+        auto aten_dtype = ONNXTypeToATenType(onnx_dtype);
+        n->output()->setType(t_type->withScalarType(aten_dtype));
+      }
+      break;
+    }
+    case ::c10::onnx::ConstantOfShape: {
+      // ONNX shape inference is not able to propagate output tensor shape
+      // for onnx::ConstantOfShape if input `shape` is not constant.
+      // This is a temporary solution when some partial information is
+      // available, for example, knowing rank of output tensor, or knowing
+      // symbolic shape. This solution won't be needed once we have proper
+      // symbolic propagation.
+      auto shape_node = n->input(0)->node();
+      if (shape_node->kind() == ::c10::onnx::Shape) {
+        // Shape -> ConstantOfShape
+        auto orig_type = shape_node->input()->type()->cast<TensorType>();
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          if (orig_type && orig_type->dim()) {
+            // Assign symbolic shape of original input of onnx::Shape.
+            v_type = v_type->withSymbolicShapes(orig_type->symbolic_sizes());
+            n->output()->setType(v_type);
+          } else if (
+              shape_node->input()->node()->kind() ==
+              ::c10::prim::ListConstruct) {
+            // Assign rank of original input of onnx::Shape.
+            v_type = v_type->withSizes({static_cast<int64_t>(
+                shape_node->input()->node()->inputs().size())});
+            n->output()->setType(v_type);
+          }
+        }
+      } else if (shape_node->kind() == ::c10::prim::ListConstruct) {
+        // ListConstruct -> ConstantOfShape
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          auto value = n->t(attr::value);
+          v_type = v_type->withScalarType(value.scalar_type());
+          std::vector<c10::ShapeSymbol> sizes(
+              shape_node->inputs().size(), c10::ShapeSymbol::newSymbol());
+          v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+          n->output()->setType(v_type);
         }
       }
       break;
@@ -1479,6 +1551,11 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
+  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+    // For cases with tracing, simply ignore NoneType outputs
+    // For cases with scripting, TODO: Add logic to handle NoneType outputs
+    // when such output types are supported. For now test cases with NoneType
+    // outputs have been disabled.
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
