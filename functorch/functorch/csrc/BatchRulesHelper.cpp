@@ -36,6 +36,21 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
   return wrapped_dim;
 }
 
+Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
+  if (!has_bdim) {
+    return tensor;
+  }
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, has_bdim);
+  if (tensor_logical_rank >= logical_rank) {
+    return tensor;
+  }
+  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
+    new_sizes.insert(new_sizes.begin() + 1, 1);
+  }
+  return tensor.view(new_sizes);
+}
+
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x) {
   auto x_dim = x.dim();
   src = maybe_wrap_dim(src, x_dim);
