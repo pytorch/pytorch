@@ -308,9 +308,13 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       nbytes = it->second;
       size_table_.erase(it);
     } else {
-      C10_LOG_EVERY_MS(WARNING, 1000)
-          << "Memory block of unknown size was allocated before the profiling started, "
-          << "profiler results will not include the deallocation event";
+      // C10_LOG_EVERY_MS might log every time in some builds,
+      // using a simple counter to avoid spammy logs
+      if (log_cnt_++ % 1000 == 0) {
+        LOG(WARNING) << "Memory block of unknown size was allocated before "
+                     << "the profiling started, profiler results will not "
+                     << "include the deallocation event";
+      }
     }
   }
   if (nbytes == 0) {

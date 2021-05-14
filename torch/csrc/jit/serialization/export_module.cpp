@@ -69,8 +69,15 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   Inline(*graph);
 
-  torch::jit::MobileCode code(graph, func.name());
-  auto instructions_copy = code.instructions();
+  std::shared_ptr<MobileCode> code;
+  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    code = std::make_shared<MobileCode>(
+        graph, func.name(), false /* emit_default_input_instructions */);
+  } else {
+    code = std::make_shared<MobileCode>(
+        graph, func.name(), true /* emit_default_input_instructions */);
+  }
+  auto instructions_copy = code->instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
@@ -79,7 +86,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -88,11 +95,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     // s.t. at runtime, we will look up the Function* on the Type of the
     // 0th argument in the stack and call that directly.
     if (ins.op == CALL) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       if (node->kind() == prim::CallMethod) {
         // NB: replacing instruction
         auto method_name_idx =
-            code.constant_table().size() + method_names.size();
+            code->constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
         Instruction new_instr{
             INTERFACE_CALL,
@@ -104,7 +111,7 @@ std::pair<IValue, IValue> getFunctionTuple(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
     } else if (ins.op == RET) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
@@ -137,7 +144,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           toString(ins.op),
           " is not supported in mobile module.");
     }
-    auto node = code.instructions_source()[i];
+    auto node = code->instructions_source()[i];
     int64_t debug_handle =
         debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(node);
     // Note 1-to-1 correspondence between instructions and debug handles
@@ -153,26 +160,42 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // operators
   std::vector<IValue> operators;
+  auto op_to_specified_args = code->op_to_num_specified_args();
   operators.reserve(opnames.size());
   for (const auto& opname : opnames) {
-    operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    auto unique_name = c10::toString(opname);
+    // For operator with vararg, adding default arguments would be confusing and
+    // is not allowed. For an operator with num_args = -1, it means the number
+    // of arguments is not available for this operator, we don't do any backward
+    // compatibility adaptation at runtime.
+    int num_args = -1;
+    auto it = op_to_specified_args.find(unique_name);
+    if (it != op_to_specified_args.end()) {
+      num_args = it->second;
+    }
+    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+      operators.emplace_back(
+          Tup({opname.name, opname.overload_name, num_args}));
+    } else {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    }
   }
 
   // constants
   //
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code.constant_table();
+  auto constants = code->constant_table();
   for (auto& method_name : method_names) {
     constants.emplace_back(std::move(method_name));
   }
 
   // types
   std::vector<IValue> types;
-  types.reserve(code.type_table().size());
+  types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
-  for (const TypePtr& t : code.type_table()) {
+  for (const TypePtr& t : code->type_table()) {
     auto type_str = t->annotation_str();
     if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
@@ -187,7 +210,7 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // since the register location is embedded into the bytecode, pass the
   // register size
-  auto register_size = static_cast<int>(code.register_size());
+  auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
@@ -660,8 +683,10 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
+          op_item.size() >= 2,
+          "There should be either two parts (name and overload name), ",
+          "or three parts (name, overload name and number of specified args) ",
+          "for an operator.");
       auto opname = op_item[0].toString()->string();
       auto overload = op_item[1].toString()->string();
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
