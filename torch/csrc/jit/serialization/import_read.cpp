@@ -45,5 +45,24 @@ IValue readArchiveAndTensors(
   return unpickler.parse_ivalue();
 }
 
+bool check_zip_file(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai) {
+  std::array<uint8_t, 2> first_short{};
+  static constexpr uint8_t first_slot = 0x80;
+  static constexpr uint8_t second_slot = 0x02;
+  rai->read(
+      /*pos=*/0,
+      /*buf=*/&first_short,
+      /*n=*/2,
+      /*what=*/"checking archive");
+
+  // NB: zip files by spec can start with any data, so technically they might
+  // start with 0x80 0x02, but in practice zip files start with a file entry
+  // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
+  // files that do not start with the file entry, so it is relatively safe to
+  // perform this check.
+  return !(first_short[0] == first_slot && first_short[1] == second_slot);
+}
+
 } // namespace jit
 } // namespace torch

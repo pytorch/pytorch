@@ -9,15 +9,11 @@ using namespace at;
 class atest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x_tensor = tensor({10, -1, 0, 1, -10});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     y_tensor = tensor({-10, 1, 0, -1, 10});
     x_logical = tensor({1, 1, 0, 1, 0});
     y_logical = tensor({0, 1, 0, 1, 1});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x_float = tensor({2.0, 2.4, 5.6, 7.0, 36.0});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     y_float = tensor({1.0, 1.1, 8.7, 10.0, 24.0});
   }
 
@@ -53,7 +49,6 @@ void unit_binary_ops_test(
     const Tensor& exp,
     ScalarType dtype,
     Args... args) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto out_tensor = empty({5}, dtype);
   func(out_tensor, x_tensor.to(dtype), y_tensor.to(dtype), args...);
   ASSERT_EQ(out_tensor.dtype(), dtype);
@@ -101,7 +96,6 @@ void run_binary_ops_test(
 }
 
 void trace() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor foo = rand({12, 12});
 
   // ASSERT foo is 2-dimensional and holds floats.
@@ -117,9 +111,7 @@ void trace() {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, operators) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int a = 0b10101011;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int b = 0b01111011;
 
   auto a_tensor = tensor({a});
@@ -202,14 +194,12 @@ TEST_F(atest, ne_operators) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, add_operators) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto exp_tensor = tensor({-10, 1, 0, -1, 10});
   run_binary_ops_test(add_out, x_tensor, y_tensor, exp_tensor, INTBOOL, 2);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, max_operators) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto exp_tensor = tensor({10, 1, 0, 1, 10});
   run_binary_ops_test<
       at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
@@ -218,7 +208,6 @@ TEST_F(atest, max_operators) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, min_operators) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto exp_tensor = tensor({-10, -1, 0, -1, -10});
   run_binary_ops_test<
       at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
@@ -227,7 +216,6 @@ TEST_F(atest, min_operators) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, sigmoid_backward_operator) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto exp_tensor = tensor({-1100, 0, 0, -2, 900});
   // only test with type Float
   run_binary_ops_test<
@@ -237,7 +225,6 @@ TEST_F(atest, sigmoid_backward_operator) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, fmod_tensor_operators) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto exp_tensor = tensor({0.0, 0.2, 5.6, 7.0, 12.0});
   run_binary_ops_test<
       at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
@@ -247,10 +234,8 @@ TEST_F(atest, fmod_tensor_operators) {
 // TEST_CASE( "atest", "[]" ) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(atest, atest) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto foo = rand({12, 6});
 
   ASSERT_EQ(foo.size(0), 12);
