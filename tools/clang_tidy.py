@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 A driver script to run clang-tidy on changes detected via git.
 
