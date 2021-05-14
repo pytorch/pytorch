@@ -287,15 +287,14 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
         inps = fx_model.graph.flatten_inps(*inps)
         if out_tensors is None:
             results = [torch.empty(shape, dtype=dtype) for shape,dtype in outs[1]]
-            # results = alloc_results
         else:
             results = out_tensors
         full_inps = module_stuff + list(inps) + results
         cg.call(full_inps)
-        results = fx_model.graph.unflatten_outs(results)
-        return results
         if len(results) == 1:
-            return results[0]
+            results = fx_model.graph.unflatten_outs(results[0])
+        else:
+            results = fx_model.graph.unflatten_outs(results)
         return results
     return f
 
