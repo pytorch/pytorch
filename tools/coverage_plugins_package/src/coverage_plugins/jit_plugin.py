@@ -41,9 +41,17 @@ class JitPlugin(CoveragePlugin):
                 filename = getsourcefile(obj)
                 # We don't want to report for filename = None
                 if filename:
-                    sourcelines, starting_lineno = getsourcelines(obj)
-                    line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
-                    cov_data.add_lines(line_data)
+                    # TODO: Because torch.jit._IgnoreContextManager relies on Python's `exec` method
+                    # which doesn't generate source codelines, getsourcelines(obj) fails. For now,
+                    # we just ignore the exception until we figure out a better way to
+                    # implement torch.jit._IgnoreContextManager.
+                    try:
+                        sourcelines, starting_lineno = getsourcelines(obj)
+                    except OSError:
+                        pass
+                    else:
+                        line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
+                        cov_data.add_lines(line_data)
         super().dynamic_context(frame)
 
 def coverage_init(reg, options):
