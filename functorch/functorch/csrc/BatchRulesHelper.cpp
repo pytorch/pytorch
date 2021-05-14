@@ -29,7 +29,7 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
   // NB: assumes the batch dim is at the front of the tensor
   optional<int64_t> bdim = has_batch_dim ? optional<int64_t>(0) : nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
-  auto wrapped_dim = maybe_wrap_dim(rank, logical_dim);
+  auto wrapped_dim = maybe_wrap_dim(logical_dim, rank);
   if (has_batch_dim) {
     return wrapped_dim + 1;
   }

@@ -43,9 +43,51 @@ std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
   return { result, 0 };
 }
 
+std::tuple<Tensor,optional<int64_t>>
+_log_softmax_backward_data(
+    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+    const Tensor& output, optional<int64_t> output_bdim,
+    int64_t dim,
+    const Tensor& self, optional<int64_t> self_bdim) {
+  TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
+      "output_bdim and self_bdim must be the same");
+  if (!grad_output_bdim && !self_bdim) {
+    return { at::_log_softmax_backward_data(grad_output, output, dim, self), nullopt };
+  }
+  if (grad_output_bdim && self_bdim) {
+    auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+    auto output_ = moveBatchDimToFront(output, output_bdim);
+    auto self_ = moveBatchDimToFront(self, self_bdim);
+    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
+    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+  }
+  // NB: It turns out that expanding + calling log_softmax_backward is generally
+  // faster than the decomposition.
+  // Benchmark here: https://gist.github.com/zou3519/ae3b33b5730a84aae8a80a05c89e078a
+  // Decomposition is (grad_output - grad_output.sum(dim, keepdim=True) * result.exp())
+  // We can squeeze out a last mile of performance by writing custom kernels.
+  if (grad_output_bdim && !self_bdim) {
+    auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
+    auto output_ = output.expand_as(grad_output_);
+    auto self_ = self.expand_as(grad_output_);
+    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+  }
+  if (!grad_output_bdim && self_bdim) {
+    auto output_ = moveBatchDimToFront(output, output_bdim);
+    auto self_ = moveBatchDimToFront(self, self_bdim);
+    auto grad_output_ = grad_output.expand_as(output_);
+    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
+    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("mean", mean_batch_rule);
+  VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
 
 }}
