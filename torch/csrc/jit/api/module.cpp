@@ -356,7 +356,6 @@ Module freeze(
   return out_mod;
 }
 
-
 Module optimize_for_inference(Module& module) {
   // not frozen yet
   if (module._ivalue()->type()->hasAttribute("training")) {
