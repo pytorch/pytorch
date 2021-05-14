@@ -60,7 +60,12 @@ set -ex
 
 assert_git_not_dirty
 
-if [ ! -f "${TMP_DIR}"/"${IMAGE_COMMIT_TAG}".7z ] && [ ! "${BUILD_ENVIRONMENT}" == "" ]; then
+if [[ "${BUILD_WHEEL}" = "1" ]]; then
+    # Only pass is there's a wheel in dist/
+    if ! ls dist/*.whl; then
+      exit 1
+    fi
+elif [ ! -f "${TMP_DIR}"/"${IMAGE_COMMIT_TAG}".7z ] && [ ! "${BUILD_ENVIRONMENT}" == "" ]; then
     exit 1
 fi
 echo "BUILD PASSED"
