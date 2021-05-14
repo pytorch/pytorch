@@ -55,6 +55,11 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
+    void operator()(c10::optional<at::Tensor> x) {
+      if (x.has_value() && x->defined()) {
+        ts = ts | x->key_set();
+      }
+    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
