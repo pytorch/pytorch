@@ -185,7 +185,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path:
-            test/test-reports/**/*.xml
+            test/**/*.xml
       - name: Clean up docker images
         if: always()
         run: |
