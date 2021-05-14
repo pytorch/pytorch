@@ -3,13 +3,13 @@
 #include <c10/core/TensorOptions.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/mobile/export_data.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/mobile/optim/sgd.h>
-#include <torch/csrc/jit/mobile/random.h>
-#include <torch/csrc/jit/mobile/sequential.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
+#include <torch/csrc/jit/mobile/train/optim/sgd.h>
+#include <torch/csrc/jit/mobile/train/random.h>
+#include <torch/csrc/jit/mobile/train/sequential.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/data/dataloader.h>
 #include <torch/torch.h>
