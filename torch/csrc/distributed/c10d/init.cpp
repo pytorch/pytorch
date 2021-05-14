@@ -1303,6 +1303,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
+    // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
+    // group. It can be used to validate collective calls across processes by
+    // checking the op type and input tensor shapes.
     auto processGroupWrapper =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
           module, "ProcessGroupWrapper", processGroup)

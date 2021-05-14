@@ -282,6 +282,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
         xs = [torch.FloatTensor([])]
         fut = pg.broadcast(xs).get_future()
         fut.wait()
