@@ -864,13 +864,22 @@ Example::
     >>> client_store.get("first_key")
       )")
       .def(
-          py::init<
-              const std::string&,
-              int,
-              int,
-              bool,
-              std::chrono::milliseconds,
-              bool>(),
+          py::init([](const std::string& host,
+                      ::c10d::PortType port,
+                      int worldSize,
+                      bool isServer,
+                      std::chrono::milliseconds timeout,
+                      bool waitWorkers) {
+            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            if (worldSize > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize);
+            }
+
+            ::c10d::TCPStoreOptions opts{
+                port, isServer, numWorkers, waitWorkers, timeout};
+
+            return c10::make_intrusive<::c10d::TCPStore>(host, opts);
+          }),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -1594,7 +1603,13 @@ static const auto TCPStoreTorchBind =
                             int64_t timeout) {
           auto timeout_miliseconds = std::chrono::milliseconds(timeout);
           return c10::make_intrusive<::c10d::TCPStore>(
-              host_name, port, world_size, is_master, timeout_miliseconds);
+              host_name,
+              ::c10d::TCPStoreOptions{
+                  static_cast<::c10d::PortType>(port),
+                  is_master,
+                  world_size,
+                  /* waitWorkers */ true,
+                  timeout_miliseconds});
         }));
 
 // TODO: This should really take Store as constructor argument instead of

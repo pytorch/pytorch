@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <thread>
 #include <unordered_map>
@@ -124,12 +125,25 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
   bool callbackRegisteredData_ = false;
 };
 
+struct TCPStoreOptions {
+  static constexpr PortType kDefaultPort = 29500;
+
+  PortType port = kDefaultPort;
+  bool isServer = false;
+  c10::optional<std::size_t> numWorkers = c10::nullopt;
+  bool waitWorkers = true;
+  std::chrono::milliseconds timeout = Store::kDefaultTimeout;
+};
+
 class TCPStore : public Store {
  public:
+  explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
+
+  [[deprecated("Use TCPStore(host, opts) instead.")]]
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
-      c10::optional<int> numWorkers = c10::nullopt_t(-1),
+      c10::optional<int> numWorkers = c10::nullopt,
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -191,9 +205,9 @@ class TCPStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  c10::optional<int> numWorkers_;
-  const std::string initKey_;
-  const std::string regularPrefix_;
+  c10::optional<std::size_t> numWorkers_;
+  const std::string initKey_ = "init/";
+  const std::string regularPrefix_ = "/";
 
   std::unique_ptr<TCPStoreMasterDaemon> tcpStoreMasterDaemon_ = nullptr;
   std::unique_ptr<TCPStoreWorkerDaemon> tcpStoreWorkerDaemon_ = nullptr;
