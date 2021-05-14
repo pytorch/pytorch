@@ -10,10 +10,10 @@ namespace at { namespace native {
 
 // This function implements a boxed fallback to CPU.
 // External backends can add their own custom logging on top if it to customize their own CPU fallbacks.
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class ReturnType, class... ParameterTypes>
-ReturnType call_fallback_fn(const char* name, const char* overload_name, ParameterTypes... args) {
+TORCH_API ReturnType call_fallback_fn(const char* name, const char* overload_name, ParameterTypes... args) {
     auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow(name, overload_name)
         .typed<ReturnType (ParameterTypes...)>();

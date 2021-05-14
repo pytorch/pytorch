@@ -80,12 +80,13 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
+            g: NativeFunctionsGroup = f
             # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
             # gen_structured() has special logic to handle auto-generated kernels.
-            if f.structured:
-                return self.gen_structured(f)
+            if g.structured:
+                return self.gen_structured(g)
             else:
-                return list(mapMaybe(lambda x: self.gen_unstructured(x, f), f.functions()))
+                return list(mapMaybe(lambda f: self.gen_unstructured(f, g), g.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
@@ -145,13 +146,13 @@ class RegisterDispatchKey:
 """
 
     def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
-        metadata = self.backend_index.get(g)
+        metadata = self.backend_index.get_kernel(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
-            assert not self.backend_index.has_backend(g.out), \
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
-            assert not self.backend_index.has_backend(g.out), \
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif metadata is None or not metadata.structured:
@@ -171,7 +172,7 @@ class RegisterDispatchKey:
         with native_function_manager(f):
             inplace_meta = False
             gets_out_inplace_wrapper = False
-            if not self.backend_index.has_backend(f):
+            if not self.backend_index.has_kernel(f):
                 if (self.backend_index.dispatch_key == DispatchKey.Meta and
                         f.func.kind() is SchemaKind.inplace and
                         # Defer to composites for meta implementation
@@ -236,7 +237,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if gets_out_inplace_wrapper:
                     return self.gen_out_inplace_wrapper(f, g)
 
-                metadata = self.backend_index.get(f)
+                metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
                 impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
@@ -520,7 +521,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
             else:
-                metadata = self.backend_index.get(self.g)
+                metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"

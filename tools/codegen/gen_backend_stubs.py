@@ -121,21 +121,23 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
     for g in grouped_native_functions:
         if isinstance(g, NativeFunction):
-            forward_kernels = [] if backend_key is None else [m for m in [backend_indices[backend_key].get(g)] if m is not None]
-            backward_kernels = [] if autograd_key is None else [m for m in [backend_indices[autograd_key].get(g)] if m is not None]
+            forward_kernels = [] if backend_key is None else \
+                [m for m in [backend_indices[backend_key].get_kernel(g)] if m is not None]
+            backward_kernels = [] if autograd_key is None else \
+                [m for m in [backend_indices[autograd_key].get_kernel(g)] if m is not None]
         else:
             forward_kernels = [] if backend_key is None else [m for m in [
-                backend_indices[backend_key].get(f) for f in g.functions()]
+                backend_indices[backend_key].get_kernel(f) for f in g.functions()]
                 if m is not None]
             backward_kernels = [] if autograd_key is None else [m for m in [
-                backend_indices[autograd_key].get(f) for f in g.functions()]
+                backend_indices[autograd_key].get_kernel(f) for f in g.functions()]
                 if m is not None]
 
         forward_kernels = [f for f in forward_kernels if f is not None]
         backward_kernels = [f for f in backward_kernels if f is not None]
         assert len(forward_kernels) == 0 or len(backward_kernels) == 0, \
             f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
-autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! \
+autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! \
 {forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
 
     return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, external_backend_headers, backend_indices)

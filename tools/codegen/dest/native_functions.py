@@ -10,7 +10,7 @@ import tools.codegen.api.structured as structured
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
-    metadata = backend_index.get(f)
+    metadata = backend_index.get_kernel(f)
     if metadata is None:
         return None
     if "legacy::" in metadata.kernel:
@@ -23,7 +23,7 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional
 def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List[str]:
     meta_name = meta.name(g)
     out_args = structured.impl_arguments(g)
-    metadata = backend_index.get(g)
+    metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
     prefix = '' if backend_index.external else 'TORCH_API '
@@ -40,7 +40,7 @@ def compute_native_function_declaration(
         g: Union[NativeFunctionsGroup, NativeFunction],
         backend_index: BackendIndex
 ) -> List[str]:
-    metadata = backend_index.get(g)
+    metadata = backend_index.get_kernel(g)
     if isinstance(g, NativeFunctionsGroup):
         if metadata is not None and metadata.structured:
             if backend_index.external:
