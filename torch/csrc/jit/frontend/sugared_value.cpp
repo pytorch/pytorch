@@ -117,6 +117,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_leaf", "aten"},       {"requires_grad", "prim"},
            {"layout", "prim"},        {"T", "prim"},
            {"ndim", "prim"},          {"name", "prim"},
+           {"real", "aten"},          {"imag", "aten"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
