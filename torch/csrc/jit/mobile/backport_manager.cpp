@@ -3,10 +3,12 @@
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
+#include <regex>
 
 namespace torch {
 namespace jit {
@@ -36,16 +38,30 @@ bool update_bytecode_version(
   return false;
 }
 
-void copy_non_bytecode(
+// Copy files from source to destination except the files matches one the regex
+// patterns
+void selective_copy(
     PyTorchStreamReader& reader,
-    PyTorchStreamWriter& writer) {
+    PyTorchStreamWriter& writer,
+    const std::vector<std::regex>& excluded_regex_patterns) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
-    // Don't copy archive `version` and archive `bytecode`
-    // Archvie `version` will be written when PyTorchStreamWriter is going to
-    // finalize and run writeEndOfFile()
-    if (record != kArchiveNameVersion &&
-        record.find(kArchiveNameBytecode) == std::string::npos) {
+    // Don't copy archive in excluded_files, usually archive `version` and
+    // `bytecode`. Archvie `version` will be written when PyTorchStreamWriter is
+    // going to finalize and run writeEndOfFile()
+
+    // records is the list of all files names in the zip file, and each record
+    // is one file with path to parent folder, for example:
+    // `bytecode/140245072983168.storage`
+    bool skip = false;
+    for (const auto& excluded_regex_pattern : excluded_regex_patterns) {
+      bool find = std::regex_match(record, excluded_regex_pattern);
+      if (find) {
+        skip = true;
+        break;
+      }
+    }
+    if (!skip) {
       auto data_ptr = reader.getRecord(record);
       auto data = std::get<0>(data_ptr).get();
       auto size = std::get<1>(data_ptr);
@@ -122,9 +138,21 @@ bool backport_v5_to_v4(
     TORCH_WARN("Incorrect bytecode version for input model.");
     return false;
   }
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, reader).toTuple()->elements();
 
-  // 2) Copy everything except bytecode related to new output
-  copy_non_bytecode(reader, writer);
+  // 2) Copy everything to new output, except the files matches one the regex
+  // patterns Skip the pattern that matches exact `constants.pkl`,
+  // `bytecode.pkl` and `version`. Also skip all tensors under `constant` folder
+  // and `bytecode` folder like `bytecode/140245072983168.storage`.
+  std::vector<std::regex> excluded_regex_patterns{
+      std::regex("constants.pkl"),
+      std::regex("constants\\/.*"),
+      std::regex("bytecode.pkl"),
+      std::regex("bytecode\\/.*"),
+      std::regex("version"),
+  };
+  selective_copy(reader, writer, excluded_regex_patterns);
 
   // 3) write `bytecode` archive
   // Update the bytecode version in bytecode.pkl
@@ -132,7 +160,11 @@ bool backport_v5_to_v4(
   // Construct the list of ivalues to a big tuple
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
   // write `bytecode` archive
-  writeArchiveV4(writer, "bytecode", bytecode_tuple);
+  writeArchiveV4(writer, kArchiveNameBytecode, bytecode_tuple);
+  // write `constants` archive
+  auto constants_tuple =
+      c10::ivalue::Tuple::create(std::move(constants_values));
+  writeArchiveV4(writer, kArchiveNameConstants, bytecode_tuple);
   return true;
 }
 
