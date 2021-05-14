@@ -61,6 +61,11 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   virtual Tensor quantize(Tensor t) = 0;
 
   /**
+   * quantize a float Tensor into a quantized Tensor, out= variant
+   */
+  virtual Tensor& quantize_out(Tensor& out, const Tensor& t) = 0;
+
+  /**
    * dequantize a quantized Tensor into a float Tensor.
    */
   virtual Tensor dequantize(Tensor t) = 0;

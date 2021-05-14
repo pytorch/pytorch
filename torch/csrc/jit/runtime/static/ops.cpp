@@ -972,6 +972,35 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    aten::quantize_per_tensor,
+    aten_quantize_per_tensor,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 4) {
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        float scale = p_node->Input(1).toDouble();
+        const auto zero_point = p_node->Input(2).toInt();
+        const auto dtype = p_node->Input(3).toScalarType();
+        if (p_node->Output(0).isNone()) {
+          auto quantizer =
+              at::make_per_tensor_affine_quantizer(scale, zero_point, dtype);
+          p_node->Output(0) = at::new_qtensor(
+              {0},
+              self.options().dtype(dtype).memory_format(
+                  self.suggest_memory_format()),
+              std::move(quantizer));
+        }
+
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        return get_qtensorimpl(out_t)->quantizer()->quantize_out(out_t, self);
+      };
+    });
+
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

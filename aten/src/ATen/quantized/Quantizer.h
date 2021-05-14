@@ -65,6 +65,7 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
         zero_point_(zero_point) {}
 
   Tensor quantize(Tensor tensor) override;
+  Tensor& quantize_out(Tensor& qtensor, const Tensor& tensor) override;
   Tensor dequantize(Tensor tensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& tensor) override;
 
@@ -136,6 +137,7 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   }
 
   Tensor quantize(Tensor tensor) override;
+  Tensor& quantize_out(Tensor& qtensor, const Tensor& tensor) override;
   Tensor dequantize(Tensor tensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& tensor) override;
 
@@ -187,6 +189,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
   }
 
   Tensor quantize(Tensor tensor) override;
+  Tensor& quantize_out(Tensor& qtensor, const Tensor& tensor) override;
   Tensor dequantize(Tensor tensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& tensor) override;
 

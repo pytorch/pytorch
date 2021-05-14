@@ -131,20 +131,25 @@ inline Tensor new_qtensor(
 }
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
-  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      {0},
       rtensor.options()
           .dtype(scalar_type_)
           .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
+  return quantize_out(qtensor, rtensor);
+}
 
-  rtensor = rtensor.contiguous(rtensor.suggest_memory_format());
+Tensor& PerTensorAffineQuantizer::quantize_out(Tensor& qtensor, const Tensor& rtensor) {
+  TORCH_CHECK(
+      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+  qtensor.resize_(rtensor.sizes());
+  const auto rtensor_contig =
+    rtensor.expect_contiguous(rtensor.suggest_memory_format());
   native::quantize_tensor_per_tensor_affine(
-      rtensor, qtensor, scale_, zero_point_);
+      *rtensor_contig, qtensor, scale_, zero_point_);
   return qtensor;
 }
 
@@ -171,14 +176,21 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      {0},
       rtensor.options()
           .dtype(scalar_type_)
           .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
-  rtensor = rtensor.contiguous(rtensor.suggest_memory_format());
+  return quantize_out(qtensor, rtensor);
+}
+
+Tensor& PerChannelAffineQuantizer::quantize_out(
+    Tensor& qtensor, const Tensor& rtensor) {
+  qtensor.resize_(rtensor.sizes());
+  const auto rtensor_contig =
+    rtensor.expect_contiguous(rtensor.suggest_memory_format());
   native::quantize_tensor_per_channel_affine(
-      rtensor, qtensor, scales_, zero_points_, axis_);
+      *rtensor_contig, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
@@ -202,15 +214,21 @@ Tensor& PerChannelAffineQuantizer::dequantize_out(
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(Tensor rtensor) {
- TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
  Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      {0},
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
- rtensor = rtensor.contiguous();
+ return quantize_out(qtensor, rtensor);
+}
+
+Tensor& PerChannelAffineFloatQParamsQuantizer::quantize_out(
+    Tensor& qtensor, const Tensor& rtensor) {
+ TORCH_CHECK(
+      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+ qtensor.resize_(rtensor.sizes());
+ const auto rtensor_contig = rtensor.expect_contiguous();
  native::quantize_tensor_per_channel_float_qparams(
-   rtensor, qtensor, scales_, zero_points_, axis_);
+   *rtensor_contig, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
