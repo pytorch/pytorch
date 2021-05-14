@@ -55,8 +55,8 @@ TORCH_API std::string serialize_model_proto_to_string(
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
-// Serializer for both oldsyle and unified format TS serialization
-class ScriptModuleSerializer {
+// Serializer for both oldsyle and unified format TorchScript serialization
+class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
@@ -68,6 +68,7 @@ class ScriptModuleSerializer {
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
       bool save_mobile_debug_info);
+  void serialize_unified_format(Module& module, uint64_t script_module_id);
 
   ~ScriptModuleSerializer() = default;
 
@@ -79,7 +80,12 @@ class ScriptModuleSerializer {
       const Module& module,
       const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
-  void writeArchive(const IValue& value, const std::string& archive_name);
+  void writeArchive(
+      const IValue& value,
+      const std::string& archive_name,
+      const std::string& archive_dir,
+      const std::string& tensor_dir,
+      bool tensor_cdata_naming_scheme = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
