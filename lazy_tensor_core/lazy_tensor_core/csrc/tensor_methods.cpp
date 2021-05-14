@@ -168,23 +168,6 @@ MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
                                           tensor.GetDevice())};
 }
 
-MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
-                             const c10::optional<at::Tensor>& min,
-                             const c10::optional<at::Tensor>& max) {
-  LTC_CHECK(min || max)
-      << "At least one of \'min\' or \'max\' must not be None";
-  lazy_tensors::PrimitiveType raw_element_type =
-      TensorTypeToLtcType(tensor.dtype());
-  Helpers::MinMax min_max = Helpers::MinMaxValues(raw_element_type);
-  auto shape = tensor.shape();
-  return {min ? MaybeExpand(bridge::GetLtcTensor(*min).GetIrValue(), shape)
-              : LazyTensor::GetIrValueForScalar(min_max.min, shape,
-                                                tensor.GetDevice()),
-          max ? MaybeExpand(bridge::GetLtcTensor(*max).GetIrValue(), shape)
-              : LazyTensor::GetIrValueForScalar(min_max.max, shape,
-                                                tensor.GetDevice())};
-}
-
 void CheckRank(const LazyTensor& t, lazy_tensors::int64 expected_rank,
                const std::string& tag, const std::string& arg_name,
                int arg_number) {
@@ -965,9 +948,16 @@ LazyTensor LazyTensor::clamp(const LazyTensor& input,
 LazyTensor LazyTensor::clamp(const LazyTensor& input,
                              const c10::optional<at::Tensor>& min,
                              const c10::optional<at::Tensor>& max) {
-  MinMaxValues min_max = GetMinMaxValues(input, min, max);
-  return input.CreateFrom(
-      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
+  LTC_CHECK(min || max)
+      << "At least one of \'min\' or \'max\' must not be None";
+  ir::Value res = input.GetIrValue();
+  if (min) {
+    res = ir::ops::Max(res, bridge::GetLtcTensor(*min).GetIrValue());
+  }
+  if (max) {
+    res = ir::ops::Min(res, bridge::GetLtcTensor(*max).GetIrValue());
+  }
+  return input.CreateFrom(res);
 }
 
 void LazyTensor::clamp_(LazyTensor& input, const c10::optional<at::Scalar>& min,
@@ -980,9 +970,16 @@ void LazyTensor::clamp_(LazyTensor& input, const c10::optional<at::Scalar>& min,
 void LazyTensor::clamp_out(LazyTensor& out, const LazyTensor& input,
                            const c10::optional<at::Tensor>& min,
                            const c10::optional<at::Tensor>& max) {
-  MinMaxValues min_max = GetMinMaxValues(input, min, max);
-  out.SetInPlaceIrValue(
-      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
+  LTC_CHECK(min || max)
+      << "At least one of \'min\' or \'max\' must not be None";
+  ir::Value res = input.GetIrValue();
+  if (min) {
+    res = ir::ops::Max(res, bridge::GetLtcTensor(*min).GetIrValue());
+  }
+  if (max) {
+    res = ir::ops::Min(res, bridge::GetLtcTensor(*max).GetIrValue());
+  }
+  out.SetInPlaceIrValue(res);
 }
 
 LazyTensor LazyTensor::clone(const LazyTensor& input) {
@@ -2710,12 +2707,13 @@ LazyTensor LazyTensor::stack(lazy_tensors::Span<const LazyTensor> tensors,
 
 LazyTensor LazyTensor::std(const LazyTensor& input,
                            std::vector<lazy_tensors::int64> dimensions,
-                           bool keep_reduced_dimensions, bool unbiased) {
+                           bool keep_reduced_dimensions,
+                           lazy_tensors::int64 correction) {
   return input.CreateFrom(
       ir::MakeNode<ir::ops::Std>(input.GetIrValue(),
                                  Helpers::GetCanonicalDimensionIndices(
                                      dimensions, input.shape().get().rank()),
-                                 keep_reduced_dimensions, unbiased));
+                                 keep_reduced_dimensions, correction));
 }
 
 LazyTensor LazyTensor::sub(const LazyTensor& input, const LazyTensor& other,
@@ -3015,12 +3013,13 @@ LazyTensor LazyTensor::view(
 
 LazyTensor LazyTensor::var(const LazyTensor& input,
                            std::vector<lazy_tensors::int64> dimensions,
-                           bool unbiased, bool keep_reduced_dimensions) {
+                           lazy_tensors::int64 correction,
+                           bool keep_reduced_dimensions) {
   return input.CreateFrom(
       ir::MakeNode<ir::ops::Var>(input.GetIrValue(),
                                  Helpers::GetCanonicalDimensionIndices(
                                      dimensions, input.shape().get().rank()),
-                                 unbiased, keep_reduced_dimensions));
+                                 correction, keep_reduced_dimensions));
 }
 
 void LazyTensor::zero_(LazyTensor& input) {

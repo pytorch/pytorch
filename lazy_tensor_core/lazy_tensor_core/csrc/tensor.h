@@ -1101,7 +1101,8 @@ class LazyTensor {
 
   static LazyTensor std(const LazyTensor& input,
                         std::vector<lazy_tensors::int64> dimensions,
-                        bool keep_reduced_dimensions, bool unbiased);
+                        bool keep_reduced_dimensions,
+                        lazy_tensors::int64 correction);
 
   static LazyTensor sub(
       const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
@@ -1216,7 +1217,8 @@ class LazyTensor {
 
   static LazyTensor var(const LazyTensor& input,
                         std::vector<lazy_tensors::int64> dimensions,
-                        bool unbiased, bool keep_reduced_dimensions);
+                        lazy_tensors::int64 correction,
+                        bool keep_reduced_dimensions);
 
   // Like reshape, but it returns a view into the original tensor.
   static LazyTensor view(

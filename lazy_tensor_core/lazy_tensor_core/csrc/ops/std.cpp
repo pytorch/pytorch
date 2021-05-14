@@ -10,28 +10,28 @@ namespace ir {
 namespace ops {
 
 Std::Std(const Value& input, std::vector<lazy_tensors::int64> dimensions,
-         bool keep_reduced_dimensions, bool unbiased)
+         bool keep_reduced_dimensions, lazy_tensors::int64 correction)
     : Node(ir::OpKind(at::aten::std), {input},
            /*num_outputs=*/1,
            lazy_tensors::util::MHash(dimensions, keep_reduced_dimensions,
-                                     unbiased)),
+                                     correction)),
       dimensions_(std::move(dimensions)),
       keep_reduced_dimensions_(keep_reduced_dimensions),
-      unbiased_(unbiased) {
+      correction_(correction) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });
 }
 
 NodePtr Std::Clone(OpList operands) const {
   return MakeNode<Std>(operands.at(0), dimensions_, keep_reduced_dimensions_,
-                       unbiased_);
+                       correction_);
 }
 
 std::string Std::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", dimensions=(" << absl::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
-     << ", unbiased=" << unbiased_;
+     << ", correction=" << correction_;
   return ss.str();
 }
 
