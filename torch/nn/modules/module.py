@@ -1083,12 +1083,20 @@ class Module:
         # Handle the non-full backward hooks
         if non_full_backward_hooks:
             var = result
-            while not isinstance(var, torch.Tensor):
-                if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
-                else:
-                    var = var[0]
-            grad_fn = var.grad_fn
+            try:
+                while not isinstance(var, torch.Tensor):
+                    if isinstance(var, dict):
+                        var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+                    elif len(var) > 0 and type(var[0]) is not type(var):
+                        var = var[0]
+                    else:
+                        var = None
+                        break
+            except StopIteration:
+                var = None
+            grad_fn = None
+            if var is not None and hasattr(var, 'grad_fn'):
+                grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
                     wrapper = functools.partial(hook, self)
