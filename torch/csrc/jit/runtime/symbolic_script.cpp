@@ -1440,6 +1440,12 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
+        def hardshrink(self, lambd: number):
+          def backward(grad_output):
+            mask = ((self > lambd) | (self < -lambd))
+            return grad_output * mask, None
+          return torch.hardshrink(self, lambd=lambd), backward
+
         def clamp_1(self,
                     min: Optional[number],
                     max: Optional[number]):
