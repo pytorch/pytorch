@@ -29,7 +29,7 @@ def _undo_create_differentiable(inps, level=None):
     def unwrap_tensors(x):
         if isinstance(x, torch.Tensor):
             return _unwrap_for_grad(x, level)
-        assert False
+        raise AssertionError()
 
     return tree_map(unwrap_tensors, inps)
 

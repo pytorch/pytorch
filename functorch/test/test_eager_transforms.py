@@ -26,7 +26,7 @@ USE_TORCHVISION = False
 try:
     import torchvision
     USE_TORCHVISION = True
-except:
+except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
                   "to install it with commands from pytorch.org, post-fixed with "
                   "`--no-deps` to avoid overwriting the pytorch installation",
