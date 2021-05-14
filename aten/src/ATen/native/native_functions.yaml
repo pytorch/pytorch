@@ -9750,22 +9750,16 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _linalg_solve_out_helper_cpu
-    CUDA: _linalg_solve_out_helper_cuda
-
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_solve
+    CPU, CUDA: linalg_solve
 
 - func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CompositeExplicitAutograd: linalg_solve_out
+    CPU, CUDA: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
