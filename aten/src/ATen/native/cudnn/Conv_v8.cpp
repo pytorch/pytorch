@@ -151,7 +151,7 @@ void raw_cudnn_convolution_forward_out(
       .build();
   auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                     .setOperationGraph(opGraph)
-                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR)
+                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                     .build();
 
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
