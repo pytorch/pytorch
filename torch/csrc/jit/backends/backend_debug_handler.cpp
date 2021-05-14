@@ -4,14 +4,13 @@ namespace torch {
 namespace jit {
 
 namespace {
-thread_local BackendDebugHandleManager* debug_handle_manager_ptr{nullptr};
+thread_local BackendDebugInfoRecorder* debug_info_recorder_ptr{nullptr};
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::atomic<DebugHandleType> BackendDebugHandleManager::unique_debug_handle_{0};
+std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};
 
-int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
-    const Node* node) {
+int64_t BackendDebugInfoRecorder::getNextDebugHandle(const Node* node) {
   InlinedCallStackPtr cs_ptr;
   if (node->callstack().has_value()) {
     cs_ptr = node->callstack().value();
@@ -28,8 +27,7 @@ int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
   return debug_handle;
 }
 
-std::unordered_map<DebugHandleType, DebugInfoTuple> BackendDebugHandleManager::
-    getCallStackPtrMap() {
+BackendDebugInfoMapType BackendDebugInfoRecorder::stopRecording() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
   // bump of refcount. Not performant, but this is not intented
@@ -38,25 +36,22 @@ std::unordered_map<DebugHandleType, DebugInfoTuple> BackendDebugHandleManager::
   return handles_to_inlined_callstack_ptrs_;
 }
 
-BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder() throw() {
+WithBackendDebugInfoRecorder::WithBackendDebugInfoRecorder(
+    BackendDebugInfoRecorder* recorder) throw() {
   TORCH_CHECK(
-      debug_handle_manager_ptr == nullptr,
+      debug_info_recorder_ptr == nullptr,
       "Module debug recording already in progress.");
-  debug_handle_manager_ptr = &debug_handle_manager_;
+  debug_info_recorder_ptr = recorder;
 }
 
-BackendModuleDebugInfoRecorder::~BackendModuleDebugInfoRecorder() {
+WithBackendDebugInfoRecorder::~WithBackendDebugInfoRecorder() {
   // If due to some exception within preprocess, such as compilation failure
   // we throw, then we want to make sure the exit is clean
-  debug_handle_manager_ptr = nullptr;
+  debug_info_recorder_ptr = nullptr;
 }
 
-BackendDebugInfoMapType BackendModuleDebugInfoRecorder::stopRecording() {
-  return std::move(debug_handle_manager_ptr->getCallStackPtrMap());
-}
-
-BackendDebugHandleManager* getBackendDebugHandleManager() {
-  return debug_handle_manager_ptr;
+BackendDebugInfoRecorder* getBackendDebugInfoRecorder() {
+  return debug_info_recorder_ptr;
 }
 
 } // namespace jit
