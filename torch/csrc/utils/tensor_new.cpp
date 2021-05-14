@@ -208,7 +208,6 @@ Tensor internal_new_from_data(
     bool type_inference,
     bool pin_memory = false) {
 
-
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
@@ -781,7 +780,6 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 }
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
   });
@@ -793,19 +791,14 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
     at::Device device = r.string(2);
-
     if(device==at::Device(DeviceType::Meta) && r.pyobject(0)==Py_Ellipsis){
-
-        c10::TensorOptions options = typeIdWithDefault(r, 2, dispatch_key);
-        at::ScalarType scalar_type = r.scalartypeWithDefault(1, scalar_type);
-        c10::optional<Device> device_opt;
-        bool copy_variables = true;
-        bool copy_numpy = true;
         bool type_inference = r.isNone(1);
+        at::ScalarType scalar_type_ = r.scalartypeWithDefault(1, scalar_type);
+        ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type_;
         bool pin_memory = r.toBool(3);
         auto sizes = compute_sizes(data);
         Tensor new_tensor;
-        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalar_type).pinned_memory(pin_memory));
+        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
         bool args_requires_grad = r.toBool(4);
         new_tensor.detach_();
         new_tensor.set_requires_grad(args_requires_grad);
