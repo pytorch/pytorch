@@ -135,8 +135,8 @@ struct cpu_scatter_gather_base_kernel {
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
-      .add_input(index)
+      .add_borrowed_output(self)
+      .add_borrowed_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -227,9 +227,9 @@ struct cpu_scatter_gather_base_kernel {
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
-      .add_input(src)
-      .add_input(index)
+      .add_borrowed_output(self)
+      .add_borrowed_input(src)
+      .add_borrowed_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);

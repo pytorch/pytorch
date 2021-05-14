@@ -61,7 +61,7 @@ inline void reduce_all_impl(
 static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
-      .add_input(input)
+      .add_borrowed_input(input)
       .build();
     bool result_data  = true;
     cpu_serial_kernel(iter, [&](const bool a) -> void {

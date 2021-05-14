@@ -315,8 +315,8 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     auto p_cpu = p_.to(kCPU);
     c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
-        .add_output(self)
-        .add_input(*p)
+        .add_borrowed_output(self)
+        .add_borrowed_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p_.scalar_type() == kDouble) {
