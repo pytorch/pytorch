@@ -9,11 +9,11 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
-#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 
 namespace torch {
 namespace jit {
