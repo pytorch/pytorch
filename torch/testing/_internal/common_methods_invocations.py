@@ -3757,11 +3757,10 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
         samples.append(SampleInput(tensor, args=args))
 
         if not requires_grad:
-            if dtype.is_floating_point or dtype.is_complex:
-                samples.append(SampleInput(
-                    tensor.clone().detach(),
-                    args=args, kwargs={'reduce': 'add'}
-                ))
+            samples.append(SampleInput(
+                tensor.clone().detach(),
+                args=args, kwargs={'reduce': 'add'}
+            ))
 
             if dtype.is_floating_point:
                 samples.append(SampleInput(

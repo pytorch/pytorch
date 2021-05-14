@@ -91,20 +91,31 @@ void scatter_meta_impl(
     const c10::optional<c10::string_view> reduce) {
   TORCH_CHECK_INDEX(
       index.scalar_type() == ScalarType::Long,
-      "scatter_(): Expected dtype int64 for index.");
+      "scatter(): Expected dtype int64 for index.");
 
   at::assert_no_internal_overlap(self);
   at::assert_no_overlap(self, index);
   meta.set_output(self.sizes(), self.options());
 
   if (reduce.has_value()) {
-    TORCH_CHECK(
-        at::isFloatingType(self.scalar_type()) ||
-            at::isComplexType(self.scalar_type()),
-        "scatter_(): Expected floating or complex type for self.");
+    auto op = get_operator_enum(reduce.value());
 
-    // Test that `reduce` is a valid argument
-    get_operator_enum(reduce.value());
+    // On CUDA, if reduce='multiply', we only allow floating point types. That
+    // is because atomic multiplication on CUDA is only implemented for them in
+    // aten/src/THC/THCAtomics.cuh
+    if (self.device() == kCUDA &&
+        op == native::SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
+      TORCH_CHECK(
+          at::isFloatingType(self.scalar_type()),
+          "scatter(): Expected floating type for self when reduce=multiply.");
+    }
+
+    // No bfloat16 dispatch for the scatter-gather kernel on CPU
+    if (self.device() == kCPU) {
+      TORCH_CHECK_TYPE(
+          self.scalar_type() != kBFloat16,
+          "scatter(): bfloat16 not supported on cpu")
+    }
   }
 }
 
