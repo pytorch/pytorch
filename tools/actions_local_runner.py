@@ -78,12 +78,8 @@ def find_changed_files() -> List[str]:
     diff_with_origin = git(["diff", "--name-only", merge_base, "HEAD"])
 
     # De-duplicate
-    all_files = set()
-    for x in untracked + cached + modified + diff_with_origin:
-        stripped = x.strip()
-        if stripped != "" and os.path.exists(stripped):
-            all_files.add(stripped)
-    return list(all_files)
+    all_files = set(untracked + cached + modified + diff_with_origin)
+    return [x.strip() for x in all_files if x.strip() != ""]
 
 
 def print_results(job_name: str, passed: bool, streams: List[str]) -> None:
