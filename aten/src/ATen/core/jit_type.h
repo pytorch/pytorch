@@ -931,6 +931,9 @@ struct TORCH_API TupleType : public NamedType {
         c10::nullopt,
         nullptr)); // NOLINT(modernize-make-shared)
   }
+  static TupleTypePtr create() {
+    return create({});
+  }
 
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
@@ -1499,6 +1502,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
+  } else if (typ->kind() == NumberType::Kind) {
+    return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
