@@ -136,19 +136,22 @@ class _DDPSink(Function):
         if find_unused:
             # First type of unused params: parameters that did not participate
             # in computing model outputs.
-            # Second type of unused params: params taht won't get gradient
+            # Second type of unused params: params that won't get gradient
             # because outputs they produced do not get used in computing loss
             # for this call to backward.
             used_inputs = []
 
             outputs_unused_indices = []
             for idx, inp in enumerate(ctx.inputs):
-                # TODO: this comparison can probably be sped-up by comparing to
-                # a pre-allocated cuda tensor instead of triggered d2h copy.
-                if grad_outputs[idx].sum().item() != 0:
+                # Some inputs might not be tensors
+                if not isinstance(inp, torch.Tensor):
+                    continue
+
+                if grad_outputs[idx].sum() != torch.tensor(0, device=grad_outputs[idx].device):
                     used_inputs.append(inp)
                 else:
                     outputs_unused_indices.append(idx)
+
             ctx.reducer.prepare_for_backward(used_inputs)
             ctx.reducer.set_per_iteration_param_outputs_unused(outputs_unused_indices)
 
@@ -832,14 +835,18 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
+            disable = False
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
-                if not self.find_unused_parameters or self.static_graph:
-                    self.reducer.prepare_for_backward([])
+                if disable or not self.find_unused_parameters or self.static_graph:
+                    if self.find_unused_parameters:
+                        self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                    else:
+                        self.reducer.prepare_for_backward([])
             else:
                 self.require_forward_param_sync = False
 
-        if (self.find_unused_parameters and not self.static_graph) or (self.static_graph and self.num_iterations == 1):
+        if not disable and (self.find_unused_parameters and not self.static_graph) or (self.static_graph and self.num_iterations == 1):
             state_dict = {
                 'static_graph': self.static_graph,
                 'grad_enabled_in_fwd': torch.is_grad_enabled(),
