@@ -1,21 +1,4 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
-import math
-import warnings
-
-import torch
-from torch import _VF
-from torch._C import _infer_size, _add_docstr
-from torch._torch_docs import reproducibility_notes, tf32_notes
-from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
-from ..overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
-from . import _reduction as _Reduction
-from . import grad  # noqa: F401
-from .modules import utils
-from .modules.utils import _single, _pair, _triple, _list_with_default
-
 __all__ = ['Tensor',
 'conv1d',
 'conv2d',
@@ -160,8 +143,55 @@ __all__ = ['Tensor',
 '_in_projection_packed',
 '_in_projection',
 '_scaled_dot_product_attention',
-'multi_head_attention_forward'
+'multi_head_attention_forward',
+'hardtanh_',
+'Callable',
+'List',
+'Optional',
+'Tuple',
+'math',
+'warnings',
+'torch',
+'_VF',
+'_infer_size',
+'_add_docstr',
+'reproducibility_notes',
+'tf32_notes',
+'boolean_dispatch',
+'_overload',
+'BroadcastingList1',
+'BroadcastingList2',
+'BroadcastingList3',
+'has_torch_function',
+'has_torch_function_unary',
+'has_torch_function_variadic',
+'handle_torch_function',
+'_Reduction',
+'grad',
+'utils',
+'_single',
+'_pair',
+'_triple',
+'_list_with_default'
 ]
+
+from typing import Callable, List, Optional, Tuple
+import math
+import warnings
+
+import torch
+from torch import _VF
+from torch._C import _infer_size, _add_docstr
+from torch._torch_docs import reproducibility_notes, tf32_notes
+from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
+from ..overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+    handle_torch_function)
+from . import _reduction as _Reduction
+from . import grad  # noqa: F401
+from .modules import utils
+from .modules.utils import _single, _pair, _triple, _list_with_default
+
 
 Tensor = torch.Tensor
 

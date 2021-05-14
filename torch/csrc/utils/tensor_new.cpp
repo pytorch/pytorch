@@ -351,7 +351,7 @@ void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Devic
   if (device.has_value()) {
     TORCH_CHECK(dispatchKeyToDeviceType(dispatch_key) == device.value().type(),
              "legacy constructor expects device type: ", dispatchKeyToDeviceType(dispatch_key),
-             "but device type: ", device.value().type(), " was passed");
+             " but device type: ", device.value().type(), " was passed");
   }
 }
 
@@ -466,6 +466,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",
+    "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
     "new(IntArrayRef size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
@@ -500,6 +501,9 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   } else if (r.idx == 3) {
     return new_with_tensor(options, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
+    TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
+                "is not supported.  Use torch.tensor(...) or torch.as_tensor(...) instead.");
+  } else if (r.idx == 5) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
@@ -509,7 +513,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
       return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  } else if (r.idx == 5) {
+  } else if (r.idx == 6) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
@@ -524,6 +528,7 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",  // this doesn't have a dtype/device because it creates an alias.
+    "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
     "new(IntArrayRef size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
@@ -559,6 +564,9 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
   } else if (r.idx == 3) {
     return new_with_tensor(options, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
+      TORCH_CHECK(false, "Legacy tensor new of the form tensor.new(tensor, device=device) " \
+                  "is not supported.  Use torch.as_tensor(...) instead.");
+  } else if (r.idx == 5) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
@@ -568,7 +576,7 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
       return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  } else if (r.idx == 5) {
+  } else if (r.idx == 6) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return legacy_new_from_sequence(options, scalar_type, r.deviceOptional(1), r.pyobject(0));
@@ -781,6 +789,25 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
+<<<<<<< HEAD
+=======
+    at::Device device = r.string(2);
+    if(device==at::Device(DeviceType::Meta) && r.pyobject(0)==Py_Ellipsis){
+        bool type_inference = r.isNone(1);
+        at::ScalarType scalar_type_ = r.scalartypeWithDefault(1, scalar_type);
+        ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type_;
+        bool pin_memory = r.toBool(3);
+        auto sizes = compute_sizes(data);
+        Tensor new_tensor;
+        new_tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
+        bool args_requires_grad = r.toBool(4);
+        new_tensor.detach_();
+        new_tensor.set_requires_grad(args_requires_grad);
+
+        return new_tensor;
+    }
+
+>>>>>>> e622600511dff6c4fa84467abdf1672196cd6053
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "

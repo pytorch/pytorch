@@ -790,6 +790,7 @@ aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
 aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/Activation.cpp",
+    "aten/src/ATen/native/cpu/AvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",
