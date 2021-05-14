@@ -177,6 +177,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/clear_profiling.cpp",
     "torch/csrc/jit/passes/clear_undefinedness.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
+    "torch/csrc/jit/passes/concat_opt.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
@@ -241,6 +242,8 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
+    "torch/csrc/jit/runtime/interpreter/frame.cpp",
+    "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
@@ -293,6 +296,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
+    "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -353,6 +357,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
@@ -383,6 +388,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/FunctionsManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/mobile/backport.cpp",
+    "torch/csrc/jit/mobile/backport_manager.cpp",
     "torch/csrc/jit/mobile/export_data.cpp",
     # To be included for eager symbolication in lite interpreter
     # when it is built in libtorch
@@ -391,10 +398,14 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/optim/sgd.cpp",
+    "torch/csrc/jit/mobile/random.cpp",
     "torch/csrc/jit/mobile/sequential.cpp",
+    "torch/csrc/jit/mobile/nnc/context.cpp",
+    "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
@@ -781,6 +792,7 @@ aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
 aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/Activation.cpp",
+    "aten/src/ATen/native/cpu/AvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",

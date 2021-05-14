@@ -22,8 +22,24 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+
+  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
+  set_output(0, IntArrayRef({mat1.sizes()[0], mat2.sizes()[1]}), {}, self.options(), names);
+  auto result = maybe_get_output(0);
+  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
+  TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == mat1.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
+  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
+}
+} // namespace meta
 namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -347,9 +363,7 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   // that are above max(atol, rtol * max(S)) threshold
   Tensor S, max_S;
   if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    S = at::linalg_svdvals(input);
     // singular values are sorted in descending order
     max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   } else {
@@ -408,10 +422,20 @@ Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermit
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  TORCH_WARN_ONCE(
+    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
+    "renamed in torch.linalg.matrix_rank to 'hermitian'."
+  );
   return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  TORCH_WARN_ONCE(
+    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
+    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
+    "renamed in torch.linalg.matrix_rank to 'hermitian'."
+  );
   return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
 }
 
@@ -666,6 +690,11 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor chain_matmul(TensorList matrices) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
@@ -679,6 +708,11 @@ Tensor chain_matmul(TensorList matrices) {
 }
 
 Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+  TORCH_WARN_ONCE(
+      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
+      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
+      "multiple parameters."
+  );
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
@@ -898,6 +932,8 @@ static void addmm_impl_cpu_(
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
 
+  // keeping TORCH_CHECKs here because othe mm methods also utilize this impl.
+  // TODO move this to meta once all methods have migrated to structured kernel.
   TORCH_CHECK(
       m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
       m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
@@ -1050,7 +1086,8 @@ Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch
     at::NoNamesGuard guard;
     addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
+  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
+  at::namedinference::propagate_names_if_nonempty(result, names);
   return result;
 }
 
@@ -1063,42 +1100,27 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
   return native::addbmm_out(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
-  return result;
-}
-
-Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, result);
-}
-
-Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(((self.dim() == 2) && (self.sizes()[0] == mat1.sizes()[0]) && (self.sizes()[1] == mat2.sizes()[1])),
-  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self.dim(),
-  "-D tensor with size ", self.sizes()[0], "x", self.sizes()[1]);
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, self);
 }
 
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
+  auto names = at::namedinference::propagate_names_for_addmm(self, mat2, result);
+  at::namedinference::propagate_names_if_nonempty(result, names);
+  return result;
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  return native::mm_cpu_out(self, mat2, result);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -1209,7 +1231,6 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
@@ -1574,7 +1595,6 @@ Tensor compute_T2(const Tensor& A) {
   auto As = _allocate_buffer(A, 3);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   As.select(0, 2).div_(2.0);
   return As.sum(0);
 }
@@ -1594,7 +1614,6 @@ Tensor compute_T4(const Tensor& A) {
     // computes (I / 2 + A / 6 + A^2 / 24)
     at::native::_compute_linear_combination(
       As.narrow(0, 0, 3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
     )
   );
@@ -1617,7 +1636,6 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto As = _allocate_buffer(A, 5);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
@@ -1662,43 +1680,27 @@ Tensor compute_T12(const Tensor& A) {
   constexpr int num_prods = 4;
   array2d<scalar_t, num_prods, num_prods> b = {{
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       9.0198e-16,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.46932117595418237389,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.20099424927047284052,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.04623946134063071740
     },
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5.31597895759871264183,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.19926790417132231573,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.01179296240992997031,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.01108844528519167989
     },
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.18188869982170434744,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.05502798439925399070,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.09351590770535414968,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.00610700528898058230
     },
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -2.0861320e-13,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.13181061013830184015,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.02027855540589259079,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -0.00675951846863086359
     }
   }};
@@ -1740,57 +1742,37 @@ Tensor compute_T18(const Tensor& A) {
   array2d<scalar_t, num_prods, num_prods> b = {{
     {
       0.,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.00365581030144618291e-01,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -8.02924648241156932449e-03,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -8.92138498045729985177e-04,
       0.
     },
     {
       0.,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       3.97849749499645077844e-01,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.36783778460411720168e+00,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       4.98289622525382669416e-01,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.37898194594723280150e-04
     },
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.09676396052962061844e+01,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       1.68015813878906206114e+00,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5.71779846478865511061e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.98210122488052056106e-03,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       3.34975017086070470649e-05
     },
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -9.04316832390810593223e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -6.76404519071381882256e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       6.75961301770459654925e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       2.95552570429315521194e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.39180257516060693404e-05
     },
     {
       0.,
       0.,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -9.23364619367118555360e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.69364939002081722752e-02,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -1.40086798182036094347e-05
     }
   }};
@@ -2161,7 +2143,6 @@ static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim)
 static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const optional<Scalar>& opt_ord,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ord = opt_ord.value_or(2.0).toDouble();
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());
@@ -2192,7 +2173,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
     auto permutation_reverse = create_reverse_permutation(permutation);
 
-    result_ = std::get<1>(self_.permute(permutation).svd()).abs();
+    result_ = at::linalg_svdvals(self_.permute(permutation));
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {
@@ -2253,7 +2234,8 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
+      Tensor result_ = at::linalg_vector_norm(
+          self, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
       // TODO: Resize and copy should be avoided with
       //       https://github.com/pytorch/pytorch/issues/52712
       at::native::resize_output(result, result_.sizes());
@@ -2268,11 +2250,11 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
   return result;
 }
 
-static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   // Casting a large integer to a double will introduce some error, but for
   // practical purposes, it won't matter since a large order will usually
   // give an infinite result
-  auto ord = opt_ord.value_or(2).toDouble();
+  auto ord = scalar_ord.toDouble();
 
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "linalg.vector_norm only supports CPU and CUDA device types, but got: ",
@@ -2343,14 +2325,78 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar
   return result;
 }
 
-Tensor linalg_vector_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
   Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
-  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
+  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 
-Tensor& linalg_vector_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
+Tensor& linalg_vector_norm_out(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
+}
+
+namespace {
+
+// Only performs checks not performed by linalg.norm
+void check_linalg_matrix_norm_args(
+    const Tensor& self,
+    IntArrayRef dim,
+    optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      self.ndimension() >= 2,
+      "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
+  ScalarType in_dtype = dtype.value_or(self.scalar_type());
+  TORCH_CHECK(
+      in_dtype == kFloat || in_dtype == kDouble || in_dtype == kComplexFloat ||
+          in_dtype == kComplexDouble,
+      "linalg.matrix_norm(): only supports the float, double, cfloat and cdouble dtypes, but got: ",
+      toString(in_dtype));
+  TORCH_CHECK(
+      dim.size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
+}
+
+} // namespace
+
+Tensor linalg_matrix_norm(
+    const Tensor& self,
+    const Scalar& ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  check_linalg_matrix_norm_args(self, dim, dtype);
+  return at::native::linalg_norm(self, ord, dim, keepdim, dtype);
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& self,
+    const Scalar& ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype,
+    Tensor& result) {
+  check_linalg_matrix_norm_args(self, dim, dtype);
+  return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
+}
+
+Tensor linalg_matrix_norm(
+    const Tensor& self,
+    std::string ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  check_linalg_matrix_norm_args(self, dim, dtype);
+  return at::native::linalg_norm(self, ord, dim, keepdim, dtype);
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& self,
+    std::string ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype,
+    Tensor& result) {
+  check_linalg_matrix_norm_args(self, dim, dtype);
+  return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
 // Numerical or None norms
@@ -2379,45 +2425,19 @@ Tensor& linalg_norm_out(const Tensor& self, std::string ord, optional<IntArrayRe
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
-Tensor _linalg_cond_exception_helper(const Tensor& self) {
-  // For batched input if at least one matrix in the batch is not invertible,
-  // we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
-  // This should change when at::inverse works with silent errors
-  if (self.dim() > 2) {
-    TORCH_CHECK(false,
-      "One or more matrices in the batch was not invertible! "
-      "linalg_cond does not support yet this case.");
-  }
-  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
-  Tensor result = at::full(result_shape, INFINITY, options);
-  return result;
-}
-
 // This function helps to dispatch norm computations depending on 'ord' of variant type
 Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string> ord_variant) {
-  // Ignore errors if not invertible, result is INFINITY in this case
-  // Currently checking for error in at::inverse causes cross-device data movement
-  // For batched input if at least one matrix in the batch is not invertible,
-  // then the result for all other (possibly) invertible matrices will be infinity as well
-  // since there is currently no way to use at::inverse with silent errors
-  Tensor self_inverse;
-  try {
-    self_inverse = at::inverse(self);
-  } catch (const std::exception& e) {
-    if (strstr(e.what(), "singular")) {
-      return _linalg_cond_exception_helper(self);
-    } else {
-      TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
-    }
-  }
-  std::array<int64_t, 2> dim_arr = {-2, -1};
-  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
+  Tensor inverse, info;
+  std::tie(inverse, info) = at::linalg_inv_ex(self);
+  info.unsqueeze_(-1).unsqueeze_(-1);
+  inverse.masked_fill_(info > 0, INFINITY);
 
   return c10::visit([&](auto&& ord) {
-    Tensor norm_self = at::linalg_norm(self, ord, dim);
-    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+    Tensor norm_self = at::linalg_matrix_norm(self, ord);
+    Tensor norm_inverse = at::linalg_matrix_norm(inverse, ord);
     Tensor result = norm_self * norm_inverse;
+    // fix multiplication of zero and infinity for NumPy compatibility
+    result.nan_to_num_(INFINITY, INFINITY, -INFINITY);
     return result;
   }, ord_variant);
 }
@@ -2433,7 +2453,6 @@ void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg_cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
@@ -2464,20 +2483,19 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   }
 
   // If ord == None or ord == ±2
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (std::abs(ord.toDouble()) == 2.0) {
     auto singular_values = std::get<1>(at::svd(self));
     // singular values are sorted in descending order
     auto s_max = at::narrow(singular_values, /*dim=*/-1, /*start=*/0, /*length=*/1);
     auto s_min = at::narrow(singular_values, /*dim=*/-1, /*start=*/-1, /*length=*/1);
     Tensor result;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (ord.toDouble() == -2.0) {
       result = s_min / s_max;
     } else {
       result = s_max / s_min;
     }
-    return result;
+    // squeeze the result for NumPy compatibility
+    return result.squeeze(-1);
   }
 
   // ord == ±1 ord == ±inf
@@ -2516,6 +2534,14 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
   if (self.numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
+  }
+
+  if (ord == "nuc") {
+    // calling matrix_norm with "nuc" on inputs with infinities raises an error
+    // therefore we use the mathematical definition of nuclear norm directly
+    // instead of going through the matrix_norm
+    auto singular_values = at::linalg_svdvals(self);
+    return singular_values.sum(-1) * (singular_values.reciprocal().sum(-1));
   }
 
   return _linalg_cond_helper(self, ord_variant);
@@ -2618,9 +2644,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 
   self_ = self_.reshape({result_product, result_product});
 
-  // 0th output of at::solve is the solution
-  // normally `other` would be flattened by at::solve expects 2D input
-  Tensor result = std::get<0>(at::solve(other.reshape({other.numel(), 1}), self_));
+  // normally `other` would be flattened by at::linalg_solve expects 2D input
+  Tensor result = at::linalg_solve(self_, other.flatten());
   return result.reshape(result_shape);
 }
 
@@ -2641,11 +2666,8 @@ struct KronImpl final {
       maxdim = std::max(self.dim(), other.dim());
       int64_t pad_self = maxdim - self.dim();
       int64_t pad_other = maxdim - other.dim();
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
       for (int64_t i = 0; i < maxdim; i++) {
         a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
@@ -2661,7 +2683,6 @@ struct KronImpl final {
     Tensor& kron_out(Tensor& result) const {
       TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
 
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
       for (int64_t i = 0; i < maxdim; i++) {
         mul_shape[2 * i] = a_reshape[2 * i];
@@ -2681,13 +2702,146 @@ struct KronImpl final {
     int64_t maxdim;
     Tensor self_view;
     Tensor other_view;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> result_reshape;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> a_reshape;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::SmallVector<int64_t, 10> b_reshape;
 };
+}
+
+DEFINE_DISPATCH(unpack_pivots_stub);
+
+std::tuple<Tensor, Tensor, Tensor> lu_unpack(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool unpack_data,
+    bool unpack_pivots
+    ) {
+  TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
+      "lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
+      "Note: this function is intended to be used with the output produced by torch{.linalg}.lu");
+
+  // trivial case
+  if (!unpack_data && !unpack_pivots) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor L, U;
+  // In the generalized LU factorization, the following shape relations hold:
+  // A.shape[-2:] == (m, n),
+  // P.shape[-2:] == (m, m),
+  // U.shape[-2:] == (m, k),
+  // L.shape[-2:] == (k, n),
+  // where k = min(m, n)
+  int64_t m = LU_data.size(-2);
+  int64_t n = LU_data.size(-1);
+  int64_t k = std::min(m, n);
+
+  if (unpack_data) {
+    U = LU_data.triu();
+    if (m != k) {
+      U = U.narrow(-2, 0, k);
+    }
+
+    L = LU_data.tril();
+    if (k != n) {
+      L = L.narrow(-1, 0, k);
+    }
+    L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  }
+
+  if (!unpack_pivots) {
+    return std::make_tuple(Tensor(), L, U);
+  }
+
+  auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
+  unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
+  auto unpacked_pivots = at::empty(
+    unpacked_pivots_sizes,
+    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // Fill `unpacked_pivots` with identity permutation
+  auto id_perm = at::arange(m, LU_pivots.options());
+  unpacked_pivots.copy_(id_perm);
+
+  // WARNING: we assume that unchanged LAPACK pivots are provided.
+  // Since LAPACK relies on the FORTRAN's 1-based indexing,
+  // we subtract 1 to convert the pivots to the C-style 0-based indexing.
+  // This behaviour could change in the future.
+  auto LU_pivots_zero_idx = LU_pivots - 1;
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
+    .add_output(unpacked_pivots)
+    .add_input(LU_pivots_zero_idx)
+    .build();
+  // }
+
+  unpack_pivots_stub(
+    LU_pivots.device().type(),
+    iter,
+    LU_pivots.size(-1)
+  );
+
+  // The permutation matrix is converted to LU_data.dtype
+  // because `matmul` does not work with integer matrices.
+  unpacked_pivots_sizes.push_back(m);
+  auto permutation_matrix = at::zeros(
+    unpacked_pivots_sizes,
+    LU_data.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // now that we know the final permutation,
+  // scatter 1s at proper locations.
+  permutation_matrix.scatter_(
+    -2,
+    unpacked_pivots.unsqueeze(-2).to(at::kLong),
+    at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
+  );
+
+  return std::make_tuple(permutation_matrix, L, U);
+}
+
+using TupleTensorRefs3 = std::tuple<Tensor&, Tensor&, Tensor&>;
+
+TupleTensorRefs3 lu_unpack_out(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool unpack_data,
+    bool unpack_pivots,
+    Tensor& P,
+    Tensor& L,
+    Tensor& U
+    ) {
+  Tensor P_tmp, L_tmp, U_tmp;
+  std::tie(P_tmp, L_tmp, U_tmp) = at::lu_unpack(LU_data, LU_pivots, unpack_data, unpack_pivots);
+
+  if (unpack_pivots) {
+    checkSameDevice("lu_unpack", P, LU_data, "P");
+    // Note that lu_unpack returns P such that P.dtype == LU_data.dtype,
+    // because otherwise we cannot use P in matric products (no int -> float promotion)
+    checkLinalgCompatibleDtype("lu_unpack", P, LU_data, "L");
+
+    at::native::resize_output(P, P_tmp.sizes());
+    P.copy_(P_tmp);
+  }
+
+  if (unpack_data) {
+    checkSameDevice("lu_unpack", L, LU_data, "L");
+    checkSameDevice("lu_unpack", U, LU_data, "U");
+    checkLinalgCompatibleDtype("lu_unpack", L, LU_data, "L");
+    checkLinalgCompatibleDtype("lu_unpack", U, LU_data, "U");
+
+    at::native::resize_output(L, L_tmp.sizes());
+    at::native::resize_output(U, U_tmp.sizes());
+    L.copy_(L_tmp);
+    U.copy_(U_tmp);
+  }
+
+  return TupleTensorRefs3(P, L, U);
 }
 
 /*

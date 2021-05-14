@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 from pathlib import Path
 
@@ -17,12 +17,14 @@ class PyTorchLinuxWorkflow:
             self,
             build_environment: str,
             docker_image_base: str,
-            on_pull_request: bool = False
+            on_pull_request: bool = False,
+            enable_doc_jobs: bool = False,
     ):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
         self.test_runner_type = CPU_TEST_RUNNER
         self.on_pull_request = on_pull_request
+        self.enable_doc_jobs = enable_doc_jobs
         if "cuda" in build_environment:
             self.test_runner_type = CUDA_TEST_RUNNER
 
@@ -39,6 +41,7 @@ class PyTorchLinuxWorkflow:
                     build_environment=self.build_environment,
                     docker_image_base=self.docker_image_base,
                     test_runner_type=self.test_runner_type,
+                    enable_doc_jobs=self.enable_doc_jobs,
                     # two leading spaces is necessary to match yaml indent
                     on_pull_request=(
                         "  pull_request:" if self.on_pull_request else ""
@@ -54,6 +57,7 @@ WORKFLOWS = [
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         on_pull_request=True,
+        enable_doc_jobs=True,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
@@ -72,23 +76,23 @@ WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-asan",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-asan",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-asan",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang7-onnx",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang7-onnx",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-onnx",
     # ),
     PyTorchLinuxWorkflow(
-        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
     ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+    #     build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+    #     build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     # ),
     # PyTorchLinuxWorkflow(
@@ -112,51 +116,35 @@ WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c-x86_32",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c-x86_64",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c-arm-v7a",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c-arm-v8a",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-mobile",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-mobile",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-asan",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-mobile-custom-dynamic",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-mobile-custom-dynamic",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-mobile-custom-static",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-mobile-custom-static",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
     # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-mobile-code-analysis",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a",
+    #     build_environment="pytorch-linux-xenial-py3.6-clang5-mobile-code-analysis",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     # ),
 ]
