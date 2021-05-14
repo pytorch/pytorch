@@ -1973,6 +1973,10 @@ class TestFrozenOptimizations(JitTestCase):
             optimized = torch.jit.optimize_for_inference(scripted_mod)
             FileCheck().check("to_mkldnn").run(optimized.graph)
 
+            frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):

@@ -360,7 +360,7 @@ Module freeze(
 Module optimize_for_inference(Module& module) {
   // not frozen yet
   if (module._ivalue()->type()->hasAttribute("training")) {
-    module = freeze(module, {}, true);
+    auto mod = freeze(module, {}, true);
   }
 
   auto graph = module.get_method("forward").graph();

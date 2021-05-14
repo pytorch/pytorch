@@ -284,7 +284,7 @@ TORCH_API Module freeze(
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation there for
 // details.
-TORCH_API Module freeze(const Module& module);
+TORCH_API Module optimize_for_inference(Module& module);
 
 namespace detail {
 

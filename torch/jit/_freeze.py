@@ -31,7 +31,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         Attributes modified in preserved methods will also be preserved.
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. Full details of optimization can be found at `torch.jit.optimize_frozen_module`.
+        preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
 
     Returns:
         Frozen :class:`ScriptModule`.
@@ -114,7 +114,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     return out
 
-def optimize_frozen_module(mod, optimize_numerics: bool = True):
+def run_frozen_optimizations(mod, optimize_numerics: bool = True):
     r"""
     Runs a series of optimizations looking for patterns that occur in frozen graphs.
     The current set of optimizations is:
@@ -145,11 +145,11 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
-        # set optimize to False here, by default freezing runs optimize_frozen_module
+        # set optimize to False here, by default freezing runs run_frozen_optimizations
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
         # inspect frozen mod
         assert "batch_norm" in str(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        torch.jit.run_frozen_optimizations(frozen_mod)
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
@@ -163,7 +163,7 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
             torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
             torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
 
-def prepare_for_inference(model: ScriptModule) -> ScriptModule:
+def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
     purposes of inference. If the model is not already frozen, prepare_for_inference
@@ -180,15 +180,14 @@ def prepare_for_inference(model: ScriptModule) -> ScriptModule:
     Primary use cases that have been targeted so far have been vision models on cpu
     and gpu to a lesser extent.
     """
-    if not isinstance(model, ScriptModule):
+    if not isinstance(mod, ScriptModule):
         raise RuntimeError(
             "prepare_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
 
+    if hasattr(mod, "training"):
+        mod = freeze(mod.eval())
 
-    if hasattr(model, "training"):
-        model = freeze(model.eval())
-
-    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(model.graph)
-    torch._C._jit_pass_fuse_frozen_conv_add_relu(model.graph)
-    return model
+    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(mod.graph)
+    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
+    return mod
