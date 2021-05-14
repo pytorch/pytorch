@@ -294,7 +294,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    op.callBoxed(stack); 
+    op.callBoxed(stack);
     return;
   }
 
