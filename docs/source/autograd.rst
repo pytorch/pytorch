@@ -57,6 +57,7 @@ Locally disabling gradient computation
     no_grad
     enable_grad
     set_grad_enabled
+    inference_mode
 
 .. _default-grad-layouts:
 
