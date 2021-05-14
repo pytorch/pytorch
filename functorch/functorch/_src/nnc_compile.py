@@ -175,6 +175,7 @@ def process_shape(x):
 
 def lower_function(node, op, nnc_args, args):
     inp_shapes = fx.node.map_aggregate(args, lambda arg: (process_shape(arg.meta['tensor_meta'].shape), arg.meta['tensor_meta'].dtype) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None)
+    nnc_args = [x.data() if isinstance(x, te.Placeholder) else x for x in nnc_args]
     if op in lowering_functions:
         out = lowering_functions[op](node.name, process_shape(node.meta['tensor_meta'].shape), inp_shapes, nnc_args)
     else:
@@ -236,7 +237,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
                 continue
             shapes = get_te_shapes(node.meta['tensor_meta'].shape)
             placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
-            env[node.name] = placeholder.data()
+            env[node.name] = placeholder
             inputs.append(placeholder)
         elif node.op == 'call_function':
             # This does the bulk of the work - we call `lower_function`, which
@@ -274,24 +275,31 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     if len(compute_stmts) == 0:
         raise RuntimeError("Doesn't support compiling empty")
 
-    loopnest = te.LoopNest(te.Stmt(compute_stmts), outs[0])
+    outs = [list(i) for i in zip(*list(outs))]
+
+    buf_outs = [i.data() if isinstance(i, te.Placeholder) else i for i, _ in outs]
+    loopnest = te.LoopNest(te.Stmt(compute_stmts), buf_outs)
     if get_loopnest:
         return loopnest
     # loopnest.inline_intermediate_bufs(True)
     loopnest.simplify()
     loopnest.prepare_for_codegen()
     stmt = te.simplify(loopnest.root_stmt())
-    cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + outs[0]])
-    if module_attrs:
-        module_stuff = [fetch_attr(i.target).contiguous().data for i in module_attrs]
-    else:
-        module_stuff = []
-    def f(*inps, out_tensors=None):
+    cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + buf_outs])
+
+    module_stuff = [fetch_attr(i.target).contiguous().data for i in module_attrs]
+
+    ph_to_inp_map = {}
+    for idx, _ in enumerate(outs):
+        if isinstance(outs[idx][0], te.Placeholder):
+            ph_to_inp_map[outs[idx][0]] = inputs.index(outs[idx][0])
+
+    def get_outs(inps):
+        return [inps[ph_to_inp_map[buf]] if isinstance(buf, te.Placeholder) else torch.empty(shape, dtype=dtype) for buf, (shape,dtype) in outs]
+
+    def f(*inps):
         inps = fx_model.graph.flatten_inps(*inps)
-        if out_tensors is None:
-            results = [torch.empty(shape, dtype=dtype) for shape,dtype in outs[1]]
-        else:
-            results = out_tensors
+        results = get_outs(inps)
         full_inps = module_stuff + list(inps) + results
         cg.call(full_inps)
         if len(results) == 1:
