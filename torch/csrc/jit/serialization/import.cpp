@@ -89,9 +89,11 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<CompilationUnit> cu,
       std::shared_ptr<PyTorchStreamReader> reader,
       std::string pickle_dir_prefix,
-      std::string tensor_dir_prefix)
+      std::string tensor_dir_prefix,
+      std::shared_ptr<StorageContext> storage_context)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
+        storage_context_(std::move(storage_context)),
         code_prefix_(".data/ts_code/code/"),
         pickle_dir_prefix_(std::move(pickle_dir_prefix)),
         tensor_dir_prefix_(std::move(tensor_dir_prefix)),
@@ -113,6 +115,7 @@ class ScriptModuleDeserializer final {
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::shared_ptr<PyTorchStreamReader> reader_;
+  std::shared_ptr<StorageContext> storage_context_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   std::string code_prefix_;
@@ -168,7 +171,8 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get());
+      *reader_.get(),
+      storage_context_);
 }
 
 void rewriteQuantizedConvForBC(const Module& module) {
@@ -286,13 +290,15 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<PyTorchStreamReader> reader,
+    std::shared_ptr<StorageContext> storage_context,
     c10::optional<at::Device> device,
     std::string ts_id) {
   ScriptModuleDeserializer deserializer(
       std::move(cu),
       std::move(reader),
       /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
-      /* tensor_dir_prefix = */ ".data/");
+      /* tensor_dir_prefix = */ ".data/",
+      storage_context);
   ExtraFilesMap extra_files;
   return deserializer.deserialize(device, extra_files);
 }
