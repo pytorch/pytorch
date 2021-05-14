@@ -256,10 +256,18 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() == 2, "There should be two parts in an operator name.");
+        op_item.size() >= 2,
+        "There should be either two parts (name and overload name), ",
+        "or three parts (name, overload name and number of specified args) ",
+        "for an operator");
+    c10::optional<int> num_args;
+    if (op_item.size() > 2) {
+      num_args = op_item[2].toInt();
+    }
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
+        num_args,
         model_version);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
