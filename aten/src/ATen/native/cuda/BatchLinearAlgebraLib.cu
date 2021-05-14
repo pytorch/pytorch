@@ -1201,26 +1201,21 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
 void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-  int m = cuda_int_cast(self.size(-2), "m");
-  int n = cuda_int_cast(self.size(-1), "n");
-  int lda = std::max<int>(1, m);
-  int64_t self_stride = matrixStride(self);
-  int64_t batch_size = batchCount(self);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
     "lu_cusolver",
-    [&m,
-     &n,
-     &lda,
-     &self_stride,
-     &batch_size,
-     &self,
+    [&self,
      &pivots,
      &infos,
      &get_pivots]() {
-    auto self_data = self.data_ptr<scalar_t>();
-    auto infos_data = infos.data_ptr<int>();
+    int m = cuda_int_cast(self.size(-2), "m");
+    int n = cuda_int_cast(self.size(-1), "n");
+    int lda = std::max<int>(1, m);
+    int64_t self_stride = matrixStride(self);
+    int64_t batch_size = batchCount(self);
+    scalar_t* self_data = self.data_ptr<scalar_t>();
+    int* infos_data = infos.data_ptr<int>();
 
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -1264,6 +1259,8 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
     }
 
     // Fill the pivots tensor with indices using 1-based (Fortran) indexing
+    auto m = self.size(-2);
+    auto n = self.size(-1);
     auto k = std::min(m, n);
     Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
     pivots.copy_(pivots_tmp);
