@@ -267,9 +267,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     return std::forward_as_tuple(values, indices);
   }
 
-  TORCH_CHECK(get_overlap_status(self, values) == MemOverlapStatus::NO,
-	      "Sort size too large for inplace sort");
-
   Tensor self_;
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
     self_ = self;
@@ -298,7 +295,12 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
     values_ptr_ = values_tmp.data_ptr();
   } else {
-    values_ptr_ = values.data_ptr();
+    if (get_overlap_status(self, values) == MemOverlapStatus::NO) {
+      values_ptr_ = values.data_ptr();
+    } else {
+      values_tmp = at::empty_like(values);
+      values_ptr_ = values_tmp.data_ptr();
+    }
   }
 
   if (!indices.defined()) {
