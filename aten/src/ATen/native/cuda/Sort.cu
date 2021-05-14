@@ -295,7 +295,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
     values_ptr_ = values_tmp.data_ptr();
   } else {
-    if (get_overlap_status(self, values) == MemOverlapStatus::NO) {
+    if (self_.defined() || get_overlap_status(self, values) == MemOverlapStatus::NO) {
       values_ptr_ = values.data_ptr();
     } else {
       values_tmp = at::empty_like(values);
