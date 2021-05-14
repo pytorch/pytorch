@@ -1273,7 +1273,8 @@ class {test_classname}(torch.nn.Module):
             optimized_model = optimization.optimize_for_inference(model)
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
 
-            optimized_model2 = optimization.optimize_for_inference(model, pass_config={"conv_bn_fuse": False, "remove_dropout": False})
+            optimized_model2 = \
+                optimization.optimize_for_inference(model, pass_config={"remove_dropout": False})
             torch.testing.assert_allclose(model(inp), optimized_model2(inp))
 
 

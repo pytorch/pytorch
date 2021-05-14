@@ -233,7 +233,7 @@ class UnionFind:
 
 def optimize_for_inference(
     model: torch.nn.Module,
-    pass_config: Optional[Dict[str, any]] = None,
+    pass_config: Optional[Dict[str, Any]] = None,
     tracer: Type[fx.Tracer] = fx.Tracer
 ) -> torch.nn.Module:
     """
@@ -264,6 +264,8 @@ def optimize_for_inference(
         model = remove_dropout(model)
     if default_pass_config["mkldnn_layout_optimize"] is False:
         return model
+    if not isinstance(default_pass_config["mkldnn_layout_optimize"], dict):
+        raise RuntimeError("mkldnn_layout_optimize config is not a dict")
     if "heuristic" not in default_pass_config["mkldnn_layout_optimize"]:
         raise RuntimeError("Heuristic not found in mkldnn_layout_optimize config")
     use_mkl_heuristic = default_pass_config["mkldnn_layout_optimize"]["heuristic"]
