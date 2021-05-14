@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 namespace c10d {
@@ -656,12 +657,32 @@ class TCPServer {
   TCPSocket socket_;
   PortType port_;
   std::unique_ptr<TCPStoreMasterDaemon> daemon_;
+
+  // We store weak references to all TCPServers for which the caller requested
+  // multi-tenancy.
+  static std::unordered_map<PortType, std::weak_ptr<TCPServer>> cachedServers_;
 };
 
+std::unordered_map<PortType, std::weak_ptr<TCPServer>>
+    TCPServer::cachedServers_{};
+
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
-  if (opts.multiTenant) {
-    LOG(WARNING)
-        << "The multi-tenant feature of TCPStore is not implemented yet.";
+  std::shared_ptr<TCPServer> server{};
+
+  // If the caller is okay with a multi-tenant store, first check if we already
+  // have a TCPServer running on the specified port.
+  if (opts.multiTenant && opts.port > 0) {
+    auto pos = cachedServers_.find(opts.port);
+    if (pos != cachedServers_.end()) {
+      server = pos->second.lock();
+      if (server != nullptr) {
+        return server;
+      }
+
+      // Looks like the TCPStore has been disposed, make sure that we release
+      // the control block.
+      cachedServers_.erase(pos);
+    }
   }
 
   TCPSocket socket{};
@@ -671,8 +692,14 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
 
   auto daemon = std::make_unique<TCPStoreMasterDaemon>(socket.handle());
 
-  return std::make_shared<TCPServer>(
+  server = std::make_shared<TCPServer>(
       std::move(socket), port, std::move(daemon));
+
+  if (opts.multiTenant) {
+    cachedServers_.emplace(port, server);
+  }
+
+  return server;
 }
 
 class TCPClient {
