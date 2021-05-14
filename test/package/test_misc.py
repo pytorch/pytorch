@@ -69,6 +69,7 @@ class TestMisc(PackageTestCase):
             import package_a.subpackage
 
             obj = package_a.subpackage.PackageASubpackageObject()
+            he.intern("**")
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
             he.save_pickle("obj", "obj.pkl", obj)
@@ -106,6 +107,7 @@ class TestMisc(PackageTestCase):
         with PackageExporter(buffer, verbose=False) as he:
             import package_a.subpackage
 
+            he.intern("**")
             obj = package_a.subpackage.PackageASubpackageObject()
             he.save_pickle("obj", "obj.pkl", obj)
 
@@ -124,6 +126,7 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -145,6 +148,7 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -168,6 +172,7 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -188,6 +193,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_module(mod.__name__)
 
         buffer.seek(0)
