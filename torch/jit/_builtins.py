@@ -125,6 +125,10 @@ _functional_registered_ops = _gen_torch_functional_registered_ops()
 def _is_special_functional_bound_op(fn):
     return fn in _functional_registered_ops
 
+def _is_grad_context_manager(obj):
+    possible_grad_context_managers = [torch.no_grad, torch.set_grad_enabled, torch.enable_grad]
+    return obj in possible_grad_context_managers
+
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
     global _builtin_table
@@ -135,7 +139,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad:
+            if callable(v) and not _is_special_functional_bound_op(v) and not _is_grad_context_manager(v):
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)

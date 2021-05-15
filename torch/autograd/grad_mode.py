@@ -156,6 +156,9 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
+    def __init__(self) -> None:
+        self.prev = torch.is_grad_enabled()
+
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)

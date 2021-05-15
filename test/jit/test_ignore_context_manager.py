@@ -102,3 +102,17 @@ class TestIgnoreContextManager(JitTestCase):
         s = torch.jit.script(model)
         self.assertEqual(s(), 5)
         self.assertEqual(s(), model())
+
+
+class TestGradEnabledContextManager(JitTestCase):
+    def test_with_set_grad_enabled(self):
+        def f(x):
+            with torch.set_grad_enabled(True):
+                return x
+        self.checkScript(f, torch.tensor([1]))
+
+    def test_with_enable_grad(self):
+        def f(x):
+            with torch.enable_grad():
+                return x
+        self.checkScript(f, torch.tensor([1]))
