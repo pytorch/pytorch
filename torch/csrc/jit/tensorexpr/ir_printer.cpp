@@ -360,7 +360,7 @@ void IRPrinter::visit(const ReduceOp* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   if (v->indices().size() == 0) {
-    os() << *v->base_handle() << " = " << *v->value() << ";" << std::endl;
+    os() << *v->base_handle() << " = " << *v->value() << ";";
     return;
   }
 
@@ -376,7 +376,6 @@ void IRPrinter::visit(const Store* v) {
     os() << "0";
   }
   os() << "] = " << *v->value() << ";";
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const For* v) {
@@ -402,7 +401,7 @@ void IRPrinter::visit(const Block* v) {
 
   for (Stmt* s : *v) {
     emitIndent();
-    os() << *s;
+    os() << *s << "\n";
   }
   indent_--;
   emitIndent();
@@ -420,17 +419,17 @@ void IRPrinter::visit(const Allocate* v) {
     }
     os() << *dims[i];
   }
-  os() << "]" << std::endl;
+  os() << "]";
 }
 
 void IRPrinter::visit(const Free* v) {
-  os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+  os() << "Free(" << *v->buffer_var() << ");";
 }
 
 void IRPrinter::visit(const Let* v) {
   os() << v->dtype().ToCppString() << " " << *v->var();
   os() << " = " << *v->value();
-  os() << "; " << std::endl;
+  os() << ";";
 }
 
 void IRPrinter::visit(const Cond* v) {
@@ -439,7 +438,7 @@ void IRPrinter::visit(const Cond* v) {
   Stmt* false_stmt = v->false_stmt();
   if (!true_stmt) {
     os() << "if (!" << *cond << ") ";
-    os() << *false_stmt << std::endl;
+    os() << *false_stmt;
   } else {
     os() << "if (" << *cond << ") ";
     os() << *true_stmt;
@@ -447,7 +446,6 @@ void IRPrinter::visit(const Cond* v) {
       os() << " else ";
       os() << *false_stmt;
     }
-    os() << std::endl;
   }
 }
 
@@ -464,7 +462,6 @@ void IRPrinter::visit(const AtomicAdd* v) {
     os() << "0";
   }
   os() << "], " << *v->value() << ");";
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const SyncThreads* v) {
@@ -491,7 +488,7 @@ void IRPrinter::visit(const ExternalCall* v) {
     }
     os() << *arg;
   }
-  os() << "})" << std::endl;
+  os() << "})";
 }
 
 void IRPrinter::emitIndent() {
