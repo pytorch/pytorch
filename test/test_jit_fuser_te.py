@@ -1796,7 +1796,7 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(x, y))
 
     def test_unsqueeze_var_dim(self):
-        def eager(x, y, z:int):
+        def eager(x, y, z: int):
             return x * torch.unsqueeze(y, dim=z)
         x = torch.rand(4, 4, 64).permute(1, 0, 2)
         y = torch.rand(4, 4)
