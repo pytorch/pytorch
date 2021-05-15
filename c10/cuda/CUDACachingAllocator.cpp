@@ -367,6 +367,60 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
+  size_t det_malloc(int device, size_t size, cudaStream_t stream) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    size = round_size(size);
+    auto& pool = get_pool(size, stream);
+    const size_t alloc_size = get_allocation_size(size);
+    AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    // bool block_found =
+    //     // Search pool
+    //     get_free_block(params)
+    //     // Trigger callbacks and retry search
+    //     || (trigger_free_memory_callbacks(params) && get_free_block(params))
+    //     // Attempt allocate
+    //     || alloc_block(params, false)
+    //     // Free all non-split cached blocks and retry alloc.
+    //     || (free_cached_blocks() && alloc_block(params, true));
+
+    // if (!block_found) {
+    //   // For any error code other than cudaErrorMemoryAllocation,
+    //   // alloc_block should have thrown an exception already.
+    //   TORCH_INTERNAL_ASSERT(params.err == cudaErrorMemoryAllocation);
+    //   size_t device_free;
+    //   size_t device_total;
+    //   C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    //   std::string allowed_info;
+    //   if (set_fraction) {
+    //     allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+    //   }
+    // }
+    // TORCH_INTERNAL_ASSERT(
+    //     params.err == cudaSuccess && params.block != nullptr &&
+    //     params.block->ptr != nullptr);
+    // Block* block = params.block;
+    // Block* remaining = nullptr;
+
+    // const bool already_split = block->is_split();
+    // if (should_split(block, size)) {
+    //   remaining = block;
+    //   block = new Block(device, stream, size, &pool, block->ptr);
+    //   block->prev = remaining->prev;
+    //   if (block->prev) {
+    //     block->prev->next = block;
+    //   }
+    //   block->next = remaining;
+    //   remaining->prev = block;
+    //   remaining->ptr = static_cast<char*>(remaining->ptr) + size;
+    //   remaining->size -= size;
+    //   bool inserted = pool.blocks.insert(remaining).second;
+    //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+    // }
+    // return block->size;
+    return 10;
+  }
+
   Block* malloc(int device, size_t size, cudaStream_t stream) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -1500,6 +1554,11 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 
 void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
+}
+
+size_t raw_det_malloc(int device, size_t size, cudaStream_t stream) {
+  return caching_allocator.device_allocator[device]->det_malloc(
+      device, size, stream);
 }
 
 } // namespace CUDACachingAllocator

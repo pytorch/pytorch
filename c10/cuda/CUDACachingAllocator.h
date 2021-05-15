@@ -138,6 +138,10 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
+
+C10_CUDA_API size_t
+raw_det_malloc(int device, size_t size, cudaStream_t stream);
+
 } // namespace CUDACachingAllocator
 
 } // namespace cuda
