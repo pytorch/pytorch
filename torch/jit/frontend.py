@@ -386,7 +386,8 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg])
                                 else None) for arg in py_args.kwonlyargs]
 
-    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type) for arg, arg_type in arg_and_types]
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
+              for arg, arg_type in arg_and_types]
     result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
                for arg, arg_type in arg_and_types_kwonlyargs]
     return result
@@ -900,6 +901,10 @@ class ExprBuilder(Builder):
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
+                if not indices:
+                    r = ctx.make_range(expr.lineno, expr.slice.value.col_offset, expr.slice.value.end_col_offset)
+                    tup = TupleLiteral(r, [])
+                    indices.append(tup)
                 return Subscript(base, indices)
             else:
                 return Subscript(base, [build_expr(ctx, expr.slice.value)])
