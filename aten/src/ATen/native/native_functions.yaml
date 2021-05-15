@@ -5513,13 +5513,19 @@
 - func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
-- func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU, CUDA: scatter_add_
-
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  structured_delegate: scatter_add.out
   variants: function, method
+
+- func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
+  structured_delegate: scatter_add.out
+  variants: method
+
+- func: scatter_add.out(Tensor self, int dim, Tensor index, Tensor src, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU, CUDA: scatter_add
 
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method

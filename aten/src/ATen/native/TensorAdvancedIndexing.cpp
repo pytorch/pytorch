@@ -152,6 +152,11 @@ TORCH_META_FUNC2(scatter, value_reduce)
   scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
 }
 
+TORCH_META_FUNC(scatter_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
 } // namespace meta
 
 namespace native {
@@ -1160,13 +1165,19 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
                reduce);
 }
 
-Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, src);
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1){
+TORCH_IMPL_FUNC(scatter_add)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const Tensor& out) {
+  auto mut_out = const_cast<Tensor&>(out);
+
+  if (&self != &mut_out) {
+    mut_out.copy_(self);
+  }
+
+  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
       "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
     TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
@@ -1175,14 +1186,9 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index);
-    return self.index_put_(indices, src, true);
+    return mut_out.index_put_(indices, src, true);
   }
-  scatter_add_stub(self.device().type(), self, dim, index, src);
-  return self;
-}
-
-Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
+  scatter_add_stub(self.device().type(), mut_out, dim, index, src);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
