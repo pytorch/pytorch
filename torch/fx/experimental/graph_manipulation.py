@@ -88,7 +88,11 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     tensor_meta = get_tensor_meta(node)
     output_elem = tensor_meta.shape.numel()
     total_num_of_elems += output_elem
-    size_per_elem_bytes = torch.tensor([], dtype=tensor_meta.dtype).element_size()
+    # Assume for now if it's quantized then it's qint8 or quint8
+    if tensor_meta.is_quantized:
+        size_per_elem_bytes = torch._empty_affine_quantized([], dtype=tensor_meta.dtype).element_size()
+    else:
+        size_per_elem_bytes = torch.tensor([], dtype=tensor_meta.dtype).element_size()
     total_size = size_per_elem_bytes * total_num_of_elems
     output_size = size_per_elem_bytes * output_elem
     return size_bytes(output_size, total_size)
