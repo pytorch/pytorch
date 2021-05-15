@@ -1,5 +1,4 @@
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.versions import MultiPartVersion, CudaVersion
 from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_BASIC, DOCKER_IMAGE_CUDA_10_2
 
 

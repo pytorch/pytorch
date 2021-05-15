@@ -1,5 +1,4 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
-import cimodel.lib.miniutils as miniutils
 
 XCODE_VERSION = MultiPartVersion([12, 0, 0])
 
