@@ -986,6 +986,15 @@ void initJitScriptBindings(PyObject* module) {
             pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
 
+  // Used by torch.Package to save TS objects in unified format
+  py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
+      .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
+      .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
+      .def(
+          "write_files",
+          &ScriptModuleSerializer::writeFiles,
+          py::arg("code_dir") = ".data/ts_code/code/");
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -1659,6 +1668,26 @@ void initJitScriptBindings(PyObject* module) {
             std::move(cu), filename, optional_device, extra_files_map);
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
+      });
+  m.def(
+      "_import_ir_module_from_package",
+      [](std::shared_ptr<CompilationUnit> cu,
+         std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+         std::shared_ptr<torch::jit::StorageContext> storage_context,
+         py::object map_location,
+         std::string ts_id) {
+        c10::optional<at::Device> optional_device;
+        if (!map_location.is(py::none())) {
+          AT_ASSERT(THPDevice_Check(map_location.ptr()));
+          optional_device =
+              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+        }
+        return import_ir_module(
+            std::move(cu),
+            std::move(reader),
+            std::move(storage_context),
+            optional_device,
+            std::move(ts_id));
       });
   m.def(
       "import_ir_module_from_buffer",
