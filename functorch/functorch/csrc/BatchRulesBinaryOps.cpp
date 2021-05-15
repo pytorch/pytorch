@@ -1,4 +1,6 @@
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <functorch/csrc/PlumbingHelper.h>
+#include <functorch/csrc/InPlacePlumbing.h>
 
 namespace at { namespace functorch {
 
@@ -48,6 +50,33 @@ std::tuple<Tensor,optional<int64_t>> binary_pointwise_batch_rule(
   return { std::move(result), std::move(result_batch_dim) };
 }
 
+template <typename M, M Meth, typename... ExtraArgs>
+void binary_pointwise_inplace_batch_rule(
+    Tensor& tensor, optional<int64_t> tensor_batch_dim,
+    const Tensor& other, optional<int64_t> other_batch_dim,
+    ExtraArgs... extra_args) {
+  if (!tensor_batch_dim && other_batch_dim) {
+    vmapIncompatibleInplaceError("inplace arithmetic");
+  }
+
+  // compute max logical rank
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
+  auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
+  auto max_logical_rank = std::max(tensor_logical_rank, other_logical_rank);
+
+  auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
+  auto other_ = moveBatchDimToFront(other, other_batch_dim);
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
+
+  (tensor_.*Meth)(other_, std::forward<ExtraArgs>(extra_args)...);
+}
+
 template <typename F, F Func>
 std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim,
@@ -92,7 +121,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #define BINARY_POINTWISE_BATCH_RULE(op) binary_pointwise_batch_rule<TensorTensorType, &op>
 #define BINARY_POINTWISE(op) VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE(at::op));
-#define SINGLE_ARG(...) __VA_ARGS__
 
   BINARY_POINTWISE_WITH_SCALAR(add);
   BINARY_POINTWISE_WITH_SCALAR(sub);
@@ -122,6 +150,34 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("clamp_max",
       SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::clamp_max, const Scalar&>));
 
+
+  using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
+  using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
+  using TensorInplaceT = Tensor& (Tensor::*)(const Tensor&) const;
+  using ScalarInplaceT = Tensor& (Tensor::*)(const Scalar&) const;
+
+  m.impl("add_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::add_, const Scalar&>),
+     const Scalar&>);
+  m.impl("add_.Scalar", inplacePlumbing1<
+     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>),
+     const Scalar&, const Scalar&>);
+  m.impl("sub_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::sub_, const Scalar&>),
+     const Scalar&>);
+  m.impl("sub_.Scalar", inplacePlumbing1<
+     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::sub_, const Scalar&, const Scalar&>),
+     const Scalar&, const Scalar&>);
+  m.impl("mul_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>)>);
+  m.impl("mul_.Scalar", inplacePlumbing1<
+     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarInplaceT, &Tensor::mul_, const Scalar&>),
+     const Scalar&>);
+  m.impl("div_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>)>);
+  m.impl("div_.Scalar", inplacePlumbing1<
+     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>),
+     const Scalar&>);
 
 #define COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(#op".Tensor", \

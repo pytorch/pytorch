@@ -1,13 +1,10 @@
-#include <functorch/csrc/OutOfPlacePlumbing.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 
-#include <ATen/Tensor.h>
-
 namespace at { namespace functorch {
 
-static Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
+Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
     TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
@@ -16,7 +13,7 @@ static Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t 
   return tensor;
 }
 
-static std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
+std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     return {tensor, nullopt};

@@ -184,8 +184,10 @@ if __name__ == '__main__':
         unique_schemas[get_hash(schema)] = schema
     schemas = list(unique_schemas.values())
     codes = [lower(*schema, i) for i, schema in enumerate(schemas)]
-    print("#include <functorch/csrc/OutOfPlacePlumbing.hpp>")
+    print("#include <functorch/csrc/OutOfPlacePlumbing.h>")
+    print("#include <functorch/csrc/PlumbingHelper.h>")
     print("#include <functorch/csrc/Constants.h>")
+
     print("")
     print("namespace at { namespace functorch {")
     for code in codes:
