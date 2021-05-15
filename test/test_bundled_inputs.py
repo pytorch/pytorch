@@ -223,10 +223,10 @@ class TestBundledInputs(TestCase):
                 """)
             mm.define(definition)
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
-                nn,
+                mm,
                 inputs={
-                    nn.forward : samples,
-                    nn.foo : samples,
+                    mm.forward : samples,
+                    mm.foo : samples,
                 },
             )
 
@@ -238,6 +238,8 @@ class TestBundledInputs(TestCase):
             @torch.jit.export
             def foo(self, arg):
                 return arg
+
+        samples = [(torch.tensor([1]),)]
 
         with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
