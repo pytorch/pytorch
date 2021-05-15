@@ -1033,6 +1033,16 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
 
+    def test_return_none(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                pass
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+
     def test_default_quant_after_none_qconfig(self):
         """ Make sure default quant is inserted properly"""
         class M(torch.nn.Module):
