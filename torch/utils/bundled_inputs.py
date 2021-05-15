@@ -97,7 +97,7 @@ def bundle_inputs(
         raise Exception("Only ScriptModule is supported.")
 
     ignored_methods, ignored_attrs = _get_bundled_inputs_attributes_and_methods(model)
-    clone = torch._C._hack_do_not_use_clone_module_with_class(
+    clone = torch._C._hack_do_not_use_clone_module_with_class(  # type: ignore[attr-defined]
         model._c,
         ignored_methods,
         ignored_attrs,
@@ -107,8 +107,10 @@ def bundle_inputs(
     # Fortunately theres a function in _recursive that does exactly that conversion.
     cloned_module = wrap_cpp_module(clone)
     if isinstance(inputs, dict):
+        assert(isinstance(info, dict) or info is None)
         augment_many_model_functions_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     else:
+        assert(isinstance(info, list) or info is None)
         augment_model_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     return cloned_module
 
@@ -374,7 +376,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
     else:
         return arg, ref
 
-def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> None:
+def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str]]:
     methods = []
     attributes = []
 
