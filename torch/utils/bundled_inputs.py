@@ -376,9 +376,9 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
     else:
         return arg, ref
 
-def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str]]:
-    methods = []
-    attributes = []
+def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str], List[str]]:
+    methods: List[str] = []
+    attributes: List[str] = []
 
     # Has bundled inputs for forward
     if hasattr(script_module, 'get_all_bundled_inputs'):
