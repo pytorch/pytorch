@@ -254,7 +254,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
-     !transposed && // or transposed tensors
      // For 1x1 filters, MKLDNN is faster than THNN when multi-threaded,
      // but THNN is faster when single-threaded.
      (is_strided() || is_dilated() || input.size(0) >= 16 ||
@@ -945,15 +944,29 @@ at::Tensor _convolution(
                              weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
     auto mkldnn_memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast
                                                   : at::MemoryFormat::Contiguous;
-    if (!input_is_mkldnn) {
-      output = at::mkldnn_convolution(
-          input.contiguous(mkldnn_memory_format), weight.contiguous(mkldnn_memory_format),
-          bias.defined() ? bias.contiguous() : bias,
-          params.padding, params.stride, params.dilation, params.groups);
+    if (params.transposed) {
+      if (!input_is_mkldnn) {
+        output = at::mkldnn_convolution_transpose(
+            input.contiguous(mkldnn_memory_format), weight.contiguous(mkldnn_memory_format),
+            bias.defined() ? bias.contiguous() : bias,
+            params.padding, params.output_padding, params.stride, params.dilation, params.groups);
+      } else {
+        // do not call contiguous on mkldnn tensor
+        output = at::mkldnn_convolution_transpose(input, weight, bias,
+            params.padding, params.output_padding, params.stride, params.dilation, params.groups
+        );
+      }
     } else {
-      // do not call contiguous on mkldnn tensor
-      output = at::mkldnn_convolution(input, weight, bias,
-                                      params.padding, params.stride, params.dilation, params.groups);
+      if (!input_is_mkldnn) {
+        output = at::mkldnn_convolution(
+            input.contiguous(mkldnn_memory_format), weight.contiguous(mkldnn_memory_format),
+            bias.defined() ? bias.contiguous() : bias,
+            params.padding, params.stride, params.dilation, params.groups);
+      } else {
+        // do not call contiguous on mkldnn tensor
+        output = at::mkldnn_convolution(input, weight, bias,
+            params.padding, params.stride, params.dilation, params.groups);
+      }
     }
 #endif
   } else if (params.use_xnnpack(input, weight, bias)) {
