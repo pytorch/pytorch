@@ -71,4 +71,15 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
   return at::reshape(x, shape);
 }
 
+void vmapIncompatibleInplaceError(const char* schema_name) {
+  TORCH_CHECK(false,
+    "vmap: ", schema_name, "(self, *extra_args) is not possible because ",
+    "there exists a Tensor `other` in extra_args that has more elements ",
+    "than `self`. This happened due to `other` being vmapped over but ",
+    "`self` not being vmapped over in a vmap. ",
+    "Please try to use out-of-place operators instead of ", schema_name, ". ",
+    "If said operator is being called inside the PyTorch framework, ",
+    "please file a bug report instead.");
+}
+
 }}

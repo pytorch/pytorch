@@ -15,6 +15,7 @@ Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_d
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val);
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim);
+void vmapIncompatibleInplaceError(const char* schema_name);
 
 Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank);
 
@@ -27,6 +28,14 @@ template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
     const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
   return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
+}
+
+#define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
+
+template <typename F, F Method, typename... ExtraArgs>
+Tensor& unary_inplace_batch_rule(Tensor& self, optional<int64_t>, ExtraArgs... extra_args) {
+  INVOKE(self, Method)(std::forward<ExtraArgs>(extra_args)...);
+  return self;
 }
 
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
