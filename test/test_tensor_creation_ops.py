@@ -1155,7 +1155,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
-        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
+        self.assertRaises(TypeError, lambda: torch.cat([x, None]))
 
     @onlyCPU
     def test_cat_scalars(self, device):

@@ -801,6 +801,6 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
  * 'throw_error': whether throw error if any element in the list or tuple is
  *                not tensor type or overloaded.
  */
-bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error);
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum);
 
 } // namespace torch

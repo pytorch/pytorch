@@ -1172,8 +1172,7 @@ void initJITBindings(PyObject* module) {
                   is_tensor_list_and_append_overloaded(
                       args[i].ptr(),
                       &overloaded_args,
-                      static_cast<int>(total_arg_num),
-                      false /* throw_error */);
+                      static_cast<int>(total_arg_num));
                 }
                 // NB: for kwargs, we cannot guarantee the order of appending
                 // is the same as the argument order in operator's schema.
@@ -1185,10 +1184,7 @@ void initJITBindings(PyObject* module) {
                   is_tensor_and_append_overloaded(
                       item.second.ptr(), &overloaded_args);
                   is_tensor_list_and_append_overloaded(
-                      item.second.ptr(),
-                      &overloaded_args,
-                      total_arg_num,
-                      false /* throw_error */);
+                      item.second.ptr(), &overloaded_args, total_arg_num);
                 }
                 if (overloaded_args.size() > 0) {
                   std::vector<py::object> overloaded_types;

@@ -393,7 +393,7 @@ bool is_scalar_list(PyObject* obj) {
   return true;
 }
 
-bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -403,10 +403,6 @@ const   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   for (long idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
-      if (throw_error) {
-        throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
-      }
       return false;
     }
   }
@@ -491,7 +487,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return size == 1 && THPUtils_checkDimname(obj);
     }
     case ParameterType::TENSOR_LIST: {
-      return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
+      return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum);
     }
     case ParameterType::INT_LIST: return is_int_list(obj, size);
     case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);

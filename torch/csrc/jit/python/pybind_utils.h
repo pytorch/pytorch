@@ -1021,10 +1021,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   for (const auto& arg : args) {
     is_tensor_and_append_overloaded(arg.ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        arg.ptr(),
-        &overloaded_args,
-        static_cast<int>(total_arg_num),
-        false /* throw_error */);
+        arg.ptr(), &overloaded_args, static_cast<int>(total_arg_num));
   }
   // NB: for kwargs, we cannot guarantee the order of appending
   // is the same as the argument order in operator's schema.
@@ -1035,10 +1032,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   for (auto item : kwargs) {
     is_tensor_and_append_overloaded(item.second.ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        item.second.ptr(),
-        &overloaded_args,
-        total_arg_num,
-        false /* throw_error */);
+        item.second.ptr(), &overloaded_args, total_arg_num);
   }
   if (overloaded_args.size() > 0) {
     return pybind11::reinterpret_steal<py::object>(
