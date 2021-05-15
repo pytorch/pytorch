@@ -228,9 +228,7 @@ class Errors(object):
 def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
            test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
            keep_initializers_as_inputs=True, add_node_names=False,
-           operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-           input_names=None, dynamic_axes=None,
-           remained_onnx_input_idx=None):
+           operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -275,9 +273,6 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
         operator_export_type (enum, default OperatorExportTypes.ONNX): the operator
             export type to use when exporting the model. The default value converts
             all operators to ONNX ops.
-        input_names (list of string): list of input names.
-        dynamic_axes (dict of (string, list)): dynamic_axes.
-        remained_onnx_input_idx (list of int, default None): The remained ONNX input index.
     """
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
@@ -358,15 +353,13 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                        opset_version=opset_version,
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                                        add_node_names=add_node_names,
-                                       operator_export_type=operator_export_type,
-                                       input_names=input_names,
-                                       dynamic_axes=dynamic_axes)
+                                       operator_export_type=operator_export_type)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
         prepared = backend.prepare(proto)
 
-        def run(args, remained_onnx_input_idx):
+        def run(args):
             alt_proto_bytes = io.BytesIO()
             torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose,
                                            do_constant_folding=do_constant_folding,
@@ -374,9 +367,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                            opset_version=opset_version,
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
                                            add_node_names=add_node_names,
-                                           operator_export_type=operator_export_type,
-                                           input_names=input_names,
-                                           dynamic_axes=dynamic_axes)
+                                           operator_export_type=operator_export_type)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)
@@ -443,17 +434,11 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                     raise AssertionError()
 
             # TODO: test that the traced model also returns the same thing...
-            run_helper(torch_out, args, remained_onnx_input_idx)
+            run_helper(torch_out, args)
 
         # Factored out so we can avoid one run of the model
-        def run_helper(torch_out, args, remained_onnx_input_idx):
-            onnx_input = backend_args(args)
-            if remained_onnx_input_idx is not None:
-                input_onnx = []
-                for idx in remained_onnx_input_idx:
-                    input_onnx.append(onnx_input[idx])
-                onnx_input = tuple(input_onnx)
-            backend_out = prepared.run(onnx_input)
+        def run_helper(torch_out, args):
+            backend_out = prepared.run(backend_args(args))
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
             torch_out, _ = torch._C._jit_flatten(torch_out)
@@ -466,11 +451,11 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                 for i, (x, y) in enumerate(zip(torch_out, backend_out)):
                     errs.checkAlmostEqual(x.data.cpu().numpy(), y, "In output {}".format(i))
 
-        run_helper(torch_out, args, remained_onnx_input_idx)
+        run_helper(torch_out, args)
 
         if isinstance(test_args, int):
             for i in range(test_args):
-                run(randomize_args(args), remained_onnx_input_idx)
+                run(randomize_args(args))
         else:
             for test_arg in test_args:
-                run(test_arg, remained_onnx_input_idx)
+                run(test_arg)
