@@ -1,4 +1,6 @@
-#include <functorch/csrc/OutOfPlacePlumbing.hpp>
+#include <functorch/csrc/OutOfPlacePlumbing.h>
+
+#include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/Constants.h>
 #include <iostream>
 
