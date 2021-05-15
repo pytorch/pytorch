@@ -5,10 +5,10 @@ set DEBUG=1
 set USE_DISTRIBUTED=0
 
 set CMAKE_VERBOSE_MAKEFILE=1
-
-set TMP_DIR_WIN=C:\git\
-set CMAKE_INCLUDE_PATH=%TMP_DIR_WIN%\mkl\include
-set LIB=%TMP_DIR_WIN%\mkl\lib;%LIB
+set VSCMD_DEBUG=2
+%set TMP_DIR_WIN=C:\git\
+%set CMAKE_INCLUDE_PATH=%TMP_DIR_WIN%\mkl\include
+%set LIB=%TMP_DIR_WIN%\mkl\lib;%LIB
 
 
 set USE_NINJA=OFF
@@ -22,7 +22,7 @@ sccache --zero-stats
 set CC=sccache-cl
 set CXX=sccache-cl
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-rem set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Tools\MSVC\14.26.28801\bin\HostX64\x64\cl.exe
+rem set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64
 

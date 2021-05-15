@@ -368,6 +368,7 @@ class DeviceCachingAllocator {
   // Thus, do not call a public method from another public method.
 
   size_t det_malloc(int device, size_t size, cudaStream_t stream) {
+    printf("Called.\n");
     std::unique_lock<std::recursive_mutex> lock(mutex);
     size = round_size(size);
     auto& pool = get_pool(size, stream);
@@ -418,7 +419,8 @@ class DeviceCachingAllocator {
     //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
     // }
     // return block->size;
-    return 10;
+    printf("Returning...\n");
+    return (size_t)10;
   }
 
   Block* malloc(int device, size_t size, cudaStream_t stream) {

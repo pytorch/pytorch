@@ -213,14 +213,31 @@ PyObject* THCPModule_cudaDetMalloc(PyObject* _unused, PyObject* args) {
   PyObject* size_o = nullptr;
   PyObject* stream_o = nullptr;
   if (!PyArg_ParseTuple(args, "OOO", &device_o, &size_o, &stream_o)) {
+    printf("Invalid input arguments!\n");
     THPUtils_invalidArguments(
         args, nullptr, "det_malloc", 1, "(double fraction, int device);");
     return nullptr;
+  } else{
+    printf("Valid input arguments!\n");
   }
   int64_t device = PyLong_AsLongLong(device_o);
+  std::cout << size_o << std::endl;
   ssize_t size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  return c10::cuda::CUDACachingAllocator::det_malloc(device, size, stream);
+  printf("Here [0]\n");
+  // std::cout << sizeof(size) << std::endl;
+  // PyLong_FromUnsignedLongLong return_val = (unsigned __int64)c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream);
+  PyObject * return_val = PyLong_FromUnsignedLongLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
+  std::cout << return_val << std::endl;
+  // PyObject* return_val = PyLong_FromLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
+  // std::cout << return_val << std::endl;
+  // return return_val;
+  // return PyLong_FromUnsignedLongLong(return_val);
+  // return py::int_(15);
+  // Py_ssize_t ret = 14;
+  // return &ret;
+  return return_val;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
@@ -622,10 +639,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaCachingAllocator_raw_delete,
      METH_O,
      nullptr},
-    {"_cuda_cudaDetMalloc",
-     THCPModule_cudaCachingAllocator_raw_det_malloc,
-     METH_VARARGS,
-     nullptr},
+    {"_cuda_cudaDetMalloc", THCPModule_cudaDetMalloc, METH_VARARGS, nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
