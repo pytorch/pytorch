@@ -1243,7 +1243,7 @@ class {test_classname}(torch.nn.Module):
             self.assertFalse(type_matches(sig_type, arg_type))
 
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu(self):
+    def test_optimize_for_inference_cpu(self):
         import torch.nn as nn
 
         class Foo(nn.Module):
@@ -1270,12 +1270,17 @@ class {test_classname}(torch.nn.Module):
         inp = torch.randn(N, C, H, W)
         with torch.no_grad():
             model = Foo().eval()
-            optimized_model = optimization.prepare_for_inference(model)
+            optimized_model = optimization.optimize_for_inference(model)
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+            optimized_model2 = \
+                optimization.optimize_for_inference(model, pass_config={"remove_dropout": False})
+            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu_torchvision(self):
+    def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
             torchvision.models.resnet50,
@@ -1295,7 +1300,7 @@ class {test_classname}(torch.nn.Module):
                 model.eval()
                 inp = torch.randn(1, C, H, W)
                 heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
-                optimized_model = optimization.prepare_for_inference(model)
+                optimized_model = optimization.optimize_for_inference(model)
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
