@@ -59,6 +59,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 
 #include <c10/util/irange.h>
@@ -88,10 +89,14 @@ void scatter_meta_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
-    const c10::optional<c10::string_view> reduce) {
-  TORCH_CHECK_INDEX(
-      index.scalar_type() == ScalarType::Long,
-      "scatter(): Expected dtype int64 for index.");
+    const c10::optional<Tensor>& src = nullopt,
+    const c10::optional<c10::string_view> reduce = nullopt) {
+  at::native::scatter_gather_dtype_check("scatter", self, index, src);
+  at::native::scatter_shape_check(self, dim, index, src);
+
+  if (src.has_value()) {
+    at::assert_no_overlap(self, src.value());
+  }
 
   at::assert_no_internal_overlap(self);
   at::assert_no_overlap(self, index);
@@ -103,7 +108,7 @@ void scatter_meta_impl(
     // On CUDA, if reduce='multiply', we only allow floating point types. That
     // is because atomic multiplication on CUDA is only implemented for them in
     // aten/src/THC/THCAtomics.cuh
-    if (self.device() == kCUDA &&
+    if (self.device().is_cuda() &&
         op == native::SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
       TORCH_CHECK(
           at::isFloatingType(self.scalar_type()),
@@ -112,7 +117,7 @@ void scatter_meta_impl(
 
     // No bfloat16 dispatch for the scatter-gather kernel on CPU
     if (self.device() == kCPU) {
-      TORCH_CHECK_TYPE(
+      TORCH_CHECK(
           self.scalar_type() != kBFloat16,
           "scatter(): bfloat16 not supported on cpu")
     }
@@ -121,13 +126,12 @@ void scatter_meta_impl(
 
 TORCH_META_FUNC2(scatter, src)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  at::assert_no_overlap(self, src);
-  scatter_meta_impl(*this, self, dim, index, nullopt);
+  scatter_meta_impl(*this, self, dim, index, src);
 }
 
 TORCH_META_FUNC2(scatter, value)
 (const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
-  scatter_meta_impl(*this, self, dim, index, nullopt);
+  scatter_meta_impl(*this, self, dim, index);
 }
 
 TORCH_META_FUNC2(scatter, reduce)
@@ -136,8 +140,7 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
-  at::assert_no_overlap(self, src);
-  scatter_meta_impl(*this, self, dim, index, reduce);
+  scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
 TORCH_META_FUNC2(scatter, value_reduce)
@@ -146,7 +149,7 @@ TORCH_META_FUNC2(scatter, value_reduce)
  const Tensor& index,
  const Scalar& src,
  const c10::string_view reduce) {
-  scatter_meta_impl(*this, self, dim, index, reduce);
+  scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
 }
 
 } // namespace meta
@@ -1091,10 +1094,10 @@ void scatter_impl(
     int64_t dim,
     const Tensor& index,
     const T& src,
-    const c10::optional<c10::string_view> reduce,
     const Tensor& out,
     ReduceStub& reduce_stub,
-    FillStub& fill_stub) {
+    FillStub& fill_stub,
+    const c10::optional<c10::string_view> reduce = nullopt) {
   auto mut_out = const_cast<Tensor&>(out);
 
   if (&self != &mut_out) {
@@ -1115,7 +1118,7 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
-  scatter_impl(self, dim, index, src, nullopt, out,
+  scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
 }
@@ -1126,7 +1129,7 @@ TORCH_IMPL_FUNC(scatter_value_out)
  const Tensor& index,
  const Scalar& value,
  const Tensor& out) {
-  scatter_impl(self, dim, index, value, nullopt, out,
+  scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
 }
@@ -1138,9 +1141,10 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  const Tensor& src,
  const c10::string_view reduce,
  const Tensor& out) {
-  scatter_impl(self, dim, index, src, reduce, out,
+  scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
-               scatter_stub);
+               scatter_stub,
+               reduce);
 }
 
 TORCH_IMPL_FUNC(scatter_value_reduce_out)
@@ -1150,9 +1154,10 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  const Scalar& value,
  const c10::string_view reduce,
  const Tensor& out) {
-  scatter_impl(self, dim, index, value, reduce, out,
+  scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
-               scatter_fill_stub);
+               scatter_fill_stub,
+               reduce);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {

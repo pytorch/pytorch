@@ -1157,7 +1157,7 @@ class AbstractTestCases:
                         getattr(base.clone(), method)(dim, idx, src.type(torch.int))
 
                 # should throw an error when index dtype is not long
-                with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
+                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 # check for the same dimensionality
@@ -1179,14 +1179,6 @@ class AbstractTestCases:
                         else:
                             getattr(base.clone(), method)(dim, idx, src)
 
-                # test for empty index, should be a no-op
-                idx = cast(torch.LongTensor())
-                if reduction:
-                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
-                else:
-                    actual = getattr(base.clone(), method)(dim, idx, src)
-                self.assertEqual(actual, base, atol=0, rtol=0)
-
         def test_scatter(self):
             self._test_scatter_base(self, lambda t: t, 'scatter_')
 
@@ -1197,11 +1189,6 @@ class AbstractTestCases:
             self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
         def test_scatterReduce(self):
-            for method in ["add", "multiply"]:
-                self._test_scatter_base(self, lambda t: t, 'scatter', reduction=method)
-                self._test_scatter_base(self, lambda t: t, 'scatter', True, reduction=method)
-
-        def test_scatterReduceInplace(self):
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
                 self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
@@ -5540,12 +5527,15 @@ else:
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
+    def scatter_allow_reduce(self, device, dtype, reduceop):
+        return device == 'cpu' or (device == 'cuda' and reduceop == 'multiply' and not dtype.is_floating_point)
+
+    # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
+    # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
-                   torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=True, include_half=True) +
-                    torch.testing.get_all_complex_dtypes()))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -5565,17 +5555,17 @@ else:
         ]
 
         for input, src, result, operation in test_data:
-            if operation == "multiply" and torch.is_complex(input):
+            if not self.scatter_allow_reduce(device, dtype, operation):
                 continue
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
+    # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
+    # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
-                   torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=True, include_half=True) +
-                    torch.testing.get_all_complex_dtypes()))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -5593,7 +5583,7 @@ else:
         ]
 
         for input, src, result, operation in test_data:
-            if operation == "multiply" and torch.is_complex(input):
+            if not self.scatter_allow_reduce(device, dtype, operation):
                 continue
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
@@ -5611,12 +5601,12 @@ else:
                          torch.tensor([[3], [1]], device=device,
                                       dtype=torch.float32).repeat(1, width))
 
+    # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
+    # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
-                   torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=True, include_half=True) +
-                    torch.testing.get_all_complex_dtypes()))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
@@ -5632,15 +5622,17 @@ else:
         ]
 
         for input, src, result, operation in test_data:
-            if operation == "multiply" and torch.is_complex(input):
+            if not self.scatter_allow_reduce(device, dtype, operation):
                 continue
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
+    # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
+    # So, we are skipping it here.
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
-    @dtypesIfCPU(*(torch.testing.get_all_int_dtypes()))
+    @dtypesIfCPU(torch.bfloat16)
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
