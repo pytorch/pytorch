@@ -69,9 +69,6 @@ def bundle_inputs(
             Equivalent to `len(model.get_all_bundled_inputs())`,
             but slightly easier to call from C++.
 
-        `run_on_bundled_input(idx: int) -> Any`
-            Run the model on bundled input number `idx`
-
     Inputs can be specified in one of two ways:
 
       - The model can define `_generate_bundled_inputs_for_<function_name>`.
@@ -201,9 +198,6 @@ def augment_many_model_functions_with_bundled_inputs(
             Equivalent to `len(model.get_all_bundled_inputs())`,
             but slightly easier to call from C++.
 
-        `run_on_bundled_input(idx: int) -> Any`
-            Run the model on bundled input number `idx`
-
     Inputs can be specified in one of two ways:
 
       - The model can define `_generate_bundled_inputs_for_<function_name>`.
@@ -331,10 +325,6 @@ def augment_many_model_functions_with_bundled_inputs(
                 def get_num_bundled_inputs(self):
                     return len(self.get_all_bundled_inputs_for_forward())
                 """))
-            model.define(textwrap.dedent("""
-                def run_on_bundled_input(self, idx: int):
-                    return self(*self.get_all_bundled_inputs()[idx])
-                """))
 
 
     # Define some high level helper methods that act on all bundled inputs
@@ -384,7 +374,6 @@ def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptMo
     if hasattr(script_module, 'get_all_bundled_inputs'):
         methods.append('get_all_bundled_inputs')
         methods.append('get_num_bundled_inputs')
-        methods.append('run_on_bundled_input')
 
     if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
         methods.append('get_bundled_inputs_functions_and_info')
