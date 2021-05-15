@@ -55,10 +55,9 @@
 #include <c10/util/Optional.h>
 
 #include <fmt/format.h>
+#include <linker.h>
 
-struct DeployLinkerError : public std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
+namespace torch { namespace deploy {
 
 #define DEPLOY_ERROR(msg_fmt, ...) \
   throw DeployLinkerError(fmt::format(msg_fmt, ##__VA_ARGS__))
@@ -285,12 +284,12 @@ extern "C" int __cxa_thread_atexit_impl(
     void* obj,
     void* dso_symbol);
 
-struct ElfFile;
+struct CustomLibraryImpl;
 
 struct TLSMemory {
-  TLSMemory(std::shared_ptr<ElfFile> file, size_t size)
+  TLSMemory(std::shared_ptr<CustomLibraryImpl> file, size_t size)
       : file_(std::move(file)), mem_(malloc(size)) {}
-  std::shared_ptr<ElfFile> file_;
+  std::shared_ptr<CustomLibraryImpl> file_;
   void* mem_;
   ~TLSMemory() {
     free(mem_);
@@ -313,11 +312,6 @@ static void delete_TLSMemory(void* obj) {
 // someone creates 2^63 sequential objects, but it is hard to imagine
 // a system with enough RAM to do that.
 constexpr size_t TLS_LOCAL_FLAG = (1ULL << 63);
-struct TLSIndex {
-  size_t module_id; // if module_id & TLS_LOCAL_FLAG, then module_id &
-                    // ~TLS_LOCAL_FLAG is a TLSSegment*;
-  size_t offset;
-};
 
 static void* local__tls_get_addr(TLSIndex* idx);
 
@@ -339,26 +333,10 @@ extern "C" {
 DeployModuleInfo __deploy_module_info;
 }
 
-struct SymbolProvider {
-  virtual at::optional<Elf64_Addr> sym(const char* name) const = 0;
-  virtual at::optional<TLSIndex> tls_sym(const char* name) const = 0;
-  virtual ~SymbolProvider() {}
-};
-
 // RAII wrapper around dlopen
-struct SystemLibrary : public SymbolProvider {
-  SystemLibrary() : SystemLibrary(RTLD_DEFAULT, false) {}
-  SystemLibrary(void* handle, bool steal)
+struct SystemLibraryImpl : public SystemLibrary {
+  SystemLibraryImpl(void* handle, bool steal)
       : handle_(handle), own_handle_(steal && handle != RTLD_DEFAULT) {}
-  SystemLibrary(const char* path, int flags) : own_handle_(false) {
-    handle_ = dlopen(path, flags);
-    if (handle_) {
-      own_handle_ = true;
-    }
-  }
-  bool loaded() const {
-    return handle_ != nullptr;
-  }
 
   at::optional<Elf64_Addr> sym(const char* name) const override {
     void* r = dlsym(handle_, name);
@@ -370,28 +348,24 @@ struct SystemLibrary : public SymbolProvider {
 
   at::optional<TLSIndex> tls_sym(const char* name) const override;
 
-  const char* last_error() const {
-    return dlerror();
-  }
-
-  // rule of 3:
-  SystemLibrary(const SystemLibrary& rhs) = delete;
-  SystemLibrary& operator=(const SystemLibrary& rhs) = delete;
-
-  ~SystemLibrary() {
+  ~SystemLibraryImpl() override {
     if (own_handle_) {
       dlclose(handle_);
     }
   }
 
  private:
-  void swap(SystemLibrary& rhs) {
-    std::swap(handle_, rhs.handle_);
-    std::swap(own_handle_, rhs.own_handle_);
-  }
   void* handle_;
   bool own_handle_;
 };
+
+std::shared_ptr<SystemLibrary> SystemLibrary::create(void* handle, bool steal) {
+  return std::make_shared<SystemLibraryImpl>(handle, steal);
+}
+std::shared_ptr<SystemLibrary> SystemLibrary::create(const char* path, int flags) {
+  void* handle = dlopen(path, flags);
+  return SystemLibrary::create(handle, handle != nullptr);
+}
 
 // reads DT_NEEDED and DT_RUNPATH from an unloaded elf file so we can sort out
 // dependencies before calling dlopen
@@ -714,7 +688,7 @@ at::optional<TLSIndex> slow_find_tls_symbol_offset(const char* sym_name) {
   return result;
 }
 
-at::optional<TLSIndex> SystemLibrary::tls_sym(const char* name) const {
+at::optional<TLSIndex> SystemLibraryImpl::tls_sym(const char* name) const {
   if (!sym(name)) {
     return at::nullopt; // before we do a bunch of slow lookups to find the
                         // module_id, check that this even defines the symbol
@@ -776,11 +750,10 @@ void resolve_needed_libraries(
 
     // (1) the library is already loaded
     const int base_flags = RTLD_LAZY | RTLD_LOCAL;
-    auto already_loaded =
-        std::make_shared<SystemLibrary>(name, base_flags | RTLD_NOLOAD);
-    if (already_loaded->loaded()) {
+    void* handle = dlopen(name, base_flags | RTLD_NOLOAD);
+    if (handle) {
       // std::cout << "ALREADY LOADED " << name << "\n";
-      libraries.emplace_back(std::move(already_loaded));
+      libraries.emplace_back(SystemLibrary::create(handle, true));
       continue;
     }
 
@@ -824,14 +797,13 @@ void resolve_needed_libraries(
     // resolved.
 
     // std::cout << "OPENING " << library_path << "\n";
-    auto try_open =
-        std::make_shared<SystemLibrary>(library_path.c_str(), base_flags);
+    handle = dlopen(library_path.c_str(), base_flags);
     DEPLOY_CHECK(
-        try_open->loaded(),
+        handle,
         "{}: could not load library, dlopen says: {}",
         name,
-        try_open->last_error());
-    libraries.emplace_back(std::move(try_open));
+        dlerror());
+    libraries.emplace_back(SystemLibrary::create(handle, true));
   }
 
   // unwind search_path stack
@@ -841,9 +813,8 @@ void resolve_needed_libraries(
 
 extern "C" void* __dso_handle;
 
-struct ElfFile : public std::enable_shared_from_this<ElfFile>, SymbolProvider {
-  ElfFile(const ElfFile&) = delete;
-  ElfFile(const char* filename, int argc, const char** argv)
+struct CustomLibraryImpl : public std::enable_shared_from_this<CustomLibraryImpl>, public CustomLibrary {
+  CustomLibraryImpl(const char* filename, int argc, const char** argv)
       : contents_(filename),
         mapped_library_(nullptr),
         name_(filename),
@@ -854,12 +825,9 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile>, SymbolProvider {
     header_ = (Elf64_Ehdr*)data_;
     program_headers_ = (Elf64_Phdr*)(data_ + header_->e_phoff);
     n_program_headers_ = header_->e_phnum;
-    // system library search path starts with the process global symbols.
-    symbol_search_path_.emplace_back(std::make_shared<SystemLibrary>());
   }
-  void add_system_library(void* handle) {
-    symbol_search_path_.emplace_back(
-        std::make_shared<SystemLibrary>(handle, false));
+  void add_search_library(std::shared_ptr<SymbolProvider> lib) {
+    symbol_search_path_.emplace_back(std::move(lib));
   }
   void reserve_address_space() {
     Elf64_Addr min_vaddr, max_vaddr;
@@ -1175,7 +1143,7 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile>, SymbolProvider {
     initialize();
   }
 
-  ~ElfFile() {
+  ~CustomLibraryImpl() {
     // std::cout << "LINKER IS UNLOADING: " << name_ << "\n";
     if (initialized_) {
       finalize();
@@ -1251,47 +1219,16 @@ struct ElfFile : public std::enable_shared_from_this<ElfFile>, SymbolProvider {
   std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
 };
 
+std::shared_ptr<CustomLibrary> CustomLibrary::create(const char* filename, int argc, const char** argv) {
+  return std::make_shared<CustomLibraryImpl>(filename, argc, argv);
+}
+
 static void* local__tls_get_addr(TLSIndex* idx) {
   if ((idx->module_id & TLS_LOCAL_FLAG) != 0) {
-    return ((ElfFile*)(idx->module_id & ~TLS_LOCAL_FLAG))
+    return ((CustomLibraryImpl*)(idx->module_id & ~TLS_LOCAL_FLAG))
         ->tls_addr(idx->offset);
   }
   return __tls_get_addr(idx);
 }
 
-std::vector<std::shared_ptr<ElfFile>> loaded_files_;
-
-static void* deploy_self = nullptr;
-
-__attribute__((visibility("default"))) extern "C" void deploy_set_self(
-    void* v) {
-  deploy_self = v;
-}
-
-typedef void (*dl_funcptr)(void);
-extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
-    const char* prefix,
-    const char* shortname,
-    const char* pathname,
-    FILE* fp) {
-  const char* args[] = {"deploy"};
-  // XXX: we have to manually flush loaded_files_ (see deploy_flush_python_libs)
-  // when the manager unloads. Otherwise some libraries can live longer than
-  // they are needed, and the process of unloading them might use functionality
-  // that itself gets unloaded.
-  loaded_files_.emplace_back(std::make_shared<ElfFile>(pathname, 1, args));
-  ElfFile& lib = *loaded_files_.back();
-  lib.add_system_library(deploy_self);
-  lib.load();
-  std::stringstream ss;
-  ss << prefix << "_" << shortname;
-  auto r = (dl_funcptr)lib.sym(ss.str().c_str()).value();
-  assert(r);
-  // std::cout << "LOADED " << pathname << "\n";
-  return r;
-}
-
-__attribute__((visibility("default"))) extern "C" void
-deploy_flush_python_libs() {
-  loaded_files_.clear();
-}
+}}
