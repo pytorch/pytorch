@@ -269,6 +269,9 @@ static bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   return participatesInCurrentLevel(ivalue.toTensor());
 }
 
+// TODO: Consider rewriting the following to look like:
+// https://gist.github.com/zou3519/7b7c6a4a258d580f62d1d969851be6b1<Paste>
+
 // The general flow of the algorithm is as follows.
 // - First, we figure out which arguments are BatchedTensors and save them
 //   to a vector. We also store a vector of which index of the arguments list
