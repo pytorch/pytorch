@@ -139,7 +139,7 @@ def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     world_size = int(query["world_size"])
     start_daemon = rank == 0
     assert result.hostname is not None
-    store = TCPStore(
+    store = TCPStore(  # type: ignore[call-arg]
         result.hostname, result.port, world_size, start_daemon, timeout, multi_tenant=True
     )
     yield (store, rank, world_size)
@@ -198,7 +198,7 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     else:
         # Start the TCP store daemon on the rank 0
         start_daemon = rank == 0
-        store = TCPStore(
+        store = TCPStore(  # type: ignore[call-arg]
             master_addr, master_port, world_size, start_daemon, timeout, multi_tenant=True
         )
         # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
