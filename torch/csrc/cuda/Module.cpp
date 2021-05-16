@@ -208,7 +208,7 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
 }
 
 PyObject* THCPModule_cudaDetMalloc(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
+  // HANDLE_TH_ERRORS
   PyObject* device_o = nullptr;
   PyObject* size_o = nullptr;
   PyObject* stream_o = nullptr;
@@ -227,17 +227,25 @@ PyObject* THCPModule_cudaDetMalloc(PyObject* _unused, PyObject* args) {
   printf("Here [0]\n");
   // std::cout << sizeof(size) << std::endl;
   // PyLong_FromUnsignedLongLong return_val = (unsigned __int64)c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream);
-  PyObject * return_val = PyLong_FromUnsignedLongLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
-  std::cout << return_val << std::endl;
+  // PyObject * return_val = PyLong_FromUnsignedLongLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
+  // std::cout << return_val << std::endl;
   // PyObject* return_val = PyLong_FromLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
   // std::cout << return_val << std::endl;
   // return return_val;
-  // return PyLong_FromUnsignedLongLong(return_val);
+  // 
   // return py::int_(15);
   // Py_ssize_t ret = 14;
   // return &ret;
-  return return_val;
-  END_HANDLE_TH_ERRORS
+  // return (PyObject *)PyLong_FromLong(10);
+  // return return_val;
+  // printf("K.\n");
+  // py::dict dict;
+  // dict["test"] = "val.";
+  unsigned long long return_val = 123695;
+  return PyLong_FromUnsignedLongLong(return_val);
+  // return PyBytes_FromString("test123");
+  // Py_RETURN_NONE;
+  // END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
