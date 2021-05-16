@@ -63,7 +63,7 @@ class PyTorchLinuxWorkflow:
             self.test_runner_type = self.CUDA_TEST_RUNNER
 
     def generate_workflow_file(
-        self, workflow_template: jinja2.Template, jinja_env: jinja2.Environment
+        self, workflow_template: jinja2.Template,
     ) -> Path:
         output_file_path = GITHUB_DIR.joinpath(
             f"workflows/{self.build_environment}.yml"
@@ -86,10 +86,10 @@ class PyTorchLinuxWorkflow:
 
 
 WINDOWS_WORKFLOWS = [
-        PyTorchWindowsWorkflow(
-            build_environment="pytorch-win-vs2019-cpu-py3",
-            on_pull_request=True
-        )
+    PyTorchWindowsWorkflow(
+        build_environment="pytorch-win-vs2019-cpu-py3",
+        on_pull_request=True
+    )
 ]
 
 LINUX_WORKFLOWS = [
@@ -197,8 +197,7 @@ if __name__ == "__main__":
     for workflow in LINUX_WORKFLOWS:
         print(
             workflow.generate_workflow_file(
-                workflow_template=linux_workflow_template,
-                jinja_env=jinja_env
+                workflow_template=linux_workflow_template
             )
         )
     windows_workflow_template = jinja_env.get_template(

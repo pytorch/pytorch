@@ -4,19 +4,14 @@ function Install-Binary
     <#
     .SYNOPSIS
         A helper function to install executables.
-
     .DESCRIPTION
         Download and install .exe or .msi binaries from specified URL.
-
     .PARAMETER Url
         The URL from which the binary will be downloaded. Required parameter.
-
     .PARAMETER Name
         The Name with which binary will be downloaded. Required parameter.
-
     .PARAMETER ArgumentList
         The list of arguments that will be passed to the installer. Required for .exe binaries.
-
     .EXAMPLE
         Install-Binary -Url "https://go.microsoft.com/fwlink/p/?linkid=2083338" -Name "winsdksetup.exe" -ArgumentList ("/features", "+", "/quiet")
     #>
@@ -108,4 +103,3 @@ function Start-DownloadWithRetry
 
     return $filePath
 }
-

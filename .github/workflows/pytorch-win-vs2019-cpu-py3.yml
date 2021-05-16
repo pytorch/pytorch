@@ -75,6 +75,10 @@ jobs:
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.GITHUB_RUN_ID }}\build-results
+      - name: Check build-results folder
+        shell: powershell
+        run: |
+          tree /f C:\${GITHUB_RUN_ID}\build-results
       - name: Run test scripts
         shell: bash
         run: |
