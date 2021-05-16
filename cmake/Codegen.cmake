@@ -98,7 +98,7 @@ if(INTERN_BUILD_ATEN_OPS)
     if(MSVC)
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
     else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mno-avx512f -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
     endif(MSVC)
   endif(CXX_AVX2_FOUND)
 
