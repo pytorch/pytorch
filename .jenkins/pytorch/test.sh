@@ -121,7 +121,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+  export ATEN_CPU_CAPABILITY=default
 fi
 
 # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
