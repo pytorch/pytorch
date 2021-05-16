@@ -6,10 +6,6 @@ on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
-    branches:
-      - master
-      - gh/* # for ghstack
-      - release/*
 {%- endif %}
   push:
     branches:

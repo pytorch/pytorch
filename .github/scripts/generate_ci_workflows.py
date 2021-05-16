@@ -36,10 +36,7 @@ class PyTorchWindowsWorkflow:
                 workflow_template.render(
                     build_environment=self.build_environment,
                     test_runner_type=self.test_runner_type,
-                    # two leading spaces is necessary to match yaml indent
-                    on_pull_request=(
-                        "  pull_request:" if self.on_pull_request else ""
-                    )
+                    on_pull_request=self.on_pull_request
                 )
             )
             output_file.write('\n')
@@ -194,19 +191,10 @@ if __name__ == "__main__":
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
     )
-    linux_workflow_template = jinja_env.get_template("linux_ci_workflow.yml.in")
-    for workflow in LINUX_WORKFLOWS:
-        print(
-            workflow.generate_workflow_file(
-                workflow_template=linux_workflow_template
-            )
-        )
-    windows_workflow_template = jinja_env.get_template(
-        "windows_ci_workflow.yml.in"
-    )
-    for workflow in WINDOWS_WORKFLOWS:
-        print(
-            workflow.generate_workflow_file(
-                workflow_template=windows_workflow_template
-            )
-        )
+    template_and_workflows = [
+        (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
+    ]
+    for template, workflows in template_and_workflows:
+        for workflow in workflows:
+            print(workflow.generate_workflow_file(workflow_template=template))

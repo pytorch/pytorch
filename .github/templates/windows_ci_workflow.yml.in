@@ -4,7 +4,9 @@ name: Windows CI (!{{ build_environment }})
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-!{{ on_pull_request }}
+{%- if on_pull_request %}
+  pull_request:
+{%- endif %}
   push:
     branches:
       - master
