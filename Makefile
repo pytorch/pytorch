@@ -66,6 +66,7 @@ quick_checks:
 		--step 'Ensure no tabs' \
 		--step 'Ensure no non-breaking spaces' \
 		--step 'Ensure canonical include' \
+		--step 'Ensure no versionless Python shebangs' \
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
