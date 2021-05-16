@@ -917,6 +917,7 @@ if __name__ == '__main__':
                 'include/ATen/*.h',
                 'include/ATen/cpu/*.h',
                 'include/ATen/cpu/vec/vec256/*.h',
+                'include/ATen/cpu/vec/vec512/*.h',
                 'include/ATen/cpu/vec/*.h',
                 'include/ATen/core/*.h',
                 'include/ATen/cuda/*.cuh',
