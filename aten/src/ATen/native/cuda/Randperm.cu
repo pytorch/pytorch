@@ -38,6 +38,9 @@ namespace native {
 //
 // Reference
 // [1] https://osf.io/af2hy/
+
+// The kernels are templated on an opaque, self-aligned type of the correct
+// size to avoid redundant kernels for different types of the same size.
 namespace {
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 }
@@ -73,8 +76,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   constexpr bool is_reduced_bits = true;
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
-  // The kernels are templated on an opaque, self-aligned type of the correct
-// size to avoid redundant kernels for different types of the same size.
 
   if (n == 0) {
     return result;
