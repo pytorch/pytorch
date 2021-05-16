@@ -368,7 +368,6 @@ class DeviceCachingAllocator {
   // Thus, do not call a public method from another public method.
 
   size_t det_malloc(int device, size_t size, cudaStream_t stream) {
-    // printf("debug [called]\n");
     std::unique_lock<std::recursive_mutex> lock(mutex);
     if (C10_LIKELY(captures_underway == 0)) {
       process_events();
@@ -376,21 +375,13 @@ class DeviceCachingAllocator {
     size = round_size(size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
-    // printf("size: %zu\n", size);
-    // printf("alloc_size: %zu\n", alloc_size);
-    // printf("D1.\n");
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
-    bool block_found = get_free_block(params) || (trigger_free_memory_callbacks(params) && get_free_block(params));
-    if (!block_found) {
-      void* ptr;
-      params.block = new Block(params.device(), params.stream(), alloc_size, params.pool, (char*)ptr);
-    }
+    trigger_free_memory_callbacks(params);
+    get_free_block(params);
+    void* ptr;
+    params.block = new Block(params.device(), params.stream(), alloc_size, params.pool, (char*)ptr);
     const bool already_split = params.block->is_split();
     if (should_split(params.block, size)) {
-      printf("Split detected.\n");
-      // remaining = block;
-      // block = new Block(device, stream, size, &pool, block->ptr);
-      // remaining->size -= size;
       return size;
     } else {
       return alloc_size;
@@ -399,7 +390,6 @@ class DeviceCachingAllocator {
 
   Block* malloc(int device, size_t size, cudaStream_t stream) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    printf("malloc has been called!\n");
     if (C10_LIKELY(captures_underway == 0)) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and

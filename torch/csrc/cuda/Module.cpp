@@ -220,12 +220,6 @@ PyObject* THCPModule_cudaDetMalloc(PyObject* _unused, PyObject* args) {
   int64_t device = PyLong_AsLongLong(device_o);
   ssize_t size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-
-  // Debug.
-  std::cout << "debug [device]: " << device << std::endl;
-  std::cout << "debug [size]: " << size << std::endl;
-  std::cout << "debug [stream]: " << stream << std::endl;
-  
   return PyLong_FromUnsignedLongLong(c10::cuda::CUDACachingAllocator::raw_det_malloc(device, size, stream));
   END_HANDLE_TH_ERRORS
 }
