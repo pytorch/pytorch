@@ -69,11 +69,12 @@ class TestOpInfo(TestCase):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
 
-        for sample in op.sample_inputs(device, dtype, requires_grad=True):
-            result = op(sample.input, *sample.args, **sample.kwargs)
-            if not isinstance(result, torch.Tensor):
-                continue
-            result.sum().backward()
+        for ctx in op.sample_inputs(device, dtype, requires_grad=True):
+            with ctx as sample:
+                result = op(sample.input, *sample.args, **sample.kwargs)
+                if not isinstance(result, torch.Tensor):
+                    continue
+                result.sum().backward()
 
     # Verifies that ops do not have an entry in
     # `method_tests` (legacy testing infra).

@@ -78,17 +78,45 @@ class SkipInfo(DecorateInfo):
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
 
+
+class SampleInputCtx(object):
+    """Context manager wrapping a SampleInput.
+
+    The end user can get the underlying SampleInput by entering a with
+    statement, e.g.:
+
+        with ctx as sample:
+            print(sample.args)
+            print(sample.input)
+
+    If case of exception, the context manager will prepend the name of the
+    SampleInput to the error message, making it possible to know which is the
+    specific sample which caused the test to fail.
+    """
+    def __init__(self, sample):
+        assert isinstance(sample, SampleInput)
+        self._sample = sample
+
+    def __enter__(self):
+        return self._sample
+
+    def __exit__(self, etype, evalue, tb):
+        if etype:
+            evalue.args = (f'[SampleInput: {self._sample.name}] {evalue}',)
+
+
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input']
+    __slots__ = ['input', 'name', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False):
+    def __init__(self, input, *, name=None, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False):
         # input is the first input to the op and must be either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
         assert isinstance(input, torch.Tensor) or is_iterable_of_tensors(input)
         self.input: Union[torch.Tensor, Sequence[torch.Tensor]] = input
+        self.name = name
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
@@ -106,6 +134,7 @@ class SampleInput(object):
     def __repr__(self):
         arguments = [
             'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
+            f'name={self.name!r}',
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
@@ -288,13 +317,12 @@ class OpInfo(object):
         """
         return self.operator_variant
 
-    def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
-        """Returns an iterable of SampleInputs.
+    def generate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns a list of SampleInputs.
 
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
         """
-
         # TODO: Remove the try/except once all operators have sample_inputs_func with
         #       **kwargs in their signature.
         try:
@@ -302,6 +330,24 @@ class OpInfo(object):
         except TypeError:
             samples = self.sample_inputs_func(self, device, dtype, requires_grad)
         return samples
+
+    def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns a list of SampleInputCtxs.
+
+        The SampleInputCtxs are constructed by wrapping the result of
+        generate_sample_inputs.
+
+        If subclasses want to customize the generation of inputs, they should
+        override generate_sample_inputs(). On the contrary, end users should
+        always call sample_inputs().
+        """
+        samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
+        # make sure that every SampleInput has a sensible name: if the name
+        # was not given, use the index instead
+        for i, sample in enumerate(samples):
+            if sample.name is None:
+                sample.name = str(i)
+        return [SampleInputCtx(sample) for sample in samples]
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -2025,7 +2071,7 @@ class SpectralFuncInfo(OpInfo):
         self.ndimensional = ndimensional
 
 
-    def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
+    def generate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
                                 requires_grad=requires_grad)
         tensor = make_tensor((31,), device, dtype, low=None, high=None,
