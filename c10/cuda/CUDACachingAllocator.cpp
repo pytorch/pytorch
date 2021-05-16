@@ -1559,8 +1559,10 @@ void raw_delete(void* ptr) {
 }
 
 size_t raw_det_malloc(int device, size_t size, cudaStream_t stream) {
-  return caching_allocator.device_allocator[device]->det_malloc(
+  size_t out = caching_allocator.device_allocator[device]->det_malloc(
       device, size, stream);
+  printf("Z.\n");
+  return out;
 }
 
 } // namespace CUDACachingAllocator
