@@ -369,23 +369,10 @@ class DeviceCachingAllocator {
 
   size_t det_malloc(int device, size_t size, cudaStream_t stream) {
     printf("debug [called]\n");
-
     std::unique_lock<std::recursive_mutex> lock(mutex);
-
     if (C10_LIKELY(captures_underway == 0)) {
-      // Processes end-of-life events for outstanding allocations used on
-      // multiple streams (checks if their GPU-side uses are complete and
-      // recycles their memory if so)
-      //
-      // Q. Why skip process_events if a capture might be underway?
-      // A. process_events involves cudaEventQueries, illegal during CUDA graph
-      // capture.
-      //    Dumb simple solution: defer reclaiming these allocations until after
-      //    capture. Cross-stream memory use is uncommon, so the deferral's
-      //    effect on memory use during capture should be small.
       process_events();
     }
-
     size = round_size(size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
@@ -394,60 +381,33 @@ class DeviceCachingAllocator {
     printf("alloc_size: %zu\n", alloc_size);
     printf("D1.\n");
 
-    // Block* block = malloc(device, size, stream);
-    // size_t block_size = block->size;
-    // free(block);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
-    params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
+    // params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    // params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
 
     void* ptr;
-    if (params.pool->owner_PrivatePool) {
-      // The block is for a CUDA graph's PrivatePool.
-      params.pool->owner_PrivatePool->cudaMalloc_count++;
-    }
-    // params.block = new Block(params.device(), params.stream(), size, params.pool, (char*)ptr);
-    // Block* block = params.block;
+    // if (params.pool->owner_PrivatePool) {
+    //   // The block is for a CUDA graph's PrivatePool.
+    //   params.pool->owner_PrivatePool->cudaMalloc_count++;
+    // }
+    // params.block = new Block(params.device(), params.stream(), alloc_size, params.pool, (char*)ptr);
     // update_stat_array(stats.segment, 1, params.stat_types);
-    // update_stat_array(stats.reserved_bytes, size, params.stat_types);
-    alloc_block(params, false);
-    Block* block = params.block;
+    // update_stat_array(stats.reserved_bytes, alloc_size, params.stat_types);
+    // alloc_block(params, false);
+    // Block* block = params.block;
+    Block* block = new Block(params.device(), params.stream(), alloc_size, params.pool, (char*)ptr);
     Block* remaining = nullptr;
     const bool already_split = block->is_split();
     if (should_split(block, size)) {
       remaining = block;
       block = new Block(device, stream, size, &pool, block->ptr);
       remaining->size -= size;
-      if (already_split) {
-        update_stat_array(
-            stats.inactive_split_bytes, -block->size, params.stat_types);
-      } else {
-        update_stat_array(
-            stats.inactive_split_bytes, block->size, params.stat_types);
-        update_stat_array(stats.inactive_split, 1, params.stat_types);
-      }
-    } else if (already_split) {
-      update_stat_array(
-          stats.inactive_split_bytes, -block->size, params.stat_types);
-      update_stat_array(stats.inactive_split, -1, params.stat_types);
+
     }
-
-    update_stat_array(stats.segment, 1, params.stat_types);
-    update_stat_array(stats.reserved_bytes, size, params.stat_types);
-    update_stat_array(stats.allocation, 1, params.stat_types);
-    update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
-    update_stat_array(stats.active, 1, params.stat_types);
-    update_stat_array(stats.active_bytes, block->size, params.stat_types);
-
     printf("D2.\n");
-
-
     // Block* block = new Block(device, stream, size, &pool, block->ptr);
     size_t block_size = block->size;
-    printf("D3.\n");
     printf("%zu.\n", block_size);
-    free(block);
-    // free(remaining)
     return block_size;
 
 
@@ -708,7 +668,7 @@ class DeviceCachingAllocator {
 
   Block* malloc(int device, size_t size, cudaStream_t stream) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
-
+    printf("malloc has been called!\n");
     if (C10_LIKELY(captures_underway == 0)) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
