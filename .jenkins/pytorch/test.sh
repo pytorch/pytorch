@@ -118,7 +118,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]] || [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* ]]; then
   export ATEN_CPU_CAPABILITY=avx2
