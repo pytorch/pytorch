@@ -24,6 +24,24 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 bool isVmapFallbackWarningEnabled();
 void setVmapFallbackWarningEnabled(bool enabled);
 
+template <typename A> A vector_to_result(const std::vector<IValue>& buffer) {
+  return buffer[0].to<A>();
+}
+template <typename A, typename B> std::tuple<A, B> vector_to_result(const std::vector<IValue>& buffer) {
+  return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>());
+}
+template <typename A, typename B, typename C> std::tuple<A, B, C> vector_to_result(const std::vector<IValue>& buffer) {
+  return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>(), buffer[2].to<B>);
+}
+
+// This is a way to call the slow fallback from inside some plumbing
+// TODO: nothing calls this yet, so I'm not completely sure it works.
+template <typename... Rets>
+std::tuple<Rets...> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
+  std::vector<IValue> stack(args.begin(), args.end());
+  batchedTensorForLoopFallback(op, &stack);
+  return vector_to_result<Rets...>(stack);
+}
 
 }
 } // namespace at
