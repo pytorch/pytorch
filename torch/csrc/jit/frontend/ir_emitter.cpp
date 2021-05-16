@@ -4208,20 +4208,29 @@ struct to_ir {
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
         std::vector<at::optional<NamedValue>> tuple_args;
         tuple_args.reserve(3);
-        auto begin =
-            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
-        tuple_args.emplace_back(begin);
+        if (slice.start().present()) {
+          auto begin = NamedValue(
+              val_range, "begin", emitExpr(Expr(slice.start().get())));
+          tuple_args.emplace_back(begin);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           tuple_args.emplace_back(end);
-
         } else {
           tuple_args.emplace_back(c10::nullopt);
         }
-        // pushing step_size to match the tuple_args
-        tuple_args.emplace_back(c10::nullopt);
 
+        if (slice.step().present()) {
+          auto step =
+              NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
+          tuple_args.emplace_back(step);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
         auto tupleSliceValue =
             emitTupleSlice(val_range, s_tuple_val, tuple_args);
         return std::make_shared<SimpleValue>(tupleSliceValue);

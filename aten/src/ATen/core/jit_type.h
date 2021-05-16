@@ -2136,11 +2136,6 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<std::vector<std::string>> findOverloadedMethod(
       const std::string& name) const;
 
-  // given the mangled name, return the function pointer
-  // corresponding that name.
-  torch::jit::Function* getMangledOverloadedMethod(
-      const std::string& name) const;
-
   torch::jit::Function* findHook(const std::string& name) const;
   torch::jit::Function& getHook(const std::string& name) const;
   bool hasMethod(const std::string& name) const;
@@ -2189,6 +2184,10 @@ struct TORCH_API ClassType : public NamedType {
   void addAttribute(ClassAttribute classAttribute);
   std::string getForwardPreHookErrorMessage(int pre_hook_idx) const;
   std::string getForwardHookErrorMessage(int hook_idx) const;
+  // given the mangled name, return the function pointer
+  // corresponding that name.
+  torch::jit::Function* getMangledOverloadedMethod(
+      const std::string& name) const;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module

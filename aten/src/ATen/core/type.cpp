@@ -1100,7 +1100,7 @@ void ClassType::addOverloadedMethod(torch::jit::Function* method) {
       std::pair<std::string, std::vector<std::string>>(
           method->name(), std::vector<std::string>()));
   // create a mangled name for this function and bookkeep
-  // the mangled name and its' corresponding function.
+  // the mangled name and its corresponding function.
   const std::string& mangled_name =
       method->name() + "__" + std::to_string(it.first->second.size());
   it.first->second.push_back(mangled_name);
