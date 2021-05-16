@@ -77,7 +77,7 @@ jobs:
       - name: Check build-results folder
         shell: powershell
         run: |
-          tree /f C:\${GITHUB_RUN_ID}\build-results
+          tree /F C:\${GITHUB_RUN_ID}\build-results
       - name: Run test scripts
         shell: bash
         run: |
