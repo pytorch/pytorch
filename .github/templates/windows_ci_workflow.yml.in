@@ -82,6 +82,7 @@ jobs:
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
       - name: Run test scripts
         shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
-          PYTORCH_FINAL_PACKAGE_DIR="/c/${GITHUB_RUN_ID}/build-results/${BUILD_ENVIRONMENT}" \
             .jenkins/pytorch/win-test.sh
