@@ -1849,12 +1849,6 @@ if(USE_KINETO)
     message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
     message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 
-    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
-        ${CUDA_INCLUDE_DIRS}
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
-
     if(NOT MSVC)
       if(USE_CUPTI_SO)
         set(CUPTI_LIB_NAME "libcupti.so")
@@ -1870,17 +1864,18 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
         ${CUDA_SOURCE_DIR}/lib64)
 
-    message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-    set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
-    message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_INCLUDE_DIRS}
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
+        ${CUDA_SOURCE_DIR}/include)
 
-    set(FOUND_CUPTI FALSE)
-    if((EXISTS ${CUPTI_INCLUDE_DIR}) AND (EXISTS ${CUDA_cupti_LIBRARY}))
-      set(FOUND_CUPTI TRUE)
-    endif()
-
-    if(FOUND_CUPTI)
+    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
+      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
+      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
+      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
