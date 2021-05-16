@@ -180,7 +180,6 @@ def gen_dependent_configs(xenial_parent_config):
 
     extra_parms = [
         (["multigpu"], "large"),
-        (["nogpu", "NO_AVX512"], None),
         (["nogpu", "NO_AVX2"], None),
         (["nogpu", "NO_AVX"], None),
         (["slow"], "medium"),
