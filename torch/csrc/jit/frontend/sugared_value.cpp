@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <memory>
 
 namespace torch {
 namespace jit {
