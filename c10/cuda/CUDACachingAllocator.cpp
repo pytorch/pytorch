@@ -368,13 +368,296 @@ class DeviceCachingAllocator {
   // Thus, do not call a public method from another public method.
 
   size_t det_malloc(int device, size_t size, cudaStream_t stream) {
-    printf("Called.\n");
+    printf("debug [called]\n");
+
     std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    if (C10_LIKELY(captures_underway == 0)) {
+      // Processes end-of-life events for outstanding allocations used on
+      // multiple streams (checks if their GPU-side uses are complete and
+      // recycles their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      // capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after
+      //    capture. Cross-stream memory use is uncommon, so the deferral's
+      //    effect on memory use during capture should be small.
+      process_events();
+    }
+
     size = round_size(size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
+
+    printf("size: %zu\n", size);
+    printf("alloc_size: %zu\n", alloc_size);
+    printf("D1.\n");
+
+    // Block* block = malloc(device, size, stream);
+    // size_t block_size = block->size;
+    // free(block);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
     params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
+
+    void* ptr;
+    if (params.pool->owner_PrivatePool) {
+      // The block is for a CUDA graph's PrivatePool.
+      params.pool->owner_PrivatePool->cudaMalloc_count++;
+    }
+    // params.block = new Block(params.device(), params.stream(), size, params.pool, (char*)ptr);
+    // Block* block = params.block;
+    // update_stat_array(stats.segment, 1, params.stat_types);
+    // update_stat_array(stats.reserved_bytes, size, params.stat_types);
+    alloc_block(params, false);
+    Block* block = params.block;
+    Block* remaining = nullptr;
+    const bool already_split = block->is_split();
+    if (should_split(block, size)) {
+      remaining = block;
+      block = new Block(device, stream, size, &pool, block->ptr);
+      remaining->size -= size;
+      if (already_split) {
+        update_stat_array(
+            stats.inactive_split_bytes, -block->size, params.stat_types);
+      } else {
+        update_stat_array(
+            stats.inactive_split_bytes, block->size, params.stat_types);
+        update_stat_array(stats.inactive_split, 1, params.stat_types);
+      }
+    } else if (already_split) {
+      update_stat_array(
+          stats.inactive_split_bytes, -block->size, params.stat_types);
+      update_stat_array(stats.inactive_split, -1, params.stat_types);
+    }
+
+    update_stat_array(stats.segment, 1, params.stat_types);
+    update_stat_array(stats.reserved_bytes, size, params.stat_types);
+    update_stat_array(stats.allocation, 1, params.stat_types);
+    update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
+    update_stat_array(stats.active, 1, params.stat_types);
+    update_stat_array(stats.active_bytes, block->size, params.stat_types);
+
+    printf("D2.\n");
+
+
+    // Block* block = new Block(device, stream, size, &pool, block->ptr);
+    size_t block_size = block->size;
+    printf("D3.\n");
+    printf("%zu.\n", block_size);
+    free(block);
+    // free(remaining)
+    return block_size;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    // params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    // params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
+
+    // Block* block = new Block(device, stream, size, &pool, block->ptr);
+    // return block->size;
+
+    // if (params.pool->owner_PrivatePool) {
+    //   // The block is for a CUDA graph's PrivatePool.
+    //   params.pool->owner_PrivatePool->cudaMalloc_count++;
+    // }
+    // void* ptr;
+    // params.block = new Block(params.device(), params.stream(), size, params.pool, (char*)ptr);
+    // printf("%zu.\n", params.block->size);
+    // bool block_found = get_free_block(params) || (trigger_free_memory_callbacks(params) && get_free_block(params));
+    // printf(block_found ? "True.\n" : "False.\n");
+    // if (!block_found) {
+    //   // alloc_block(params, false);
+    //   // Block* block = params.block;
+    //   // return block->size;
+    //   return params.block->size;
+    // } else {
+    //   return size;
+    // }
+    
+    // if (block_found) {
+    //   Block* block = params.block;
+    //   return block->size;
+    //   // return 0;
+    //   // const bool already_split = block->is_split();
+    //   // if (should_split(block, size)) {
+    //   //   remaining = block;
+    //   //   block = new Block(device, stream, size, &pool, block->ptr);
+    //   //   block->prev = remaining->prev;
+    //   //   if (block->prev) {
+    //   //     block->prev->next = block;
+    //   //   }
+    //   //   block->next = remaining;
+
+    //   //   remaining->prev = block;
+    //   //   remaining->ptr = static_cast<char*>(remaining->ptr) + size;
+    //   //   remaining->size -= size;
+    //   //   bool inserted = pool.blocks.insert(remaining).second;
+    //   //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+    //   //   if (already_split) {
+    //   //     // An already-split inactive block is being shrunk by size bytes.
+    //   //     update_stat_array(
+    //   //         stats.inactive_split_bytes, -block->size, params.stat_types);
+    //   //   } else {
+    //   //     // A new split inactive block is being created from a previously unsplit
+    //   //     // block, size remaining->size bytes.
+    //   //     update_stat_array(
+    //   //         stats.inactive_split_bytes, remaining->size, params.stat_types);
+    //   //     update_stat_array(stats.inactive_split, 1, params.stat_types);
+    //   //   }
+    //   // } else if (already_split) {
+    //   //   // An already-split block is becoming active
+    //   //   update_stat_array(
+    //   //       stats.inactive_split_bytes, -block->size, params.stat_types);
+    //   //   update_stat_array(stats.inactive_split, -1, params.stat_types);
+    //   // }
+    //   // block->allocated = true;
+    //   // bool inserted = active_blocks.insert(block).second;
+    //   // TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+    //   // c10::reportMemoryUsageToProfiler(
+    //   //     block, block->size, c10::Device(c10::DeviceType::CUDA, device));
+
+    //   // update_stat_array(stats.allocation, 1, params.stat_types);
+    //   // update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
+    //   // update_stat_array(stats.active, 1, params.stat_types);
+    //   // update_stat_array(stats.active_bytes, block->size, params.stat_types);
+    // } else {
+    //   return size;
+    // }
+
+
+    
+      
+
+      
+
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // printf("p_alloc_size: %zu\n", params.alloc_size);
+
+    // printf("D2.\n");
+
+    
+        // Search pool
+        
+        // Trigger callbacks and retry search
+        
+    // printf(block_found ? "block found: true\n" : "block found: false\n");
+    // // // printf(free_block ? "true" : "false");
+
+    // Block* block = malloc(device, size, stream);
+    // size_t block_size = block->size;
+    // free(block);
+
+    // return block_size;
+    // printf("D2.5.\n");
+
+    // if (block_found) {
+
+    //   Block* block = params.block;
+    //   printf("block size: %zu", block->size);
+    //   // Block* remaining = nullptr;
+
+    //   printf("D3.\n");
+
+    //   const bool already_split = block->is_split();
+    //   printf("D3.\n");
+
+    //   return size;
+    // } else {
+    //   return alloc_size;
+    // }
+
+    // if (should_split(block, size)) {
+    //   printf("Should split.\n");
+    //   if (already_split) {
+    //     return block->size;
+    //   } else {
+    //     return size;
+    //   }
+      
+    //   // New block.
+    //   return block->size + alloc_size;
+    // // } else {
+    // //   printf("Should not split.\n");
+    // //   return block->size;
+    // } else if (already_split) {
+    //   return block->size;
+    // } else{
+    //   return 0;
+    // }
+    // bool block_found =
+    //     // Search pool
+    //     get_free_block(params)
+    //     // Trigger callbacks and retry search
+    //     || (trigger_free_memory_callbacks(params) && get_free_block(params))
+    //     // Attempt allocate
+    //     || alloc_block(params, false)
+    //     // Free all non-split cached blocks and retry alloc.
+    //     || (free_cached_blocks() && alloc_block(params, true));
+
+    
+
+
+
+
+
+    // AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    // params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     // bool block_found =
     //     // Search pool
     //     get_free_block(params)
@@ -419,8 +702,8 @@ class DeviceCachingAllocator {
     //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
     // }
     // return block->size;
-    printf("Returning...\n");
-    return (size_t)10;
+    // printf("debug [returning]\n");
+    // return alloc_size;
   }
 
   Block* malloc(int device, size_t size, cudaStream_t stream) {
@@ -584,7 +867,6 @@ class DeviceCachingAllocator {
         true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
-
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
         // It's forbidden to cudaEventQuery an event recorded during CUDA graph
@@ -1559,10 +1841,7 @@ void raw_delete(void* ptr) {
 }
 
 size_t raw_det_malloc(int device, size_t size, cudaStream_t stream) {
-  size_t out = caching_allocator.device_allocator[device]->det_malloc(
-      device, size, stream);
-  printf("Z.\n");
-  return out;
+  return caching_allocator.device_allocator[device]->det_malloc(device, size, stream);
 }
 
 } // namespace CUDACachingAllocator
