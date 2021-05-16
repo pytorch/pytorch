@@ -770,6 +770,70 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
+    def test_lennard_jones_batched_jacrev(self, device):
+        sigma = 0.5
+        epsilon = 4.
+
+        def lennard_jones(r):
+            return epsilon * ((sigma / r)**12 - (sigma / r)**6)
+
+        def lennard_jones_force(r):
+            """Get magnitude of LJ force"""
+            return \
+                -epsilon * ((-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7))
+
+        r = torch.linspace(0.5, 2 * sigma, requires_grad=True)
+        drs = torch.outer(r, torch.tensor([1.0, 0, 0]))
+        norms = torch.norm(drs, dim=1).reshape(-1, 1)
+        training_energies = \
+            torch.stack(list(map(lennard_jones, norms))).reshape(-1, 1)
+        training_forces = torch.stack(
+            [force * dr
+             for force, dr in zip(map(lennard_jones_force, norms), drs)])
+
+        model = nn.Sequential(
+            nn.Linear(1, 16),
+            nn.Tanh(),
+            nn.Linear(16, 16),
+            nn.Tanh(),
+            nn.Linear(16, 16),
+            nn.Tanh(),
+            nn.Linear(16, 16),
+            nn.Tanh(),
+            nn.Linear(16, 1)
+        )
+
+        def make_prediction(model, drs, use_functorch):
+            norms = torch.norm(drs, dim=1).reshape(-1, 1)
+            energies = model(norms)
+
+            if use_functorch:
+                network_derivs = vmap(jacrev(model))(norms).squeeze(-1)
+                forces = -network_derivs * drs / norms
+            else:
+                forces = []
+                for r, dr in zip(norms, drs):
+                    network_deriv = torch.autograd.functional.jacobian(
+                        model, r, create_graph=True)
+                    force = -network_deriv * dr / r
+                    forces.append(force)
+                forces = torch.cat(forces)
+            return energies, forces
+
+        def loss_fn(energies, forces, predicted_energies, predicted_forces):
+            return F.mse_loss(energies, predicted_energies) + \
+                0.01 * F.mse_loss(forces, predicted_forces) / 3
+
+        energies, forces = make_prediction(model, drs, use_functorch=True)
+        loss = loss_fn(training_energies, training_forces, energies, forces)
+        result = torch.autograd.grad(loss, model.parameters())
+
+        energies, forces = make_prediction(model, drs, use_functorch=False)
+        loss = loss_fn(training_energies, training_forces, energies, forces)
+        expected = torch.autograd.grad(loss, model.parameters())
+
+        self.assertEqual(result, expected)
+
     def test_ensemble_regression(self, device):
         def make_spirals(n_samples, noise_std=0., rotations=1.):
             ts = torch.linspace(0, 1, n_samples)
