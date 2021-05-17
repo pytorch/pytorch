@@ -17,6 +17,7 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
     make_functional, make_functional_with_buffers,
+    functional_init, functional_init_with_buffers,
 )
 
 # NB: numpy is a testing dependency!
@@ -373,6 +374,53 @@ class TestGradTransform(TestCase):
         _, vjp_fn = vjp(f, x)
         with self.assertRaisesRegex(RuntimeError, 'Expected pytree structure'):
             result, = vjp_fn((v1, (v2, v3)))
+
+    def test_functional_init(self, device):
+        class MLPClassifier(nn.Module):
+            def __init__(self, hidden_dim=32, n_classes=2):
+                super().__init__()
+                self.hidden_dim = hidden_dim
+                self.n_classes = n_classes
+
+                self.fc1 = nn.Linear(2, self.hidden_dim)
+                self.fc2 = nn.Linear(self.hidden_dim, self.n_classes)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = F.relu(x)
+                x = self.fc2(x)
+                x = F.log_softmax(x, -1)
+                return x
+
+        B = 10
+        weights, fn, _ = functional_init(MLPClassifier, (B,))(32, 2)
+        inputs = torch.randn(B, 7, 2)
+        vmap(fn)(weights, (inputs,))
+
+    def test_functional_init_with_buffers(self, device):
+        class MLPClassifier(nn.Module):
+            def __init__(self, hidden_dim=32, n_classes=2):
+                super().__init__()
+                self.hidden_dim = hidden_dim
+                self.n_classes = n_classes
+
+                self.fc1 = nn.Linear(2, self.hidden_dim)
+                self.bn = nn.BatchNorm1d(self.hidden_dim, affine=True)
+                self.fc2 = nn.Linear(self.hidden_dim, self.n_classes)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = F.relu(x)
+                x = self.bn(x)
+                x = self.fc2(x)
+                x = F.log_softmax(x, -1)
+                return x
+
+        B = 10
+        weights, buffers, fn, _, _ = \
+            functional_init_with_buffers(MLPClassifier, [B])(32, 2)
+        inputs = torch.randn(B, 7, 2)
+        vmap(fn)(weights, buffers, (inputs,))
 
 
 class TestVmapOfGrad(TestCase):
