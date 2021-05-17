@@ -5859,7 +5859,9 @@ class DistributedTest:
                     a, b = local_net(inp)
                     a_dist, b_dist = net(inp)
                 if i < 2:
-                    # Use both params in loss computation
+                    # Use both params in loss computation. Later, "a" will go
+                    # unused and we check to ensure DDP supports this and
+                    # gradients remain the same as local training.
                     t = a @ b
                     t_dist = a_dist @ b_dist
                     loss = t.sum()

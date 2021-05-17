@@ -125,8 +125,8 @@ class _DDPSink(Function):
         static_graph_training = ctx.state_dict['static_graph']
         if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-            return (None, None, *grad_outputs)
-        if state_dict['find_unused'] and not static_graph_training:
+
+        elif state_dict['find_unused'] and not static_graph_training:
             # First type of unused params: parameters that did not participate
             # in computing model outputs. These are found by the below call to
             # prepare_for_backward.
