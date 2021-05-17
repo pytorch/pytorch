@@ -6953,25 +6953,19 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input: PackedSequence):
                 return self.inner_model(input)
 
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
         if initial_state:
             model = ElmanWithStateModel(layers=layers, bidirect=bidirectional, nonlinearity=nonlinearity,
                                         dropout=dropout, batch_first=batch_first)
-
-            if packed_sequence == 1:
-                model = RnnModelWithPackedSequenceWithState(model, False)
-            if packed_sequence == 2:
-                model = RnnModelWithPackedSequenceWithState(model, True)
+            if packed_sequence:
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
         else:
             model = ElmanWithStateModel(layers=layers, bidirect=bidirectional,
                                         nonlinearity=nonlinearity, dropout=dropout,
                                         batch_first=batch_first)
-
-            if packed_sequence == 1:
-                model = RnnModelWithPackedSequenceWithoutState(model, False)
-            if packed_sequence == 2:
-                model = RnnModelWithPackedSequenceWithoutState(model, True)
+            if packed_sequence:
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -7002,24 +6996,18 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
-        if packed_sequence == 0:
-            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-                                                         bidirectional, dropout, batch_first)
-        else:
+        if packed_sequence:
             model = LstmFlatteningResultWithSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
                                                       bidirectional, dropout, batch_first)
             if initial_state:
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithState(model, True)
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
             else:
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithoutState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithoutState(model, True)
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
+        else:
+            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                         bidirectional, dropout, batch_first)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -7097,30 +7085,24 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input, hx):
                 return self.inner_model(input, hx)
 
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
-        if packed_sequence == 0:
+        if packed_sequence:
+            if initial_state:
+                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                          batch_first=batch_first)
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
+            else:
+                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                             batch_first=batch_first)
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
+        else:
             if initial_state:
                 model = GRUNoSeqLengthWithStateModel(layers=layers, bidirect=bidirectional,
                                                      dropout=dropout, batch_first=batch_first)
             else:
                 model = GRUNoSeqLengthWithoutStateModel(layers=layers, bidirect=bidirectional,
                                                         dropout=dropout, batch_first=batch_first)
-        else:
-            if initial_state:
-                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
-                                          batch_first=batch_first)
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithState(model, True)
-            else:
-                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
-                                             batch_first=batch_first)
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithoutState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -8757,7 +8739,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0, 1]})
 
 def make_test(name, base, layer, bidirectional, initial_state,
-              variable_length, dropout,
+              variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
     test_name = str('_'.join([
         'test', name, layer[1],
@@ -8776,6 +8758,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
     @disableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def f(self):
+        self.is_script_test_enabled = self.opset_version >= script_test_min_opset_version
         self._dispatch_rnn_test(
             base,
             layers=layer[0],
@@ -8825,8 +8808,21 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
+            # Need Add between list of tensors
+            script_test_min_opset_version = 11
+
+            if (    # compiling in script mode fails with errors like:
+                    # torch.jit.frontend.UnsupportedNodeError: annotated assignments
+                    # without assigned value aren't supported
+                    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
+                    base == 'elman' or
+                    # compiling in script mode fails with errors like:
+                    # RuntimeError: Arguments for call are not valid.
+                    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
+                    base == 'lstm'):
+                script_test_min_opset_version = float("inf")
             make_test(name, base, layer, bidirectional, initial_state,
-                      variable_length, dropout,
+                      variable_length, dropout, script_test_min_opset_version,
                       **extra_kwargs)
             test_count += 1
 
