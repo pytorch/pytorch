@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/mobile/random.h>
+#include <torch/csrc/jit/mobile/train/random.h>
 #include <torch/types.h>
 
 #include <algorithm>
