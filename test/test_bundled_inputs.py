@@ -263,7 +263,7 @@ class TestBundledInputs(TestCase):
                 inputs=[torch.ones(1, 2), ]  # type: ignore[list-item]
             )
 
-    def test_double_augment(self):
+    def test_double_augment_fail(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
@@ -278,6 +278,39 @@ class TestBundledInputs(TestCase):
                 m,
                 inputs=[(torch.ones(1),)]
             )
+
+    def test_double_augment_non_mutator(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs=[(torch.ones(1),)]
+        )
+        with self.assertRaises(AttributeError):
+            m.get_all_bundled_inputs()
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+        self.assertEqual(bundled_model.forward(torch.ones(1)), torch.ones(1))
+
+    def test_double_augment_success(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs={m.forward : [(torch.ones(1),)]}
+        )
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+
+        bundled_model2 = torch.utils.bundled_inputs.bundle_inputs(
+            bundled_model,
+            inputs=[(torch.ones(2),)]
+        )
+        self.assertEqual(bundled_model2.get_all_bundled_inputs(), [(torch.ones(2),)])
 
 if __name__ == '__main__':
     run_tests()
