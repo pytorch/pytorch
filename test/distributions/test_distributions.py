@@ -2586,6 +2586,10 @@ class TestDistributions(TestCase):
                          (2, 5, 2, 3, 5))
         self.assertEqual(ContinuousBernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
+    @unittest.skipIf(
+        IS_MACOS,
+        "Reference: https://github.com/pytorch/pytorch/issues/58381",
+    )
     def test_lkj_cholesky_log_prob(self):
         def tril_cholesky_to_tril_corr(x):
             x = vec_to_tril_matrix(x, -1)
