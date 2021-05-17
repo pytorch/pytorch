@@ -101,7 +101,9 @@ int main(int argc, char *argv[]) {
       throw std::runtime_error(
           "could not generate a random directory for manager socket");
     }
+
     std::string tempfile = tempdir->name + "/manager.sock";
+
     // NOLINTNEXTLINE(modernize-make-unique)
     srv_socket.reset(new ManagerServerSocket(tempfile));
     register_fd(srv_socket->socket_fd);
@@ -177,6 +179,14 @@ int main(int argc, char *argv[]) {
     DEBUG("freeing %s", obj_name.c_str());
     shm_unlink(obj_name.c_str());
   }
+
+  // Clean up file descriptors
+  for (auto &pfd: pollfds) {
+    unregister_fd(pfd.fd);
+  }
+  // Clean up manager.sock
+  srv_socket->remove();
+  // Clean up directory automatically
 
   DEBUG("manager done");
   return 0;
