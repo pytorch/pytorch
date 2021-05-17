@@ -1,7 +1,6 @@
 #import "Benchmark.h"
 #include <string>
 #include <vector>
-#include "ATen/ATen.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/grad_mode.h"
@@ -79,7 +78,7 @@ static int iter = 10;
 //  torch::jit::GraphOptimizerEnabledGuard opguard(false);
   auto module = torch::jit::_load_for_mobile(model);
 
-  module.eval();
+//  module.eval();
   if (print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
