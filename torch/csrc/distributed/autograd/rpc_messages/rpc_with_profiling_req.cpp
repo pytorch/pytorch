@@ -15,20 +15,20 @@ using rpc::RpcCommandBase;
 // client.
 RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType messageType,
-    rpc::Message&& wrappedMessage,
+    c10::intrusive_ptr<rpc::Message> wrappedMessage,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
     rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profilerConfig_(profilerConfig),
       profilingKeyId_(profilingKeyId) {
-  tensors_ = wrappedMessage_.tensors();
+  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
       c10::str(
           "Incorrect message type, expected message type ",
           rpc::MessageType::RUN_WITH_PROFILING_REQ));
-  wrappedMessageType_ = wrappedMessage_.type();
+  wrappedMessageType_ = wrappedMessage_->type();
 }
 
 // this constructor is only called in fromMessage() which is called in
@@ -61,11 +61,11 @@ void RpcWithProfilingReq::setWrappedRpc(
 
 rpc::Message RpcWithProfilingReq::toMessageImpl() && {
   // save the original message ID and type before moving it.
-  auto wrappedMsgId = wrappedMessage_.id();
-  auto wrappedMsgType = wrappedMessage_.type();
+  auto wrappedMsgId = wrappedMessage_->id();
+  auto wrappedMsgType = wrappedMessage_->type();
   // destructively move the wrappedMessage and get the payload. Now the payload
   // of wrappedMessage won't be in a valid state.
-  auto wrappedPayload = std::move(wrappedMessage_).movePayload();
+  auto wrappedPayload = std::move(*wrappedMessage_).movePayload();
   // The wrapped payload should not be empty
   TORCH_INTERNAL_ASSERT(
       !wrappedPayload.empty(), "Wrapped payload should not be empty.");

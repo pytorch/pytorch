@@ -18,7 +18,7 @@ RpcWithAutograd::RpcWithAutograd(
     worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    rpc::Message&& wrappedMessage,
+    c10::intrusive_ptr<rpc::Message> wrappedMessage,
     std::unordered_map<c10::Device, c10::Device> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
@@ -28,8 +28,8 @@ RpcWithAutograd::RpcWithAutograd(
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
-  tensors_ = wrappedMessage_.tensors();
-  wrappedMessageType_ = wrappedMessage_.type();
+  tensors_ = wrappedMessage_->tensors();
+  wrappedMessageType_ = wrappedMessage_->type();
 }
 
 RpcWithAutograd::RpcWithAutograd(
@@ -54,10 +54,10 @@ RpcWithAutograd::RpcWithAutograd(
 }
 
 Message RpcWithAutograd::toMessageImpl() && {
-  auto messageId = wrappedMessage_.id();
-  auto wrappedMessageType = wrappedMessage_.type();
+  auto messageId = wrappedMessage_->id();
+  auto wrappedMessageType = wrappedMessage_->type();
 
-  auto payload = std::move(wrappedMessage_).movePayload();
+  auto payload = std::move(*wrappedMessage_).movePayload();
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // Convert deviceMap to c10::Dict for serialization.

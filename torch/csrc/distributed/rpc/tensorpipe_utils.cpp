@@ -41,15 +41,15 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 } // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    Message&& rpcMessage,
+    c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device> devices,
     const std::shared_ptr<LazyStreamContext>& ctx) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
   // Metadata
-  buffers.type = std::make_unique<MessageType>(rpcMessage.type());
-  buffers.id = std::make_unique<int64_t>(rpcMessage.id());
+  buffers.type = std::make_unique<MessageType>(rpcMessage->type());
+  buffers.id = std::make_unique<int64_t>(rpcMessage->id());
   // kTpMessageTypeIdx = 0
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
@@ -58,7 +58,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
   // Payload
-  buffers.payload = std::move(rpcMessage.payload());
+  buffers.payload = std::move(rpcMessage->payload());
   // TensorPipe uses the same Message class for both reading and writing, thus
   // it uses non-const pointers even though it doesn't modify them when writing.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -74,7 +74,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     c10::MultiStreamGuard guard(
         ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
     // Tensors
-    buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+    buffers.tensors = cloneSparseTensors(rpcMessage->tensors()).vec();
   }
 
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
@@ -235,7 +235,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
   return {std::move(tpAllocation), std::move(buffers)};
 }
 
-Message tensorpipeDeserialize(
+c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& buffers) {
   // Tensors
@@ -289,7 +289,7 @@ Message tensorpipeDeserialize(
     }
   }
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(buffers.payload),
       std::move(tensors),
       *buffers.type,

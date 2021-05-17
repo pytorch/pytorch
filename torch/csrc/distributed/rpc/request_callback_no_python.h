@@ -110,8 +110,6 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> asFuture(
       c10::intrusive_ptr<Message> message) const;
 
-  c10::intrusive_ptr<JitFuture> asFuture(Message message) const;
-
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
 

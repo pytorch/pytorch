@@ -18,7 +18,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      rpc::Message&& wrappedMessage,
+      c10::intrusive_ptr<rpc::Message> wrappedMessage,
       std::unordered_map<c10::Device, c10::Device> deviceMap = {});
 
   // Used when receiving an RPC over the wire.
@@ -80,7 +80,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   // avoid serializing the request twice.
   // When receive rpcWithAutograd is constructed fromMessage, it is nullptr;
   // When send rpcWithAutograd is constructed before toMessage, it is valid;
-  rpc::Message wrappedMessage_;
+  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
 
   // message type of the wrappedMessage, this is stored separately since
   // wrappedMessage_ is not always guaranteed to be populated.
