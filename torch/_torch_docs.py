@@ -3278,9 +3278,7 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the dividend :attr:`input`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - tquot * \text{{other}}_i
-
-where :math:`tquot` is the truncated quotient value (rounded towards zero).
+    \text{{out}}_i = \text{{input}}_i - trunc(\frac{\text{{input}}_i}{\text{{other}}_}) * \text{{other}}_i
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3295,6 +3293,13 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
+
+.. seealso::
+
+    :func:`torch.fmod` truncates (rounded towards zero) the quotient with the
+    output having same sign as the dividend :attr:`input` while
+    :func:`torch.remainder` rounds (towards the nearest even integer) the quotient
+    with the output having same sign as the divisor :attr:`other`.
 
 Args:
     input (Tensor): the dividend
@@ -7627,9 +7632,6 @@ sign as the divisor :attr:`other`.
 .. math::
     \text{{out}}_i = \text{{input}}_i - round(\frac{\text{{input}}_i}{\text{{other}}_i} * \text{{other}}_i
 
-where :math:`round(\frac{\text{{input}}_i}{\text{{other}}_i})` is the rounded quotient value
-(rounded towards nearest even integer).
-
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
@@ -7642,7 +7644,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
     :func:`torch.fmod` truncates (rounded towards zero) the quotient with the
     output having same sign as the dividend :attr:`input` while
-    :func:`torch.remainder` rounds (towards the nearest integer) the quotient
+    :func:`torch.remainder` rounds (towards the nearest even integer) the quotient
     with the output having same sign as the divisor :attr:`other`.
 
 Args:
