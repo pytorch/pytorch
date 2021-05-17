@@ -790,6 +790,10 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::sorted.str(str[](a) input) -> (str[])"),
+         listCopyAndSort<std::string>,
+         aliasAnalysisFromSchema()),
      DEFINE_UNARY_OP_WITH_COMPLEX(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::eq, a == b),
