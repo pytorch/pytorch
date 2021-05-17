@@ -558,6 +558,7 @@ class DeviceCachingAllocator {
         true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
+    
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
         // It's forbidden to cudaEventQuery an event recorded during CUDA graph
@@ -735,10 +736,6 @@ class DeviceCachingAllocator {
       return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
     }
   }
-
-  size_t det_free_memory() {
-
-  }   
 
   // See Note [Interaction with CUDA graph capture]
 
