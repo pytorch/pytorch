@@ -128,7 +128,7 @@ void launch_no_thread_state(std::function<void()> fn);
 TORCH_API void intraop_launch(std::function<void()> func);
 
 // Launches intra-op parallel task, returns a future
-TORCH_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+TORCH_API c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func);
 
 // Returns number of intra-op threads used by default
