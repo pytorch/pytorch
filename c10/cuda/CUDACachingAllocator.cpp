@@ -370,6 +370,16 @@ class DeviceCachingAllocator {
   size_t det_malloc(int device, size_t size, cudaStream_t stream) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     if (C10_LIKELY(captures_underway == 0)) {
+      // Processes end-of-life events for outstanding allocations used on
+      // multiple streams (checks if their GPU-side uses are complete and
+      // recycles their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      // capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after
+      //    capture. Cross-stream memory use is uncommon, so the deferral's
+      //    effect on memory use during capture should be small.
       process_events();
     }
     size = round_size(size);

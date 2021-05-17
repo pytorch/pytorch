@@ -22,7 +22,21 @@ def _free_mutex():
         torch._C._cuda_unlock_mutex()
 
 def caching_allocator_det_malloc(size, device: Union[Device, int] = None, stream=None, warn_if_exceeds_free_memory_capacity=True):
-    r"""TBD.
+    r"""Determines how many bytes will be allocated by the CUDACachingAllocator for an object of a specified size.
+
+    Args:
+        size (int): number of bytes.
+        device (torch.device or int, optional): selected device. If it is
+            ``None`` the default CUDA device is used.
+        stream (torch.cuda.Stream or int, optional): selected stream. If is ``None`` then
+            the default stream for the selected device is used. 
+        warn_if_exceeds_free_memory_capacity (bool, optional): whether to raise a warning if the memory to be allocated exceeds the free memory capacity of the current selected device. 
+            (default: False).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+
     """
     if device is None:
         device = torch.cuda.current_device()
@@ -43,7 +57,7 @@ def caching_allocator_det_malloc(size, device: Union[Device, int] = None, stream
         if warn_if_exceeds_free_memory_capacity:
             free_memory_capacity = torch._C._cuda_cudaDetDeviceFreeMemory(device)
             if memory_to_be_allocated > free_memory_capacity:
-                warnings.warn("Memory to be allocated exceeds the free memory capacity of the current device ({})".format(free_memory_capacity))
+                warnings.warn("Memory to be allocated exceeds the free memory capacity of the current selected device ({})".format(free_memory_capacity))
         return memory_to_be_allocated
 
 
