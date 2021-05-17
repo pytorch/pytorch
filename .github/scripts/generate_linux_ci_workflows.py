@@ -42,10 +42,7 @@ class PyTorchLinuxWorkflow:
                     docker_image_base=self.docker_image_base,
                     test_runner_type=self.test_runner_type,
                     enable_doc_jobs=self.enable_doc_jobs,
-                    # two leading spaces is necessary to match yaml indent
-                    on_pull_request=(
-                        "  pull_request:" if self.on_pull_request else ""
-                    )
+                    on_pull_request=self.on_pull_request,
                 )
             )
             output_file.write('\n')
