@@ -12,7 +12,7 @@ except ImportError:
     )
 
 try:
-    import rich
+    import rich  # type: ignore[import]
 except ImportError:
     print("rich not found, for color output use 'pip install rich'")
 
