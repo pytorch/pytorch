@@ -1302,7 +1302,6 @@ def all_reduce_coalesced(tensors,
         default_pg = _get_default_group()
         work = default_pg.allreduce_coalesced(tensors, opts)
     else:
-        print(f"Rank {get_rank(group)} allreduing with tensor shapes: {[t.shape for t in tensors]}")
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
