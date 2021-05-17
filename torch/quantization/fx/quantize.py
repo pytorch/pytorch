@@ -476,7 +476,7 @@ def maybe_insert_observers_before_graph_output(
 ) -> None:
     """
     If the output needs to be quantized and there are any nodes
-    in the output which are not already observed, inserts obserervers
+    in the output which are not already observed, inserts observers
     for those nodes.
     """
 
