@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -25,9 +26,11 @@ bool isRNN(const Node* node) {
 }
 
 bool isNopTranspose(const std::vector<int64_t>& perm) {
-  for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++)
-    if (perm[i] != i)
+  for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++) {
+    if (perm[i] != i) {
       return false;
+    }
+  }
   return true;
 }
 
@@ -106,6 +109,10 @@ c10::optional<size_t> fusibleExpandTo(
   return to.size() - from.size();
 }
 
+// Fuses expand calls into ONNX operators, because it is
+// easier for non-strided backends to more efficiently do broadcasts if this
+// is local information. This optimization is not useful for PyTorch as
+// 'expand' is free.
 void fuseBroadcast(Block* b) {
   for (auto n : b->nodes()) {
     for (auto* child_block : n->blocks()) {
@@ -134,8 +141,9 @@ void fuseBroadcast(Block* b) {
       // not generated from symbolic), but if for some reason we don't
       // have it, we need to skip.
       if (!unexpanded_input->isCompleteTensor() ||
-          !n->output()->isCompleteTensor())
+          !n->output()->isCompleteTensor()) {
         continue;
+      }
 
       // Not all broadcasts are supported by ONNX broadcast.
       c10::optional<size_t> axis = fusibleExpandTo(
@@ -150,8 +158,9 @@ void fuseBroadcast(Block* b) {
               .sizes()
               .concrete_sizes()
               .value()); // to
-      if (axis == c10::nullopt)
+      if (axis == c10::nullopt) {
         continue;
+      }
 
       n->replaceInput(position, unexpanded_input);
       if (!expand_node->hasUses()) {
@@ -239,7 +248,6 @@ void fuseTransposeIntoGemm(Block* b) {
 //   the removeNopPacking pass removes the packing operations
 //   entirely by pairing them with their inverse PadPacked. If the
 //   input graph does not pair the operations, export will fail.
-
 void pushPackingPastRnn(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
@@ -431,11 +439,11 @@ void fixDefaultRNNState(
   //    traced as a ConstantOfShape with the expected Shape.
   // 3- When the batch size is fixed, everything works great as well.
   // 4- When h0 and c0 are specified but are not inputs of the model (they are
-  // Constants)
-  //    and the batch size is variable, the model should be saved with a batch
-  //    size of 1 (or an error will occur), and we save the value of h0 and c0
-  //    with a batch size of 1. When the model is then called with a different
-  //    batch size value, h0 and c0 are broadcasted to get the right shape.
+  //    Constants) and the batch size is variable, the model should be saved
+  //    with a batch size of 1 (or an error will occur), and we save the value
+  //    of h0 and c0 with a batch size of 1. When the model is then called with
+  //    a different batch size value, h0 and c0 are broadcasted to get the right
+  //    shape.
   // Recognize that last pattern here (4) and fix the shape.
   // Note that for multi-layer RNNs there will be a Slice operation between the
   // Constant and the RNN.
@@ -545,6 +553,12 @@ static bool isSafeToSpeculate(Node* n) {
   return n->kind() == onnx::Transpose;
 }
 
+// Moves ops outside of control flow blocks so that they are always executed,
+// no matter the result of the control flow conditions.
+// Needed only so that the split pass of the ONNX optimizer will put the ops
+// into the init_net.
+// TODO: Once the code in caffe2/python/onnx/backend.py no longer calls
+// optimize_onnx, delete this function.
 static void speculateOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -554,13 +568,15 @@ static void speculateOps(Block* block) {
     for (auto b : n->blocks()) {
       speculateOps(b);
     }
-    if (!isSafeToSpeculate(n))
+    if (!isSafeToSpeculate(n)) {
       continue;
+    }
     // XXX - only works for nodes with a single input
     // move node n outside of the control flow it is nested in
     auto node_input = n->input()->node();
-    if (node_input->owningBlock() == n->owningBlock())
+    if (node_input->owningBlock() == n->owningBlock()) {
       continue;
+    }
     // Skip if output of this node is part of block output.
     bool is_block_output = false;
     for (auto node_output : n->outputs()) {
@@ -580,8 +596,9 @@ static void speculateOps(Block* block) {
     // find the control flow node in the same block as node_input that contains
     // Node n
     auto control_flow_node = n->owningBlock()->owningNode();
-    while (control_flow_node->owningBlock() != node_input->owningBlock())
+    while (control_flow_node->owningBlock() != node_input->owningBlock()) {
       control_flow_node = control_flow_node->owningBlock()->owningNode();
+    }
     // put the node right before this flow node
     n->moveBefore(control_flow_node);
   }
@@ -669,6 +686,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
 
 static void eraseListUnpack(Block* block, int opset_version);
 
+// Replace prim::ListUnpack with onnx::SequenceAt.
 static void eraseListUnpack(Node* n, int opset_version) {
   for (auto b : n->blocks()) {
     eraseListUnpack(b, opset_version);
@@ -708,9 +726,17 @@ static void eraseListUnpack(Block* block, int opset_version) {
   }
 }
 
-// For ops such as meshgrid where output is a list of Tensors
-// (returns prim::ListConstruct), we need to unpack the list
-// before the pass which deletes ListConstruct.
+// From:
+//   %list = ListConstruct(%x);
+//   %unpacked = ListUnpack(%list);
+//   do_something(%unpacked);
+//
+// To:
+//   %list = ListConstruct(%x);
+//   %unpacked = ListUnpack(%list);
+//   do_something(%x)
+//
+// The ListConstruct and ListUnpack may now be dead code.
 static void fuseListConstructListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -794,8 +820,9 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        if (transpose->inputs().size() > 0)
+        if (transpose->inputs().size() > 0) {
           origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        }
       } else if (
           prev->kind() == onnx::Reshape &&
           prev->input(0)->node()->kind() == onnx::Transpose &&
@@ -933,10 +960,10 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+// Work around limitation from ONNX that the block input cannot be used directly
+// as block output. Inserts an Identity node inside the block, and have the
+// block return the output of the Identity.
 static void insertIdentityForInputUsedAsOutput(Block* b) {
-  // Resolving limitation from ONNX that the block input cannot be used directly
-  // as block output. Inserting an Identity node inside
-  // the block, linking with the value as workaround.
   for (auto out : b->outputs()) {
     auto n = out->node();
     if (nullptr != n && n->kind() == prim::Param) {
@@ -957,21 +984,11 @@ static void insertIdentityForInputUsedAsOutput(Block* b) {
 
 // This optimization does ONNX-specific peephole optimizations.
 //
-// At the moment, here are the optimizations it does:
-//  - This optimization fuses expand calls into ONNX operators, because it is
-//    easier for non-strided backends to more efficiently do broadcasts if this
-//    is local information.  This optimization is not useful for PyTorch as
-//    'expand' is free.
-//  - Fusing of consecutive transposes
-//  - Elimination of NOP transposes
-//  - Fusing of transposes into Gemm
-//  - Elimination of PaddedSequences
-//
 // Before you write an optimization here, ask yourself, "Could I do this
 // optimization on ATen operators"?  If so, you should seriously consider
 // writing your optimization in jit/passes/peephole.cpp rather than
 // here, as it will be generally applicable to the JIT as well.  The
-// optimizations here are ONLY applied on ONNX update
+// optimizations here are ONLY applied on ONNX export.
 void PeepholeOptimizeONNX(
     std::shared_ptr<Graph>& graph,
     int opset_version,
@@ -1004,6 +1021,8 @@ void PeepholeOptimizeONNX(
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
   insertIdentityForInputUsedAsOutput(graph->block());
+
+  GRAPH_DUMP("After PeepholeOptimizeONNX", graph);
 }
 
 } // namespace jit

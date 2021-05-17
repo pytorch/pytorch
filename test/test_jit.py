@@ -10899,9 +10899,8 @@ dedent """
 
         graph = torch.jit.script(func).graph
         FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
-        self.run_pass('remove_inplace_ops', graph)
-        self.run_pass('erase_number_types', graph)
-        FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
+        self.run_pass("erase_number_types", graph)
+        FileCheck().check_not("int = prim::Constant").run(str(graph))
 
     def test_remove_dropout(self):
         weight_0_shape = (20, 5)
