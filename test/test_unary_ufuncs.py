@@ -180,8 +180,7 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 
     vals = []
     if dtype.is_floating_point:
-        info = torch.finfo(dtype)
-        vals = _float_extremals + [info.min, info.max, info.eps, info.tiny]
+        vals = _float_extremals
     elif dtype.is_complex:
         vals = tuple(complex(x, y) for x, y in chain(product(_float_extremals, _float_extremals),
                                                      product(_float_vals, _float_extremals),
@@ -1216,6 +1215,16 @@ class TestUnaryUfuncs(TestCase):
             range = (-65000, 65000)
 
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t, torch.i0, scipy.special.i0)
         check_equal(t, torch.special.i0e, scipy.special.i0e)
         if dtype not in [torch.half, torch.bfloat16]:
