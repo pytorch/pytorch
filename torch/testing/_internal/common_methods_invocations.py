@@ -6237,10 +6237,14 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
     OpInfo('where',
+           # Currently only the `input` is tested in gradcheck.
+           # If we pass `condition` first, none of the input which supports
+           # autograd will be tested. Hence the following lambda.
            op=lambda self, condition, other: torch.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
            skips=(
+               # test does not work with passing lambda for op
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
