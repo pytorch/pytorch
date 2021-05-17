@@ -26,7 +26,6 @@ bool SparseLpRegularizerOp<float, CPUContext>::DoRunWithType() {
   // embedding length, e.g. 32, 64, 128
   auto block_size = Input(PARAM).size_from_dim(1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (p_ == 2.0) { // L2 regularization
 #ifdef LOG_FIRST_N
     LOG_FIRST_N(INFO, 3)

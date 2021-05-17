@@ -590,10 +590,6 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   virtual ~DisableRecordFunctionGuard() {}
 };
 
-// Internal, used in ThreadLocalState to propagate TLS callbacks across threads
-TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
-TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
-
 struct TORCH_API RecordFunctionTLS {
   // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
   // must be sorted in increasing handles order

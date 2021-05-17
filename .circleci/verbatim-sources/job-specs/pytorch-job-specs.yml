@@ -2,7 +2,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -80,7 +80,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -181,8 +181,6 @@ jobs:
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
               echo "Retrieving C++ coverage report"
               docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
@@ -199,6 +197,10 @@ jobs:
         no_output_timeout: "5m"
         command: |
           set -e
+          # Retrieving test results should be done as very first step as command never fails
+          # But is always executed if previous step fails for some reason
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           docker stats --all --no-stream
 
           cat >docker_commands.sh \<<EOL
