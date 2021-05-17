@@ -24,7 +24,7 @@ struct IntegerValueRefiner {
       : graph_(std::move(graph)) {}
 
   bool run() {
-    if (!checkForPossibleRefinements(graph_->block())) {
+    if (!blockHasIntComparisons(graph_->block())) {
       return false;
     }
     IntegerRefinement refinements;
@@ -32,7 +32,7 @@ struct IntegerValueRefiner {
     return changed_;
   }
 
-  bool checkForPossibleRefinements(Block* b) {
+  bool blockHasIntComparisons(Block* b) {
     for (Node* n : b->nodes()) {
       if (n->matches("aten::eq(int a, int b) -> bool") ||
           n->matches("aten::ne(int a, int b) -> bool")) {
@@ -45,7 +45,7 @@ struct IntegerValueRefiner {
         }
       }
       for (Block* block : n->blocks()) {
-        if (checkForPossibleRefinements(block)) {
+        if (blockHasIntComparisons(block)) {
           return true;
         }
       }
@@ -57,21 +57,22 @@ struct IntegerValueRefiner {
       Node* if_node,
       IntegerRefinement& true_block_refinements,
       IntegerRefinement& false_block_refinements) {
-    // we are looking for cases where we can replace
-    // both block outputs with the same value, which opens up
-    // further optimization opportunities
-    // The pass will already handle if both are refined to the same
-    // constant. Here, we add a case case where one block output
-    // is refined to a constant in the other block, and where the existing
-    // block output in the other block is the same constant
-    // x = 1
-    // if y == 1:
-    //    return x
-    // else:
-    //    return y
-    // can always safely be replaced with `y`
+    // we are looking for cases where we can replace both block outputs with the
+    // same value, which opens up further optimization opportunities. The pass
+    // will already handle if both are refined to the same constant. Here, we
+    // other block, and where the existing block output in the other block is
+    // the same constant.
+    // graph(%y.1 : int):
+    //   %one_constant : int = prim::Constant[value=1]()
+    //   %3 : bool = aten::eq(%y.1, %one_constant)
+    //   %15 : int = prim::If(%3)
+    //     block0():
+    //       -> (%one_constant)
+    //     block1():
+    //       -> (%y.1)
+    //   return (%15)
+    // Here, %15 can always be safely replaced with %y.1
     // this is an important case for symbolic shape analysis
-
     for (size_t block_index : {0, 1}) {
       Block* if_block = if_node->blocks().at(block_index);
       Block* other_if_block = if_node->blocks().at(1 - block_index);
@@ -81,23 +82,28 @@ struct IntegerValueRefiner {
           continue;
         }
         // Value must be in scope for both blocks
+        // in example above, %y.1 cannot be defined in block1
         if (!if_node->isDominatedBy(block_output->node())) {
           continue;
         }
-        // one constant value one not
+        // one constant value one not - we are looking for the pattern
+        // where y.1 is refined to the existing block output %one_constant
         auto other_const_value =
             constant_as<int64_t>(other_if_block->outputs().at(i));
         if (!other_const_value ||
             block_output->node()->kind() == prim::Constant) {
           continue;
         }
+        // here, we are looking in refinements in the other block of our
+        // current output. in the example, we are looking for refinements of
+        // %y.1 in `block0`, and we are checking that %y.1 is refined
+        // to the constant value of %one_constant
         const auto& other_block_refinements =
             block_index == 0 ? false_block_refinements : true_block_refinements;
-        c10::optional<int64_t> maybe_refine = tryFindRefinement(block_output);
-        if (!maybe_refine && other_block_refinements.count(block_output)) {
-          maybe_refine = other_block_refinements.at(block_output);
+        if (!other_block_refinements.count(block_output)) {
+          continue;
         }
-        if (maybe_refine && *maybe_refine == *other_const_value) {
+        if (other_block_refinements.at(block_output) == *other_const_value) {
           if_node->outputs().at(i)->replaceAllUsesWith(block_output);
           changed_ = true;
         }
@@ -166,16 +172,22 @@ struct IntegerValueRefiner {
       }
     }
 
-    // this is useful for things like if block outputs,
-    // where the output value node may not be defined in this block
-    // but we have refined its use as a block output
+    // iterating over all nodes in the block will not iterate over
+    // block outputs, so we need to add handling of them.
+    // %3 : int = prim::Constant[value=3]()
+    // %4 : bool = aten::eq(%y.1, %3)
+    // %a : int = prim::If(%4)
+    //   block0():
+    //     -> (%y.1)
+    // Here, we can replace y.1 with 3
+
     for (size_t i = 0; i < b->outputs().size(); ++i) {
-      Value* input_v = b->outputs().at(i);
-      if (!input_v->type()->cast<IntType>()) {
+      Value* output_v = b->outputs().at(i);
+      if (!output_v->type()->cast<IntType>()) {
         continue;
       }
 
-      if (auto refine = tryFindRefinement(input_v)) {
+      if (auto refine = tryFindRefinement(output_v)) {
         WithInsertPoint guard(b);
         auto refine_constant =
             graph_->insertConstant(static_cast<int64_t>(*refine));
