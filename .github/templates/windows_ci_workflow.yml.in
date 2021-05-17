@@ -80,6 +80,11 @@ jobs:
         shell: powershell
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
+      # Needed for coverage in win-test.sh
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       - name: Run test scripts
         shell: bash
         env:
