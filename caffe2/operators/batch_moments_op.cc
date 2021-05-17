@@ -65,7 +65,6 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNCHW(
   for (int i = 0; i < N; ++i) {
     EigenArrayMap<float> dX_arr(dX_ptr, HxW, C);
     dX_arr = ConstEigenArrayMap<float>(X_ptr, HxW, C).rowwise() *
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         dvar_arr.transpose() * 2.0f;
     dX_arr.rowwise() += dmu_arr.transpose();
     X_ptr += stride;
@@ -88,7 +87,6 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNHWC(
   const float scale = 1.0f / static_cast<float>(N * HxW);
   EigenArrayMap<float> dX_arr(dX, C, N * HxW);
   dX_arr = ConstEigenArrayMap<float>(X, C, N * HxW).colwise() *
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ConstEigenVectorArrayMap<float>(dvar, C) * 2.0f;
   dX_arr.colwise() += ConstEigenVectorArrayMap<float>(dmu, C);
   math::Scale<float, float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
