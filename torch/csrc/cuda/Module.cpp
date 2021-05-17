@@ -60,7 +60,7 @@ void THCPModule_setDevice(int device)
   c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
-PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg) 
+PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
@@ -73,7 +73,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs) 
+PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
@@ -83,7 +83,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args) 
+PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
   PyObject* arg1 = nullptr;
@@ -108,7 +108,7 @@ PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs) 
+PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
@@ -116,7 +116,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs) 
+PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
@@ -189,8 +189,7 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject *args)
-{
+PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject *args){
   HANDLE_TH_ERRORS
   PyObject* size_o = nullptr;
   PyObject* stream_o = nullptr;
@@ -317,8 +316,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
 PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPUtils_checkLong(arg), "invalid argument to has_primary_context");
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
   if (at::detail::getCUDAHooks().hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
@@ -362,7 +360,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
-  const int device = (int)THPUtils_unpackLong(arg);
+  const int device = (int) THPUtils_unpackLong(arg);
 
   using c10::cuda::CUDACachingAllocator::StatType;
   using c10::cuda::CUDACachingAllocator::Stat;
@@ -408,7 +406,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_resetAccumulatedMemoryStats(PyObject* _unused, PyObject* arg)
+PyObject * THCPModule_resetAccumulatedMemoryStats(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_accumulated_memory_stats");
@@ -434,7 +432,7 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
   using c10::cuda::CUDACachingAllocator::BlockInfo;
-  
+
   const auto segmentInfoToDict = [](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
     segmentDict["device"] = segmentInfo.device;
@@ -475,20 +473,20 @@ static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
-      .def_readonly("name", &cudaDeviceProp::name)
-      .def_readonly("major", &cudaDeviceProp::major)
-      .def_readonly("minor", &cudaDeviceProp::minor)
-      .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
-      .def_readonly("is_integrated", &cudaDeviceProp::integrated)
-      .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
-      .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
-      .def("__repr__", [](const cudaDeviceProp& prop) {
-        std::ostringstream stream;
-        stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
-               << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
-               << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
-        return stream.str();
-      });
+    .def_readonly("name", &cudaDeviceProp::name)
+    .def_readonly("major", &cudaDeviceProp::major)
+    .def_readonly("minor", &cudaDeviceProp::minor)
+    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
+    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
+    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+    .def("__repr__", [](const cudaDeviceProp& prop) {
+      std::ostringstream stream;
+      stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
+              << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+      return stream.str();
+    });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -500,13 +498,14 @@ static void bindGetDeviceProperties(PyObject* module) {
 }
 
 // Callback for python part. Used for additional initialization of python classes
-static PyObject * THCPModule_initExtension(PyObject* self, PyObject* noargs) {
+static PyObject * THCPModule_initExtension(PyObject* self, PyObject* noargs)
+{
 #if C10_ASAN_ENABLED
   TORCH_WARN(
-      "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
-      "asan is currently not compatible with torch.cuda module, "
-      "you might get unexpected behavior (eg. out of memory, crash, etc.), "
-      "please rebuild pytorch without asan if you need to use this module");
+    "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
+    "asan is currently not compatible with torch.cuda module, "
+    "you might get unexpected behavior (eg. out of memory, crash, etc.), "
+    "please rebuild pytorch without asan if you need to use this module");
 #endif
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
@@ -543,8 +542,7 @@ static PyObject * THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
-  if (!_state_cdata)
-    throw python_error();
+  if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
 
   auto num_gpus = c10::cuda::device_count();
@@ -563,7 +561,7 @@ static PyObject * THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject* self, PyObject* noargs)
+PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
