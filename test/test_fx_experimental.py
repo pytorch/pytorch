@@ -129,12 +129,13 @@ class TestFXExperimental(JitTestCase):
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
-        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
+        result, _ = graph_manipulation.serialize_tensor_quantization(q_tensor, weights={}, pcq_prefix="foo")
+        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(q_tensor_channel, weights={}, pcq_prefix="bar")
         assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["qscheme"] == "torch.per_channel_affine"
-        assert len(result2["q_per_channel_scales"]) == 2
+        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
+        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
 
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):

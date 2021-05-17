@@ -215,6 +215,7 @@ class TestBundledInputs(TestCase):
 
         samples = [(torch.tensor([1]),)]
 
+        # inputs defined 2 ways so should fail
         with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
             definition = textwrap.dedent("""
@@ -241,6 +242,7 @@ class TestBundledInputs(TestCase):
 
         samples = [(torch.tensor([1]),)]
 
+        # inputs not defined so should fail
         with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
             mm._generate_bundled_inputs_for_forward()
