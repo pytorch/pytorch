@@ -42,6 +42,8 @@ function Install-Binary
         $process = Start-Process -FilePath $filePath -ArgumentList $ArgumentList -Wait -PassThru
 
         $exitCode = $process.ExitCode
+        # 3010 == ERROR_SUCCESS_REBOOT_REQUIRED
+        # see: https://docs.microsoft.com/en-us/windows/win32/msi/error-codes
         if ($exitCode -eq 0 -or $exitCode -eq 3010)
         {
             Write-Host "Installation successful"
