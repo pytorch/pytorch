@@ -33,10 +33,12 @@ class InflatableArg(NamedTuple):
 def bundle_inputs(
         model: torch.jit.ScriptModule,
         inputs: Union[Optional[Sequence[Tuple[Any, ...]]], Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
-        _receive_inflate_expr: Optional[List[str]] = None,
         info: Optional[Union[List[str], Dict[Callable, List[str]]]] = None,
+        *,
+        _receive_inflate_expr: Optional[List[str]] = None,
 ) -> torch.jit.ScriptModule:
-    """Creates and returns a copy of the specified model with inputs attached.
+    """Creates and returns a copy of the specified model with inputs attached. The original model is
+    not mutated or changed in any way.
 
     Models with bundled inputs can be invoked in a uniform manner by
     benchmarking and code coverage tools.
@@ -46,7 +48,7 @@ def bundle_inputs(
     will have their corresponding inputs bundled. Info should match watchever type is
     chosen for the inputs.
 
-    Augmented models will support the following methods:
+    The returned model will support the following methods:
 
         `get_all_bundled_inputs_for_<function_name>() -> List[Tuple[Any, ...]]`
             Returns a list of tuples suitable for passing to the model like
@@ -59,7 +61,7 @@ def bundle_inputs(
                     run to get back a list of inputs corresponding to that function.
                 'info' -> the user provided extra information about the bundled inputs
 
-    If forward has bundled inputs then these following functions are also defined:
+    If forward has bundled inputs then these following functions will also be defined on the returned module:
 
         `get_all_bundled_inputs() -> List[Tuple[Any, ...]]`
             Returns a list of tuples suitable for passing to the model like
@@ -79,13 +81,17 @@ def bundle_inputs(
 
       - The `inputs` argument to this function can be a dictionary mapping functions to a
         list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
+        Alternatively if only bundling inputs for forward the map can be omitted and a singular list of inputs
+        can be provided instead.
+
         The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
         list of inputs, the inner tuple is the list of args that together make up one input.
         For inputs of functions that take one arg, this will be a tuple of length one. The Any, ...
         is the actual data that makes up the args, e.g. a tensor.
 
     Info is an optional parameter that maps functions to a list of strings providing extra information about that
-    function's bundled inputs. This could be descriptions, expected outputs, etc.
+    function's bundled inputs. Alternatively if only bundling inputs for forward the map can be omitted and
+    a singular list of information can be provided instead. This could be descriptions, expected outputs, etc.
         - Ex: info={model.forward : ['man eating icecream', 'an airplane', 'a dog']}
 
     This function will attempt to optimize arguments so that (e.g.)
