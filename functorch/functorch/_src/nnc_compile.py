@@ -68,8 +68,10 @@ def get_nnc_type(dtype):
         return te.Dtype.Long
     elif dtype == torch.float64:
         return te.Dtype.Double
+    elif dtype == torch.bool:
+        return te.Dtype.Bool
     else:
-        raise RuntimeError("nyi")
+        raise RuntimeError(f"type nyi {dtype}")
 
 
 lowering_functions = { }
@@ -100,6 +102,41 @@ def full_like_lower(name, out_shape, inp_shapes, args):
         return to_expr(args[1])
     res = te.Compute(name, get_dim_args(out_shape), f)
     return res
+
+
+def prod(x, start=1):
+    t = start
+    for i in x: t *= i
+    return t
+
+def encode_idxs(shape, idxs):
+    assert(len(shape) == len(idxs))
+    cur = 1
+    out = to_expr(0)
+    for dim, idx in reversed(list(zip(shape, idxs))):
+        out += to_expr(cur) * idx
+        cur *= dim
+    return out
+
+def reshape_lower(name, out_shape, inp_shapes, args):
+    X, shape = args
+    start_shape = list(inp_shapes[0][0])
+    end_shape = out_shape
+    def get_orig_idxs(idxs):
+        absolute_new = encode_idxs(end_shape, idxs)
+        new_idxs = []
+        total_old = prod(start_shape)
+        for dim in start_shape:
+            total_old //= dim
+            new_idxs.append(absolute_new / to_expr(total_old))
+            absolute_new %= to_expr(total_old)
+        return new_idxs
+
+    def f(*idxs):
+        idxs = list(idxs)
+        orig_idxs = get_orig_idxs(idxs)
+        return X.load(orig_idxs)
+    return te.Compute(name, get_dim_args(out_shape), f)
 
 # def select_lower(name, out_shape, inp_shapes, args):
 #     A = args[0]
@@ -156,6 +193,8 @@ lowering_functions[torch.ops.aten.dot] = dot_lower
 lowering_functions[torch.ops.aten.digamma] = digamma_lower
 lowering_functions[torch.ops.aten.mv] = mv_lower
 lowering_functions[torch.ops.aten.ger] = ger_lower
+lowering_functions[torch.ops.aten.reshape] = reshape_lower
+lowering_functions[torch.ops.aten.view] = reshape_lower
 
 
 func_to_aten = {
