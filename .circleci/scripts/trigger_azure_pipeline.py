@@ -61,8 +61,13 @@ def wait_for_build(_id):
     while build_status == 'notStarted':
         print('Waiting for run to start: ' + str(_id))
         sys.stdout.flush()
-        build_detail = get_build(_id)
-        build_status = build_detail['status']
+        try:
+            build_detail = get_build(_id)
+            build_status = build_detail['status']
+        except Exception as e:
+            print("Error getting build")
+            print(e)
+
         time.sleep(30)
 
     print("Bulid started: ", str(_id))
@@ -84,8 +89,12 @@ def wait_for_build(_id):
                 continue
             handled_logs.add(log_id)
             print('Fetching log: \n' + log['url'])
-            log_content = get_log_content(log['url'])
-            print(log_content)
+            try:
+                log_content = get_log_content(log['url'])
+                print(log_content)
+            except Exception as e:
+                print("Error getting log content")
+                print(e)
             sys.stdout.flush()
         build_detail = get_build(_id)
         build_status = build_detail['status']
