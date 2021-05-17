@@ -480,11 +480,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
     .def_readonly("is_integrated", &cudaDeviceProp::integrated)
     .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
     .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
-    .def("__repr__", [](const cudaDeviceProp& prop) {
+    .def("__repr__", [](const cudaDeviceProp &prop) {
       std::ostringstream stream;
       stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
-              << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
-              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+             << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+             << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();
     });
 }
@@ -498,7 +498,7 @@ static void bindGetDeviceProperties(PyObject* module) {
 }
 
 // Callback for python part. Used for additional initialization of python classes
-static PyObject * THCPModule_initExtension(PyObject* self, PyObject* noargs)
+static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
 #if C10_ASAN_ENABLED
   TORCH_WARN(
