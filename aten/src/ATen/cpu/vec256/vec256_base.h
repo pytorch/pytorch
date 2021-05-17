@@ -701,11 +701,14 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 
 template<class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
-  Vec256<intmax_t> buffer;
-  const auto a_tmp = Vec256<intmax_t>::loadu(a);
-  const auto b_tmp = Vec256<intmax_t>::loadu(b);
-  for (uint32_t i = 0U; i < buffer.size(); ++i) {
-    buffer[i] = op(a_tmp[i], b_tmp[i]);
+  constexpr uint32_t element_no = 32 / sizeof(intmax_t);
+  __at_align32__ intmax_t buffer_a[element_no];
+  __at_align32__ intmax_t buffer_b[element_no];
+  __at_align32__ intmax_t buffer[element_no];
+  a.store(buffer_a);
+  b.store(buffer_b);
+  for (uint32_t i = 0U; i < element_no; ++ i) {
+    buffer[i] = op(buffer_a[i], buffer_b[i]);
   }
   return Vec256<T>::loadu(buffer);
 }
