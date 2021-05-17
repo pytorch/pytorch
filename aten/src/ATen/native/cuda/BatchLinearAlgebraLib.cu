@@ -1243,6 +1243,7 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
+  // See https://github.com/pytorch/pytorch/issues/53879 for more details.
   if (!get_pivots) {
     if (self.is_complex()) {
       auto real = at::real(self);
