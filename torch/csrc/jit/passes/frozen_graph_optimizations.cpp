@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/linear_to_matmul_add.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -22,6 +23,7 @@ void OptimizeFrozenGraph(
       FoldFrozenConvMulOrDiv(graph);
     }
   }
+  DecomposeLinearToMatmulAdd(graph);
   FuseFrozenConvAddRelu(graph);
 }
 
