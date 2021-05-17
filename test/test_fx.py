@@ -919,6 +919,124 @@ class TestFX(JitTestCase):
         for s in ['args', 'kwargs', '#users']:
             assert s in stringed
 
+    def test_custom_proxy_type(self):
+        class TensorPair:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair(x : TensorPair, y : TensorPair):
+            s = x.add(y)
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair(x, y)
+
+        traced = symbolic_trace(use_tensor_pair)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_type_literal(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_literal(x : TensorPair):
+            s = x.add(TensorPair(torch.zeros(5, 3), torch.zeros(5, 3)))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair_literal(x)
+
+        traced = symbolic_trace(use_tensor_pair_literal)
+
+        traced_out = traced(x)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_dynamic_value(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_ctor(x : TensorPair, y : torch.Tensor):
+            s = x.add(TensorPair(y, y))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = torch.randn(5, 3)
+        ref_out = use_tensor_pair_ctor(x, y)
+
+        traced = symbolic_trace(use_tensor_pair_ctor)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_input_dependent_control_flow(self):
+        class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, inp):
+                if inp.sum() == 0:
+                    self.is_zero = True
+                    self.tensor = torch.tensor([])
+                else:
+                    self.is_zero = False
+                    self.tensor = inp
+
+            def add(self, other):
+                if self.is_zero:
+                    return ZeroTensor(other.tensor)
+                elif other.is_zero:
+                    return self
+
+        def use_zero_tensor(x : torch.Tensor, y : torch.Tensor):
+            return ZeroTensor(x + y)
+
+        x, y = torch.randn(5, 3), torch.randn(5, 3)
+
+        ref_out = use_zero_tensor(x, y)
+
+        traced = symbolic_trace(use_zero_tensor)
+
+        traced_out = traced(x, y)
+
+        self.assertEqual(traced_out.is_zero, ref_out.is_zero)
+        self.assertEqual(traced_out.tensor, ref_out.tensor)
+
     def test_graph_fns(self):
         g = Graph()
         a = g.placeholder('a')
@@ -2467,6 +2585,7 @@ class TestOperatorSignatures(JitTestCase):
                            'stack',
                            'view',
                            'view_as',
+                           'nn.functional.hardshrink',
                            'vstack',
                            '__getitem__',
                            '__radd__',
