@@ -32,16 +32,15 @@ def write_version_file():
         f.write("__version__ = '{}'\n".format(version))
         f.write("git_version = {}\n".format(repr(sha)))
 
-# TODO: is there a way to specify that either of the following is the requirement:
-# 1. a pytorch nightly
-# 2. a specific hash of PyTorch?
+
 # pytorch_dep = 'torch'
 # if os.getenv('PYTORCH_VERSION'):
 #     pytorch_dep += "==" + os.getenv('PYTORCH_VERSION')
-# 
-# requirements = [
-#     pytorch_dep,
-# ]
+requirements = [
+    # This represents a nightly version of PyTorch.
+    # It can be installed as a binary or from source.
+    "torch>=1.9.0.dev",
+]
 
 
 class clean(distutils.command.clean.clean):
@@ -81,7 +80,6 @@ def get_extensions():
         for p in glob.glob(os.path.join(extensions_dir, "*.cpp"))
     )
     sources = list(extension_sources)
-    include_dirs = [extensions_dir]
 
     ext_modules = [
         extension(
@@ -112,7 +110,7 @@ if __name__ == '__main__':
 
         # Package info
         packages=find_packages(),
-        # install_requires=requirements,
+        install_requires=requirements,
         ext_modules=get_extensions(),
         cmdclass={
             "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
