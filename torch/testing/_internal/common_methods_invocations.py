@@ -5034,9 +5034,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_gradgrad=True,
            supports_out=False,
-           autodiff_nonfusible_nodes=["aten::leaky_relu"],
-            skips=(
-                SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float32]),),),
+           autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+           # skips=(
+           #     SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float32]),),),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
