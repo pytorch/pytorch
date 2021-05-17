@@ -139,8 +139,8 @@ C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
-C10_CUDA_API size_t
-raw_det_malloc(int device, size_t size, cudaStream_t stream);
+C10_CUDA_API size_t raw_det_malloc(size_t size, cudaStream_t stream);
+C10_CUDA_API size_t raw_det_device_free_memory(int device);
 
 } // namespace CUDACachingAllocator
 

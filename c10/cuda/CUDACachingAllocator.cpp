@@ -726,6 +726,10 @@ class DeviceCachingAllocator {
     }
   }
 
+  size_t det_free_memory() {
+
+  }   
+
   // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
@@ -1521,8 +1525,18 @@ void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
 }
 
-size_t raw_det_malloc(int device, size_t size, cudaStream_t stream) {
+size_t raw_det_malloc(size_t size, cudaStream_t stream) {
+  int device;
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   return caching_allocator.device_allocator[device]->det_malloc(device, size, stream);
+}
+
+size_t raw_det_device_free_memory(int device) {
+  C10_CUDA_CHECK(cudaGetDevice(&device));
+  size_t device_free;
+  size_t device_total;
+  C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+  return device_free;
 }
 
 } // namespace CUDACachingAllocator

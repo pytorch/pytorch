@@ -2,6 +2,7 @@ import collections
 import contextlib
 import warnings
 from typing import Any, Dict, Union
+import ctypes
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
@@ -19,6 +20,40 @@ def _free_mutex():
         yield
     finally:
         torch._C._cuda_unlock_mutex()
+
+def caching_allocator_det_malloc(size, device: Union[Device, int] = None, stream=None, warn_if_exceeds_free_memory_capacity=True):
+    r"""TBD.
+    """
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    if stream is None:
+        stream = torch.cuda.current_stream(device)
+    if isinstance(stream, torch.cuda.streams.Stream):
+        stream = stream.cuda_stream
+    if not isinstance(stream, int):
+        raise TypeError('Invalid type for stream argument, must be '
+                        '`torch.cuda.Stream` or `int` representing a pointer '
+                        'to a exisiting stream')
+    with torch.cuda.device(device) as current_device:
+        maximum_ssize_t_size = 256 ** ctypes.sizeof(ctypes.c_longlong) // 2 - 1
+        if size > maximum_ssize_t_size:
+            raise Exception("Invalid size. size must not exceed {}".format(size))
+        memory_to_be_allocated = torch._C._cuda_cudaDetMalloc(size, stream)
+        if warn_if_exceeds_free_memory_capacity:
+            memory_stats = torch.cuda.memory_stats(device=current_device)
+            # torch._C._cuda_
+            # free_memory_capacity = memory_stats.get("allocated_bytes.all.reserved", 0) - memory_stats.get("allocated_bytes.all.current", 0)
+            # free_memory_capacity = torch.cuda.get_device_properties(current_device).total_memory - memory_stats.get("active.all.freed", 0)
+            free_memory_capacity = memory_cached(current_device)
+            print(free_memory_capacity)
+            # print(memory_to_be_allocated)
+            # print(free_memory_capacity)
+            # # print(torch.cuda.get_device_properties(current_device).total_memory)
+            # # print(torch.cuda.memory_stats(device=current_device).get("allocated_bytes.all.current", 0))
+            # if memory_to_be_allocated > free_memory_capacity:
+            #     raise Warning("Memory to be allocated exceeds the free memory capacity of the current device ({})".format(free_memory_capacity))
+        return memory_to_be_allocated
 
 
 def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None):
