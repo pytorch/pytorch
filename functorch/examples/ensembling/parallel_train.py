@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import make_functional, grad_and_value, vmap
+from functorch import make_functional, grad_and_value, vmap, functional_init
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
@@ -84,10 +84,7 @@ step4()
 # Step 5: We're ready for multiple models. Let's define an init_fn
 # that, given a number of models, returns to us all of the weights.
 def init_fn(num_models):
-    models = tuple(MLPClassifier() for _ in range(num_models))
-    weights = tuple(make_functional(model)[0] for model in models)
-    weights = tuple(zip(*weights))
-    weights = tuple(torch.stack(shards).detach() for shards in weights)
+    weights, _, _ = functional_init(MLPClassifier, (num_models,))()
     return weights
 
 # Step 6: Now, can we try multiple models at the same time?
