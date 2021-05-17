@@ -320,7 +320,6 @@ REGISTER_CPU_OPERATOR(
         /*with_weights=*/true>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum4BitRowwiseSparse)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .WeightedValueKeyLengthInputFillers(
@@ -411,11 +410,8 @@ OPERATOR_SCHEMA(SparseLengthsSum8BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
     .ValueKeyLengthInputFillers(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8>::COMPRESSED_INDICES_MAPPING,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8>::INDICES,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8>::LENGTHS)
     .SetDoc(R"DOC(
 Performs SparseLengthsSum, but operating on 8-bit rowwise quantized matrices
@@ -453,17 +449,12 @@ REGISTER_CPU_OPERATOR(
         /*with_weights=*/true>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitRowwiseSparse)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .WeightedValueKeyLengthInputFillers(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, true>::COMPRESSED_INDICES_MAPPING,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, true>::INDICES,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, true>::LENGTHS,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, true>::WEIGHTS)
     .SetDoc(R"DOC(
 Performs SparseLengthsWeightedSum, but operating on 8-bit rowwise quantized
@@ -508,12 +499,9 @@ OPERATOR_SCHEMA(SparseLengthsMean8BitRowwiseSparse)
     .NumInputs(4)
     .NumOutputs(1)
     .ValueKeyLengthInputFillers(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, false, true>::
             COMPRESSED_INDICES_MAPPING,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, false, true>::INDICES,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         SparseLengthsNBitRowwiseSparseOp<8, false, true>::LENGTHS)
     .SetDoc(R"DOC(
 Performs SparseLengthsMean, but operating on 8-bit rowwise quantized matrices
@@ -590,7 +578,6 @@ REGISTER_CPU_OPERATOR(
         /*with_weights=*/true>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum2BitRowwiseSparse)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .WeightedValueKeyLengthInputFillers(

@@ -169,9 +169,6 @@ namespace impl {
   /// Retrieves this `Variable`s version counter.
   TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 
-  TORCH_API PyObject* pyobj(const Variable&);
-  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj);
-
   TORCH_API void set_name(const Variable&, const std::string& name);
 
   TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
