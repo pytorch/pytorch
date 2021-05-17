@@ -151,11 +151,11 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
+    if (auto overloaded_methods = classType->findOverloadedMethod(field)) {
+      return std::make_shared<MethodValue>(
+          getValue(), overloaded_methods.value());
+    }
     if (auto method = classType->findMethod(field)) {
-      if (auto overloaded_methods = classType->findOverloadedMethod(field)) {
-        return std::make_shared<MethodValue>(
-            getValue(), overloaded_methods.value());
-      }
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -638,7 +638,8 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
-  if (!type_->findMethod("__init__")) {
+  if (!type_->findMethod("__init__") &&
+      !type_->findOverloadedMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
   }

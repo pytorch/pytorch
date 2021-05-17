@@ -1102,7 +1102,7 @@ void ClassType::addOverloadedMethod(torch::jit::Function* method) {
   // create a mangled name for this function and bookkeep
   // the mangled name and its corresponding function.
   const std::string& mangled_name =
-      method->name() + "__" + std::to_string(it.first->second.size());
+      method->name() + "__" + c10::guts::to_string(it.first->second.size());
   it.first->second.push_back(mangled_name);
   // registers where this overloaded function is stored in the methods map.
   mangled_to_function_[mangled_name] = methods_.size();
@@ -1412,14 +1412,26 @@ void ClassType::checkForwardHookSchema(
 }
 
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
+  // if this is overloaded, there are multiple methods with the
+  // same name. Since this method is expected to work correctly
+  // only for normal methods, we just return nullptr
+  if (auto overloaded_methods = findOverloadedMethod(name)) {
+    if (overloaded_methods.value().size() == 1) {
+      return getMangledOverloadedMethod(overloaded_methods.value()[0]);
+    }
+    return nullptr;
+  }
+
+  // if the name is already mangled, we know there is only
+  // one corresponding function.
+  if (auto mangled_method = getMangledOverloadedMethod(name)) {
+    return mangled_method;
+  }
+
   for (auto method : methods_) {
     if (name == method->name()) {
       return method;
     }
-  }
-
-  if (auto method = getMangledOverloadedMethod(name)) {
-    return method;
   }
 
   return nullptr;
