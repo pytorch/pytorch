@@ -208,6 +208,8 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 return storage
             elif typename == "reduce_package":
+                # to fix BC breaking change, objects on this load path
+                # will be loaded multiple times erroneously 
                 if len(data) == 2:
                     func, args = data
                     return func(self, *args)
