@@ -557,10 +557,6 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
-              exit 0
-            fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
