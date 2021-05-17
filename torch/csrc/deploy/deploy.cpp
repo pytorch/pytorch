@@ -16,34 +16,45 @@ namespace torch {
 namespace deploy {
 
 Package InterpreterManager::load_package(const std::string& uri) {
+  TORCH_DEPLOY_TRY
   return Package(uri, this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Package InterpreterManager::load_package(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+  TORCH_DEPLOY_TRY
   return Package(reader, this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Obj InterpreterSession::from_movable(const ReplicatedObj& obj) {
+  TORCH_DEPLOY_TRY
   return impl_->unpickle_or_get(obj.pImpl_->object_id_, obj.pImpl_->data_);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 InterpreterSession ReplicatedObj::acquire_session(
     const Interpreter* on_this_interpreter) const {
+  TORCH_DEPLOY_TRY
   InterpreterSession I = on_this_interpreter
       ? on_this_interpreter->acquire_session()
       : pImpl_->manager_->acquire_one();
   I.self = I.from_movable(*this);
   return I;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 InterpreterSession::~InterpreterSession() {
+  TORCH_DEPLOY_TRY
   if (manager_ && notify_idx_ >= 0) {
     manager_->resources_.free(notify_idx_);
   }
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
+  TORCH_DEPLOY_TRY
   if (!on_this_interpreter) {
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     for (auto& interp : manager_->all_instances()) {
@@ -54,27 +65,35 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
 
   InterpreterSession I = on_this_interpreter->acquire_session();
   I.impl_->unload(object_id_);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 ReplicatedObjImpl::~ReplicatedObjImpl() {
+  TORCH_DEPLOY_TRY
   unload(nullptr);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void ReplicatedObj::unload(const Interpreter* on_this_interpreter) {
+  TORCH_DEPLOY_TRY
   pImpl_->unload(on_this_interpreter);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 ReplicatedObj InterpreterSession::create_movable(Obj obj) {
+  TORCH_DEPLOY_TRY
   TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
   auto pickled = impl_->pickle(self, obj);
   return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->next_object_id_++, std::move(pickled), manager_));
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
+  TORCH_DEPLOY_TRY
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char library_name[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(library_name);
@@ -103,17 +122,21 @@ Interpreter::Interpreter(InterpreterManager* manager)
   pImpl_ = std::unique_ptr<InterpreterImpl>(
       // NOLINTNEXTLINE(modernize-redundant-void-arg)
       ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Interpreter::~Interpreter() {
+  TORCH_DEPLOY_TRY
   if (handle_) {
     // ensure python uninitialization runs before we dlclose the library
     pImpl_.reset();
     dlclose(handle_);
   }
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 int LoadBalancer::acquire() {
+  TORCH_DEPLOY_TRY
   thread_local int last = 0;
   size_t minusers = SIZE_MAX;
   int min_idx = 0;
@@ -147,10 +170,14 @@ int LoadBalancer::acquire() {
   // then, so this is only a heuristic).
   __atomic_fetch_add(&uses_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
   return min_idx;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void LoadBalancer::free(int where) {
+  TORCH_DEPLOY_TRY
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 } // namespace deploy
