@@ -1208,7 +1208,7 @@ class CosineEmbeddingLoss(_Loss):
         - Input1: :math:`(N, D)`, where `N` is the batch size and `D` is the embedding dimension.
         - Input2: :math:`(N, D)`, same shape as Input1.
         - Target: :math:`(N)`.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+        - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
     """
     __constants__ = ['margin', 'reduction']
     margin: float
