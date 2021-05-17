@@ -75,10 +75,8 @@ class TORCH_API Interpreter {
 struct Package;
 
 struct TORCH_API LoadBalancer {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoadBalancer(size_t n) : uses_(new uint64_t[8 * n]), allocated_(n), n_(n) {
     // 8*... to avoid false sharing of atomics on the same cache line
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     memset(uses_.get(), 0, 8 * n_ * sizeof(uint64_t));
   }
   void setResourceLimit(size_t n) {
