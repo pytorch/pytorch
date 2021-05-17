@@ -1,5 +1,5 @@
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/python/python_ir.h>
-#include "c10/core/ScalarType.h"
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -465,7 +465,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS

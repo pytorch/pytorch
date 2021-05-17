@@ -546,7 +546,7 @@ void ne_kernel(TensorIterator& iter) {
   }
 }
 
-void maximum_kernel(TensorIterator& iter) {
+void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
@@ -573,7 +573,7 @@ void maximum_kernel(TensorIterator& iter) {
   }
 }
 
-void minimum_kernel(TensorIterator& iter) {
+void minimum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
@@ -925,7 +925,7 @@ void nextafter_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void heaviside_kernel(TensorIterator& iter) {
+void heaviside_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "heaviside_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         return a == 0 ? b : static_cast<scalar_t>(a > 0);
