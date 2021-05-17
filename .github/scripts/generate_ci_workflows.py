@@ -85,7 +85,6 @@ class PyTorchLinuxWorkflow:
 WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
-        on_pull_request=True
     )
 ]
 
