@@ -5420,6 +5420,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
     'test_to_sparse',
+    'test_to_sparse_dim',
 ])
 
 def add_test(
