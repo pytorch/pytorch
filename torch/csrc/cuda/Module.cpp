@@ -55,12 +55,12 @@ static void poison_fork() {
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
-void THCPModule_setDevice(int device) 
+void THCPModule_setDevice(int device)
 {
   c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
-PyObject * THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) 
+PyObject * THCPModule_setDevice_wrap(PyObject * self, PyObject * arg) 
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
@@ -73,7 +73,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
+PyObject * THCPModule_getDevice_wrap(PyObject * self, PyObject * noargs) {
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -82,7 +82,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) 
+PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject * self, PyObject * args) 
 {
   HANDLE_TH_ERRORS
   PyObject* arg1 = nullptr;
@@ -107,7 +107,7 @@ PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) 
+PyObject * THCPModule_getDeviceCount_wrap(PyObject * self, PyObject * noargs) 
 {
   HANDLE_TH_ERRORS
   poison_fork();
@@ -115,7 +115,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getArchFlags(PyObject* self, PyObject* noargs) 
+PyObject * THCPModule_getArchFlags(PyObject * self, PyObject * noargs) 
 {
   HANDLE_TH_ERRORS
   poison_fork();
@@ -128,14 +128,14 @@ PyObject * THCPModule_getArchFlags(PyObject* self, PyObject* noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPModule_isInBadFork(PyObject* self, PyObject* noargs) {
+static PyObject * THCPModule_isInBadFork(PyObject * self, PyObject * noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(in_bad_fork);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_getCurrentStream_wrap(
-    PyObject* /* unused */, PyObject* device_index) {
+    PyObject * /* unused */, PyObject * device_index) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
     THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
@@ -146,7 +146,7 @@ PyObject * THCPModule_getCurrentStream_wrap(
 }
 
 PyObject * THCPModule_getDefaultStream_wrap(
-    PyObject * /* unused */, PyObject* device_index) {
+    PyObject * /* unused */, PyObject *device_index) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
     THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
@@ -156,7 +156,7 @@ PyObject * THCPModule_getDefaultStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_setStream_wrap(PyObject* self, PyObject* obj) 
+PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj) 
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(PyLong_Check(obj), "invalid stream");
@@ -175,9 +175,9 @@ PyObject * THCPModule_setStream_wrap(PyObject* self, PyObject* obj)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) 
+PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs) 
 {
-  return THPUtils_packInt64((int64_t)CUDA_VERSION);
+  return THPUtils_packInt64((int64_t) CUDA_VERSION);
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) 
@@ -188,9 +188,7 @@ PyObject * THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaCachingAllocator_raw_alloc(
-    PyObject* _unused,
-    PyObject* args) {
+PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject *args) {
   HANDLE_TH_ERRORS
   PyObject* size_o = nullptr;
   PyObject* stream_o = nullptr;
@@ -244,9 +242,7 @@ PyObject * THCPModule_cudaDetDeviceFreeMemory(PyObject* _unused, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaCachingAllocator_raw_delete(
-    PyObject* _unused,
-    PyObject* obj) {
+PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObject *obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
   c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
