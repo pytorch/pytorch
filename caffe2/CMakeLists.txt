@@ -574,11 +574,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
     list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
@@ -600,6 +601,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
@@ -803,7 +806,7 @@ endif()
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
-    scalaropts transformutils native orcjit)
+    scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
 
