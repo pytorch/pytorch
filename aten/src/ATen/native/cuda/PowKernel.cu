@@ -7,6 +7,11 @@
 
 namespace at { namespace native {
 
+// Forward declare some unary kernels
+void rsqrt_kernel_cuda(TensorIteratorBase& iter);
+void sqrt_kernel_cuda(TensorIteratorBase& iter);
+void reciprocal_kernel_cuda(TensorIteratorBase& iter);
+
 namespace {
 
 
@@ -59,40 +64,10 @@ template<typename B, typename E>
 static inline __host__ __device__ B complex_pow_(B base, E exp) {
   return std::pow(base, exp);
 }
-// Functions for sqrt
-// sqrt (floating)
-template <typename T>
-static inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type sqrt_(T x) {
-  return std::sqrt(x);
-}
-// sqrt (integral)
-template <typename T>
-static inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt_(T x) {
-  return static_cast<T>(std::sqrt(static_cast<double>(x)));
-}
-// Function for inverse sqrt
-// invsqrt (floating)
-template <typename T>
-static inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
-  return 1.0 / std::sqrt(x);
-}
-// invsqrt (integral)
-template <typename T>
-static inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
-  return static_cast<T>(1.0 / std::sqrt(static_cast<double>(x)));
-}
 #else
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
   return ::pow(base, exp);
-}
-template <typename T>
-static inline __host__ __device__ T sqrt_(T x) {
-  return ::sqrt(x);
-}
-template <typename T>
-static inline __host__ __device__ T invsqrt_(T x) {
-  return 1.0 / ::sqrt(x);
 }
 // pow (Otherwise)
 template<typename B, typename E>
@@ -123,29 +98,20 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   }
 }
 
+
 template<typename Base_type, typename Exp_type>
 void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
-  if (d_exp == 0.5) {
-    gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return sqrt_(base);
-    });
-  } else if (d_exp == 2) {
+  // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
+  // in pow_tensor_scalar_kernel
+  if (d_exp == 2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base;
     });
   } else if (d_exp == 3) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base * base;
-    });
-  } else if (d_exp == -0.5) {
-    gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return invsqrt_(base);
-    });
-  } else if (d_exp == -1) {
-    gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return 1.0 / base;
     });
   } else if (d_exp == -2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
@@ -159,6 +125,16 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
+  // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
+  if (!exp_scalar.isComplex()) {
+    if (exp_scalar.equal(.5)) {
+      return sqrt_kernel_cuda(iter);
+    } else if (exp_scalar.equal(-0.5)) {
+      return rsqrt_kernel_cuda(iter);
+    } else if (exp_scalar.equal(-1.0)) {
+      return reciprocal_kernel_cuda(iter);
+    }
+  }
   if (isComplexType(iter.common_dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();

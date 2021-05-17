@@ -146,7 +146,6 @@ TEST(NetDeathTest, DeclaredOutputNotMet) {
 
 void testExecution(std::unique_ptr<NetBase>& net, int num_ops) {
   // Run 100 times
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; i++) {
     counter.exchange(0);
     net.get()->Run();
@@ -583,7 +582,6 @@ TEST(NetTest, DISABLED_FailingOperator) {
   {
     net_def.set_num_workers(4);
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
       bool run_result = false;
@@ -1138,7 +1136,6 @@ void testProfDAGNetErrorCase(bool test_error) {
   auto net = CreateNet(net_def, &ws);
 
   // with failing op - net runs return false, without - true
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto num_runs = 0; num_runs < 10; ++num_runs) {
     auto ret = net->Run();
     ASSERT_TRUE(test_error ? !ret : ret);
