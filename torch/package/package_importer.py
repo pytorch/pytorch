@@ -208,6 +208,9 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 return storage
             elif typename == "reduce_package":
+                if len(data) == 2:
+                    func, args = data
+                    return func(self, *args)
                 reduce_id, func, args = data
                 if reduce_id not in loaded_reduces:
                     loaded_reduces[reduce_id] = func(self, *args)
