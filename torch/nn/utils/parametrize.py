@@ -2,8 +2,10 @@ import torch
 from torch.nn.modules.container import ModuleList, ModuleDict, Module
 from torch.nn.parameter import Parameter
 from torch import Tensor
-from typing import Union, Optional, Iterable, Dict, Tuple
+
+import collections
 from contextlib import contextmanager
+from typing import Union, Optional, Dict, Tuple, Sequence
 
 
 _cache_enabled = 0
@@ -53,63 +55,137 @@ def cached():
             _cache = {}
 
 
+def _register_parameter_or_buffer(module, name, X):
+    if isinstance(X, Parameter):
+        module.register_parameter(name, X)
+    else:
+        module.register_buffer(name, X)
+
+
 class ParametrizationList(ModuleList):
-    r"""A sequential container that holds and manages the ``original`` parameter or buffer of
-    a parametrized :class:`torch.nn.Module`. It is the type of
-    ``module.parametrizations[tensor_name]`` when ``module[tensor_name]`` has been parametrized
-    with :func:`register_parametrization`.
+    r"""A sequential container that holds and manages the ``original`` or ``original0``, ``original1``, ...
+    parameters or buffers of a parametrized :class:`torch.nn.Module`.
+
+    It is the type of ``module.parametrizations[tensor_name]`` when ``module[tensor_name]``
+    has been parametrized with :func:`register_parametrization`.
+
+    If the first registered parmetrization has a ``right_inverse`` that returns one tensor or
+    does not have a ``right_inverse`` (in which case we assume that ``right_inverse`` is the identity),
+    it will hold the tensor under the name ``original``.
+    If it has a ``right_inverse`` that returns more than one tensor, these will be registered as
+    ``original0``, ``original1``, ...
 
     .. note ::
         This class is used internally by :func:`register_parametrization`. It is documented
         here for completeness. It should not be instantiated by the user.
 
     Args:
-        modules (iterable): an iterable of modules representing the parametrizations
+        modules (sequence): an sequence of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
     """
     original: Tensor
 
     def __init__(
-        self, modules: Iterable[Module], original: Union[Tensor, Parameter]
+        self, modules: Sequence[Module], original: Union[Tensor, Parameter]
     ) -> None:
+        # We require this because we need to treat differently the first parametrization
+        # This should never throw, unless this class is used from the outside
+        if len(modules) == 0:
+            raise ValueError("ParametrizationList requires one or more modules.")
+
         super().__init__(modules)
-        if isinstance(original, Parameter):
-            self.register_parameter("original", original)
+
+        with torch.no_grad():
+            value = original
+            for module in reversed(self):  # type: ignore[call-overload]
+                if hasattr(module, "right_inverse"):
+                    value = module.right_inverse(value)
+                # else, we assume that it's the identity
+
+        if not isinstance(value, Tensor) and not isinstance(value, collections.Sequence):
+            raise ValueError("'right_inverse' should return a Tensor or a Sequence of tensors (list, tuple...). "
+                             f"Got {value.__class__.__name__}")
+
+        # Set the number of original tensors
+        is_tensor = isinstance(value, Tensor)
+        self.ntensors = 1 if is_tensor else len(value)
+
+        # If it is a sequence of one tensor, we unpack it
+        if not is_tensor and self.ntensors == 1:
+            value = value[0]
+
+        # Register the tensor(s)
+        if self.ntensors == 1:
+            if value.dtype != original.dtype:
+                raise ValueError(
+                    "'X = right_inverse(Y)' may not change the dtype of the tensor.\n"
+                    f"dtype of Y: {original.dtype}\n"
+                    f"dtype of X: {value.dtype}"
+                )
+            # Set the value to original so that the user does not need to re-register the parameter
+            # manually in the optimiser
+            with torch.no_grad():
+                original.set_(value)  # type: ignore[call-overload]
+            _register_parameter_or_buffer(self, "original", original)
         else:
-            self.register_buffer("original", original)
+            requires_grad = original.requires_grad
+            for i, tensor in enumerate(value):
+                if not isinstance(tensor, Tensor):
+                    raise ValueError("'right_inverse' should return a Tensor or a Sequence of tensors "
+                                     "(list, tuple...). "
+                                     f"Got a sequence with an element {tensor.__class__.__name__}.")
 
-    def set_original_(self, value: Tensor) -> None:
-        r"""This method is called when assigning to a parametrized tensor.
+                # If they require grad we expect the user to add the new parametesr to the optimizer
+                # after registering the parametrization
 
-        It calls the methods ``right_inverse`` (see :func:`register_parametrization`)
+                # Here we cannot use set_ on the original tensor so we drop the requirement of the
+                # parametrization not changing the dtype
+                if requires_grad:
+                    tensor = Parameter(tensor)
+                _register_parameter_or_buffer(self, f"original{i}", tensor)
+
+    def right_inverse(self, value: Tensor) -> None:
+        r"""Calls the methods ``right_inverse`` (see :func:`register_parametrization`)
         of the parametrizations in the inverse order that they have been registered.
-        Then, it assigns the result to ``self.original``.
+        Then, it stores the result in ``self.original`` if the parametrization has one input
+        or in ``self.original0``, ``self.original1``, ... otherwise.
 
         Args:
             value (Tensor): Value to which initialize the module
-
-        Raises:
-            RuntimeError: if any of the parametrizations do not implement a ``right_inverse`` method
         """
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
-                else:
-                    raise RuntimeError(
-                        "The parametrization '{}' does not implement a 'right_inverse' method. "
-                        "Assigning to a parametrized tensor is only possible when all the parametrizations "
-                        "implement a 'right_inverse' method.".format(module.__class__.__name__)
+                # else we assume that right_inverse is the identity
+            if self.ntensors == 1:
+                if value.dtype != self.original.dtype:
+                    raise ValueError(
+                        "'X = right_inverse(Y)' may not change the dtype of the tensor.\n"
+                        f"dtype of Y: {self.original.dtype}\n"
+                        f"dtype of X: {value.dtype}"
                     )
-            self.original.copy_(value)
+                self.original.set_(value)  # type: ignore[call-overload]
+            else:
+                for i, tensor in enumerate(value):
+                    original_i = getattr(self, f"original{i}")
+                    original_i.set_(tensor)
 
     def forward(self) -> Tensor:
-        x = self.original
-        for module in self:
+        # Unpack the originals for the first parametrization
+        if self.ntensors == 1:
+            x = self[0](self.original)
+        else:
+            originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
+            x = self[0](*originals)
+        # It's not possible to call self[1:] here, so we have to be a bit more cryptic
+        for module in list(self._modules.values())[1:]:
             x = module(x)
-        if x.size() != self.original.size():
-            raise RuntimeError(
+
+        # This check is not strictly necessary, but we disallow this case to protect the user
+        if self.ntensors == 1 and x.size() != self.original.size():
+            raise ValueError(
                 "The parametrization may not change the size of the parametrized tensor. "
                 "Size of original tensor: {} "
                 "Size of parametrized tensor: {}".format(self.original.size(), x.size())
@@ -178,7 +254,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
-        self.parametrizations[tensor_name].set_original_(value)
+        self.parametrizations[tensor_name].right_inverse(value)
 
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
 
@@ -217,14 +293,38 @@ def register_parametrization(
 
         def right_inverse(self, X: Tensor) -> Tensor
 
-    If :attr:`parametrization` implements this method, it will be possible to assign
-    to the parametrized tensor. This may be used to initialize the tensor, as shown in the example.
+    If this method is not implemented, it defaults to the identity.
+    This method is called on the unparametrized tensor when the first parametrization
+    is registered.
 
     In most situations, ``right_inverse`` will be a function such that
     ``forward(right_inverse(X)) == X`` (see
     `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
     Sometimes, when the parametrization is not surjective, it may be reasonable
     to relax this, as shown in the example below.
+    This may be used to initialize the tensor, as shown in the example.
+
+    If the parametrization depends on several inputs, the ``right_inverse`` should
+    return a tuple of tensors:
+
+    .. code-block:: python
+
+        def MultipleParametrization(nn.Module):
+            def forward(self, X: Tensor, Y: Tensor) -> Tensor
+                ...
+
+            def right_inverse(self, X: Tensor) -> Tuple[Tensor, Tensor]
+                ...
+
+    In this case, the original are also located under ``module.parametrizations.weight``
+    with names ``original0``, ``original1``,...
+
+    .. warning::
+
+        If a parametrization depends on several inputs, :func:`~register_parametrization`
+        will register a number of new parameters. If such parametrization is registered
+        after the optimizer is created, these new parameters will need to be added manually
+        to the optimizer. See :`torch.Optimizer.add_param_group`.
 
     Args:
         module (nn.Module): module on which to register the parametrization
@@ -240,16 +340,17 @@ def register_parametrization(
 
     Examples:
         >>> import torch
+        >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P
-        >>>
-        >>> class Symmetric(torch.nn.Module):
+
+        >>> class Symmetric(nn.Module):
         >>>     def forward(self, X):
         >>>         return X.triu() + X.triu(1).T  # Return a symmetric matrix
         >>>
         >>>     def right_inverse(self, A):
         >>>         return A.triu()
-        >>>
-        >>> m = torch.nn.Linear(5, 5)
+
+        >>> m = nn.Linear(5, 5)
         >>> P.register_parametrization(m, "weight", Symmetric())
         >>> print(torch.allclose(m.weight, m.weight.T))  # m.weight is now symmetric
         True
@@ -258,6 +359,23 @@ def register_parametrization(
         >>> m.weight = A  # Initialize the weight to be the symmetric matrix A
         >>> print(torch.allclose(m.weight, A))
         True
+
+        >>> class RankOne(nn.Module):
+        >>>     def forward(self, x, y):
+        >>>         # Form a rank 1 matrix multiplying two vectors
+        >>>         return x.unsqueeze(-1) @ y.unsqueeze(-2)
+
+        >>>     def right_inverse(self, Y):
+        >>>         # Project Y onto the rank 1 matrices
+        >>>         U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
+        >>>         # S is ordered in a decreasing way.
+        >>>         s0_sqrt = S[0].sqrt().unsqueeze(-1)
+        >>>         return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
+
+        >>> linear_rank_one = P.register_parametrization(nn.Linear(4, 4), "weight", RankOne())
+        >>> print(torch.linalg.matrix_rank(linear_rank_one.weight).item())
+        1
+
     """
     parametrization.train(module.training)
     if is_parametrized(module, tensor_name):
@@ -267,6 +385,8 @@ def register_parametrization(
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
         original = getattr(module, tensor_name)
+        # We create this early to check for possible errors in ``right_inverse``
+        parametrizations = ParametrizationList([parametrization], original)
         # Delete the previous parameter or buffer
         delattr(module, tensor_name)
         # If this is the first parametrization registered on the module,
@@ -274,14 +394,12 @@ def register_parametrization(
         if not is_parametrized(module):
             # Change the class
             _inject_new_class(module)
-            # Inject the a ``ModuleDict`` into the instance under module.parametrizations
+            # Inject a ``ModuleDict`` into the instance under module.parametrizations
             module.parametrizations = ModuleDict()
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
-        module.parametrizations[tensor_name] = ParametrizationList(  # type: ignore[assignment, index, operator]
-            [parametrization], original
-        )
+        module.parametrizations[tensor_name] = parametrizations  # type: ignore[assignment, index, operator]
     else:
         raise ValueError(
             "Module '{}' does not have a parameter, a buffer, or a "
@@ -321,6 +439,7 @@ def remove_parametrizations(
       of the tensor.
     - If ``leave_parametrized=False``, ``module[tensor_name]`` will be set to
       the unparametrised tensor in ``module.parametrizations[tensor_name].original``.
+      This is only possible when the parametrization depends on just one tensor.
 
     Args:
         module (nn.Module): module from which remove the parametrization
@@ -335,6 +454,7 @@ def remove_parametrizations(
         ValueError: if ``module[tensor_name]`` is not parametrized
         ValueError: if ``leave_parametrized=True`` and the parametrization changes the size or dtype
             of the tensor
+        ValueError: if ``leave_parametrized=False`` and the parametrization depends on several tensors
     """
 
     if not is_parametrized(module, tensor_name):
@@ -345,32 +465,44 @@ def remove_parametrizations(
         )
 
     # Fetch the original tensor
-    original = module.parametrizations[tensor_name].original  # type: ignore[index, union-attr]
-    if leave_parametrized:
-        with torch.no_grad():
-            t = getattr(module, tensor_name)
-        # If they have the same dtype, we reuse the original tensor.
-        # We do this so that the parameter does not to change the id()
-        # This way the user does not need to update the optimizer
-        if t.dtype == original.dtype:
+    parametrizations = module.parametrizations[tensor_name]  # type: ignore[index, union-attr]
+    assert isinstance(parametrizations, ParametrizationList)  # make mypy happy
+    if parametrizations.ntensors == 1:
+        original = parametrizations.original
+        if leave_parametrized:
             with torch.no_grad():
-                original.set_(t)
+                t = getattr(module, tensor_name)
+            if t.dtype == original.dtype:
+                # If they have the same dtype, we reuse the original tensor.
+                # We do this so that the parameter does not to change the id()
+                # This way the user does not need to update the optimizer
+                with torch.no_grad():
+                    original.set_(t)
+            else:
+                raise ValueError(
+                    "The parametrization changes the dtype of the tensor from {} to {}. "
+                    "In this case, it is not supported to leave the tensor parametrized "
+                    "(`leave_parametrized=True`)".format(original.dtype, t.dtype)
+                )
+    else:
+        if leave_parametrized:
+            # We cannot use no_grad because we need to know whether one or more
+            # original tensors required grad
+            t = getattr(module, tensor_name)
+            print(t.requires_grad)
+            # We'll have to trust the user to add it to the optimizer
+            original = Parameter(t) if t.requires_grad else t
         else:
-            raise ValueError(
-                "The parametrization changes the dtype of the tensor from {} to {}. "
-                "It is not supported to leave the tensor parametrized (`leave_parametrized=True`) "
-                "in this case.".format(original.dtype, t.dtype)
-            )
+            raise ValueError("Cannot leave unparametrized (`leave_parametrized=False`) a tensor "
+                             "that is parametrized in terms of more than one tensor.")
+
     # Delete the property that manages the parametrization
     delattr(module.__class__, tensor_name)
     # Delete the ParametrizationList
     del module.parametrizations[tensor_name]  # type: ignore[operator, union-attr]
 
     # Restore the parameter / buffer into the main class
-    if isinstance(original, Parameter):
-        module.register_parameter(tensor_name, original)
-    else:
-        module.register_buffer(tensor_name, original)
+    _register_parameter_or_buffer(module, tensor_name, original)
 
     # Roll back the parametrized class if no other buffer or parameter
     # is currently parametrized in this class

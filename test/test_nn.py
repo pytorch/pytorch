@@ -2155,7 +2155,9 @@ class TestNN(NNTestCase):
                 # Cayley map
                 # If X is skew-symmetric it returns an orthogonal matrix
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
+                # We call contiguous because solve returns a tensor with strides that are Fortran-contiguous
+                # and autograd raises a performance warning
+                return torch.linalg.solve(Id + X, Id - X).contiguous()
 
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
@@ -2392,8 +2394,12 @@ class TestNN(NNTestCase):
 
         N = 5
         model = nn.Linear(N, N)
-        # Register the skew-symmetric onstraint. The result is now skew-symmetric
-        parametrize.register_parametrization(model, "weight", Skew())
+        # Register the skew-symmetric constraint. The result is now skew-symmetric
+        skew = Skew()
+        # Make the weight skew-symmetric before registering the parametrization
+        with torch.no_grad():
+            model.weight.set_(skew(model.weight))
+        parametrize.register_parametrization(model, "weight", skew)
         X = torch.rand(N, N)
         # X is not skew-symmetric, so it throws an error
         with self.assertRaises(ValueError):
@@ -2417,25 +2423,82 @@ class TestNN(NNTestCase):
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
 
     def test_errors_parametrization(self):
-        # A parametrization shall not change the size of the parameter
+        # A simple parametrization
+        class Basic(nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        # A parametrization that changes the size
         class ChangeSize(nn.Module):
             def forward(self, x):
                 return x[:-1]
 
-        # A simple parametrization that does not implement a right_inverse
-        class Double(nn.Module):
+        # A parametrization that changes the dtype
+        class ChangeDtypeForward(nn.Module):
             def forward(self, x):
-                return 2 * x
+                return x.bool()
+
+        # A parametrization that changes the dtype in the right_inverse
+        class ChangeDtypeInverse(nn.Module):
+            def forward(self, x):
+                return x.bool()
+
+            def right_inverse(self, x):
+                return x.float()
+
+        # A parametrization with an incorrect number of outputs
+        class WrongNumberRight(nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z
+
+            def right_inverse(self, w):
+                return w, torch.zeros_like(w)
+
+        # A parametrization with several outputs
+        class Sum(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+            def right_inverse(self, z):
+                return z, torch.zeros_like(z)
+
+        # A parametrization with a right_inverse that does not return a Tensor or Sequence[Tensor]
+        class WrongRightInverse(nn.Module):
+            def forward(self, x):
+                return x
+
+            def right_inverse(self, z):
+                return None
+
+        # If it's a sequence, it needs to be a sequence of tensors
+        class WrongRightInverseSequence(nn.Module):
+            def forward(self, x, y):
+                return x
+
+            def right_inverse(self, z):
+                return None, z
 
         module = nn.Linear(3, 4)
+        weight_init = module.weight.clone()
         # This should not throw when registering
         parametrize.register_parametrization(module, "weight", ChangeSize())
         # It throws in the forward
-        with self.assertRaisesRegex(RuntimeError, "may not change the size"):
+        with self.assertRaisesRegex(ValueError, "may not change the size"):
             module(torch.rand(2))
         # Undo
         parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
         self.assertFalse(parametrize.is_parametrized(module))
+
+        # This should not throw when registering
+        parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
+        # Throws when removing with leave_parametrized=True
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=True"):
+            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+        # But not when leave_parametrized=False
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+
+        with self.assertRaisesRegex(ValueError, "right_inverse"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
 
         # Removing a parametrization from an unparametrized tensor throws
         with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
@@ -2443,18 +2506,116 @@ class TestNN(NNTestCase):
         # Nothing odd happens
         self.assertFalse(parametrize.is_parametrized(module))
 
-        # Register a parametrization on a non-existing parameter breaks
+        # Register a parametrization on a non-existing parameter throws
         with self.assertRaisesRegex(ValueError, "does not have a parameter"):
-            parametrize.register_parametrization(module, "foo", ChangeSize())
+            parametrize.register_parametrization(module, "foo", Basic())
         self.assertFalse(parametrize.is_parametrized(module))
 
-        # Try to assign to a parametrization that does not implement `right_inverse`
-        parametrize.register_parametrization(module, "weight", Double())
-        with self.assertRaisesRegex(RuntimeError, "right_inverse"):
-            module.weight = torch.rand(4, 3)
-        # Undo
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        parametrize.register_parametrization(module, "weight", Sum())
+        # Cannot remove a parametrization with several outputs with `leave_parametrized=False`
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+
+        # right_inverse should return a Tensor or a Sequence[Tensor]
+        with self.assertRaisesRegex(ValueError, "Tensor or a Sequence of"):
+            parametrize.register_parametrization(module, "weight", WrongRightInverse())
+
+        with self.assertRaisesRegex(ValueError, "Got a sequence"):
+            parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
+
+        # None of the operations above should have altered the weight
         self.assertFalse(parametrize.is_parametrized(module))
+        self.assertTrue(torch.allclose(module.weight, weight_init))
+
+    def test_multiple_inputs_parametrization(self):
+        # A parametrization with several outputs
+        class RankOne(nn.Module):
+            def forward(self, x, y):
+                # Form a rank-1 matrix from a pair of vectors
+                return x.unsqueeze(-1) @ y.unsqueeze(-2)
+
+            def right_inverse(self, Y):
+                # We project the given matrix onto the rank 1 matrices
+                U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
+                # S is ordered in a decreasing way.
+                s0_sqrt = S[0].sqrt().unsqueeze(-1)
+                return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
+
+        # Simple parametrisation
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+            def right_inverse(self, w):
+                return 0.5 * w
+
+        model = nn.Linear(3, 3)
+        # Test one parametrization
+        parametrize.register_parametrization(model, "weight", RankOne())
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertTrue(hasattr(model.parametrizations.weight, "original0"))
+        self.assertIn("original0", model.parametrizations.weight._parameters)
+        self.assertTrue(hasattr(model.parametrizations.weight, "original1"))
+        self.assertIn("original1", model.parametrizations.weight._parameters)
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be rank 1
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        # Remove parametrization and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+        self.assertIn("weight", model._parameters)
+
+        # Registering parametrizations with one input on top of one with multiple inputs should work
+        init_weight = model.weight.clone()
+        parametrize.register_parametrization(model, "weight", RankOne())
+        # Projecting a rank 1 matrix onto the matrices of rank one does not change the matrix
+        self.assertTrue(torch.allclose(init_weight, model.weight))
+        parametrize.register_parametrization(model, "weight", Double())
+        # The matrix now is twice the initial matrix
+        self.assertTrue(torch.allclose(2.0 * init_weight, model.weight))
+        # Multiplying by a scalar does not change the rank
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+
+        # The model should have 3 parameters now
+        for _ in range(2):
+            # The model has now three parameters
+            self.assertEqual(len(list(model.parameters())), 3)
+            (model.weight.T @ model.bias).sum().backward()
+            with torch.no_grad():
+                for p in model.parameters():
+                    p.add_(- p.grad, alpha=0.01)
+
+        # Same drill as before, removing should work as expected
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        # Remove parametrization and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+        self.assertIn("weight", model._parameters)
+
+        # The model has now two parameters
+        self.assertEqual(len(list(model.parameters())), 2)
+        # Should not throw
+        for _ in range(2):
+            (model.weight.T @ model.bias).sum().backward()
+            with torch.no_grad():
+                for p in model.parameters():
+                    p.add_(- p.grad, alpha=0.01)
 
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
