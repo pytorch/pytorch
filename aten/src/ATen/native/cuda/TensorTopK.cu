@@ -300,9 +300,10 @@ TORCH_IMPL_FUNC(topk_out_cuda)
       // allocated tensors to receive the results.
 
       Tensor sortedIndices = at::empty_like(indices);
-      // FIXME: remove const_cast once sort_out cuda is ported to structured
-      sort_out_cuda(const_cast<Tensor&>(values), dim, largest, const_cast<Tensor&>(values), const_cast<Tensor&>(sortedIndices));
+      Tensor sortedValues = at::empty_like(values);
+      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
+      values.copy_(sortedValues);
     }
   }
 }
