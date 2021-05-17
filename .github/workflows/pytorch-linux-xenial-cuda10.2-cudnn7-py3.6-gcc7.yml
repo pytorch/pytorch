@@ -242,7 +242,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   render_test_results:
-    if: always()
+    if: always() && jobs.calculate-docker-image.outcome == 'success' && jobs.build.outcome == 'success'
     needs:
       - test
     runs-on: ubuntu-18.04
