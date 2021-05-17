@@ -2196,8 +2196,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict,
-            print_debug_info=True)
+            prepare_custom_config_dict=prepare_custom_config_dict)
 
         # quantizeable node, quantized output
         class M2(torch.nn.Module):
@@ -2219,8 +2218,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict,
-            print_debug_info=True)
+            prepare_custom_config_dict=prepare_custom_config_dict)
 
         # quantizeable node, quantized dictionary output
         class M3(torch.nn.Module):
