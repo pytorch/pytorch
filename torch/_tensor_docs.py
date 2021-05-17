@@ -3528,7 +3528,12 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                r"""
-std(dim=None, unbiased=True, keepdim=False) -> Tensor
+std(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.std`
+
+.. function:: std(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 """)
@@ -3810,6 +3815,26 @@ add_docstr_all('float',
 float(memory_format=torch.preserve_format) -> Tensor
 
 ``self.float()`` is equivalent to ``self.to(torch.float32)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cdouble',
+               r"""
+cdouble(memory_format=torch.preserve_format) -> Tensor
+
+``self.cdouble()`` is equivalent to ``self.to(torch.complex128)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cfloat',
+               r"""
+cfloat(memory_format=torch.preserve_format) -> Tensor
+
+``self.cfloat()`` is equivalent to ``self.to(torch.complex64)``. See :func:`to`.
 
 Args:
     {memory_format}
@@ -4185,7 +4210,12 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                r"""
-var(dim=None, unbiased=True, keepdim=False) -> Tensor
+var(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.var`
+
+.. function:: var(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 """)
