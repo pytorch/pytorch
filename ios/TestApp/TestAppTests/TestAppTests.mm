@@ -26,9 +26,9 @@
 - (void)setUp {
   [super setUp];
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model"
-                                                                         ofType:@"pt"];
+                                                                         ofType:@"ptl"];
   XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:modelPath],
-                @"model.pt doesn't exist!");
+                @"model.ptl doesn't exist!");
   _module = torch::jit::_load_for_mobile(modelPath.UTF8String);
 }
 
