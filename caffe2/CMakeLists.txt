@@ -746,22 +746,22 @@ endif()
 
 # NOTE [ Linking AVX and non-AVX files ]
 #
-# Regardless of the CPU capabilities, we build some files with AVX and AVX2
+# Regardless of the CPU capabilities, we build some files with AVX, AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
 # functions at runtime during dispatch.
 #
 # We must make sure that those files are at the end of the input list when
 # linking the torch_cpu library. Otherwise, the following error scenario might
 # occur:
-# 1. A non-AVX and an AVX file both call a function defined with the `inline`
+# 1. A non-AVX2 and an AVX2 file both call a function defined with the `inline`
 #    keyword
 # 2. The compiler decides not to inline this function
 # 3. Two different versions of the machine code are generated for this function:
-#    one without AVX instructions and one with AVX.
-# 4. When linking, the AVX version is found earlier in the input object files,
+#    one without AVX2 instructions and one with AVX2.
+# 4. When linking, the AVX2 version is found earlier in the input object files,
 #    so the linker makes the entire library use it, even in code not guarded by
 #    the dispatcher.
-# 5. A CPU without AVX support executes this function, encounters an AVX
+# 5. A CPU without AVX2 support executes this function, encounters an AVX2
 #    instruction and crashes.
 #
 # Thus we organize the input files in the following order:
@@ -769,19 +769,23 @@ endif()
 # 2. All files with AVX support (conveniently, they all have names ending with
 #    'AVX.cpp')
 # 3. All files with AVX2 support ('*AVX2.cpp')
+# 4. # 3. All files with AVX512 support ('*AVX512.cpp')
 set(Caffe2_CPU_SRCS_NON_AVX)
 set(Caffe2_CPU_SRCS_AVX)
 set(Caffe2_CPU_SRCS_AVX2)
+set(Caffe2_CPU_SRCS_AVX512)
 foreach(input_filename ${Caffe2_CPU_SRCS})
   if(${input_filename} MATCHES "AVX\\.cpp")
     list(APPEND Caffe2_CPU_SRCS_AVX ${input_filename})
   elseif(${input_filename} MATCHES "AVX2\\.cpp")
     list(APPEND Caffe2_CPU_SRCS_AVX2 ${input_filename})
+  elseif(${input_filename} MATCHES "AVX512\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX512 ${input_filename})
   else()
     list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
   endif()
 endforeach(input_filename)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_CPU_SRCS_AVX512})
 
 # ==========================================================
 # END formerly-libtorch sources
@@ -1617,7 +1621,7 @@ if(BUILD_TEST)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
         list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
-        # Build vec256 with minimal dependencies on all platforms but Windows
+        # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
