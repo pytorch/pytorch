@@ -302,17 +302,22 @@ set_property(
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
 if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn UNKNOWN IMPORTED)
+  add_library(caffe2::cudnn INTERFACE IMPORTED)
   set_property(
-      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY_PATH})
+    TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
+    ${CUDNN_LIBRARY_PATH})
   set_property(
-      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_PATH})
+    TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
     set_property(
-        TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+      TARGET caffe2::cudnn APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    # Add explicit dependency on cublas to cudnn
+    get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
+    set_property(
+      TARGET caffe2::cudnn APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${__tmp}")
     # Lines below use target_link_libraries because we support cmake 3.5+.
     # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
     # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
