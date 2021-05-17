@@ -3310,11 +3310,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-        :func:`torch.fmod` uses truncated (rounded towards zero) value
-        of the quotient while :func:`torch.remainder` uses rounded
-        (towards the nearest integer) value of the quotient.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -7630,9 +7625,10 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divisor :attr:`other`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - rquot * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - round(\frac{\text{{input}}_i}{\text{{other}}_i} * \text{{other}}_i
 
-where :math:`rquot` is the rounded quotient value (rounded towards nearest integer).
+where :math:`round(\frac{\text{{input}}_i}{\text{{other}}_i})` is the rounded quotient value
+(rounded towards nearest even integer).
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -7641,6 +7637,13 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
+
+.. seealso::
+
+    :func:`torch.fmod` truncates (rounded towards zero) the quotient with the
+    output having same sign as the dividend :attr:`input` while
+    :func:`torch.remainder` rounds (towards the nearest integer) the quotient
+    with the output having same sign as the divisor :attr:`other`.
 
 Args:
     input (Tensor): the dividend
@@ -7661,9 +7664,6 @@ Example::
         :func:`torch.fmod`, which computes the element-wise remainder of
         division equivalently to the C library function ``fmod()``.
 
-        :func:`torch.remainder` uses rounded (to the nearest integer) value
-        of the quotient while :func:`torch.fmod` uses truncated (rounded
-        towards zero) value of the quotient.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
