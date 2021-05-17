@@ -104,7 +104,8 @@ struct TORCH_API LazyStreamContext {
   void waitForCurrentStreams(const std::vector<torch::Tensor>& tensors = {}) {
     for (const auto& tensor : tensors) {
       if (tensor.is_cuda()) {
-        getStream(tensor.device());
+        c10::Stream stream = getStream(tensor.device());
+        impl_.recordDataPtrOnStream(tensor.storage().data_ptr(), stream);
       }
     }
 
