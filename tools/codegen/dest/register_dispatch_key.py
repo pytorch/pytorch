@@ -11,11 +11,10 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
                                  TensorOptionsArguments,
                                  DeviceCheckType, Argument,
                                  assert_never,
-                                 is_cuda_dispatch_key,
-                                 is_structured_dispatch_key)
+                                 is_cuda_dispatch_key, BackendIndex)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
-                                     DispatcherSignature, Expr, MutRefCType,
+                                     Expr, MutRefCType,
                                      NativeSignature, tensorT, NamedCType)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
@@ -42,7 +41,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 #     directly to kernels, but with user-friendly cpp-style API
 @dataclass(frozen=True)
 class RegisterDispatchKey:
-    dispatch_key: DispatchKey
+    backend_index: BackendIndex
 
     target: Union[
         Literal[Target.ANONYMOUS_DEFINITION],
@@ -74,6 +73,8 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
+            # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
+            # gen_structured() has special logic to handle auto-generated kernels.
             if f.structured:
                 return self.gen_structured(f)
             else:
@@ -85,21 +86,20 @@ class RegisterDispatchKey:
             assert_never(f)
 
     def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
-        if self.dispatch_key == DispatchKey.Meta:
-            assert self.dispatch_key not in g.out.dispatch, \
+        metadata = self.backend_index.get_kernel(g)
+        if self.backend_index.dispatch_key == DispatchKey.Meta:
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
-            assert self.dispatch_key not in g.out.dispatch, \
+        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+            assert not self.backend_index.has_kernel(g.out), \
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif not is_structured_dispatch_key(self.dispatch_key):
+        elif metadata is None or not metadata.structured:
             return list(mapMaybe(self.gen_unstructured, g.functions()))
-        elif self.dispatch_key not in g.out.dispatch:
-            return []
 
         structured_gen = StructuredRegisterDispatchKey(
-            self.dispatch_key,
+            self.backend_index,
             self.target,
             self.selector,
             self.rocm,
@@ -110,12 +110,11 @@ class RegisterDispatchKey:
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         inplace_meta = False
-        if self.dispatch_key not in f.dispatch:
-            if (self.dispatch_key == DispatchKey.Meta and
+        if not self.backend_index.has_kernel(f):
+            if (self.backend_index.dispatch_key == DispatchKey.Meta and
                     f.func.kind() is SchemaKind.inplace and
                     # Defer to composites for meta implementation
-                    DispatchKey.CompositeImplicitAutograd not in f.dispatch and
-                    DispatchKey.CompositeExplicitAutograd not in f.dispatch and
+                    not f.has_composite_kernel and
                     # Inplace list operations are not supported
                     len(f.func.returns) == 1):
                 inplace_meta = True
@@ -167,12 +166,15 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-            impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
+            metadata = self.backend_index.get_kernel(f)
+            if metadata is None:
+                return None
+            impl_name = f"at::native::{metadata.kernel}"
 
             args_exprs_str = ', '.join(a.name for a in args)
 
             device_check = '  // No device check\n'
-            if is_cuda_dispatch_key(self.dispatch_key):
+            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
@@ -180,7 +182,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
             device_guard = "// DeviceGuard omitted"  # default
-            if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
+            if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
                     # kernel is creating a tensor
@@ -220,7 +222,6 @@ namespace {{
             if f.manual_kernel_registration:
                 return None
             else:
-                dispatcher_sig = DispatcherSignature.from_schema(f.func)
                 payload = f"TORCH_FN({name})"
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
@@ -256,7 +257,7 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 """
 
     def gen_class_set_output_body(self, k: SchemaKind) -> str:
-        if self.dispatch_key in [DispatchKey.CUDA, DispatchKey.CompositeExplicitAutograd]:
+        if self.backend_index.dispatch_key in [DispatchKey.CUDA, DispatchKey.CompositeExplicitAutograd]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
 if (C10_UNLIKELY(current_device.has_value())) {
@@ -271,7 +272,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
-            if self.dispatch_key == DispatchKey.Meta:
+            if self.backend_index.dispatch_key == DispatchKey.Meta:
                 # TODO: dedupe this with below
                 return """
 if (strides.empty()) {
@@ -283,13 +284,13 @@ if (strides.empty()) {
             else:
                 expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
                     "options.device_opt(), options.pinned_memory_opt()"
-                if self.dispatch_key == DispatchKey.CPU:
+                if self.backend_index.dispatch_key == DispatchKey.CPU:
                     empty_impl = "at::native::empty_cpu"
                     empty_strided_impl = "at::native::empty_strided_cpu"
-                elif self.dispatch_key == DispatchKey.CUDA:
+                elif self.backend_index.dispatch_key == DispatchKey.CUDA:
                     empty_impl = "at::native::empty_cuda"
                     empty_strided_impl = "at::native::empty_strided_cuda"
-                elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                     empty_impl = "at::empty"
                     empty_strided_impl = "at::empty_strided"
                 else:
@@ -352,12 +353,12 @@ if (resized) {{
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
 
-        if self.dispatch_key == DispatchKey.CUDA:
+        if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
                 guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
             else:
                 guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
-        elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             guard_field = 'c10::OptionalDeviceGuard guard_;'
         else:
             guard_field = ''
@@ -395,7 +396,7 @@ if (resized) {{
         # someone to implement one or the other.  We'd have to do a little bit
         # of work to not register one of these "weak" definitions unless there
         # is a strong definition somewhere in the DAG!  So it's not implemented yet.
-        if self.dispatch_key == DispatchKey.CompositeExplicitAutograd and f.func.kind() is SchemaKind.out:
+        if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd and f.func.kind() is SchemaKind.out:
             # Never generate a default implementation for out, that's what you
             # have to define as a backend implementor
             return None
@@ -441,18 +442,20 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # Initialize the class corresponding to this structured
             # operator; feeding it the output argument(s) if it is known
-            if self.dispatch_key is DispatchKey.Meta:
+            if self.backend_index.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
-            elif self.dispatch_key is DispatchKey.CompositeExplicitAutograd:
+            elif self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutograd:
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
             else:
-                class_name = f"structured_{self.g.out.dispatch[self.dispatch_key]}_{k.name}"
-                parent_class = f"at::native::structured_{self.g.out.dispatch[self.dispatch_key]}"
+                metadata = self.backend_index.get_kernel(self.g)
+                assert metadata is not None
+                class_name = f"structured_{metadata.kernel}_{k.name}"
+                parent_class = f"at::native::structured_{metadata.kernel}"
 
-            if is_cuda_dispatch_key(self.dispatch_key):
+            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
@@ -493,7 +496,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+            if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                 # TODO: https://github.com/pytorch/pytorch/issues/53023
                 out_sig_group = CppSignatureGroup.from_native_function(
                     self.g.out, method=False, fallback_binding=f.manual_cpp_binding)
@@ -517,7 +520,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # fetch and get the DispatchKeySet when you don't have it, but
                 # I didn't do it for this version
                 sig_body.append(f"at::{api_name}({out_exprs});")
-            elif self.dispatch_key != DispatchKey.Meta:
+            elif self.backend_index.dispatch_key != DispatchKey.Meta:
                 impl_exprs = ', '.join(
                     e.expr for e in translate(
                         context,
