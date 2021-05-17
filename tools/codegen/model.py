@@ -494,8 +494,8 @@ class NativeFunctionsGroup:
         return self.out.func.signature()
 
     def functions(self) -> Iterator[NativeFunction]:
-        yield self.out
         yield self.functional
+        yield self.out
         if self.inplace is not None:
             yield self.inplace
 
@@ -1453,6 +1453,11 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
+    return f.func.kind() is not SchemaKind.functional and \
+        not b.has_kernel(f) and \
+        b.has_kernel(g.functional)
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
