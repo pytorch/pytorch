@@ -234,6 +234,19 @@ class UnusedParamTwoLinLayerNet(nn.Module):
         b = self.b(x)
         return (a, b)
 
+class DictOutputModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.module = UnusedParamTwoLinLayerNet()
+
+    def forward(self, x):
+        predictions = self.module(x)
+        loss = (predictions[0] + predictions[1]).sum()
+        return {
+            "predictions": predictions,
+            "loss": loss,
+        }
+
 class TwoLinLayerNet(nn.Module):
 
     def __init__(self):
@@ -5822,11 +5835,8 @@ class DistributedTest:
                 )
                 dist.barrier()
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_output_unused_in_loss(self):
-            model = UnusedParamTwoLinLayerNet()
+        def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
+            model = module_cls()
             local_net = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(model).cuda(self.rank),
@@ -5842,8 +5852,12 @@ class DistributedTest:
             a_local_grad = None
             a_dist_grad = None
             for i in range(6):
-                a, b = local_net(inp)
-                a_dist, b_dist = net(inp)
+                if module_cls == DictOutputModule:
+                    a, b = local_net(inp)["predictions"]
+                    a_dist, b_dist = net(inp)["predictions"]
+                else:
+                    a, b = local_net(inp)
+                    a_dist, b_dist = net(inp)
                 if i < 2:
                     # Use both params in loss computation
                     t = a @ b
@@ -5851,20 +5865,28 @@ class DistributedTest:
                     loss = t.sum()
                     loss_dist = t_dist.sum()
                 else:
-                    # Model output unused in loss.
+                    # Model output "a" unused in loss.
                     loss = b.sum()
                     loss_dist = b_dist.sum()
                 loss.backward()
                 loss_dist.backward()
                 if i == 1:
                     # Save grads to compare with them in next iterations.
-                    a_local_grad = local_net.a.weight.grad
-                    a_dist_grad = net.module.a.weight.grad
+                    if module_cls == DictOutputModule:
+                        a_local_grad = local_net.module.a.weight.grad
+                        a_dist_grad = net.module.module.a.weight.grad
+                    else:
+                        a_local_grad = local_net.a.weight.grad
+                        a_dist_grad = net.module.a.weight.grad
                     self.assertEqual(a_local_grad, a_dist_grad)
                 elif i >= 2:
                     # parameter "a" of both models should be the same and not change
-                    self.assertEqual(net.module.a.weight.grad, a_dist_grad)
-                    self.assertEqual(local_net.a.weight.grad, a_local_grad)
+                    if module_cls == DictOutputModule:
+                        self.assertEqual(net.module.module.a.weight.grad, a_dist_grad)
+                        self.assertEqual(local_net.module.a.weight.grad, a_local_grad)
+                    else:
+                        self.assertEqual(net.module.a.weight.grad, a_dist_grad)
+                        self.assertEqual(local_net.a.weight.grad, a_local_grad)
 
                 # Verify grads are the same
                 for (local_param, dist_param) in zip(local_net.parameters(), net.parameters()):
@@ -5873,6 +5895,28 @@ class DistributedTest:
                     self.assertEqual(local_grad, dist_grad)
 
             dist.barrier()
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss_tuple_module(self):
+            module_cls = UnusedParamTwoLinLayerNet
+            for grad_as_bucket_view in [True, False]:
+                self._test_output_unused_in_loss(
+                    module_cls,
+                    grad_as_bucket_view
+                )
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss_dict_module(self):
+            module_cls = DictOutputModule
+            for grad_as_bucket_view in [True, False]:
+                self._test_output_unused_in_loss(
+                    module_cls,
+                    grad_as_bucket_view
+                )
 
         def _test_different_graph_across_ranks(self,
                                                find_unused_parameters=False,

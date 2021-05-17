@@ -474,7 +474,7 @@ void Reducer::delay_all_reduce() {
   // prepare to set unused_parameters_, if it is static graph,
   // unused_parameters_ will not change after 1st iteration.
   unused_parameters_.clear();
-  per_iteration_param_outputs_unused_.clear();
+
   // copy all gradients to buckets
   for (size_t replica_index = 0; replica_index < replicas_.size();
        replica_index++) {
@@ -520,14 +520,6 @@ void Reducer::autograd_hook(VariableIndex index) {
     return;
   }
 
-  // Due to adding passthrough autograd function in DDP forward pass, these
-  // parameters that were unused in loss computation still have autograd hooks
-  // fired, since the passthrough function receives 0 for all unused params.
-  // Short-circuit here to avoid retriggered the hook, which has already been
-  // called as this is an unused parameter.
-  if (per_iteration_param_outputs_unused_.find(index.variable_index) != per_iteration_param_outputs_unused_.end()) {
-    return;
-  }
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -1194,7 +1186,6 @@ void Reducer::prepare_for_backward(
   // and we don't have to search the autograd graph for presence of these hooks.
   if (dynamic_graph_find_unused()) {
     unused_parameters_.clear();
-    per_iteration_param_outputs_unused_.clear();
     search_unused_parameters(outputs);
   }
 }
@@ -1346,13 +1337,6 @@ void Reducer::save_thread_local_state() {
   // from forward pass to autograd engine hooks, and autograd engine takes care
   // of grad mode.
   thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
-}
-
-void Reducer::set_per_iteration_param_outputs_unused(const std::vector<size_t>& indices) {
-  TORCH_INTERNAL_ASSERT(per_iteration_param_outputs_unused_.empty());
-    for (auto & idx : indices) {
-      per_iteration_param_outputs_unused_.insert(idx);
-    }
 }
 
 void Reducer::finalize_backward() {

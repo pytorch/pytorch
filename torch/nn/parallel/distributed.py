@@ -126,34 +126,16 @@ class _DDPSink(Function):
         if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
             return (None, None, *grad_outputs)
-        # Check all state that indicates we need to find unused parameters.
-        find_unused = all([
-            state_dict['grad_enabled_in_fwd'],
-            state_dict['require_backward_grad_sync'],
-            state_dict['find_unused_parameters'],
-            (not static_graph_training)
-        ])
-        if find_unused:
+        if state_dict['find_unused'] and not static_graph_training:
             # First type of unused params: parameters that did not participate
-            # in computing model outputs.
+            # in computing model outputs. These are found by the below call to
+            # prepare_for_backward.
             # Second type of unused params: params that won't get gradient
             # because outputs they produced do not get used in computing loss
-            # for this call to backward.
-            used_inputs = []
-
-            outputs_unused_indices = []
-            for idx, inp in enumerate(ctx.inputs):
-                # Some inputs might not be tensors
-                if not isinstance(inp, torch.Tensor):
-                    continue
-
-                if grad_outputs[idx].sum() != torch.tensor(0, device=grad_outputs[idx].device):
-                    used_inputs.append(inp)
-                else:
-                    outputs_unused_indices.append(idx)
-
-            ctx.reducer.prepare_for_backward(used_inputs)
-            ctx.reducer.set_per_iteration_param_outputs_unused(outputs_unused_indices)
+            # for this call to backward. Due to this passthrough autograd
+            # function, autograd hooks for these parameters are now triggered
+            # with zero gradient to maintain parity with local training.
+            ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
 
         return (None, None, *grad_outputs)
 
@@ -835,23 +817,27 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            disable = False
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
-                if disable or not self.find_unused_parameters or self.static_graph:
-                    if self.find_unused_parameters:
-                        self.reducer.prepare_for_backward(list(_find_tensors(output)))
-                    else:
-                        self.reducer.prepare_for_backward([])
+                if self.static_graph or not self.find_unused_parameters:
+                    self.reducer.prepare_for_backward([])
             else:
                 self.require_forward_param_sync = False
 
-        if not disable and (self.find_unused_parameters and not self.static_graph) or (self.static_graph and self.num_iterations == 1):
+        # TODO: DDPSink is currently enabled for unused parameter detection and
+        # static graph training for first iteration, in the future we plan to
+        # enable this passthrough for all training use cases.
+        if (self.find_unused_parameters and not self.static_graph) or (
+            self.static_graph and self.num_iterations == 1
+        ):
+            find_unused = all([
+                torch.is_grad_enabled(),
+                self.require_backward_grad_sync,
+                self.find_unused_parameters,
+            ])
             state_dict = {
                 'static_graph': self.static_graph,
-                'grad_enabled_in_fwd': torch.is_grad_enabled(),
-                'require_backward_grad_sync': self.require_backward_grad_sync,
-                'find_unused_parameters': self.find_unused_parameters,
+                'find_unused': find_unused,
                 'num_iterations': self.num_iterations,
             }
             output_tensor_list, treespec = tree_flatten(output)
@@ -860,7 +846,7 @@ class DistributedDataParallel(Module):
                 state_dict,
                 *output_tensor_list,
             )
-            # Reconstruct output data structure
+            # Reconstruct output data structure.
             output = tree_unflatten(passthrough_tensor_list, treespec)
         return output
 
