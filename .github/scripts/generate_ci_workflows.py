@@ -17,7 +17,7 @@ class PyTorchWindowsWorkflow:
             self,
             build_environment: str,
             on_pull_request: bool = False
-    ):
+    ) -> None:
         self.build_environment = build_environment
         self.test_runner_type = self.CPU_TEST_RUNNER
         self.on_pull_request = on_pull_request
