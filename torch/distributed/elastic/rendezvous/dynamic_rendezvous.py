@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Set, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from torch.distributed import PrefixStore, Store
 
@@ -329,6 +329,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     _token: Token
     _dirty: bool
     _last_sync_time: float
+    _dead_nodes: List[_NodeDesc]
 
     def __init__(
         self, backend: RendezvousBackend, settings: RendezvousSettings, cache_duration: int = 1
@@ -340,6 +341,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         self._token = None
         self._dirty = False
         self._last_sync_time = -1
+        self._dead_nodes = []
 
     @property
     def state(self) -> _RendezvousState:
@@ -385,6 +387,14 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         else:
             self._state = _RendezvousState()
 
+        if has_set and self._dead_nodes and log.isEnabledFor(logging.DEBUG):
+            node_list = ", ".join(f"'{dead_node}'" for dead_node in self._dead_nodes)
+
+            log.debug(
+                f"As part of the sync operation the node(s) {node_list} have been removed from the "
+                f"rendezvous '{self._settings.run_id}' since they had no heartbeat."
+            )
+
         self._token = token
 
         self._dirty = False
@@ -401,13 +411,13 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         )
 
         # Filter out the dead nodes.
-        dead_nodes = [
+        self._dead_nodes = [
             node
             for node, last_heartbeat in self._state.last_heartbeats.items()
             if last_heartbeat < expire_time
         ]
 
-        for dead_node in dead_nodes:
+        for dead_node in self._dead_nodes:
             del self._state.last_heartbeats[dead_node]
 
             try:
@@ -621,8 +631,8 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
 
     def _add_to_wait_list(self) -> None:
         log.debug(
-            f"The '{self._node}' added itself to the wait list of round {self._state.round + 1} "
-            f"of the rendezvous '{self._settings.run_id}'. Pending sync."
+            f"The node '{self._node}' added itself to the wait list of round "
+            f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
         )
 
         self._state.wait_list.add(self._node)
@@ -1054,6 +1064,12 @@ def create_handler(
 ) -> DynamicRendezvousHandler:
     """Creates a new :py:class:`DynamicRendezvousHandler` from the specified
     parameters.
+
+    Args:
+        store:
+            The C10d store to return as part of the rendezvous.
+        backend:
+            The backend to use to hold the rendezvous state.
 
     +-------------------+------------------------------------------------------+
     | Parameter         | Description                                          |

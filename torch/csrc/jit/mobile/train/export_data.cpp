@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/mobile/export_data.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -65,21 +65,6 @@ class ScriptModuleSerializer {
 };
 
 } // namespace
-
-void _save_data(const Module& module, std::ostream& out) {
-  ScriptModuleSerializer serializer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  serializer.serialize(module._ivalue());
-}
-
-void _save_data(const Module& module, const std::string& filename) {
-  ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module._ivalue());
-}
-
 } // namespace mobile
 
 void _save_parameters(
