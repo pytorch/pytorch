@@ -56,7 +56,6 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
       {var(CF, {1}, true),
        var(CD, {1, 2}, false),
        var(GF, {}, true),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        var(GD, {4, 5, 6}, false),
        undef()});
 
@@ -68,7 +67,6 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
       {var(CF, {1}, true),
        var(CD, {1, 2}, false),
        var(GF, {}, true),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        var(GD, {4, 5, 6}, false),
        undef()});
   list2[1].toTensor().transpose_(0, 1);
@@ -153,7 +151,6 @@ TEST(ArgumentSpecTest, Basic_CUDA) {
       {var(CF, {1}, true),
        var(CD, {1, 2}, false),
        var(GF, {}, true),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        var(GD, {4, 5, 6}, false),
        undef()});
 
@@ -165,7 +162,6 @@ TEST(ArgumentSpecTest, Basic_CUDA) {
       {var(CF, {1}, true),
        var(CD, {1, 2}, false),
        var(GF, {}, true),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        var(GD, {4, 5, 6}, false),
        undef()});
   list2[1].toTensor().transpose_(0, 1);
