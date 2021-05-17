@@ -2700,10 +2700,10 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
     )
     return [SampleInput(tensor) for tensor in tensors]
 
-def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autodiffed_args=False, **kwargs):
+def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autodiffed=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    if autodiffed_args:
+    if autodiffed:
         samples = (
             ((S, S, S), 1.5, False),
             ((), 1.5, False),
@@ -4386,20 +4386,20 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_fmod_remainder),
     OpInfo('fmod',
-           variant_test_name='autodiffed_args',
+           variant_test_name='autodiffed',
            dtypes=all_types_and(torch.float16, torch.bool),
            assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed_args=True)),
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
     OpInfo('remainder',
            dtypesIfCPU=all_types_and(torch.float16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_fmod_remainder),
     OpInfo('remainder',
-           variant_test_name='autodiffed_args',
+           variant_test_name='autodiffed',
            dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
            assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed_args=True)),
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
