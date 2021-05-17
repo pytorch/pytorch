@@ -1,5 +1,5 @@
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UnfoldBackward.h>
 #include <ATen/native/cpu/Loops.h>
 

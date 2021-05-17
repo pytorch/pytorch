@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <c10/macros/Macros.h>
-#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
 
 using vbool8   =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) char;
 using vbool16  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) short;
@@ -86,79 +86,79 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 #define vec_not(a) vec_nor(a, a)
 
 #define DEFINE_MEMBER_UNARY_OP(op, op_type, func)     \
-  Vec256<op_type> C10_ALWAYS_INLINE op() const {      \
-    return Vec256<op_type>{func(_vec0), func(_vec1)}; \
+  Vectorized<op_type> C10_ALWAYS_INLINE op() const {      \
+    return Vectorized<op_type>{func(_vec0), func(_vec1)}; \
   }
 
 #define DEFINE_MEMBER_OP(op, op_type, func)                                  \
-  Vec256<op_type> C10_ALWAYS_INLINE op(const Vec256<op_type>& other) const { \
-    return Vec256<op_type>{                                                  \
+  Vectorized<op_type> C10_ALWAYS_INLINE op(const Vectorized<op_type>& other) const { \
+    return Vectorized<op_type>{                                                  \
         func(_vec0, other._vec0), func(_vec1, other._vec1)};                 \
   }
 
 #define DEFINE_MEMBER_BITWISE_OP(op, op_type, func)                          \
-  Vec256<op_type> C10_ALWAYS_INLINE op(const Vec256<op_type>& other) const { \
-    return Vec256<op_type>{                                                  \
+  Vectorized<op_type> C10_ALWAYS_INLINE op(const Vectorized<op_type>& other) const { \
+    return Vectorized<op_type>{                                                  \
         func(_vecb0, other._vecb0), func(_vecb1, other._vecb1)};             \
   }
 
 #define DEFINE_MEMBER_TERNARY_OP(op, op_type, func)                    \
-  Vec256<op_type> C10_ALWAYS_INLINE op(                                \
-      const Vec256<op_type>& b, const Vec256<op_type>& c) const {      \
-    return Vec256<op_type>{                                            \
+  Vectorized<op_type> C10_ALWAYS_INLINE op(                                \
+      const Vectorized<op_type>& b, const Vectorized<op_type>& c) const {      \
+    return Vectorized<op_type>{                                            \
         func(_vec0, b._vec0, c._vec0), func(_vec1, b._vec1, c._vec1)}; \
   }
 
 #define DEFINE_MEMBER_EMULATE_BINARY_OP(op, op_type, binary_op)          \
-  Vec256<op_type> C10_ALWAYS_INLINE op(const Vec256<op_type>& b) const { \
-    Vec256<op_type>::vec_internal_type ret_0;                         \
-    Vec256<op_type>::vec_internal_type ret_1;                         \
-    for (int i = 0; i < Vec256<op_type>::size() / 2; i++) {           \
+  Vectorized<op_type> C10_ALWAYS_INLINE op(const Vectorized<op_type>& b) const { \
+    Vectorized<op_type>::vec_internal_type ret_0;                         \
+    Vectorized<op_type>::vec_internal_type ret_1;                         \
+    for (int i = 0; i < Vectorized<op_type>::size() / 2; i++) {           \
       ret_0[i] = _vec0[i] binary_op b._vec0[i];                       \
       ret_1[i] = _vec1[i] binary_op b._vec1[i];                       \
     }                                                                 \
-    return Vec256<op_type>{ret_0, ret_1};                             \
+    return Vectorized<op_type>{ret_0, ret_1};                             \
   }
 
 
 #define DEFINE_MEMBER_OP_AND_ONE(op, op_type, func)                          \
-  Vec256<op_type> C10_ALWAYS_INLINE op(const Vec256<op_type>& other) const { \
-    using vvtype = Vec256<op_type>::vec_internal_type;                       \
+  Vectorized<op_type> C10_ALWAYS_INLINE op(const Vectorized<op_type>& other) const { \
+    using vvtype = Vectorized<op_type>::vec_internal_type;                       \
     const vvtype v_one = vec_splats(static_cast<op_type>(1.0));              \
     vvtype ret0 = (vvtype)func(_vec0, other._vec0);                          \
     vvtype ret1 = (vvtype)func(_vec1, other._vec1);                          \
-    return Vec256<op_type>{vec_and(ret0, v_one), vec_and(ret1, v_one)};      \
+    return Vectorized<op_type>{vec_and(ret0, v_one), vec_and(ret1, v_one)};      \
   }
 
 #define DEFINE_CLAMP_FUNCS(operand_type)                                \
   template <>                                                           \
-  Vec256<operand_type> C10_ALWAYS_INLINE clamp(                         \
-      const Vec256<operand_type>& a,                                    \
-      const Vec256<operand_type>& min,                                  \
-      const Vec256<operand_type>& max) {                                \
-    return Vec256<operand_type>{                                        \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp(                         \
+      const Vectorized<operand_type>& a,                                    \
+      const Vectorized<operand_type>& min,                                  \
+      const Vectorized<operand_type>& max) {                                \
+    return Vectorized<operand_type>{                                        \
         vec_min(max.vec0(), vec_max(a.vec0(), min.vec0())),             \
         vec_min(max.vec1(), vec_max(a.vec1(), min.vec1()))};            \
   }                                                                     \
   template <>                                                           \
-  Vec256<operand_type> C10_ALWAYS_INLINE clamp_min(                     \
-      const Vec256<operand_type>& a, const Vec256<operand_type>& min) { \
-    return Vec256<operand_type>{                                        \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_min(                     \
+      const Vectorized<operand_type>& a, const Vectorized<operand_type>& min) { \
+    return Vectorized<operand_type>{                                        \
         vec_max(a.vec0(), min.vec0()), vec_max(a.vec1(), min.vec1())};  \
   }                                                                     \
   template <>                                                           \
-  Vec256<operand_type> C10_ALWAYS_INLINE clamp_max(                     \
-      const Vec256<operand_type>& a, const Vec256<operand_type>& max) { \
-    return Vec256<operand_type>{                                        \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_max(                     \
+      const Vectorized<operand_type>& a, const Vectorized<operand_type>& max) { \
+    return Vectorized<operand_type>{                                        \
         vec_min(a.vec0(), max.vec0()), vec_min(a.vec1(), max.vec1())};  \
   }
 
 #define DEFINE_REINTERPRET_CAST_FUNCS(                             \
     first_type, cast_type, cast_inner_vector_type)                 \
   template <>                                                      \
-  C10_ALWAYS_INLINE Vec256<cast_type> cast<cast_type, first_type>( \
-      const Vec256<first_type>& src) {                                 \
-    return Vec256<cast_type>{(cast_inner_vector_type)src.vec0(),       \
+  C10_ALWAYS_INLINE Vectorized<cast_type> cast<cast_type, first_type>( \
+      const Vectorized<first_type>& src) {                                 \
+    return Vectorized<cast_type>{(cast_inner_vector_type)src.vec0(),       \
                              (cast_inner_vector_type)src.vec1()};      \
   }
 
@@ -276,7 +276,7 @@ constexpr vbool64 VsxComplexDblMask2(uint32_t mask) {
 
 // constants
 namespace at {
-namespace vec256 {
+namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 //
@@ -384,5 +384,5 @@ const vfloat64 vd_sqrt2_2 = vfloat64{0.70710678118654757, 0.70710678118654757};
 const vfloat64 vd_pi_2 = vfloat64{M_PI / 2.0, 0.0};
 
 } // namespace
-} // namespace vec256
+} // namespace vec
 } // namespace at

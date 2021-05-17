@@ -746,7 +746,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     //       or only for strided access to the grid tensor
     auto max_gather_offset = std::max(
       (sizes[2] - 1) * strides[2] + (sizes[3] - 1) * strides[3],
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback(
@@ -793,7 +793,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
       std::max(
         (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
         (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback_backward(
