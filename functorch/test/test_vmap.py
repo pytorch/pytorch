@@ -1395,6 +1395,24 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
+    def test_nll_loss(self):
+        test = self._vmap_test
+        op = F.nll_loss
+        B = 3
+
+        y = torch.randn(B, 2, 5)
+        t = torch.randint(0, 5, (B, 2))
+        test(op, (y, t))
+        test(functools.partial(op, reduction='sum'), (y, t))
+        test(functools.partial(op, reduction='none'), (y, t))
+
+        y = torch.randn(B, 2, 5)
+        t = torch.randint(0, 5, (2,))
+        test(op, (y, t), in_dims=(0, None))
+        test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
+        test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
+
+
     def test_bmm(self):
         op = torch.bmm
         test = self._vmap_test
