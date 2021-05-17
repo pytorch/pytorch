@@ -356,7 +356,7 @@ jit_sources_full = [
 libtorch_core_jit_sources = sorted(jit_sources_full)
 
 torch_mobile_core = [
-    # backend_debug_info.cpp provides 
+    # backend_debug_info.cpp provides
     # __torch__.torch.classes.backend.BackendDebugInfo class
     # This should not be needed eventually.
     # TODO: Remove this dependency
