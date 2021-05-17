@@ -3446,6 +3446,11 @@ Tensor i1_backward(
     // So we manually update gradient for x=0
     auto eps = std::numeric_limits<scalar_t>::epsilon();
     auto self_is_not_tiny = self.abs() > eps;
+
+    // Following `where` is needed as `where` computes gradients,
+    // even for the part which didn't affect the output.
+    // Look at https://github.com/pytorch/pytorch/issues/52248
+    // Update if and when this is fixed.
     auto safe_self =
         at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
     auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
@@ -3464,6 +3469,11 @@ Tensor i1e_backward(
     // So we manually update gradient for x=0
     auto eps = std::numeric_limits<scalar_t>::epsilon();
     auto self_is_not_tiny = self.abs() > eps;
+
+    // Following `where` is needed as `where` computes gradients,
+    // even for the part which didn't affect the output.
+    // Look at https://github.com/pytorch/pytorch/issues/52248
+    // Update if and when this is fixed.
     auto safe_self =
         at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
     auto gradx =
