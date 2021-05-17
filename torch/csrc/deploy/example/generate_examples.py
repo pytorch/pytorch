@@ -15,6 +15,7 @@ except ImportError:
 def save(name, model, model_jit, eg):
     with PackageExporter(str(p / name)) as e:
         e.mock('iopath.**')
+        e.intern('**')
         e.save_pickle('model', 'model.pkl', model)
         e.save_pickle('model', 'example.pkl', eg)
     model_jit.save(str(p / (name + '_jit')))
