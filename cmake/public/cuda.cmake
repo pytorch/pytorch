@@ -272,6 +272,33 @@ else()
       ${LIBNVTOOLSEXT})
 endif()
 
+# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cublas INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+      # Add explicit dependency to cudart_static to fix
+      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
+      # error adding symbols: DSO missing from command line
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_cudart_static_LIBRARY}" rt dl)
+    endif()
+else()
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUBLAS_LIBRARIES})
+endif()
+set_property(
+    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
 if(CAFFE2_USE_CUDNN)
@@ -345,33 +372,6 @@ if(CAFFE2_USE_TENSORRT)
       TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${TENSORRT_INCLUDE_DIR})
 endif()
-
-# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
-# interface library similar to cudart.
-add_library(caffe2::cublas INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
-      # Add explicit dependency to cudart_static to fix
-      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
-      # error adding symbols: DSO missing from command line
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_cudart_static_LIBRARY}" rt dl)
-    endif()
-else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
-endif()
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
 # nvrtc
 add_library(caffe2::nvrtc UNKNOWN IMPORTED)
