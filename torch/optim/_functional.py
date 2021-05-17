@@ -322,3 +322,47 @@ def adamax(params: List[Tensor],
         clr = lr / bias_correction
 
         param.addcdiv_(exp_avg, exp_inf, value=-clr)
+
+
+def asgd(params: List[Tensor],
+         grads: List[Tensor],
+         mus: List[Tensor],
+         axs: List[Tensor],
+         etas: List[Tensor],
+         state_steps: List[int],
+         *,
+         lr: float,
+         weight_decay: float,
+         alpha: float,
+         t0: float,
+         lambd: float):
+    r"""Functional API that performs asgd algorithm computation.
+
+    See :class:`~torch.optim.ASGD` for details.
+    """
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        mu = mus[i]
+        ax = axs[i]
+        eta = etas[i]
+        step = state_steps[i]
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # decay term
+        param.mul_(1 - lambd * eta)
+
+        # update parameter
+        param.add_(grad, alpha=-eta)
+
+        # averaging
+        if mu != 1:
+            ax.add_(param.sub(ax).mul(mu))
+        else:
+            ax.copy_(param)
+
+        # update eta and mu
+        eta = (lr / math.pow((1 + lambd * lr * step), alpha))
+        mu = 1 / max(1, step - t0)
