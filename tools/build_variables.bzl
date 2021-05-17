@@ -392,7 +392,6 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/mobile/backport.cpp",
     "torch/csrc/jit/mobile/backport_manager.cpp",
-    "torch/csrc/jit/mobile/export_data.cpp",
     # To be included for eager symbolication in lite interpreter
     # when it is built in libtorch
     "torch/csrc/jit/mobile/debug_info.cpp",
@@ -402,12 +401,13 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/observer.cpp",
-    "torch/csrc/jit/mobile/optim/sgd.cpp",
-    "torch/csrc/jit/mobile/random.cpp",
-    "torch/csrc/jit/mobile/sequential.cpp",
     "torch/csrc/jit/mobile/nnc/context.cpp",
     "torch/csrc/jit/mobile/nnc/registry.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
+    "torch/csrc/jit/mobile/train/export_data.cpp",
+    "torch/csrc/jit/mobile/train/optim/sgd.cpp",
+    "torch/csrc/jit/mobile/train/random.cpp",
+    "torch/csrc/jit/mobile/train/sequential.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
@@ -794,7 +794,6 @@ aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
 aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/Activation.cpp",
-    "aten/src/ATen/native/cpu/AvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",
@@ -1035,6 +1034,9 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
     "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
+    "aten/src/ATen/nnapi/nnapi_bind.cpp",
+    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
+    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions
