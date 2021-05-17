@@ -262,8 +262,9 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-.. note:: If :attr:`A` is on a CUDA device then this function may synchronize
-that device with the CPU.
+.. note::
+    If :attr:`A` is on a CUDA device then this function may synchronize
+    that device with the CPU.
 
 .. warning:: This function is "experimental" and it may change in a future PyTorch release.
 
