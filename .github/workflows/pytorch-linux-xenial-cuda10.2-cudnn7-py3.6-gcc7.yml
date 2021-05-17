@@ -5,7 +5,6 @@ name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-
   push:
     branches:
       - master
@@ -31,6 +30,10 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
