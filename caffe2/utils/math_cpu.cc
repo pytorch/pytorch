@@ -2042,7 +2042,6 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],
@@ -2383,7 +2382,6 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NHWC>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],
@@ -2672,7 +2670,6 @@ C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NHWC>(
         pad[2],
         pad[3],
         pad[4],
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         pad[5],
         stride[0],
         stride[1],

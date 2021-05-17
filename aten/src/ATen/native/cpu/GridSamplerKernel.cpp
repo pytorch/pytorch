@@ -276,13 +276,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
   ComputeLocationBase(int64_t size)
     : max_val(static_cast<scalar_t>(size - 1))
     , scaling_factor(static_cast<scalar_t>(size) / 2)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     , low(static_cast<scalar_t>(-0.5))
     , twice_span(static_cast<scalar_t>(size) * 2)
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
   }
 
@@ -544,25 +542,16 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto interp_params = compute_interp_params(x, y);
 
     auto nw = std::get<4>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne = std::get<5>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw = std::get<6>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se = std::get<7>(interp_params);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto nw_mask = std::get<8>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne_mask = std::get<9>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw_mask = std::get<10>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se_mask = std::get<11>(interp_params);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_y_n = std::get<12>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_x_w = std::get<13>(interp_params);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
@@ -838,14 +827,12 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
     x = tx;           // x = |0 - tx| <= 1
     coeffs[1] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
   }
 
@@ -854,14 +841,12 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients_grad(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
     x = Vec(0) - tx;  // x = |0 - tx| <= 1
     coeffs[1] = (Vec(-3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = (Vec(3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
@@ -1220,7 +1205,6 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 10 /* 2d * 5 tensors*/);
 
 #define HANDLE_CASE(interp, padding, align_corners)                              \
