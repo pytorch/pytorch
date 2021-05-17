@@ -145,7 +145,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
   auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
 
   return future->then(
-      [](JitFuture& future) { return ScriptResp(future.value()).toMessage(); },
+      [](JitFuture& future) {
+        return withDataPtrs(ScriptResp(future.value()).toMessage());
+      },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
@@ -195,7 +197,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
           ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(future.value());
         }
-        return RemoteRet(rrefId, forkId).toMessage();
+        return withDataPtrs(RemoteRet(rrefId, forkId).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -251,7 +253,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [](JitFuture& future) {
-        return ScriptRRefFetchRet({future.value()}).toMessage();
+        return withDataPtrs(ScriptRRefFetchRet({future.value()}).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -356,7 +358,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
               fromWorkerId,
               wrappedRpcResponseFuture.value().toCustomClass<Message>(),
               MessageType::FORWARD_AUTOGRAD_RESP);
-          return msg;
+          return withDataPtrs(std::move(msg));
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -387,7 +389,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   // Our response is satisfied when the rpcs come back.
   return execFuture->then(
       [](JitFuture& execFuture) {
-        return PropagateGradientsResp().toMessage();
+        return withDataPtrs(PropagateGradientsResp().toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -476,7 +478,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                 wrappedRpcResponseFuture.value().toCustomClass<Message>(),
                 profiledEvents,
                 profilingKeyId);
-            return std::move(*rpcWithProfilingResp).toMessage();
+            return withDataPtrs(std::move(*rpcWithProfilingResp).toMessage());
           }
         }),
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -604,9 +606,12 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     c10::intrusive_ptr<Message> message) const {
-  return asFuture(
-      std::move(message),
+  auto future = c10::make_intrusive<JitFuture>(
       at::getCustomClassType<c10::intrusive_ptr<Message>>());
+  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs =
+      message->getDataPtrs();
+  future->markCompleted(std::move(message), std::move(dataPtrs));
+  return future;
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
