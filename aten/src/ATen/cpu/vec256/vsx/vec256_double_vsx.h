@@ -359,14 +359,6 @@ class Vec256<double> {
     return map(calc_i0e);
   }
 
-  Vec256<double> i1() const {
-    return map(calc_i1);
-  }
-
-  Vec256<double> i1e() const {
-    return map(calc_i1e);
-  }
-
   Vec256<double> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
