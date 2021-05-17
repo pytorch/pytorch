@@ -3157,6 +3157,7 @@ def index_add(g, self, dim, index, other):
 
     return scatter_add(g, self, dim, expand_as(g, index, other), other)
 
+
 @parse_args('v', 'is', 'is')
 def roll(g, self, shifts, dims):
     assert len(shifts) == len(dims)
