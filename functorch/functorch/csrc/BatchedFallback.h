@@ -31,7 +31,7 @@ template <typename A, typename B> std::tuple<A, B> vector_to_result(const std::v
   return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>());
 }
 template <typename A, typename B, typename C> std::tuple<A, B, C> vector_to_result(const std::vector<IValue>& buffer) {
-  return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>(), buffer[2].to<B>);
+  return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>(), buffer[2].to<B>());
 }
 
 // This is a way to call the slow fallback from inside some plumbing
