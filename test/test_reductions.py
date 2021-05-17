@@ -13,7 +13,7 @@ import warnings
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS)
+    IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
@@ -2086,10 +2086,10 @@ class TestReductions(TestCase):
                 return
             self.fail("Failed to hit RuntimeError!")
 
-        self.assertEqual(torch_result, numpy_result, exact_dtype=False)
+        exact_dtype = input.dtype != torch.bfloat16
+        self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
-    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2100,8 +2100,7 @@ class TestReductions(TestCase):
                                  (False, True),):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
-    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2111,6 +2110,136 @@ class TestReductions(TestCase):
                                  (False, True),
                                  (False, True),):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
+
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_var_correction_vs_numpy(self, device, dtype):
+        _size = (20, 20)
+        test_args = [
+            *product(
+                # dim
+                (None, 0, 1),
+                # correction
+                (None, 0, 10, 30),
+                # keepdim
+                (False, True),
+            ),
+            [None, -100, True],  # Negative correction
+        ]
+
+        tensor = make_tensor(_size, device=device, dtype=dtype)
+        array = tensor.cpu().numpy()
+
+        for dim, correction, keepdim in test_args:
+            numpy_kwargs = dict(axis=dim, ddof=correction, keepdims=keepdim)
+            if correction is None:
+                # NumPy default is not compatible with torch.std (gh-50010)
+                numpy_kwargs['ddof'] = 1
+
+            numpy_res = np.asarray(np.var(array, **numpy_kwargs))
+            torch_res = torch.var(tensor, dim=dim, correction=correction, keepdim=keepdim)
+
+            # inf vs. nan results are sensitive to machine precision,
+            # just treat them as equivalent
+            numpy_res[np.isinf(numpy_res)] = np.nan
+            torch_res[torch_res.isinf()] = np.nan
+
+            self.assertEqual(torch_res, numpy_res)
+
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_std_correction_vs_numpy(self, device, dtype):
+        _size = (20, 20)
+        test_args = [
+            *product(
+                # dim
+                (None, 0, 1),
+                # correction
+                (None, 0, 10, 30),
+                # keepdim
+                (False, True),
+            ),
+            [None, -100, True],  # Negative correction
+        ]
+
+        tensor = make_tensor(_size, device=device, dtype=dtype)
+        array = tensor.cpu().numpy()
+
+        for dim, correction, keepdim in test_args:
+            numpy_kwargs = dict(axis=dim, ddof=correction, keepdims=keepdim)
+            if correction is None:
+                # NumPy default is incompatible with torch.std (gh-50010)
+                numpy_kwargs['ddof'] = 1
+
+            numpy_res = np.asarray(np.std(array, **numpy_kwargs))
+            torch_res = torch.std(tensor, dim=dim, correction=correction, keepdim=keepdim)
+
+            # inf vs. nan results are sensitive to machine precision,
+            # just treat them as equivalent
+            numpy_res[np.isinf(numpy_res)] = np.nan
+            torch_res[torch_res.isinf()] = np.nan
+
+            self.assertEqual(torch_res, numpy_res)
+
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_std_mean_correction(self, device, dtype):
+        _size = (20, 20)
+        test_args = [
+            *product(
+                # dim
+                (None, 0, 1),
+                # correction
+                (None, 0, 10, 30),
+                # keepdim
+                (False, True),
+            ),
+            [None, -100, True],  # Negative correction
+        ]
+
+        tensor = make_tensor(_size, device=device, dtype=dtype)
+
+        for dim, correction, keepdim in test_args:
+            kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
+            std1 = torch.std(tensor, **kwargs)
+            if dim is not None:
+                mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)
+            else:
+                mean1 = torch.mean(tensor)
+                if keepdim:
+                    mean1 = mean1.reshape((1,) * tensor.ndim)
+            std2, mean2 = torch.std_mean(tensor, **kwargs)
+
+            self.assertEqual(std1, std2)
+            self.assertEqual(mean1, mean2)
+
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_var_mean_correction(self, device, dtype):
+        _size = (20, 20)
+        test_args = [
+            *product(
+                # dim
+                (None, 0, 1),
+                # correction
+                (None, 0, 10, 30),
+                # keepdim
+                (False, True),
+            ),
+            [None, -100, True],  # Negative correction
+        ]
+
+        tensor = make_tensor(_size, device=device, dtype=dtype)
+
+        for dim, correction, keepdim in test_args:
+            kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
+            var1 = torch.var(tensor, **kwargs)
+            if dim is not None:
+                mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)
+            else:
+                mean1 = torch.mean(tensor)
+                if keepdim:
+                    mean1 = mean1.reshape((1,) * tensor.ndim)
+            var2, mean2 = torch.var_mean(tensor, **kwargs)
+
+            self.assertEqual(var1, var2)
+            self.assertEqual(mean1, mean2)
 
     def test_amin_amax_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
