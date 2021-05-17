@@ -491,34 +491,38 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
+    def sample(name, t):
+        t.requires_grad = requires_grad
+        return SampleInput(t, name=name)
+
     kw = dict(device=device, dtype=dtype)
-    inputs = [
-        make_tensor((S, S), **kw),
-        make_tensor((1, 1), **kw),  # 1x1
-        random_symmetric_matrix(S, **kw),  # symmetric
-        random_symmetric_psd_matrix(S, **kw),  # symmetric_psd
-        random_symmetric_pd_matrix(S, **kw),  # symmetric_pd
+    samples = [
+        sample('SxS', make_tensor((S, S), **kw)),
+        sample('1x1', make_tensor((1, 1), **kw)),
+        sample('symmetric', random_symmetric_matrix(S, **kw)),
+        sample('symmetric_pds', random_symmetric_psd_matrix(S, **kw)),
+        sample('symmetric_pd', random_symmetric_pd_matrix(S, **kw)),
 
         # dim2_null, rank1 and rank2 are disabled because of
         # https://github.com/pytorch/pytorch/issues/53364
         # we should re-enable them once the issue is solved
-        # random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
-        # random_square_matrix_of_rank(S, 1, **kw),  # rank1
-        # random_square_matrix_of_rank(S, 2, **kw),  # rank2
+        # sample('dim2_null', random_square_matrix_of_rank(S, S - 2, **kw)),
+        # sample('rank1', random_square_matrix_of_rank(S, 1, **kw)),
+        # sample('rank2', random_square_matrix_of_rank(S, 2, **kw)),
 
-        random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
-        make_tensor((3, 3, S, S), **kw),  # batched
-        make_tensor((3, 3, 1, 1), **kw),  # batched_1x1
-        random_symmetric_matrix(S, 3, **kw),  # batched_symmetric
-        random_symmetric_psd_matrix(S, 3, **kw),  # batched_symmetric_psd
-        random_symmetric_pd_matrix(S, 3, **kw),  # batched_symmetric_pd
-        random_fullrank_matrix_distinct_singular_value(S, 3, 3, **kw),  # batched_distinct_singular_values
-        make_tensor((0, 0), **kw),
-        make_tensor((0, S, S), **kw),
+        sample('distinct_singular_value',
+               random_fullrank_matrix_distinct_singular_value(S, **kw)),
+        sample('batched', make_tensor((3, 3, S, S), **kw)),
+        sample('batched_1x1', make_tensor((3, 3, 1, 1), **kw)),
+        sample('batched_symmetric', random_symmetric_matrix(S, 3, **kw)),
+        sample('batched_symmetric_psd', random_symmetric_psd_matrix(S, 3, **kw)),
+        sample('batched_symmetric_pd', random_symmetric_pd_matrix(S, 3, **kw)),
+        sample('batched_distinct_singular_values',
+               random_fullrank_matrix_distinct_singular_value(S, 3, 3, **kw)),
+        sample('0x0', make_tensor((0, 0), **kw)),
+        sample('0xSxS', make_tensor((0, S, S), **kw)),
     ]
-    for t in inputs:
-        t.requires_grad = requires_grad
-    return [SampleInput(t) for t in inputs]
+    return samples
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
     # (<matrix_size>, (<batch_sizes, ...>))
