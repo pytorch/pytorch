@@ -475,8 +475,11 @@ def maybe_insert_observers_before_graph_output(
     graph: Graph,
 ) -> None:
     """
-
+    If the output needs to be quantized and there are any nodes
+    in the output which are not already observed, inserts obserervers
+    for those nodes.
     """
+
     # TODO(future PR): update the output_quantized_idxs API to match
     # arbitrary data structures. There is always a single output, and
     # that output can have arbitrary nesting of values. List[int] is
@@ -492,14 +495,14 @@ def maybe_insert_observers_before_graph_output(
     output_target_dtype = torch.quint8
 
     def _recursive_maybe_replace_node_with_obs(
-        maybe_node: Any,
+        maybe_node: Argument,
         target_dtype: torch.dtype,
         node_name_to_target_dtype: Dict[str, torch.dtype],
         qconfig_map: Dict[str, QConfigAny],
         model: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         graph: Graph,
-    ) -> Any:
+    ) -> Argument:
         """
         Navigate an arbitrary data structure of lists, tuples, dicts.
         For each container type, recurse on all inputs. Once any Node
