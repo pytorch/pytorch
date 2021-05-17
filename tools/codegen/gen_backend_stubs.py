@@ -170,15 +170,56 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             ))),
         })
 
+        external_backend_headers = '''\
+#include <tensorflow/compiler/xla/xla_client/debug_macros.h>
+#include <tensorflow/compiler/xla/xla_client/metrics.h>
+#include <tensorflow/compiler/xla/xla_client/tf_logging.h>
+#include <torch_xla/csrc/function_call_tracker.h>
+#include <torch_xla/csrc/aten_xla_type.h>
+#include <torch_xla/csrc/aten_xla_type_default.h>'''
+
+        for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
+            fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
+                'extra_cuda_headers': '',
+                'legacy_th_headers': '',
+                'external_backend_headers': external_backend_headers,
+                'DispatchKey': dispatch_key,
+                'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_namespaced_definitions': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        backend_indices[dispatch_key],
+                        Target.NAMESPACED_DEFINITION,
+                        selector,
+                        rocm=False,
+                        cpp_namespace=cpp_namespace),
+                    grouped_native_functions
+                )),
+                'dispatch_anonymous_definitions': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        backend_indices[dispatch_key],
+                        Target.ANONYMOUS_DEFINITION,
+                        selector,
+                        rocm=False,
+                        cpp_namespace=cpp_namespace),
+                    grouped_native_functions
+                )),
+                'dispatch_registrations': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        backend_indices[dispatch_key],
+                        Target.REGISTRATION,
+                        selector,
+                        rocm=False,
+                        cpp_namespace=cpp_namespace),
+                    grouped_native_functions
+                )),
+            })
+
         fm.write('aten_xla_type_default.h', lambda: {
             'generated_comment': generated_comment,
             'cpp_namespace': cpp_namespace,
             'dispatch_aten_fallback_declarations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_kernel(g)]
-            )) + list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[autograd_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_kernel(g)]
+                grouped_native_functions
             )),
         })
 
@@ -189,18 +230,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             # merge registrations / definitions into RegisterDispatchKey
             'dispatch_aten_fallback_definitions': list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_kernel(g)]
-            )) + list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[autograd_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_kernel(g)]
+                grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_kernel(g)]
-            )),
-            'dispatch_autograd_registrations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[autograd_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_kernel(g)]
+                grouped_native_functions
             )),
         })
 
