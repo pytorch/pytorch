@@ -28,7 +28,7 @@ from .gen_python_functions import should_generate_py_binding, is_py_torch_functi
     is_py_nn_function, is_py_linalg_function, is_py_variable_method
 
 def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
     mappings = (
         (is_py_torch_function, 'torch._C._VariableFunctions'),
         (is_py_nn_function, 'torch._C._nn'),
