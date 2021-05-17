@@ -57,11 +57,9 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   options = empty(5, getDeprecatedTypeProperties(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
@@ -69,7 +67,6 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
     Tensor tensor;
     {
       DeviceGuard guard(CUDADevice(1));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       tensor = empty(5, device(kCUDA));
     }
     options = tensor.options();
@@ -77,7 +74,6 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
 
     {
       DeviceGuard guard(CUDADevice(1));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
     options = tensor.options();
