@@ -770,7 +770,8 @@ class DistributedDataParallel(Module):
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            grad_enabled = torch.is_grad_enabled()
+            if grad_enabled and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
@@ -801,7 +802,7 @@ class DistributedDataParallel(Module):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+            if grad_enabled and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
 
             if self.require_forward_param_sync:
@@ -817,7 +818,7 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            if grad_enabled and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
                 if self.static_graph or not self.find_unused_parameters:
                     self.reducer.prepare_for_backward([])
@@ -831,7 +832,7 @@ class DistributedDataParallel(Module):
             self.static_graph and self.num_iterations == 1
         ):
             find_unused = all([
-                torch.is_grad_enabled(),
+                grad_enabled,
                 self.require_backward_grad_sync,
                 self.find_unused_parameters,
             ])
