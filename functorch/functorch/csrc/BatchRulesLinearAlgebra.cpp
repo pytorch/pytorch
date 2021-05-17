@@ -108,12 +108,25 @@ static std::tuple<Tensor, optional<int64_t>> mm_batch_rule(
   return { at::matmul(self_, other_), 0 };
 }
 
+Tensor linear_decomp(
+    const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt) {
+  auto result = input.matmul(weight.t());
+  if (bias_opt) {
+    // NB: It's too much work to figure out how to actually fuse the bias so
+    // we're not going to.
+    result.add_(*bias_opt);
+  }
+  return result;
+}
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("slogdet", slogdet_batch_rule);
   VMAP_SUPPORT("dot", dot_batch_rule);
   VMAP_SUPPORT("mv", mv_batch_rule);
   VMAP_SUPPORT("mm", mm_batch_rule);
+
+  m.impl("linear", linear_decomp);
 }
 }}
 
