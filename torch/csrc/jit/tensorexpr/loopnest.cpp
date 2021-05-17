@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <typeinfo>
 #include <unordered_map>
@@ -1056,6 +1057,18 @@ bool isConditionalFromCat(
   return false;
 }
 
+bool areConstantsAndSorted(const std::vector<const Expr*>& comp_values) {
+  std::vector<int> comp_consts;
+  comp_consts.reserve(comp_values.size());
+  for (auto c : comp_values) {
+    if (!c->isConstant()) {
+      return false;
+    }
+    comp_consts.push_back(immediateAs<int>(c));
+  }
+  return std::is_sorted(comp_consts.begin(), comp_consts.end());
+}
+
 } // namespace
 
 bool LoopNest::optimizeConditionals() {
@@ -1122,6 +1135,11 @@ bool LoopNest::optimizeConditionals() {
     // `comp_values` needs to include the end bound, which is `for_to_split`
     // stop value.
     comp_values.push_back(for_to_split->stop());
+
+    // Check if all `comp_values` are constants and they are sorted.
+    if (!areConstantsAndSorted(comp_values)) {
+      continue;
+    }
 
     // Remove all the if-then-else expressions from this store and create
     // one loop per sub-expression.
