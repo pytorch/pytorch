@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/mobile/export_data.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
