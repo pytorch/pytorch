@@ -12,19 +12,22 @@ AZURE_DEVOPS_PAT_BASE64 = os.environ.get("AZURE_DEVOPS_PAT_BASE64_SECRET", "")
 PIPELINE_ID = "911"
 PROJECT_ID = "0628bce4-2d33-499e-bac5-530e12db160f"
 TARGET_BRANCH = os.environ.get("CIRCLE_BRANCH", "master")
+TARGET_COMMIT = os.environ.get("CIRCLE_SHA1", "")
 
 build_base_url = AZURE_PIPELINE_BASE_URL + "_apis/build/builds?api-version=6.0"
 
 s = requests.Session()
 s.headers.update({"Authorization": "Basic " + AZURE_DEVOPS_PAT_BASE64})
 
-def submit_build(pipeline_id, project_id, source_branch):
+def submit_build(pipeline_id, project_id, source_branch, source_version):
     print("Submitting build for branch: " + source_branch)
+    print("Commit SHA1: ", source_version)
 
     run_build_raw = s.post(build_base_url, json={
         "definition": {"id": pipeline_id},
         "project": {"id": project_id},
-        "sourceBranch": source_branch
+        "sourceBranch": source_branch,
+        "sourceVersion": source_version
     })
 
     try:
@@ -61,8 +64,13 @@ def wait_for_build(_id):
     while build_status == 'notStarted':
         print('Waiting for run to start: ' + str(_id))
         sys.stdout.flush()
-        build_detail = get_build(_id)
-        build_status = build_detail['status']
+        try:
+            build_detail = get_build(_id)
+            build_status = build_detail['status']
+        except Exception as e:
+            print("Error getting build")
+            print(e)
+
         time.sleep(30)
 
     print("Bulid started: ", str(_id))
@@ -84,8 +92,12 @@ def wait_for_build(_id):
                 continue
             handled_logs.add(log_id)
             print('Fetching log: \n' + log['url'])
-            log_content = get_log_content(log['url'])
-            print(log_content)
+            try:
+                log_content = get_log_content(log['url'])
+                print(log_content)
+            except Exception as e:
+                print("Error getting log content")
+                print(e)
             sys.stdout.flush()
         build_detail = get_build(_id)
         build_status = build_detail['status']
@@ -107,11 +119,11 @@ if __name__ == '__main__':
     else:
         SOURCE_BRANCH = f'refs/heads/{TARGET_BRANCH}'
 
-    MAX_RETRY = 3
+    MAX_RETRY = 2
     retry = MAX_RETRY
 
     while retry > 0:
-        build_id = submit_build(PIPELINE_ID, PROJECT_ID, SOURCE_BRANCH)
+        build_id = submit_build(PIPELINE_ID, PROJECT_ID, SOURCE_BRANCH, TARGET_COMMIT)
         build_status, build_result = wait_for_build(build_id)
 
         if build_result != 'succeeded':

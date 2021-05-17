@@ -65,11 +65,6 @@ bool Context::deterministicAlgorithms() const {
 }
 
 void Context::setDeterministicAlgorithms(bool b) {
-  if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
-  }
-
   _deterministic_algorithms = b;
 }
 
@@ -101,7 +96,6 @@ bool Context::checkCuBLASConfigDeterministic() {
   bool cublas_config_deterministic = true;
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (hasCUDART() && (versionCUDART() >= 10020)) {
     char* workspace_config = std::getenv(cublas_config_var_name);
     cublas_config_deterministic = (workspace_config != nullptr) && (
@@ -277,7 +271,6 @@ void Context::setDefaultMobileCPUAllocator() {
       "Cannot set another allocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
   prev_allocator_ptr_ = c10::GetCPUAllocator();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
 }
 
@@ -286,7 +279,6 @@ void Context::unsetDefaultMobileCPUAllocator() {
       "setDefaultMobileCPUAllocator must have been called "
       "before unsetDefaultMobileCPUAllocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }

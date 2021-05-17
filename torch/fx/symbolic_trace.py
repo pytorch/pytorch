@@ -4,15 +4,16 @@ import inspect
 import math
 import os
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, Type, List, Callable, Union
 from itertools import chain
 import torch
 import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
+import torch.utils._pytree as pytree
 
 import sys
-from .node import Argument, map_aggregate
-from .graph import Graph
+from .node import Argument, map_aggregate, base_types
+from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy
 
@@ -21,6 +22,75 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 # These need to run in global scope to handle nested calls correctly
 _orig_module_call : Callable = torch.nn.Module.__call__
 _orig_module_getattr : Callable = torch.nn.Module.__getattr__
+
+_proxyable_classes : Dict[Type, None] = {}
+
+class ProxyableClassMeta(type):
+    """
+    ProxyableClassMeta allows you to make construction of a given Python class
+    symbolically traceable. For example::
+
+        import torch
+        import torch.fx
+
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_ctor(x : TensorPair, y : torch.Tensor):
+            s = x.add(TensorPair(y, y))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = torch.randn(5, 3)
+        ref_out = use_tensor_pair_ctor(x, y)
+
+        traced = torch.fx.symbolic_trace(use_tensor_pair_ctor)
+        print(traced.code)
+        '''
+        def forward(self, x : __main___TensorPair, y : torch.Tensor):
+            tensor_pair = __main___TensorPair(y, y);  y = None
+            add = x.add(tensor_pair);  tensor_pair = None
+            mul = add.mul(x);  add = x = None
+            return mul
+        '''
+
+    From this example, we can see that contruction of a class (``TensorPair``)
+    defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
+    tracing.
+    """
+    def __init__(cls, name, bases, attrs):
+        _proxyable_classes.setdefault(cls)
+        return super().__init__(name, bases, attrs)
+
+    def __call__(cls, *args, **kwargs):
+        instance = cls.__new__(cls)  # type: ignore[call-overload]
+
+        found_proxies = []
+
+        def check_proxy(a):
+            if isinstance(a, Proxy):
+                found_proxies.append(a)
+
+        map_aggregate(args, check_proxy)
+        map_aggregate(kwargs, check_proxy)
+
+        if len(found_proxies) != 0:
+            tracer = found_proxies[0].tracer
+            return tracer.create_proxy('call_function', cls, args, kwargs)
+        else:
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
+            return instance
 
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
@@ -86,6 +156,15 @@ class _CPatchManager(object):
 
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
+
+class PHBase(object):
+    """
+    Object representing an input placeholder to `concrete_args`
+    """
+    def __repr__(self):
+        return 'PH'
+
+PH = PHBase()
 
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -183,7 +262,10 @@ class Tracer(TracerBase):
             for n_, p_ in self.root.named_buffers():
                 if a is p_:
                     return self.create_node('get_attr', n_, (), {})
-
+        elif isinstance(a, torch.nn.Module):
+            for n_, p_ in self.root.named_modules():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, '_fields'):
@@ -212,6 +294,22 @@ class Tracer(TracerBase):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
+
+        if type(a) in _proxyable_classes:
+            # This is an instance of a proxyable class for which we did not
+            # witness its construction. Intern this as a constant attribute
+
+            # TODO: binary search
+            i = 0
+            while True:
+                qualname = f'_{a.__class__.__name__}_constant_{i}'
+                if not hasattr(self.root, qualname):
+                    break
+                i += 1
+            setattr(self.root, qualname, a)
+
+            return self.create_node('get_attr', qualname, (), {})
+
         return super().create_arg(a)
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
@@ -306,6 +404,7 @@ class Tracer(TracerBase):
         fn_for_analysis = inspect.unwrap(root_fn)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
+        orig_args = list(co.co_varnames)
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
         skip_arg_idx = 0
@@ -319,8 +418,28 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
-            if concrete_args is not None and name in concrete_args:
-                return concrete_args[name]
+            if concrete_args is not None and name in concrete_args :
+                cnt = 0
+
+                def replace_ph(x):
+                    nonlocal cnt
+                    cnt += 1
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    if x == PH:
+                        return out
+                    # Union[int, bool] == bool in Python <= 3.6
+                    if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
+                        torch._assert(out == x, f"{name} has been specialized to have value {x}")
+                    else:
+                        torch.warnings.warn(
+                            "Was not able to add assertion to guarantee correct inputs to "
+                            "specialized function. It is up to the user to make sure that your inputs match the "
+                            "inputs you specialized the function with."
+                        )
+
+                    return x
+
+                return pytree.tree_map(replace_ph, concrete_args[name])
             if name[0] == '*':
                 default = ()
             else:
@@ -328,8 +447,12 @@ class Tracer(TracerBase):
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
+        arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
+        if isinstance(concrete_args, tuple):
+            assert(len(arg_names) == len(concrete_args))
+            concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
+        args.extend(proxy_placeholder(names) for names in arg_names)
 
-        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -339,6 +462,22 @@ class Tracer(TracerBase):
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
 
+        flat_args, in_spec = pytree.tree_flatten(tuple(args))
+        if any(not isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
+            # In the case that we have pytree-flattened inputs in
+            # `concrete_args`, generate a flattening wrapper around the
+            # original root function and return that.
+            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec, None)
+
+            def flatten_fn(*args):
+                tree_args = pytree.tree_unflatten(list(args), in_spec)
+                tree_out = root_fn(*tree_args)
+                out_args, out_spec = pytree.tree_flatten(tree_out)
+                assert(self.graph._pytree_info is not None)
+                self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
+                return out_args
+
+            return flatten_fn, flat_args
         return root_fn, args
 
 
@@ -429,7 +568,6 @@ class Tracer(TracerBase):
                 _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
                 for module in self._autowrap_search:
                     _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
-
                 self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                                  type_expr=fn.__annotations__.get('return', None))
 
@@ -674,10 +812,43 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
     constructed by recording operations seen while tracing through ``root``.
 
+    ``concrete_args`` allows you to partially specialize your function, whether it's to remove control flow or data structures.
+
+    For example::
+
+        def f(a, b):
+            if b == True:
+                return a
+            else:
+                return a*2
+
+    FX can typically not trace through this due to the presence of control
+    flow. However, we can use `concrete_args` to specialize on the value of
+    `b` to trace through this.
+
+        f = fx.symbolic_trace(f, concrete_args={'b': False})
+        assert f(3, False)  == 6
+
+    Note that although you can still pass in different values of `b`, they will be ignored.
+
+    We can also use `concrete_args` to eliminate data-structure handling from
+    our function. This will use pytrees to flatten your input. To avoid
+    overspecializing, pass in `fx.PH` for values that shouldn't be
+    specialized. For example::
+
+        def f(x):
+            out = 0
+            for v in x.values():
+                out += v
+            return out
+        f = fx.symbolic_trace(f, concrete_args={'x': {'a': fx.PH, 'b': fx.PH, 'c': fx.PH}})
+        assert f({'a': 1, 'b': 2, 'c': 4}) == 7
+
+
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
-        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
         enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
