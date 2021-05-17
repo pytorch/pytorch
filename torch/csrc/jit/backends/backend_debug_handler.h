@@ -42,14 +42,15 @@ namespace jit {
  *  Now about 2:
  *  There are two usecases for [debug-handle, DebugInfoPair]
  *  A. During bytecode generation the DebugInfoPair corresponding to the nodes
- *  of the inlined graph being serialized, are stored in this object and a unique
- *  debug handle is returned. This unique debug handle is stored in mobile_debug
- *  info for pytorch lite models. It will be used for raising exceptions as well
- *  as profiling. B. During backend lowering, each backend's preprocess/compile
- *  method can compile method's graph and serialize those methods. Once the
- *  method is lowered to backend, graph is essentially lost. Without access to
- *  graph it is hard to generate model level debug info. Thus the debug handles
- *  provide a way to map nodes of the graph to the model level debug info.
+ *  of the inlined graph being serialized, are stored in this object and a
+ *  unique debug handle is returned. This unique debug handle is stored in
+ *  mobile_debug info for pytorch lite models. It will be used for raising
+ *  exceptions as well as profiling. B. During backend lowering, each backend's
+ *  preprocess/compile method can compile method's graph and serialize those
+ *  methods. Once the method is lowered to backend, graph is essentially lost.
+ *  Without access to graph it is hard to generate model level debug info. Thus
+ *  the debug handles provide a way to map nodes of the graph to the model level
+ *  debug info.
  *
  *  During byte-code model serialization, [debug-handle, DebugInfoPair] is
  *  serialized. Now we know a. debug handles and b. how to map debug handles to
