@@ -406,14 +406,18 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.extra_repr()
 
     @dist_utils.dist_init
-    def test_send_remote_module_with_a_new_attribute_ignored_over_the_wire(self):
+    def test_send_remote_module_with_a_new_attribute_not_pickled_over_the_wire(self):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
 
-        # If add a new attribute is added to this RemoteModule, which will be sent over the wire by RPC,
-        # this new field must be added to either _REMOTE_MODULE_PICKLED_ATTRIBUTES or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
-        # to avoid runtime error.
+        # If a new attribute is added to this RemoteModule after the initialization,
+        # and it will be sent over the wire by RPC,
+        # this new field will not be pickled, because it's not specified in _REMOTE_MODULE_PICKLED_ATTRIBUTES.
+        # Note that adding a new attribute out of constructor should rarely happen.
+        # If a new attribute is added to RemoteModule constructor,
+        # there is a sanity check to enforce developers to add this attribute to either
+        # _REMOTE_MODULE_PICKLED_ATTRIBUTES or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
         for remote_module in self._create_remote_module_iter(
             dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
         ):
