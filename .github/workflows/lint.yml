@@ -78,6 +78,10 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
+      - name: Ensure no versionless Python shebangs
+        if: always()
+        run: |
+          (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
       - name: Ensure no unqualified noqa
         if: always()
         run: |
@@ -138,7 +142,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
-        run: .github/scripts/generate_linux_ci_workflows.py
+        run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
         run: .github/scripts/report_git_status.sh
 
