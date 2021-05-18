@@ -1252,14 +1252,20 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {
-      for (int64_t b = 0; b < bs; b++) {
-        auto r = self_or_result.select(0, b);
-        native::mm_cpu_out(batch1.select(0, b), batch2.select(0, b), r);
-      }
+      auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
+        for (int64_t b = start; b < end; b++) {
+          auto r = self_or_result.select(0, b);
+          native::mm_cpu_out(r, batch1.select(0, b), batch2.select(0, b));
+        }
+      };
+      at::parallel_for(0, bs, 1, bmm_out_fn);
     } else {
-      for (int64_t b = 0; b < bs; b++) {
-        self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
-      }
+      auto bmm_fn = [&](uint64_t start, uint64_t end) {
+        for (int64_t b = start; b < end; b++) {
+          self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+        }
+      };
+      at::parallel_for(0, bs, 1, bmm_fn);
     }
   }
   return self_or_result;
