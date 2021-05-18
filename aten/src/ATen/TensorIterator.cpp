@@ -839,6 +839,12 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
+TensorIterator TensorIterator::borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+  TensorIterator iter;
+  iter.build_borrowing_binary_op(out, a, b);
+  return iter;
+}
+
 TensorIterator TensorIterator::binary_float_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_float_op(out, a, b);
