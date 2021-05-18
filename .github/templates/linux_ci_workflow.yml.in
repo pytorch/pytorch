@@ -3,10 +3,7 @@
 name: Linux CI (!{{ build_environment }})
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- if on_pull_request %}
   pull_request:
-{%- endif %}
   push:
     branches:
       - master
@@ -25,6 +22,9 @@ env:
 
 jobs:
   calculate-docker-image:
+    {%- if not on_pull_request %}
+    if: github.event_name != 'pull_request'
+    {%- endif %}
     runs-on: linux.2xlarge
     env:
       DOCKER_BUILDKIT: 1
@@ -247,7 +247,11 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   render_test_results:
+    {%- if on_pull_request %}
     if: always()
+    {%- else %}
+    if: always() && github.event_name != 'pull_request'
+    {%- endif %}
     needs:
       - test
     runs-on: ubuntu-18.04

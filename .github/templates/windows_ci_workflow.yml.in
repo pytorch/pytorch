@@ -3,9 +3,7 @@
 name: Windows CI (!{{ build_environment }})
 
 on:
-{%- if on_pull_request %}
   pull_request:
-{%- endif %}
   push:
     branches:
       - master
@@ -27,6 +25,9 @@ env:
 
 jobs:
   build:
+    {%- if not on_pull_request %}
+    if: github.event_name != 'pull_request'
+    {%- endif %}
     runs-on: "windows.4xlarge"
     steps:
       - name: Checkout PyTorch
@@ -101,7 +102,11 @@ jobs:
             test/**/*.xml
   # TODO: Make this into a composite step
   render_test_results:
+    {%- if on_pull_request %}
     if: always()
+    {%- else %}
+    if: always() && github.event_name != 'pull_request'
+    {%- endif %}
     needs:
       - test
     runs-on: ubuntu-18.04
