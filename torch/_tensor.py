@@ -555,6 +555,12 @@ class Tensor(torch._C._TensorBase):
 
     __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
 
+    @_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
+        return torch.remainder(other, self)
+
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)

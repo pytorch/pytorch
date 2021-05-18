@@ -7663,7 +7663,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
-    input (Tensor): the dividend
+    input (Tensor or Scalar): the dividend
     other (Tensor or Scalar): the divisor
 
 Keyword args:
