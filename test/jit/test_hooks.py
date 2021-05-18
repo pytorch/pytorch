@@ -5,7 +5,7 @@ from typing import Tuple
 
 import torch
 from jit.test_hooks_modules import (
-    ModuleDirectFowardSubmodCall, ModuleForwardSingleInput,
+    ModuleDirectforwardSubmodCall, ModuleForwardSingleInput,
     ModuleForwardTupleInput, create_forward_tuple_input,
     create_module_forward_multiple_inputs, create_module_forward_single_input,
     create_module_hook_return_nothing,
@@ -184,7 +184,7 @@ class TestHooks(JitTestCase):
         self.assertNotEqual(m_scripted("a"), m_scripted.forward("a"))
 
     def test_submodule_direct_forward_invocation(self):
-        m_submod_forward_call = ModuleDirectFowardSubmodCall(
+        m_submod_forward_call = ModuleDirectforwardSubmodCall(
             "outer_mod_name", "inner_mod_name"
         )
         m_submod_call = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
