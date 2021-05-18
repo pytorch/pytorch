@@ -26,6 +26,8 @@ SystemEnv = namedtuple('SystemEnv', [
     'clang_version',
     'cmake_version',
     'os',
+    'kernel_version',
+    'libc_version',
     'python_version',
     'is_cuda_available',
     'cuda_runtime_version',
@@ -73,6 +75,13 @@ def run_and_parse_first_match(run_lambda, command, regex):
     if match is None:
         return None
     return match.group(1)
+
+def run_and_return_first_line(run_lambda, command):
+    """Runs command using run_lambda and returns first line if output is not empty"""
+    rc, out, _ = run_lambda(command)
+    if rc != 0:
+        return None
+    return out.split('\n')[0]
 
 
 def get_conda_packages(run_lambda):
@@ -244,6 +253,17 @@ def get_os(run_lambda):
     # Unknown platform
     return platform
 
+def get_kernel_version():
+    import platform
+    if get_platform() == 'linux':
+        return '{} {}'.format(platform.release(), platform.version())
+    else:
+        return platform.release()
+
+def get_libc_version(run_lambda):
+    if get_platform() != 'linux':
+        return 'N/A'
+    return run_and_return_first_line(run_lambda, '/lib64/libc.so.6')
 
 def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
@@ -314,6 +334,8 @@ def get_env_info():
         pip_packages=pip_list_output,
         conda_packages=get_conda_packages(run_lambda),
         os=get_os(run_lambda),
+        kernel_version = get_kernel_version(),
+        libc_version = get_libc_version(run_lambda),
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
@@ -329,6 +351,8 @@ OS: {os}
 GCC version: {gcc_version}
 Clang version: {clang_version}
 CMake version: {cmake_version}
+Kernel version: {kernel_version}
+Libc version: {libc_version}
 
 Python version: {python_version}
 Is CUDA available: {is_cuda_available}
