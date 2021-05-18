@@ -218,7 +218,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
       // backward differentiable view
       if (diff_view_meta->has_bw_view()) {
         TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
-            creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+            creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
             "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       }
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
@@ -248,7 +248,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
       // TODO: fix fb internal use-case so that it doesn't trigger this internal assert when the base is not a view.
       // In this code, the assert should be outside of the if statement.
       TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
-          creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+          creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
           "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
@@ -266,7 +266,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
-          creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+          creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
           "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed

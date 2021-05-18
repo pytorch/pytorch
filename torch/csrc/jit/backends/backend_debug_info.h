@@ -11,7 +11,7 @@ namespace jit {
 constexpr static auto kBackendUtilsNamespace = "backendutils";
 constexpr static auto kBackendDebugInfoClass = "BackendDebugInfo";
 
-#ifndef C10_MOBILE
+#ifndef BUILD_LITE_INTERPRETER
 /*
  * Custom class for holding debug information in lowered modules, intended
  * purely for keeping this information to be later serialized outside of the
