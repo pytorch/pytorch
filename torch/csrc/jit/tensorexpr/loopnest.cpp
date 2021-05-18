@@ -1111,7 +1111,13 @@ bool LoopNest::optimizeConditionals() {
       // contains.
       continue;
     }
+
     auto for_to_split = fors.back();
+    if (!LoopNest::isNormalized(for_to_split)) {
+      // Do not optimize this conditional since the condition variable
+      // refers to a loop that is not normalized.
+      continue;
+    }
     if (split_fors.count(for_to_split)) {
       // This loop has already been split while optimizing conditionals
       // earlier.
