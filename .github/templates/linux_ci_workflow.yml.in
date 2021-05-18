@@ -32,6 +32,15 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -49,7 +58,6 @@ jobs:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
-          eval "$(aws ecr get-login --no-include-email --region us-east-1)"
           set -x
           # Check if image already exists, if it does then skip building it
           if docker manifest inspect "${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
@@ -305,7 +313,7 @@ jobs:
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -350,7 +358,7 @@ jobs:
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
           zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
