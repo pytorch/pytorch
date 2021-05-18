@@ -1145,6 +1145,25 @@ class TestNN(NNTestCase):
         s = nn.Sequential(l1, l2, l1, l2, subnet)
         self.assertEqual(list(s.children()), [l1, l2, subnet])
 
+    def test_train_errors_for_invalid_mode(self):
+        class SubclassNet(nn.Module):
+            def __init__(self):
+                super(SubclassNet, self).__init__()
+                self.l1 = nn.Linear(2, 2)
+
+            def forward(self, inputs):
+                return self.l1(inputs)
+
+        subclass_net = SubclassNet()
+        sequential_net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+
+        error_modes = ["invalid_str", torch.device('cpu')]
+        modules_to_check = [subclass_net, sequential_net]
+
+        for error_mode, module in itertools.product(error_modes, modules_to_check):
+            with self.assertRaises(ValueError):
+                module.train(error_mode)
+
     def test_dir(self):
         linear = nn.Linear(2, 2)
         linear._test_submodule = nn.Linear(2, 2)
@@ -8479,39 +8498,6 @@ class TestNN(NNTestCase):
         x_grad_ref = torch.where(mask, grad, z)
         self.assertEqual(x.grad, x_grad_ref)
 
-    def test_batchnorm_nhwc_cpu(self):
-        def helper(self, size):
-            channels = size[1]
-            input = torch.randn(size, dtype=torch.float32, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last)
-            input.retain_grad()
-            grad = torch.randn(size, dtype=torch.float32, device='cpu')
-            grad = grad.contiguous(memory_format=torch.channels_last)
-            bn = nn.BatchNorm2d(channels).cpu().float()
-            bn.weight.data.uniform_()
-            bn.bias.data.uniform_()
-
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
-            ref_bn = nn.BatchNorm2d(channels).cpu().float()
-            ref_bn.load_state_dict(bn.state_dict())
-
-            out = bn(input)
-            out.backward(grad)
-            ref_out = ref_bn(ref_input)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
-            self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
-
-        helper(self, (4, 8, 10, 10))
-        helper(self, (4, 1, 9, 9))
-        helper(self, (4, 9, 1, 1))
-
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
@@ -13189,8 +13175,7 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     output = module(input)
 
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double)
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None,
