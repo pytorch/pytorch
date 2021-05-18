@@ -1,4 +1,5 @@
 import cimodel.lib.miniutils as miniutils
+from cimodel.data.simple.util.versions import MultiPartVersion, CudaVersion
 from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_BASIC, DOCKER_IMAGE_CUDA_10_2
 
 
@@ -56,6 +57,20 @@ class GeConfigTestJob:
 
 
 WORKFLOW_DATA = [
+    GeConfigTestJob(
+        MultiPartVersion([3, 6], "py"),
+        MultiPartVersion([5, 4], "gcc"),
+        None,
+        ["jit_legacy", "test"],
+        ["pytorch_linux_xenial_py3_6_gcc5_4_build"]),
+    GeConfigTestJob(
+        None,
+        None,
+        CudaVersion(10, 2),
+        ["cudnn7", "py3", "jit_legacy", "test"],
+        ["pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build"],
+        use_cuda_docker=True,
+    ),
 ]
 
 
