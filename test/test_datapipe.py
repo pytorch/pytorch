@@ -15,11 +15,13 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import (
     IterDataPipe, RandomSampler, DataLoader,
-    argument_validation, runtime_validation_disabled, runtime_validation)
+    argument_validation, runtime_validation_disabled, runtime_validation
+)
 
-from typing import \
-    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
-     TypeVar, Set, Union)
+from typing import (
+    Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
+    Type, TypeVar, Set, Union
+)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -771,6 +773,19 @@ class TestTyping(TestCase):
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp = DP6()  # type: ignore[assignment]
         self.assertTrue(dp.type.param == int)
+
+        class DP7(IterDataPipe[Awaitable[T_co]]):
+            r""" DataPipe with abstract base class"""
+
+        self.assertTrue(issubclass(DP6, IterDataPipe))
+        self.assertTrue(DP7.type.param == Awaitable[T_co])
+
+        class DP8(DP8[str]):
+            r""" DataPipe subclass from a DataPipe with abc type"""
+
+        self.assertTrue(issubclass(DP8, IterDataPipe))
+        self.assertTrue(DP8.type.param == Awaitable[str])
+
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
