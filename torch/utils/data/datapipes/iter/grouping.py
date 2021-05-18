@@ -7,19 +7,31 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, 
 
 T_co = TypeVar('T_co', covariant=True)
 
-
+def dive(element, nesting_level):
+    if nesting_level == -1:
+        if isinstance(element, list):
+            for item in element:
+                for i in dive(item, nesting_level = -1):
+                    yield i
+        else:
+            yield element
+    elif nesting_level == 0:
+        yield element
+    else:
+        for item in element:
+            for i in dive(item, nesting_level=nesting_level-1):
+                yield i 
+        
 @functional_datapipe('unbatch')
 class UnBatchIterDataPipe(IterDataPipe):
-    def __init__(self, datapipe):
+    def __init__(self, datapipe, unbatch_level: int = 1):
         self.datapipe = datapipe
+        self.unbatch_level = unbatch_level
 
     def __iter__(self):
         for element in self.datapipe:
-            if isinstance(element, list):
-                for i in element:
-                    yield i
-            else:
-                yield element
+            for i in dive(element, nesting_level=self.unbatch_level):
+                yield i
 
 
 @functional_datapipe('batch')
@@ -43,23 +55,24 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
                  datapipe: IterDataPipe[T_co],
                  batch_size: int,
                  drop_last: bool = False,
-                 batch_level: bool = False,
+                #  batch_level: bool = True,
+                 unbatch_level: int = 0,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        if batch_level:
-        self.datapipe = datapipe
+        if unbatch_level == 0:
+            self.datapipe = datapipe
         else:
-            self.datapipe = datapipe.unbatch()
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        self.batch_level = batch_level
 
     def __iter__(self) -> Iterator[List[T_co]]:
         # // TODO: Never modify inplace!
         batch: List[T_co] = []
         for x in self.datapipe:
+            # print(x)
             batch.append(x)
             if len(batch) == self.batch_size:
                 yield batch
