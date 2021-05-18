@@ -35,12 +35,19 @@ template <typename A, typename B, typename C> std::tuple<A, B, C> vector_to_resu
 }
 
 // This is a way to call the slow fallback from inside some plumbing
-// TODO: nothing calls this yet, so I'm not completely sure it works.
-template <typename... Rets>
-std::tuple<Rets...> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
+// TODO: Probably better way to metaprogram this
+template <typename Ret>
+Ret slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
   std::vector<IValue> stack(args.begin(), args.end());
   batchedTensorForLoopFallback(op, &stack);
-  return vector_to_result<Rets...>(stack);
+  return vector_to_result<Ret>(stack);
+}
+
+template <typename A, typename B>
+std::tuple<A, B> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
+  std::vector<IValue> stack(args.begin(), args.end());
+  batchedTensorForLoopFallback(op, &stack);
+  return vector_to_result<A, B>(stack);
 }
 
 }
