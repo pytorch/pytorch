@@ -31,7 +31,7 @@
 #elif (defined(__GNUC__) || defined(__xlC__)) &&                               \
         (defined(__VEC__) || defined(__ALTIVEC__))
 /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
-#include <altivec256.h>
+#include <altivec.h>
 /* We need to undef those tokens defined by <altivec256.h> to avoid conflicts
    with the C++ types. => Can still use __bool/__vector */
 #undef bool
