@@ -15,7 +15,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule
+    from .graph_module import GraphModule  # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -805,6 +805,7 @@ class Graph:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
+        wrapped_fns: Dict[str, None] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -919,6 +920,8 @@ class Graph:
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
+                if node.meta.get('is_wrapped', False):
+                    wrapped_fns.setdefault(global_name)
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
@@ -960,6 +963,12 @@ class Graph:
         else:
             orig_args = free_vars
 
+        if len(wrapped_fns) > 0:
+            wrap_name = add_global('wrap', torch.fx.wrap)
+            wrap_stmts = '\n'.join([f'{wrap_name}("{name}")' for name in wrapped_fns])
+        else:
+            wrap_stmts = ''
+
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(orig_args) == 0 or orig_args[0] != 'self':
@@ -967,11 +976,11 @@ class Graph:
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
+{wrap_stmts}
+
 def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
 {code}"""
-
-        return PythonCode(fn_code,
-                          globals_)
+        return PythonCode(fn_code, globals_)
 
     def __str__(self) -> str:
         """
