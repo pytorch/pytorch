@@ -528,8 +528,8 @@
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
+            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
+              echo "Run Build Test is not for full jit, skipping."
               exit 0
             fi
             PROJ_ROOT=/Users/distiller/project
@@ -557,8 +557,8 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
+            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
+              echo "Run Simulator Tests is not for full jit, skipping."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
