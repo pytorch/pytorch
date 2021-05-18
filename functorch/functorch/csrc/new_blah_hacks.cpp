@@ -40,17 +40,20 @@ namespace at { namespace functorch {
 
 NEW_BLAH_HACK(new_zeros);
 NEW_BLAH_HACK(new_empty);
+NEW_BLAH_HACK(new_ones);
 
-#undef NEW_BLAH_HACK 
+#undef NEW_BLAH_HACK
 
 TORCH_LIBRARY(functorch, m) {
   m.def("new_zeros_hack", new_zeros_hack_impl);
   m.def("new_empty_hack", new_empty_hack_impl);
+  m.def("new_ones_hack", new_ones_hack_impl);
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("new_zeros", new_zeros_hack);
   m.impl("new_empty", new_empty_hack);
+  m.impl("new_ones", new_ones_hack);
 }
 
 
