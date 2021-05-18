@@ -303,11 +303,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::addmm_cpu_out(in0_t, in1_t, in2_t, in3_s, in4_s, out_t);
+    at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
   };
 });
 
-// TODO: support
+// clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
 // clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
@@ -316,14 +316,22 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
-    const auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
+
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
+
+    if (p_node->Input(1).isTensor()) {
+      auto in1_t = p_node->Input(1).toOptional<at::Tensor>();
+      auto in2_t = p_node->Input(2).toOptional<at::Tensor>();
+      at::native::clamp_out(in0_t, in1_t, in2_t, out_t);
+    } else {
+      auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
+      auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
+      at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
+    }
   };
 });
 
@@ -417,7 +425,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(in0_t);
         }
         auto& out_t = p_node->Output(0).toTensor();
-        at::native::leaky_relu_out(in0_t, in1_s, out_t);
+        at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
       };
     });
 
@@ -586,7 +594,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::threshold_out(in0_t, 0, 0, out_t);
+      at::cpu::threshold_out(out_t, in0_t, 0, 0);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
