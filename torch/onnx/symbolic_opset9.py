@@ -3162,29 +3162,20 @@ def index_add(g, self, dim, index, other):
 def roll(g, self, shifts, dims):
     assert len(shifts) == len(dims)
 
-    dim_size_list = [sym_help._get_tensor_dim_size(self, dims[i]) for i in range(len(dims))]
-
     result = self
     for i in range(len(shifts)):
-        if dim_size_list[i] is None:
-            raise NotImplementedError("ONNX export does NOT support exporting 'roll()' function with " +
-                                      "unknown dimension size.")
-
-        if shifts[i] < 0:
-            shifts[i] = shifts[i] + dim_size_list[i]
-
         shapes = []
         shape = sym_help._slice_helper(g,
                                        result,
                                        axes=[dims[i]],
-                                       starts=[dim_size_list[i] - shifts[i]],
+                                       starts=[-shifts[i]],
                                        ends=[maxsize])
         shapes.append(shape)
         shape = sym_help._slice_helper(g,
                                        result,
                                        axes=[dims[i]],
                                        starts=[0],
-                                       ends=[dim_size_list[i] - shifts[i]])
+                                       ends=[-shifts[i]])
         shapes.append(shape)
         result = g.op("Concat", *shapes, axis_i=dims[i])
 
