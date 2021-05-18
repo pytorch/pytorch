@@ -1,10 +1,12 @@
 # Template is at:    .github/templates/linux_ci_workflow.yml
-# Generation script: .github/scripts/generate_linux_ci_workflows.py
+# Generation script: .github/scripts/generate_ci_workflows.py
 name: Linux CI (!{{ build_environment }})
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-!{{ on_pull_request }}
+{%- if on_pull_request %}
+  pull_request:
+{%- endif %}
   push:
     branches:
       - master
@@ -30,6 +32,10 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
