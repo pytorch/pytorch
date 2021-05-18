@@ -309,6 +309,7 @@ Tensor& add_relu_impl(
     max_val = std::numeric_limits<double>::max();
   } else {
     TORCH_INTERNAL_ASSERT(
+        false,
         "Unsupported datatype for add_relu:", self.dtype().name());
   }
 

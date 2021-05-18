@@ -323,6 +323,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
   } else {
     TORCH_INTERNAL_ASSERT(
+        false,
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 

@@ -425,22 +425,22 @@ script::Module optimizeForMobile(
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void insertPrePackedOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 script::Module optimizeForMobile(
@@ -448,6 +448,7 @@ script::Module optimizeForMobile(
     const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
+      false,
       "Mobile optimization only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
   return module;

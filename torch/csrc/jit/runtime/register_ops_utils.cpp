@@ -195,7 +195,8 @@ IValue tensorToListRecursive(
     } else if (inner_result.isBool()) {
       result.emplace_back(inner_result.toBool());
     } else {
-      TORCH_INTERNAL_ASSERT("Unknown return type for tensorToListRecursive");
+      TORCH_INTERNAL_ASSERT(
+          false, "Unknown return type for tensorToListRecursive");
     }
 
     data += strides[cur_dim] * element_size;

@@ -796,7 +796,7 @@ void GraphExecutor::debugFlushCompilationCache() {
     ppImpl->debugFlushCompilationCache();
   } else {
     // we are deprecating legacy executor
-    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+    TORCH_INTERNAL_ASSERT(false, "Not Implemented for Legacy Executor");
   }
 }
 

@@ -42,7 +42,7 @@ std::string opTypeToString(OpType opType) {
     case OpType::UNKNOWN:
       return "UNKNOWN";
     default:
-      TORCH_INTERNAL_ASSERT("Unknown op type!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
   return "UNKNOWN";
 }

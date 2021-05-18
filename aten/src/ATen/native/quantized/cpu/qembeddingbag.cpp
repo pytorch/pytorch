@@ -815,6 +815,7 @@ class QEmbeddingBag final {
           include_last_offset);
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding_bag quantization");
     }
   }
@@ -843,6 +844,7 @@ class QEmbedding final {
 
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding quantization");
     }
     return output;
