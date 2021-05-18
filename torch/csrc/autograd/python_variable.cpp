@@ -152,36 +152,6 @@ PyObject * THPVariable_Wrap(Variable var)
   return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var), status);
 }
 
-static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
-{
-  Py_VISIT(self->backward_hooks);
-  // We don't want to traverse the grad_fn, even if the Variable owns it and the
-  // shared pointer's use count is 1. This is because we would need to treat
-  // the grad_fn as part of the Python state and hold the GIL sometimes when
-  // grad_fn's shared_ptr is copied, otherwise a race condition with the Python
-  // GC could occur. Holding the GIL when the shared_ptr is copied adds
-  // undesirable complexity/overhead.
-  //
-  // When hooks, a Variable, and its grad_fn are involved in a Python reference
-  // cycle, because we're not traversing the grad_fn, the reference cycle will
-  // in fact leak.
-  //
-  // See https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
-  // for more details about the race condition involving traversing the grad_fn
-  // and the python GC.
-  if (!self->cdata.unsafeIsBorrowed()) {
-    const auto& tensor = THPVariable_Unpack(self);
-    if (tensor.defined()) {
-      for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-          Py_VISIT(pyhook->dict);
-        }
-      }
-    }
-  }
-  return 0;
-}
-
 static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->backward_hooks);
@@ -424,8 +394,6 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
     return 0;
   }
 
-  THPUtils_assertRet(-1, THPVariable_Check(py_grad),
-      "expected Variable or None (got %s)", THPUtils_typename(py_grad));
   THPUtils_assertRet(-1, self != (THPVariable*)py_grad,
       "can't assign Variable as its own grad");
 
@@ -933,7 +901,6 @@ struct THPVariableMeta {
 };
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
-void THPVariable_subclass_dealloc(PyObject* self);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
@@ -1005,7 +972,8 @@ PyTypeObject THPVariableType = {
   nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
   nullptr,                                     /* tp_doc */
-  (traverseproc)THPVariable_traverse,          /* tp_traverse */
+  // Also set by metaclass
+  nullptr,                                     /* tp_traverse */
   (inquiry)THPVariable_clear,                  /* tp_clear */
   nullptr,                                     /* tp_richcompare */
   0,                                           /* tp_weaklistoffset */
@@ -1119,7 +1087,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
       }
   }
 
-  // Clear all slots until we get to base class THPVaraibleType
+  // Clear all slots until we get to base class THPVariableType
   {
     PyTypeObject* base = type;
     while (base != &THPVariableType) {
@@ -1156,11 +1124,104 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   Py_DECREF(type);
 }
 
+static int
+traverse_slots(PyTypeObject *type, PyObject *self, visitproc visit, void *arg)
+{
+    Py_ssize_t i, n;
+    PyMemberDef *mp;
+
+    n = Py_SIZE(type);
+    mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject *)type);
+    for (i = 0; i < n; i++, mp++) {
+        if (mp->type == T_OBJECT_EX) {
+            char *addr = (char *)self + mp->offset;
+            PyObject *obj = *(PyObject **)addr;
+            if (obj != NULL) {
+                int err = visit(obj, arg);
+                if (err)
+                    return err;
+            }
+        }
+    }
+    return 0;
+}
+
+static int THPVariable_subclass_traverse(PyObject* self, visitproc visit, void *arg) {
+  // If the tensor is eligible to be resurrected, don't traverse it; instead
+  // treat all of its references as a root (as they WOULD be a root since we
+  // can treat the inbound C++ references as root owners).
+  //
+  // This works because unlike conventional GCs, Python's GC operates in two
+  // phases: first it uses traverse to discover roots, and then it uses traverse
+  // to do reachability.  Bypassing traverse during root discovery forces Python
+  // to treat self as a root for everything it refers to.  For a full
+  // explanation of the algorithm see https://devguide.python.org/garbage_collector/
+  const auto& tensor = THPVariable_Unpack(self);
+  if (tensor.use_count() > 1) return 0;
+
+  // Crappy version of subtype_traverse; same deal as
+  // THPVariable_subclass_dealloc
+
+  PyTypeObject* type = Py_TYPE(self);
+  // Traverse slots until we get to base class THPVariableType
+  {
+    PyTypeObject *base = type;
+    while (base != &THPVariableType) {
+      if (Py_SIZE(base)) {
+        int err = traverse_slots(base, self, visit, arg);
+        if (err) return err;
+      }
+      base = base->tp_base;
+      TORCH_INTERNAL_ASSERT(base);
+    }
+  }
+
+  // All Python defined classes have __dict__
+  if (C10_LIKELY(type->tp_dictoffset)) {
+    PyObject **dictptr = _PyObject_GetDictPtr(self);
+    if (dictptr && *dictptr) Py_VISIT(*dictptr);
+  }
+
+  TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
+  Py_VISIT(type);
+
+  // Finally traverse THPVariable special stuff
+  THPVariable* var = reinterpret_cast<THPVariable*>(self);
+  Py_VISIT(var->backward_hooks);
+  // We don't want to traverse the grad_fn, even if the Variable owns it and the
+  // shared pointer's use count is 1. This is because we would need to treat
+  // the grad_fn as part of the Python state and hold the GIL sometimes when
+  // grad_fn's shared_ptr is copied, otherwise a race condition with the Python
+  // GC could occur. Holding the GIL when the shared_ptr is copied adds
+  // undesirable complexity/overhead.
+  //
+  // When hooks, a Variable, and its grad_fn are involved in a Python reference
+  // cycle, because we're not traversing the grad_fn, the reference cycle will
+  // in fact leak.
+  //
+  // See https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
+  // for more details about the race condition involving traversing the grad_fn
+  // and the python GC.
+  if (!var->cdata.unsafeIsBorrowed()) {
+    const auto& tensor = THPVariable_Unpack(var);
+    if (tensor.defined()) {
+      for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
+        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+          Py_VISIT(pyhook->dict);
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
+  ((PyTypeObject*)cls)->tp_traverse = (traverseproc)THPVariable_subclass_traverse;
   return 0;
 }
 
