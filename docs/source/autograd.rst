@@ -50,6 +50,10 @@ you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), inp
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+See `here <locally-disable-grad-doc_>`_ for more information on the differences
+between no-grad and inference mode as well as other related mechanisms that
+may be conflated with the two.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:

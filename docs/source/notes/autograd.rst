@@ -58,6 +58,100 @@ will also require them.
     # Optimize only the classifier
     optimizer = optim.SGD(model.fc.parameters(), lr=1e-2, momentum=0.9)
 
+
+.. _locally-disable-grad-doc:
+
+Locally disabling gradient computation
+--------------------------------------
+
+There are two ways to locally disable gradients from Python: no-grad mode and
+inference mode. Below, we compare no-grad mode and inference mode. We also
+compare several other useful mechanisms that may be conflated with the two.
+
+Grad Mode (Default)
+^^^^^^^^^^^^^^^^^^^
+
+Computations are performed in grad mode by default. In grad mode computations
+on tensors that require grad are tracked by autograd so that gradients can be
+computed with respect to the inputs when running ``output.backward()``. Note: this
+is the only mode where requires_grad is relevant. ``requires_grad`` is ignored in
+all other modes.
+
+Setting requires_grad
+^^^^^^^^^^^^^^^^^^^^^
+
+As described `above <excluding-requires_grad_>`_,
+use ``.requires_grad`` for more fine-grained control over which parameters should
+be updated on the backward pass. Parameters with ``requires_grad=True`` will have
+gradients accumulated into their ``.grad`` fields on ``.backward()``.
+
+Whether a tensor ``requires_grad`` also determines whether the computations are
+tracked by autograd in the first place. An operation is only tracked by
+autograd if at least one of its input tensors require grad.
+
+For example, if you need to freeze the bottom part of your model while
+fine-tuning, you can apply ``requires_grad=False`` on layers that you’d like to
+avoid.
+
+Note: you can only set the requires_grad of leaf nodes (i.e., parameters and
+other tensors that don’t have ``grad_fn``). Non-leaf tensor have ``requires_grad=True``
+by definition.
+
+No-grad Mode
+^^^^^^^^^^^^
+
+Computations in no-grad mode behave as if none of the inputs require grad.
+Enable no-grad mode when you need to perform operations that should not be
+tracked by autograd, but you’d still like to use the outputs of these
+computations in grad mode later. If you know that the outputs won’t be involved
+in computations in grad mode later, consider using inference mode.
+
+For example, you would use no-grad if you are writing an optimizer, you’d like to update parameters
+in-place in order to perform a training step without the update being tracked
+by autograd. You also intend to use the updated parameters for computations in
+grad mode in the next forward pass.
+
+Inference Mode
+^^^^^^^^^^^^^^
+
+Inference mode (PyTorch >= 1.9) provides improved performance during the model
+evaluation phase in exchange for somewhat narrower application. Inference mode
+is similar to no-grad mode in that operations performed in inference mode will
+not be tracked by autograd. But for improved performance, computations in
+inference mode skips over more autograd-specific code.
+
+Enable inference mode when you are performing computations that don’t need
+tracked for the gradient computation, AND you don’t plan on using the tensors
+created in inference mode in any computation that is tracked by autograd later.
+
+It is recommended that you try out inference mode. If it works out of the box
+for your use case it’s a free performance win. If you run into errors after
+enabling inference mode, you may need to be more careful about how you use
+tensors created in inference mode outside of inference mode. It is also
+possible that inference mode does not work for your use case. If so, consider
+using no-grad mode.
+For more implementation details of inference mode please see
+`RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
+
+Evaluation Mode (``nn.Module.eval()``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Functionally, ``module.eval()`` (or equivalently ``module.train()``) are completely
+orthogonal to no-grad mode and inference mode. How ``model.eval()`` affects
+your model depends entirely on the specific modules used in your model and
+whether they define any training-mode specific behavior.
+
+You are responsible for calling ``model.eval()`` and model.train() if your
+model relies on modules such as Dropout and BatchNorm that may behave
+differently depending on training mode, for example, to avoid updating your
+BatchNorm running statistics on validation data.
+
+It is recommended that you always use ``model.train()`` when
+training and ``model.eval()`` when evaluating your model (validation/testing) even
+if you aren’t sure your model has training-mode specific behavior, because a
+module you are using might be updated to behave differently in training and
+eval modes.
+
 .. _how-autograd-encodes-history:
 
 How autograd encodes the history
