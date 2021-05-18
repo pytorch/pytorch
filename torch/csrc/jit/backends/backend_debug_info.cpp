@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace backend {
 namespace {
-#ifdef C10_MOBILE
+#ifdef BUILD_LITE_INTERPRETER
 static auto cls = torch::class_<PyTorchBackendDebugInfoDummy>(
                       kBackendUtilsNamespace,
                       kBackendDebugInfoClass)
