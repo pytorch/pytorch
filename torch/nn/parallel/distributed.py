@@ -1180,6 +1180,8 @@ class DistributedDataParallel(Module):
 
                              We also provide an API called ``get_future`` to retrieve a
                              Future associated with the completion of ``c10d.ProcessGroup.work``.
+                             ``get_future`` is currently supported for MPI and also supported for most
+                             operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
             Grad bucket's tensors will not be predivided by world_size. User is responsible
@@ -1198,7 +1200,8 @@ class DistributedDataParallel(Module):
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
-            ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
+            ``get_future`` API supports NCCL, and partially GLOO and MPI backends (no support
+            for peer-to-peer operations like send/recv) and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
             ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
@@ -1377,7 +1380,7 @@ class DistributedDataParallel(Module):
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
-    def get_ddp_logging_data(self):
+    def _get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
@@ -1390,7 +1393,7 @@ class DistributedDataParallel(Module):
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
-    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
+    def _set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
