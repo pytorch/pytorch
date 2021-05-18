@@ -155,9 +155,8 @@ void RequestCallbackNoPython::processScriptCallOp(
   scriptCall.op()->getOperation()(&stack);
   TORCH_INTERNAL_ASSERT(
       stack.size() == 1,
-      "Return value of a builtin operator or a "
-      "TorchScript function should be a single IValue, got a vector of "
-      "size ",
+      "Return value of a builtin operator or a TorchScript function should be "
+      "a single IValue, got a vector of size ",
       stack.size());
   markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
 }

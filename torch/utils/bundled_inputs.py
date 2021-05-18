@@ -71,9 +71,6 @@ def bundle_inputs(
             Equivalent to `len(model.get_all_bundled_inputs())`,
             but slightly easier to call from C++.
 
-        `run_on_bundled_input(idx: int) -> Any`
-            Run the model on bundled input number `idx`
-
     Inputs can be specified in one of two ways:
 
       - The model can define `_generate_bundled_inputs_for_<function_name>`.
@@ -207,9 +204,6 @@ def augment_many_model_functions_with_bundled_inputs(
             Equivalent to `len(model.get_all_bundled_inputs())`,
             but slightly easier to call from C++.
 
-        `run_on_bundled_input(idx: int) -> Any`
-            Run the model on bundled input number `idx`
-
     Inputs can be specified in one of two ways:
 
       - The model can define `_generate_bundled_inputs_for_<function_name>`.
@@ -336,10 +330,6 @@ def augment_many_model_functions_with_bundled_inputs(
             model.define(textwrap.dedent("""
                 def get_num_bundled_inputs(self):
                     return len(self.get_all_bundled_inputs_for_forward())
-                """))
-            model.define(textwrap.dedent("""
-                def run_on_bundled_input(self, idx: int):
-                    return self(*self.get_all_bundled_inputs()[idx])
                 """))
 
 
