@@ -2261,6 +2261,24 @@ class TestQuantizeFx(QuantizationTestCase):
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
 
+    def test_output_lists_and_dicts(self):
+        """Verify that specifying complicated output types does not crash.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return {'foo': [x]}, [{'foo': [[x]]}]
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mc = convert_fx(mp)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
