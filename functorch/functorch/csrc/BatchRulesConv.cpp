@@ -72,8 +72,14 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
   }
 }
 
+Tensor mkldnn_convolution_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
+  std::vector<int64_t> t(self.dim() - 2, 0);
+  IntArrayRef out_padding(t);
+  return at::convolution(self, weight, bias, stride, padding, dilation, false, out_padding, groups);
+}
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("conv2d", conv2d_batching_rule);
+  m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
 }
 }}
