@@ -117,7 +117,6 @@ def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModu
     if hasattr(script_module, 'get_all_bundled_inputs'):
         bundled_inputs_attributes.append('get_all_bundled_inputs')
         bundled_inputs_attributes.append('get_num_bundled_inputs')
-        bundled_inputs_attributes.append('run_on_bundled_input')
 
     # Bundled inputs in module after the change that introduced bundled inputs for multiple functions
     if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):

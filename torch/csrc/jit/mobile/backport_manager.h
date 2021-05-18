@@ -20,9 +20,6 @@ class PyTorchStreamReader;
 namespace torch {
 namespace jit {
 
-constexpr const char* kArchiveNameBytecode = "bytecode";
-constexpr const char* kArchiveNameVersion = "version";
-
 /*
 BackportManager manages a list of backport from n to n-1 function, and provides
 function to check if a specific function exists.
