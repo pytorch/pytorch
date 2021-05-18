@@ -149,7 +149,7 @@ class TestAdadelta(serial.SerializedTestCase):
            decay=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta = inputs
         moment = np.abs(moment)
