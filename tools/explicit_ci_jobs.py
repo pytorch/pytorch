@@ -105,7 +105,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="make .circleci/config.yml only have a specific set of jobs and delete GitHub actions"
     )
-    parser.add_argument("--job", action="append", help="job name", required=True)
+    parser.add_argument("--job", action="append", help="job name", default=[])
     parser.add_argument(
         "--keep-gha", action="store_true", help="don't delete GitHub actions"
     )

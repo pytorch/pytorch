@@ -8,10 +8,9 @@ class AverageBatchParameterServer(AverageParameterServer):
         self,
         rank,
         trainer_count,
-        lc,
         use_cuda_rpc
     ):
-        super().__init__(rank, trainer_count, lc, use_cuda_rpc)
+        super().__init__(rank, trainer_count, use_cuda_rpc)
 
     def process_gradient(self, gradient, param_loc):
         if param_loc not in self.gradient_dict:
