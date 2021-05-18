@@ -2426,19 +2426,17 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
-    def generate_input_tensors():
-        yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-        yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad)
-        yield make_tensor((2, 5), device, dtype, requires_grad=requires_grad)
+    shapes = [(2,), (1, 2), (3, 2), (2, 3)]
 
     inputs = []
-    for t in generate_input_tensors():
+    for shape in shapes:
+        t = make_tensor(shape, device, dtype, requires_grad=requires_grad)
         inputs.append(SampleInput(t))
-        num_observations = t.numel() if t.ndim < 2 else t.size(1)
-        fweights = torch.randint(1, 10, (num_observations,), device=device)
-        aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1)
-        for correction in [0, 1, 2]:
-            inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fweights, 'aweights': aweights}))
+        num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
+        fweights = make_tensor((num_observations,), device, torch.int, low=0, high=10, requires_grad=requires_grad)
+        aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
+        for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
+            inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
 
     return inputs
 
@@ -4296,7 +4294,7 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
     OpInfo('cov',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cov,
            supports_out=False,
            # JIT test not working for tensor kwargs

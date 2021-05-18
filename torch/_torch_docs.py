@@ -1641,61 +1641,70 @@ Example::
 add_docstr(torch.cov, r"""
 cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
 
-Estimates a covariance matrix, given :attr:`input` and weights (optional). The unbiased sample covariance
-of the variables :math:`x` and :math:`y` is given by
+Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
+the variables and columns are the observations.
+
+A covariance matrix is a square matrix giving the covariance of each pair of variables. The diagonal contains
+the variance of each variable (covariance of a variable with itself). By definition, if :attr:`input` represents
+a single variable (Scalar or 1D) then its variance is returned.
+
+The unbiased sample covariance of the variables :math:`x` and :math:`y` is given by:
 
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
 
-where :math:`x` and :math:`y` are rows of :attr:`input`, :math:`\bar{x}` and :math:`\bar{y}` are
-the simple means of the variables respectively.
+where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively.
+
 If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
-is calculated, which is given by
+is calculated, which is given by:
 
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
 
-where, :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided as an input (:math:`w = fweights \times aweights`
-if both are provided) and :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}`
-is the weighted mean of the variable.
-
+where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided, or
+:math:`w = fweights \times aweights` if both are provided, and
+:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable.
 
 Args:
-    input (Tensor): A 1-D or 2-D tensor containing multiple variables and observations.
-        Each row of :attr:`input` represents a variable, and each column, a
-        single observation of all those variables. Also see :attr:`rowvar` below.
-    correction (int, optional): :attr:`correction`:math:`=1` will return the unbiased estimate,
-        even if both :attr:`fweights` and :attr:`aweights` are specified,
-        and :math:`correction`:math:`=0` will return the simple average.
-    fweights (tensor, optional): 1-D tensor of integer frequency weights;
-        the number of times each observation vector should be repeated.
-    aweights (tensor, optional): 1-D array of observation vector weights.
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Keyword Args:
+    correction (int, optional): difference between the sample size and sample degrees of freedom.
+        Defaults to Bessel's correction, ``correction = 1`` which returns the unbiased estimate,
+        even if both :attr:`fweights` and :attr:`aweights` are specified. ``correction = 0``
+        will return the simple average. Defaults to ``1``.
+    fweights (tensor, optional): A Scalar or 1D tensor of observation vector frequencies representing the number of
+        times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
+        Must have integral dtype. Ignored if ``None``. `Defaults to ``None``.
+    aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
         These relative weights are typically large for observations considered “important” and smaller for
-        observations considered less “important”.
+        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        Must have floating point dtype. Ignored if ``None``. `Defaults to ``None``.
+
+Returns:
+    (Tensor) The covariance matrix of the variables.
 
 Example::
-    >>> x =  torch.tensor([[0, 2], [1, 1], [2, 0]]).T
+    >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
     >>> x
     tensor([[0, 1, 2],
             [2, 1, 0]])
     >>> torch.cov(x)
     tensor([[ 1., -1.],
-            [-1.,  1.]], dtype=torch.float64)
-    >>> x = torch.tensor([-2.1, -1,  4.3])
-    >>> X = torch.stack ((x, y), 0)
-    >>> torch.cov(X)
-    tensor([[11.7100, -4.2860],
-            [-4.2860,  2.1441]])
-    >>> torch.cov(x)
-    tensor(11.7100)
-    >>> f = torch.arange(3) * 2
-    >>> x = torch.rand(3,10)
-    >>> f = torch.arange(10) * 2
-    >>> a = torch.arange(10) ** 2
-    >>> torch.cov(x, fweights = f, aweights = a, correction = 1)
-    tensor([[ 0.1070, -0.0098,  0.0382],
-            [-0.0098,  0.0770,  0.0005],
-            [ 0.0382,  0.0005,  0.0416]])
+            [-1.,  1.]])
+    >>> torch.cov(x, correction=0)
+    tensor([[ 0.6667, -0.6667],
+            [-0.6667,  0.6667]])
+    >>> fw = torch.randint(1, 10, (3,))
+    >>> fw
+    tensor([1, 6, 9])
+    >>> aw = torch.rand(3)
+    >>> aw
+    tensor([0.4282, 0.0255, 0.4144])
+    >>> torch.cov(x, fweights=fw, aweights=aw)
+    tensor([[ 0.4169, -0.4169],
+            [-0.4169,  0.4169]])
 """)
 
 add_docstr(torch.cat,

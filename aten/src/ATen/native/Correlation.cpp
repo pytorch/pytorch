@@ -9,61 +9,93 @@ Tensor cov(
     int64_t correction,
     const c10::optional<Tensor>& fweights,
     const c10::optional<Tensor>& aweights) {
+  constexpr int OBSERVATIONS_DIM = 1;
+
   TORCH_CHECK(
-      self.ndimension() <= 2, "cov(): input has more than 2 dimensions");
+      self.ndimension() <= 2,
+      "cov(): expected input to have two or fewer dimensions but got an input with ,",
+      self.ndimension(),
+      " dimensions");
+
+  TORCH_CHECK(
+      self.scalar_type() != kBool, "cov(): bool dtype is not supported");
 
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
-  const auto num_observations = in.size(1);
+  const auto num_observations = in.size(OBSERVATIONS_DIM);
 
+  // The product of frequencies (fweights) and weights (aweights).
   Tensor w;
 
   if (fweights.has_value()) {
-    const auto& fw = fweights.value();
+    w = fweights.value();
     TORCH_CHECK(
-        fw.ndimension() <= 1, "cov(): fweights has more than 1 dimension");
+        w.ndimension() <= 1,
+        "cov(): expected fweights to have one or fewer dimensions but got fweights with ,",
+        w.ndimension());
     TORCH_CHECK(
-        at::isIntegralType(fw.scalar_type(), false),
-        "cov(): fweights must be integral dtype");
+        at::isIntegralType(w.scalar_type(), false),
+        "cov(): expected fweights to have integral dtype but got fweights with ",
+        w.scalar_type(),
+        " dtype");
     TORCH_CHECK(
-        fw.numel() == num_observations,
-        "cov(): incompatible number of observations and fweights");
-    w = fw;
+        w.numel() == num_observations,
+        "cov(): expected fweights to have the same numel as there are observations in the input but got, ",
+        w.numel(),
+        " != ",
+        num_observations);
+    TORCH_CHECK(
+        !(w.is_cpu() && w.lt(0).any().item<bool>()),
+        "cov(): fweights cannot be negative");
   }
 
   if (aweights.has_value()) {
     const auto& aw = aweights.value();
     TORCH_CHECK(
-        aw.ndimension() <= 1, "cov(): aweights has more than 1 dimension");
+        aw.ndimension() <= 1,
+        "cov(): expected aweights to have one or fewer dimensions but got aweights with ,",
+        aw.ndimension());
     TORCH_CHECK(
         at::isFloatingType(aw.scalar_type()),
-        "cov(): aweights must be floating point dtype");
+        "cov(): expected aweights to have floating point dtype but got aweights with ",
+        aw.scalar_type(),
+        " dtype");
     TORCH_CHECK(
         aw.numel() == num_observations,
-        "cov(): incompatible number of observations and aweights");
+        "cov(): expected aweights to have the same numel as there are observations in the input but got, ",
+        aw.numel(),
+        " != ",
+        num_observations);
+    TORCH_CHECK(
+        !(aw.is_cpu() && aw.lt(0).any().item<bool>()),
+        "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
   }
 
-  w = w.defined() ? w.to(kDouble)
-                  : at::ones(num_observations, in.options().dtype(kDouble));
-  in = in.to(at::promote_types(in.scalar_type(), w.scalar_type()));
+  // Compute a weighted average of the observations
+  const auto w_sum = w.defined()
+      ? w.sum()
+      : at::scalar_tensor(num_observations, in.options().dtype(kLong));
+  const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;
 
-  const auto w_sum = w.sum();
-  const auto avg = (in * w).sum(1) / w_sum;
-
-  Tensor fact;
-  if (correction == 0) {
-    fact = w_sum;
-  } else if (!aweights.has_value()) {
-    fact = w_sum - correction;
+  // Compute the normalization factor
+  Tensor norm_factor;
+  if (!w.defined() || !aweights.has_value() || correction == 0) {
+    norm_factor = w_sum - correction;
   } else {
-    fact = w_sum - correction * (w * aweights.value()).sum() / w_sum;
+    norm_factor = w_sum - correction * (w * aweights.value()).sum() / w_sum;
   }
-  fact = at::where(fact < 0, at::zeros_like(fact), fact);
 
+  if (norm_factor.is_cpu() && norm_factor.le(0).item<bool>()) {
+    TORCH_WARN("cov(): degrees of freedom is <= 0");
+  }
+  norm_factor =
+      at::where(norm_factor < 0, at::zeros_like(norm_factor), norm_factor);
+
+  // Compute covariance matrix
   in = in - avg.unsqueeze(1);
-  const auto c = at::mm(in, (in * w).t().conj());
-  return at::true_divide(c, fact).squeeze();
+  const auto c = at::mm(in, (w.defined() ? in * w : in).t().conj());
+  return at::true_divide(c, norm_factor).squeeze();
 }
 
 } // namespace native

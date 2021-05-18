@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipCUDAIf,
     skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
@@ -4286,7 +4287,7 @@ else:
             fweights = fweights.cpu().numpy() if fweights is not None else None
             aweights = aweights.cpu().numpy() if aweights is not None else None
             expected = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
-            expected = torch.from_numpy(np.array(expected))
+            expected = torch.from_numpy(np.array(expected)).to(dtype=actual.dtype)
             self.assertEqual(actual, expected, atol=1e-05, rtol=1e-05)
 
         def generate_input_tensors():
@@ -4304,22 +4305,26 @@ else:
             num_observations = t.numel() if t.ndim < 2 else t.size(1)
             fweights = torch.randint(1, 10, (num_observations,), device=device)
             aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1)
-            for correction in [0, 1, 2]:
+            for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                 check(t, correction, fweights, aweights)
 
     def test_cov_error(self, device):
-        def check(error, msg, *args, **kwargs):
-            with self.assertRaisesRegex(error, r'cov\(\):.*' + msg + r'.*'):
+        def check(msg, *args, **kwargs):
+            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
                 torch.cov(*args, **kwargs)
 
         a = torch.rand(2)
-        check(RuntimeError, r'has more than 2 dimensions', torch.rand(2, 2, 2))
-        check(RuntimeError, r'has more than 1 dimension', a, fweights=torch.rand(2, 2))
-        check(RuntimeError, r'has more than 1 dimension', a, aweights=torch.rand(2, 2))
-        check(RuntimeError, r'must be integral dtype', a, fweights=torch.rand(2))
-        check(RuntimeError, r'must be floating point dtype', a, aweights=torch.tensor([1, 1]))
-        check(RuntimeError, r'incompatible number of', a, fweights=torch.tensor([1]))
-        check(RuntimeError, r'incompatible number of', a, aweights=torch.rand(1))
+        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
+        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
+        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
+        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
+        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
+        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
+        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
+
+        if self.device_type == 'cpu':
+            check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
+            check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
