@@ -501,6 +501,10 @@ public:
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
 
+  // Borrowing from temporaries is unlikely to go well.
+  TensorIteratorConfig& add_borrowed_output(Tensor&& output) = delete;
+  TensorIteratorConfig& add_borrowed_input(Tensor&& input) = delete;
+
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
   // outputs are checked for internal overlap (e.g. broadcasted views). An error
