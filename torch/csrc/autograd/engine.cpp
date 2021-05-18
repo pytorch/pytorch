@@ -428,7 +428,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
     if (local_graph_task->completed()) {
       local_graph_task->mark_as_completed_and_run_post_processing();
 
-      auto base_owner = local_graph_task->owner_;
+      auto base_owner = local_graph_task->owner_.load();
       // The current worker thread finish the graph_task, but the owning thread
       // of the graph_task might be sleeping on pop() if it does not have work.
       // So we need to send a dummy function task to the owning thread just to

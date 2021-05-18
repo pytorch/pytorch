@@ -116,9 +116,10 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
-  // Safe to read owner_ and reentrant_depth_ without synchronizaton
-  int owner_;
+  std::atomic<int> owner_;
+
   // The number of parent graph tasks for this graph task
+  // Safe to read reentrant_depth_ without synchronizaton
   const int reentrant_depth_;
 
   bool can_checkpoint() const {
