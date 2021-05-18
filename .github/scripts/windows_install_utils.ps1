@@ -1,6 +1,5 @@
 # Taken from actions/virtual-environments
-function Install-Binary
-{
+function Install-Binary {
     <#
     .SYNOPSIS
         A helper function to install executables.
@@ -30,39 +29,33 @@ function Install-Binary
 
     # MSI binaries should be installed via msiexec.exe
     $fileExtension = ([System.IO.Path]::GetExtension($Name)).Replace(".", "")
-    if ($fileExtension -eq "msi")
-    {
+    if ($fileExtension -eq "msi") {
         $ArgumentList = ('/i', $filePath, '/QN', '/norestart')
         $filePath = "msiexec.exe"
     }
 
-    try
-    {
+    try {
         Write-Host "Starting Install $Name..."
         $process = Start-Process -FilePath $filePath -ArgumentList $ArgumentList -Wait -PassThru
 
         $exitCode = $process.ExitCode
         # 3010 == ERROR_SUCCESS_REBOOT_REQUIRED
         # see: https://docs.microsoft.com/en-us/windows/win32/msi/error-codes
-        if ($exitCode -eq 0 -or $exitCode -eq 3010)
-        {
+        if ($exitCode -eq 0 -or $exitCode -eq 3010) {
             Write-Host "Installation successful"
         }
-        else
-        {
+        else {
             Write-Host "Non zero exit code returned by the installation process: $exitCode"
             exit $exitCode
         }
     }
-    catch
-    {
+    catch {
         Write-Host "Failed to install the $fileExtension ${Name}: $($_.Exception.Message)"
         exit 1
     }
 }
 
-function Start-DownloadWithRetry
-{
+function Start-DownloadWithRetry {
     Param
     (
         [Parameter(Mandatory)]
@@ -79,21 +72,17 @@ function Start-DownloadWithRetry
     $filePath = Join-Path -Path $DownloadPath -ChildPath $Name
 
     #Default retry logic for the package.
-    while ($Retries -gt 0)
-    {
-        try
-        {
+    while ($Retries -gt 0) {
+        try {
             Write-Host "Downloading package from: $Url to path $filePath ."
             (New-Object System.Net.WebClient).DownloadFile($Url, $filePath)
             break
         }
-        catch
-        {
+        catch {
             Write-Host "There is an error during package downloading:`n $_"
             $Retries--
 
-            if ($Retries -eq 0)
-            {
+            if ($Retries -eq 0) {
                 Write-Host "File can't be downloaded. Please try later or check that file exists by url: $Url"
                 exit 1
             }
