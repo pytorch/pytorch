@@ -440,7 +440,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardsigmoid_backward_kernel(TensorIterator& iter) {
+void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
     using T_ACC = acc_type<scalar_t, true>;
     const T_ACC zero(0.0f);
