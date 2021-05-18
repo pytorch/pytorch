@@ -1,6 +1,6 @@
 #pragma once
 
-#ifndef C10_MOBILE
+#ifndef BUILD_LITE_INTERPRETER
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #endif
 #include <torch/custom_class.h>
