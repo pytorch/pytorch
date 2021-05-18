@@ -4297,7 +4297,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cov,
            supports_out=False,
-           # JIT test not working for tensor kwargs
+           # JIT test not working for tensor kwargs (https://github.com/pytorch/pytorch/issues/58507)
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
