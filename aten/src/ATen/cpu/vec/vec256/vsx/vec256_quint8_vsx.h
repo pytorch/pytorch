@@ -6,17 +6,17 @@
 #include <c10/util/quint8.h>
 #include <array>
 
-// This file defines Vectorize<> for the quantized types.
+// This file defines Vectorized<> for the quantized types.
 //
 //
 // Currently, we simply use these classes as efficient converters between
-// the quantized types and Vectorize<float>, usually in bandwidth-bound cases
+// the quantized types and Vectorized<float>, usually in bandwidth-bound cases
 // where doing the arithmetic in full-precision is acceptable (e.g.
 // elementwise operators).
 //
 //
 // Conversions are as follows:
-//  Vectorize<quint8> -> 4x Vectorize<float>
+//  Vectorized<quint8> -> 4x Vectorized<float>
 //
 // The size of the returned float vector is specified by the special
 // constexpr function float_num_vecs. The type of the value returned
@@ -24,7 +24,7 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorize<T>::float_num_vecs
+// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
 // iterations.
 
 namespace at {
@@ -33,7 +33,7 @@ namespace {
 
 const vint16 mask_unsigned = vec_splats((short int)0xFF);
 template <>
-struct Vectorize<c10::quint8> {
+struct Vectorized<c10::quint8> {
  private:
   union {
     struct {
@@ -48,7 +48,7 @@ struct Vectorize<c10::quint8> {
   } __attribute__((__may_alias__));
 
  public:
-  Vectorize() {}
+  Vectorized() {}
   using size_type = int;
   static constexpr size_type size() {
     return 32;
@@ -60,22 +60,22 @@ struct Vectorize<c10::quint8> {
   static constexpr int int_num_vecs() {
     return 4;
   }
-  using float_vec_return_type = std::array<Vectorize<float>, 4>;
-  using int_vec_return_type = std::array<Vectorize<c10::qint32>, 4>;
+  using float_vec_return_type = std::array<Vectorized<float>, 4>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
   using value_type = typename c10::quint8::underlying;
   using vec_internal_type = vuint8;
   using vec_internal_mask_type = vbool8;
   // Broadcast constructor
-  C10_ALWAYS_INLINE Vectorize(const c10::quint8& val)
+  C10_ALWAYS_INLINE Vectorized(const c10::quint8& val)
       : _vec0(vec_splats(val.val_)), _vec1(vec_splats(val.val_)) {}
 
-  C10_ALWAYS_INLINE Vectorize(const Vectorize<c10::quint8>& other)
+  C10_ALWAYS_INLINE Vectorized(const Vectorized<c10::quint8>& other)
       : _vec0{other._vec0}, _vec1(other._vec1) {}
 
-  C10_ALWAYS_INLINE Vectorize(vuint8 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorize(vbool8 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorize(vuint8 v1, vuint8 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorize(vbool8 v1, vbool8 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vuint8 v) : _vec0{v}, _vec1{v} {}
+  C10_ALWAYS_INLINE Vectorized(vbool8 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  C10_ALWAYS_INLINE Vectorized(vuint8 v1, vuint8 v2) : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool8 v1, vbool8 v2) : _vecb0{v1}, _vecb1{v2} {}
 
   C10_ALWAYS_INLINE const vec_internal_type& vec0() const {
     return _vec0;
@@ -84,7 +84,7 @@ struct Vectorize<c10::quint8> {
     return _vec1;
   }
 
-  static C10_ALWAYS_INLINE Vectorize<c10::quint8> loadu(
+  static C10_ALWAYS_INLINE Vectorized<c10::quint8> loadu(
       const void* ptr,
       int count = size()) {
     if (count == size()) {
@@ -111,9 +111,9 @@ struct Vectorize<c10::quint8> {
 
  public:
   float_vec_return_type C10_ALWAYS_INLINE dequantize(
-      Vectorize<float> scale,
-      Vectorize<float> zero_point,
-      Vectorize<float> scale_zp_premul) const {
+      Vectorized<float> scale,
+      Vectorized<float> zero_point,
+      Vectorized<float> scale_zp_premul) const {
     // unpacking unsigned as signed
     vint16 vecshi0 = vec_unpackh((vint8)_vec0);
     vint16 vecshi1 = vec_unpackl((vint8)_vec0);
@@ -156,21 +156,21 @@ struct Vectorize<c10::quint8> {
     vfloat32 scale_zp_premul0 = scale_zp_premul.vec0();
     vfloat32 scale_zp_premul1 = scale_zp_premul.vec1();
     return {
-        Vectorize<float>{
+        Vectorized<float>{
             vec_madd(scale_vec0, vecf0_0, scale_zp_premul0),
             vec_madd(scale_vec1, vecf1_0, scale_zp_premul1)},
-        Vectorize<float>{
+        Vectorized<float>{
             vec_madd(scale_vec0, vecf0_1, scale_zp_premul0),
             vec_madd(scale_vec1, vecf1_1, scale_zp_premul1)},
-        Vectorize<float>{
+        Vectorized<float>{
             vec_madd(scale_vec0, vecf0_2, scale_zp_premul0),
             vec_madd(scale_vec1, vecf1_2, scale_zp_premul1)},
-        Vectorize<float>{
+        Vectorized<float>{
             vec_madd(scale_vec0, vecf0_3, scale_zp_premul0),
             vec_madd(scale_vec1, vecf1_3, scale_zp_premul1)}};
   }
 
-  static Vectorize<c10::quint8> quantize(
+  static Vectorized<c10::quint8> quantize(
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
@@ -182,10 +182,10 @@ struct Vectorize<c10::quint8> {
     vfloat32 vec_zero_point = vec_splats((float)zero_point);
     // vuint32 vmin = vec_splats(min_val);
     // vuint32 vmax = vec_splats(max_val);
-    Vectorize<float> vf0 = rhs[0];
-    Vectorize<float> vf1 = rhs[1];
-    Vectorize<float> vf2 = rhs[2];
-    Vectorize<float> vf3 = rhs[3];
+    Vectorized<float> vf0 = rhs[0];
+    Vectorized<float> vf1 = rhs[1];
+    Vectorized<float> vf2 = rhs[2];
+    Vectorized<float> vf3 = rhs[3];
     vfloat32 vecf0 = vf0.vec0();
     vfloat32 vecf1 = vf0.vec1();
     vfloat32 vecf2 = vf1.vec0();
@@ -237,18 +237,18 @@ struct Vectorize<c10::quint8> {
     return {vec0, vec1};
   }
 
-  Vectorize<c10::quint8> C10_ALWAYS_INLINE relu(Vectorize<c10::quint8> zero_point) const {
+  Vectorized<c10::quint8> C10_ALWAYS_INLINE relu(Vectorized<c10::quint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 
-  Vectorize<c10::quint8> C10_ALWAYS_INLINE
-  relu6(Vectorize<c10::quint8> zero_point, Vectorize<c10::quint8> q_six) const {
+  Vectorized<c10::quint8> C10_ALWAYS_INLINE
+  relu6(Vectorized<c10::quint8> zero_point, Vectorized<c10::quint8> q_six) const {
     vuint8 max0 = vec_max(_vec0, zero_point._vec0);
     vuint8 max1 = vec_max(_vec1, zero_point._vec1);
     return {vec_min(max0, q_six._vec0), vec_min(max1, q_six._vec1)};
   }
 
-  int_vec_return_type widening_subtract(Vectorize<c10::quint8> b) const {
+  int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
     vint16 vecshi0 = vec_unpackh((vint8)_vec0);
     vint16 vecBshi0 = vec_unpackh((vint8)b._vec0);
     vint16 vecshi1 = vec_unpackl((vint8)_vec0);
@@ -290,23 +290,23 @@ struct Vectorize<c10::quint8> {
     vint32 vecBi7 = vec_unpackl(vecBshi3);
 
     return {
-        Vectorize<c10::qint32>(veci0 - vecBi0, veci1 - vecBi1),
-        Vectorize<c10::qint32>(veci2 - vecBi2, veci3 - vecBi3),
-        Vectorize<c10::qint32>(veci4 - vecBi4, veci5 - vecBi5),
-        Vectorize<c10::qint32>(veci6 - vecBi6, veci7 - vecBi7)};
+        Vectorized<c10::qint32>(veci0 - vecBi0, veci1 - vecBi1),
+        Vectorized<c10::qint32>(veci2 - vecBi2, veci3 - vecBi3),
+        Vectorized<c10::qint32>(veci4 - vecBi4, veci5 - vecBi5),
+        Vectorized<c10::qint32>(veci6 - vecBi6, veci7 - vecBi7)};
   }
 
-  static Vectorize<c10::quint8> requantize_from_int(
+  static Vectorized<c10::quint8> requantize_from_int(
       const int_vec_return_type& inp,
       float multiplier,
       int32_t zero_point) {
     vfloat32 vec_multiplier = vec_splats(multiplier);
     vint32 vec_zero_point = vec_splats(zero_point);
 
-    Vectorize<c10::qint32> vi0 = inp[0];
-    Vectorize<c10::qint32> vi1 = inp[1];
-    Vectorize<c10::qint32> vi2 = inp[2];
-    Vectorize<c10::qint32> vi3 = inp[3];
+    Vectorized<c10::qint32> vi0 = inp[0];
+    Vectorized<c10::qint32> vi1 = inp[1];
+    Vectorized<c10::qint32> vi2 = inp[2];
+    Vectorized<c10::qint32> vi3 = inp[3];
 
     vfloat32 vecf0 = vec_float(vi0.vec0());
     vfloat32 vecf1 = vec_float(vi0.vec1());
@@ -396,19 +396,19 @@ struct Vectorize<c10::quint8> {
 };
 
 template <>
-Vectorize<c10::quint8> inline maximum(
-    const Vectorize<c10::quint8>& a,
-    const Vectorize<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
 template <>
-Vectorize<c10::quint8> inline minimum(
-    const Vectorize<c10::quint8>& a,
-    const Vectorize<c10::quint8>& b) {
+Vectorized<c10::quint8> inline minimum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.minimum(b);
 }
 
 } // namespace
-} // namespace vec256
+} // namespace vec
 } // namespace at

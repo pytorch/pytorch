@@ -53,8 +53,8 @@ namespace at { namespace native { namespace {
  *      for (int n = 0; n < input_accessor.size(0); n++) {
  *        grid_sample_2d_grid_slice_iterator(
  *          grid_accessor[n],
- *          [&](const Vectorize<scalar_t>& grid_x,
- *              const Vectorize<scalar_t>& grid_y,
+ *          [&](const Vectorized<scalar_t>& grid_x,
+ *              const Vectorized<scalar_t>& grid_y,
  *              int64_t spatial_offset, int64_t len) {
  *            grid_sample.forward(out_accessor[n], input_accessor[n],
  *                                spatial_offset, grid_x, grid_y, len);
@@ -70,7 +70,7 @@ namespace at { namespace native { namespace {
  *
  *        template<typename scalar_t, GridSamplerPadding padding>
  *        struct ComputeLocation {
- *          using Vec = Vectorize<scalar_t>;
+ *          using Vec = Vectorized<scalar_t>;
  *
  *          // ctor
  *          ComputeLocation(int64_t size);
@@ -151,8 +151,8 @@ namespace at { namespace native { namespace {
  *                (There might not be enough near boundary.)
 
  *       It should be callable as if it has declaration:
- *          void apply_fn(const Vectorize<scalar_t>& grid_x,
- *                        const Vectorize<scalar_t>& grid_y,
+ *          void apply_fn(const Vectorized<scalar_t>& grid_x,
+ *                        const Vectorized<scalar_t>& grid_y,
  *                        int64_t spatial_offset, int64_t len);
  *
  *      `apply_fn` will be called multiple times, and together cover the entire
@@ -179,7 +179,7 @@ struct ComputeLocationBase;
 
 template<typename scalar_t>
 struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
 
   // values are clipped to between 0 and max_val
   const scalar_t max_val;
@@ -261,7 +261,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
 
 template<typename scalar_t>
 struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
 
   // values are clipped to between 0 and max_val
   const scalar_t max_val;
@@ -344,7 +344,7 @@ struct ComputeLocation;
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Zeros, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::scaling_factor;
 
@@ -366,7 +366,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Zeros, align_corners>
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates_get_grad;
@@ -392,7 +392,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates_get_grad;
@@ -453,9 +453,9 @@ struct ApplyGridSample;
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
                        padding, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vectorize<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -689,9 +689,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
                        padding, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vectorize<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -794,9 +794,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
                        padding, align_corners> {
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vectorize<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -1012,8 +1012,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
   int64_t grid_sCoor = grid_slice.stride(2);
   auto grid_ptr = grid_slice.data();
 
-  using Vec = Vectorize<scalar_t>;
-  using iVec = Vectorize<int_same_size_t<scalar_t>>;
+  using Vec = Vectorized<scalar_t>;
+  using iVec = Vectorized<int_same_size_t<scalar_t>>;
   constexpr int64_t step = Vec::size();
 
   // Loop over each output pixel in grid.
@@ -1145,7 +1145,7 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
         auto inp_slice = inp_acc[n];                                           \
         grid_sample_2d_grid_slice_iterator(                                    \
           grid_acc[n],                                                         \
-          [&](const Vectorize<scalar_t>& grid_x, const Vectorize<scalar_t>& grid_y,  \
+          [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,  \
               int64_t spatial_offset, int64_t len) {                           \
             grid_sample.forward(out_slice, inp_slice, spatial_offset,          \
                                 grid_x, grid_y, len);                          \
@@ -1219,7 +1219,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
         auto inp_slice = inp_acc[n];                                             \
         grid_sample_2d_grid_slice_iterator(                                      \
           grid_acc[n],                                                           \
-          [&](const Vectorize<scalar_t>& grid_x, const Vectorize<scalar_t>& grid_y,    \
+          [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,    \
               int64_t spatial_offset, int64_t len) {                             \
             grid_sample.backward(gInp_slice, gGrid_slice, gOut_slice, inp_slice, \
                                  spatial_offset, grid_x, grid_y, len);           \

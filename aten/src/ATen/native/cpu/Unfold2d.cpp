@@ -15,7 +15,7 @@ static inline void cadd(
     const scalar_t* x,
     const scalar_t* y,
     int64_t n) {
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char* ptrs[] = {reinterpret_cast<char*>(z),
                   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)

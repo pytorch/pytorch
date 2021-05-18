@@ -53,11 +53,11 @@ namespace {
  }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Vectorize<T>& vec) {
-  T buf[Vectorize<T>::size()];
+std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
+  T buf[Vectorized<T>::size()];
   vec.store(buf);
   stream << "vec[";
-  for (int i = 0; i != Vectorize<T>::size(); i++) {
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     if (i != 0) {
       stream << ", ";
     }
@@ -73,12 +73,12 @@ std::ostream& operator<<(std::ostream& stream, const Vectorize<T>& vec) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<>
-inline Vectorize<float> cast<float, double>(const Vectorize<double>& src) {
+inline Vectorized<float> cast<float, double>(const Vectorized<double>& src) {
   return _mm256_castpd_ps(src);
 }
 
 template<>
-inline Vectorize<double> cast<double, float>(const Vectorize<float>& src) {
+inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
 
@@ -88,11 +88,11 @@ inline Vectorize<double> cast<double, float>(const Vectorize<float>& src) {
 
 #define DEFINE_FLOAT_INT_CAST(int_t, float_t, float_ch)            \
 template<>                                                         \
-inline  Vectorize<int_t> cast<int_t, float_t>(const Vectorize<float_t>& src) {   \
+inline  Vectorized<int_t> cast<int_t, float_t>(const Vectorized<float_t>& src) {   \
   return _mm256_castp ## float_ch ## _si256(src);                  \
 }                                                                  \
 template<>                                                         \
-inline Vectorize<float_t> cast<float_t, int_t>(const Vectorize<int_t>& src) {   \
+inline Vectorized<float_t> cast<float_t, int_t>(const Vectorized<int_t>& src) {   \
   return _mm256_castsi256_p ## float_ch (src);                     \
 }
 
@@ -108,30 +108,30 @@ DEFINE_FLOAT_INT_CAST(int16_t, float, s)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<double>>
-inline gather(const double* base_addr, const Vectorize<int64_t>& vindex) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
+inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
   return _mm256_i64gather_pd(base_addr, vindex, scale);
 }
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<float>>
-inline gather(const float* base_addr, const Vectorize<int32_t>& vindex) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
+inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<double>>
-inline mask_gather(const Vectorize<double>& src, const double* base_addr,
-                   const Vectorize<int64_t>& vindex, const Vectorize<double>& mask) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
+inline mask_gather(const Vectorized<double>& src, const double* base_addr,
+                   const Vectorized<int64_t>& vindex, const Vectorized<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<float>>
-inline mask_gather(const Vectorize<float>& src, const float* base_addr,
-                   const Vectorize<int32_t>& vindex, const Vectorize<float>& mask) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
+inline mask_gather(const Vectorized<float>& src, const float* base_addr,
+                   const Vectorized<int32_t>& vindex, const Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
 
@@ -140,8 +140,8 @@ inline mask_gather(const Vectorize<float>& src, const float* base_addr,
 // Only works for inputs in the range: [-2^51, 2^51]
 // From: https://stackoverflow.com/a/41148578
 template<>
-Vectorize<int64_t>
-inline convert_to_int_of_same_size<double>(const Vectorize<double> &src) {
+Vectorized<int64_t>
+inline convert_to_int_of_same_size<double>(const Vectorized<double> &src) {
   auto x = _mm256_add_pd(src, _mm256_set1_pd(0x0018000000000000));
   return _mm256_sub_epi64(
       _mm256_castpd_si256(x),
@@ -150,16 +150,16 @@ inline convert_to_int_of_same_size<double>(const Vectorize<double> &src) {
 }
 
 template<>
-Vectorize<int32_t>
-inline convert_to_int_of_same_size<float>(const Vectorize<float> &src) {
+Vectorized<int32_t>
+inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
-std::pair<Vectorize<double>, Vectorize<double>>
-inline interleave2<double>(const Vectorize<double>& a, const Vectorize<double>& b) {
+std::pair<Vectorized<double>, Vectorized<double>>
+inline interleave2<double>(const Vectorized<double>& a, const Vectorized<double>& b) {
   // inputs:
   //   a = {a0, a1, a3, a3}
   //   b = {b0, b1, b2, b3}
@@ -178,8 +178,8 @@ inline interleave2<double>(const Vectorize<double>& a, const Vectorize<double>& 
 }
 
 template <>
-std::pair<Vectorize<float>, Vectorize<float>>
-inline interleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) {
+std::pair<Vectorized<float>, Vectorized<float>>
+inline interleave2<float>(const Vectorized<float>& a, const Vectorized<float>& b) {
   // inputs:
   //   a = {a0, a1, a2, a3, a4, a5, a6, a7}
   //   b = {b0, b1, b2, b3, b4, b5, b6, b7}
@@ -202,8 +202,8 @@ inline interleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DEINTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
-std::pair<Vectorize<double>, Vectorize<double>>
-inline deinterleave2<double>(const Vectorize<double>& a, const Vectorize<double>& b) {
+std::pair<Vectorized<double>, Vectorized<double>>
+inline deinterleave2<double>(const Vectorized<double>& a, const Vectorized<double>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1}
   //   b = {a2, b2, a3, b3}
@@ -222,8 +222,8 @@ inline deinterleave2<double>(const Vectorize<double>& a, const Vectorize<double>
 }
 
 template <>
-std::pair<Vectorize<float>, Vectorize<float>>
-inline deinterleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) {
+std::pair<Vectorized<float>, Vectorized<float>>
+inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1, a2, b2, a3, b3}
   //   b = {a4, b4, a5, b5, a6, b6, a7, b7}

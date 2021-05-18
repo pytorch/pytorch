@@ -52,7 +52,7 @@ struct BlendRegs<index, false>{
   }
 };
 
-template <> class Vectorize<float> {
+template <> class Vectorized<float> {
 private:
   float32x4x2_t values;
 public:
@@ -61,19 +61,19 @@ public:
   static constexpr size_type size() {
     return 8;
   }
-  Vectorize() {}
-  Vectorize(float32x4x2_t v) : values(v) {}
-  Vectorize(float val) : values{vdupq_n_f32(val), vdupq_n_f32(val) } {}
-  Vectorize(float val0, float val1, float val2, float val3,
+  Vectorized() {}
+  Vectorized(float32x4x2_t v) : values(v) {}
+  Vectorized(float val) : values{vdupq_n_f32(val), vdupq_n_f32(val) } {}
+  Vectorized(float val0, float val1, float val2, float val3,
          float val4, float val5, float val6, float val7) :
          values{val0, val1, val2, val3, val4, val5, val6, val7} {}
-  Vectorize(float32x4_t val0, float32x4_t val1) : values{val0, val1} {}
+  Vectorized(float32x4_t val0, float32x4_t val1) : values{val0, val1} {}
   operator float32x4x2_t() const {
     return values;
   }
   template <int64_t mask>
-  static Vectorize<float> blend(const Vectorize<float>& a, const Vectorize<float>& b) {
-    Vectorize<float> vec;
+  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+    Vectorized<float> vec;
     // 0.
     vec.values.val[0] =
       BlendRegs<0, (mask & 0x01)!=0>::impl(
@@ -102,14 +102,14 @@ public:
           a.values.val[1], b.values.val[1], vec.values.val[1]);
     return vec;
   }
-  static Vectorize<float> blendv(const Vectorize<float>& a, const Vectorize<float>& b,
-                              const Vectorize<float>& mask) {
+  static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
+                              const Vectorized<float>& mask) {
     // TODO
     // NB: This requires that each value, i.e., each uint value,
     // of the mask either all be zeros or all be 1s.
     // We perhaps need some kind of an assert?
     // But that will affect performance.
-    Vectorize<float> vec(mask.values);
+    Vectorized<float> vec(mask.values);
     vec.values.val[0] = vbslq_f32(
         vreinterpretq_u32_f32(vec.values.val[0]),
         b.values.val[0],
@@ -121,20 +121,20 @@ public:
     return vec;
   }
   template<typename step_t>
-  static Vectorize<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
-    const Vectorize<float> base_vec(base);
-    const Vectorize<float> step_vec(step);
-    const Vectorize<float> step_sizes(0, 1, 2, 3, 4, 5, 6, 7);
+  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+    const Vectorized<float> base_vec(base);
+    const Vectorized<float> step_vec(step);
+    const Vectorized<float> step_sizes(0, 1, 2, 3, 4, 5, 6, 7);
     return fmadd(step_sizes, step_vec, base_vec);
   }
-  static Vectorize<float> set(const Vectorize<float>& a, const Vectorize<float>& b,
+  static Vectorized<float> set(const Vectorized<float>& a, const Vectorized<float>& b,
                            int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
       case 1:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
           vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
           vec.values.val[1] = a.values.val[1];
@@ -146,7 +146,7 @@ public:
         }
       case 2:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
           vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
           vec.values.val[1] = a.values.val[1];
@@ -158,7 +158,7 @@ public:
         }
       case 3:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
           vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
           vec.values.val[1] = a.values.val[1];
@@ -169,10 +169,10 @@ public:
           return vec;
         }
       case 4:
-        return Vectorize<float>(b.values.val[0], a.values.val[1]);
+        return Vectorized<float>(b.values.val[0], a.values.val[1]);
       case 5:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0x0, 0x0, 0x0};
           vec.values.val[0] = b.values.val[0];
           vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
@@ -184,7 +184,7 @@ public:
         }
       case 6:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
           vec.values.val[0] = b.values.val[0];
           vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
@@ -196,7 +196,7 @@ public:
         }
       case 7:
         {
-          Vectorize<float> vec;
+          Vectorized<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
           vec.values.val[0] = b.values.val[0];
           vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
@@ -209,12 +209,12 @@ public:
     }
     return b;
   }
-  static Vectorize<float> loadu(const void* ptr, int64_t count = size()) {
+  static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size()) {
       return vld1q_f32_x2(reinterpret_cast<const float*>(ptr));
     }
     else if (count == (size() >> 1)) {
-      Vectorize<float> res;
+      Vectorized<float> res;
       res.values.val[0] = vld1q_f32(reinterpret_cast<const float*>(ptr));
       res.values.val[1] = vdupq_n_f32(0.f);
       return res;
@@ -283,7 +283,7 @@ public:
     }
     return mask;
   }
-  Vectorize<float> isnan() const {
+  Vectorized<float> isnan() const {
     __at_align32__ float tmp[size()];
     __at_align32__ float res[size()];
     store(tmp);
@@ -296,7 +296,7 @@ public:
     }
     return loadu(res);
   };
-  Vectorize<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
@@ -304,31 +304,31 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> abs() const {
-    return Vectorize<float>(vabsq_f32(values.val[0]), vabsq_f32(values.val[1]));
+  Vectorized<float> abs() const {
+    return Vectorized<float>(vabsq_f32(values.val[0]), vabsq_f32(values.val[1]));
   }
-  Vectorize<float> angle() const {
-    return Vectorize<float>(0.f);
+  Vectorized<float> angle() const {
+    return Vectorized<float>(0.f);
   }
-  Vectorize<float> real() const {
+  Vectorized<float> real() const {
     return *this;
   }
-  Vectorize<float> imag() const {
-    return Vectorize<float>(0.f);
+  Vectorized<float> imag() const {
+    return Vectorized<float>(0.f);
   }
-  Vectorize<float> conj() const {
+  Vectorized<float> conj() const {
     return *this;
   }
-  Vectorize<float> acos() const {
+  Vectorized<float> acos() const {
     return map(std::acos);
   }
-  Vectorize<float> asin() const {
+  Vectorized<float> asin() const {
     return map(std::asin);
   }
-  Vectorize<float> atan() const {
+  Vectorized<float> atan() const {
     return map(std::atan);
   }
-  Vectorize<float> atan2(const Vectorize<float> &exp) const {
+  Vectorized<float> atan2(const Vectorized<float> &exp) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_exp[size()];
     store(tmp);
@@ -338,7 +338,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> copysign(const Vectorize<float> &sign) const {
+  Vectorized<float> copysign(const Vectorized<float> &sign) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_sign[size()];
     store(tmp);
@@ -348,22 +348,22 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> erf() const {
+  Vectorized<float> erf() const {
     return map(std::erf);
   }
-  Vectorize<float> erfc() const {
+  Vectorized<float> erfc() const {
     return map(std::erfc);
   }
-  Vectorize<float> erfinv() const {
+  Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
-  Vectorize<float> exp() const {
+  Vectorized<float> exp() const {
     return map(std::exp);
   }
-  Vectorize<float> expm1() const {
+  Vectorized<float> expm1() const {
     return map(std::expm1);
   }
-  Vectorize<float> fmod(const Vectorize<float>& q) const {
+  Vectorized<float> fmod(const Vectorized<float>& q) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_q[size()];
     store(tmp);
@@ -373,7 +373,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> hypot(const Vectorize<float> &b) const {
+  Vectorized<float> hypot(const Vectorized<float> &b) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_b[size()];
     store(tmp);
@@ -383,13 +383,13 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> i0() const {
+  Vectorized<float> i0() const {
     return map(calc_i0);
   }
-  Vectorize<float> i0e() const {
+  Vectorized<float> i0e() const {
     return map(calc_i0e);
   }
-  Vectorize<float> igamma(const Vectorize<float> &x) const {
+  Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -399,7 +399,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> igammac(const Vectorize<float> &x) const {
+  Vectorized<float> igammac(const Vectorized<float> &x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
     store(tmp);
@@ -409,19 +409,19 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> log() const {
+  Vectorized<float> log() const {
     return map(std::log);
   }
-  Vectorize<float> log10() const {
+  Vectorized<float> log10() const {
     return map(std::log10);
   }
-  Vectorize<float> log1p() const {
+  Vectorized<float> log1p() const {
     return map(std::log1p);
   }
-  Vectorize<float> log2() const {
+  Vectorized<float> log2() const {
     return map(std::log2);
   }
-  Vectorize<float> nextafter(const Vectorize<float> &b) const {
+  Vectorized<float> nextafter(const Vectorized<float> &b) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_b[size()];
     store(tmp);
@@ -431,54 +431,54 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> frac() const;
-  Vectorize<float> sin() const {
+  Vectorized<float> frac() const;
+  Vectorized<float> sin() const {
     return map(std::sin);
   }
-  Vectorize<float> sinh() const {
+  Vectorized<float> sinh() const {
     return map(std::sinh);
   }
-  Vectorize<float> cos() const {
+  Vectorized<float> cos() const {
     return map(std::cos);
   }
-  Vectorize<float> cosh() const {
+  Vectorized<float> cosh() const {
     return map(std::cosh);
   }
-  Vectorize<float> ceil() const {
+  Vectorized<float> ceil() const {
     return map(at::native::ceil_impl);
   }
-  Vectorize<float> floor() const {
+  Vectorized<float> floor() const {
     return map(at::native::floor_impl);
   }
-  Vectorize<float> neg() const {
-    return Vectorize<float>(
+  Vectorized<float> neg() const {
+    return Vectorized<float>(
         vnegq_f32(values.val[0]),
         vnegq_f32(values.val[1]));
   }
-  Vectorize<float> round() const {
+  Vectorized<float> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(at::native::round_impl);
   }
-  Vectorize<float> tan() const {
+  Vectorized<float> tan() const {
     return map(std::tan);
   }
-  Vectorize<float> tanh() const {
+  Vectorized<float> tanh() const {
     return map(std::tanh);
   }
-  Vectorize<float> trunc() const {
+  Vectorized<float> trunc() const {
     float32x4_t r0 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[0]));
     float32x4_t r1 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
-  Vectorize<float> lgamma() const {
+  Vectorized<float> lgamma() const {
     return map(std::lgamma);
   }
-  Vectorize<float> sqrt() const {
-    return Vectorize<float>(
+  Vectorized<float> sqrt() const {
+    return Vectorized<float>(
         vsqrtq_f32(values.val[0]),
         vsqrtq_f32(values.val[1]));
   }
-  Vectorize<float> reciprocal() const {
+  Vectorized<float> reciprocal() const {
     float32x4_t r0 = vrecpeq_f32(values.val[0]);
     float32x4_t r1 = vrecpeq_f32(values.val[1]);
     // Run two more Netwon's method iterations to get more accurate results
@@ -486,18 +486,18 @@ public:
     r0 = vmulq_f32(vrecpsq_f32(values.val[0], r0), r0);
     r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
     r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
-  Vectorize<float> rsqrt() const {
+  Vectorized<float> rsqrt() const {
     float32x4_t r0 =  vrsqrteq_f32(values.val[0]);
     float32x4_t r1 =  vrsqrteq_f32(values.val[1]);
     r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
     r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
     r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
     r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
-  Vectorize<float> pow(const Vectorize<float> &exp) const {
+  Vectorized<float> pow(const Vectorized<float> &exp) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_exp[size()];
     store(tmp);
@@ -507,190 +507,190 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorize<float> operator==(const Vectorize<float>& other) const {
+  Vectorized<float> operator==(const Vectorized<float>& other) const {
     float32x4_t r0 =
       vreinterpretq_f32_u32(vceqq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
       vreinterpretq_f32_u32(vceqq_f32(values.val[1], other.values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> operator!=(const Vectorize<float>& other) const {
+  Vectorized<float> operator!=(const Vectorized<float>& other) const {
     float32x4_t r0 = vreinterpretq_f32_u32(
         vmvnq_u32(vceqq_f32(values.val[0], other.values.val[0])));
     float32x4_t r1 = vreinterpretq_f32_u32(
         vmvnq_u32(vceqq_f32(values.val[1], other.values.val[1])));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> operator<(const Vectorize<float>& other) const {
+  Vectorized<float> operator<(const Vectorized<float>& other) const {
     float32x4_t r0 =
       vreinterpretq_f32_u32(vcltq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
       vreinterpretq_f32_u32(vcltq_f32(values.val[1], other.values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> operator<=(const Vectorize<float>& other) const {
+  Vectorized<float> operator<=(const Vectorized<float>& other) const {
     float32x4_t r0 =
       vreinterpretq_f32_u32(vcleq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
       vreinterpretq_f32_u32(vcleq_f32(values.val[1], other.values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> operator>(const Vectorize<float>& other) const {
+  Vectorized<float> operator>(const Vectorized<float>& other) const {
     float32x4_t r0 =
       vreinterpretq_f32_u32(vcgtq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
       vreinterpretq_f32_u32(vcgtq_f32(values.val[1], other.values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> operator>=(const Vectorize<float>& other) const {
+  Vectorized<float> operator>=(const Vectorized<float>& other) const {
     float32x4_t r0 =
       vreinterpretq_f32_u32(vcgeq_f32(values.val[0], other.values.val[0]));
     float32x4_t r1 =
       vreinterpretq_f32_u32(vcgeq_f32(values.val[1], other.values.val[1]));
-    return Vectorize<float>(r0, r1);
+    return Vectorized<float>(r0, r1);
   }
 
-  Vectorize<float> eq(const Vectorize<float>& other) const;
-  Vectorize<float> ne(const Vectorize<float>& other) const;
-  Vectorize<float> gt(const Vectorize<float>& other) const;
-  Vectorize<float> ge(const Vectorize<float>& other) const;
-  Vectorize<float> lt(const Vectorize<float>& other) const;
-  Vectorize<float> le(const Vectorize<float>& other) const;
+  Vectorized<float> eq(const Vectorized<float>& other) const;
+  Vectorized<float> ne(const Vectorized<float>& other) const;
+  Vectorized<float> gt(const Vectorized<float>& other) const;
+  Vectorized<float> ge(const Vectorized<float>& other) const;
+  Vectorized<float> lt(const Vectorized<float>& other) const;
+  Vectorized<float> le(const Vectorized<float>& other) const;
 };
 
 template <>
-Vectorize<float> inline operator+(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vaddq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vaddq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline operator-(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vsubq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vsubq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline operator*(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vmulq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vmulq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline operator/(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vdivq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vdivq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorize<float> Vectorize<float>::frac() const {
+Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorize<float> inline maximum(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vmaxq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vmaxq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorize<float> inline minimum(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vminq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vminq_f32(a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline clamp(const Vectorize<float>& a, const Vectorize<float>& min, const Vectorize<float>& max) {
+Vectorized<float> inline clamp(const Vectorized<float>& a, const Vectorized<float>& min, const Vectorized<float>& max) {
   return minimum(max, maximum(min, a));
 }
 
 template <>
-Vectorize<float> inline clamp_max(const Vectorize<float>& a, const Vectorize<float>& max) {
+Vectorized<float> inline clamp_max(const Vectorized<float>& a, const Vectorized<float>& max) {
   return minimum(max, a);
 }
 
 template <>
-Vectorize<float> inline clamp_min(const Vectorize<float>& a, const Vectorize<float>& min) {
+Vectorized<float> inline clamp_min(const Vectorized<float>& a, const Vectorized<float>& min) {
   return maximum(min, a);
 }
 
 template <>
-Vectorize<float> inline operator&(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(vandq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(vandq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline operator|(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(vorrq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(vorrq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 template <>
-Vectorize<float> inline operator^(const Vectorize<float>& a, const Vectorize<float>& b) {
+Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
   float32x4_t r0 = vreinterpretq_f32_u32(veorq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
   float32x4_t r1 = vreinterpretq_f32_u32(veorq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
-Vectorize<float> Vectorize<float>::eq(const Vectorize<float>& other) const {
-  return (*this == other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+  return (*this == other) & Vectorized<float>(1.0f);
 }
 
-Vectorize<float> Vectorize<float>::ne(const Vectorize<float>& other) const {
-  return (*this != other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+  return (*this != other) & Vectorized<float>(1.0f);
 }
 
-Vectorize<float> Vectorize<float>::gt(const Vectorize<float>& other) const {
-  return (*this > other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+  return (*this > other) & Vectorized<float>(1.0f);
 }
 
-Vectorize<float> Vectorize<float>::ge(const Vectorize<float>& other) const {
-  return (*this >= other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+  return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-Vectorize<float> Vectorize<float>::lt(const Vectorize<float>& other) const {
-  return (*this < other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+  return (*this < other) & Vectorized<float>(1.0f);
 }
 
-Vectorize<float> Vectorize<float>::le(const Vectorize<float>& other) const {
-  return (*this <= other) & Vectorize<float>(1.0f);
+Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+  return (*this <= other) & Vectorized<float>(1.0f);
 }
 
 template <>
 inline void convert(const float* src, int32_t* dst, int64_t n) {
   int64_t i;
 #pragma unroll
-  for (i = 0; i <= (n - Vectorize<float>::size()); i += Vectorize<float>::size()) {
+  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
     vst1q_s32(dst + i + 4, vcvtq_s32_f32(vld1q_f32(src + i + 4)));
   }
@@ -704,7 +704,7 @@ template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   int64_t i;
 #pragma unroll
-  for (i = 0; i <= (n - Vectorize<float>::size()); i += Vectorize<float>::size()) {
+  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
     vst1q_f32(dst + i + 4, vcvtq_f32_s32(vld1q_s32(src + i + 4)));
   }
@@ -715,10 +715,10 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 }
 
 template <>
-Vectorize<float> inline fmadd(const Vectorize<float>& a, const Vectorize<float>& b, const Vectorize<float>& c) {
+Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
   float32x4_t r0 = vfmaq_f32(c.get_low(), a.get_low(), b.get_low());
   float32x4_t r1 = vfmaq_f32(c.get_high(), a.get_high(), b.get_high());
-  return Vectorize<float>(r0, r1);
+  return Vectorized<float>(r0, r1);
 }
 
 #endif /* defined(aarch64) */

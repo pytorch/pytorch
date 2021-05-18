@@ -29,10 +29,10 @@ static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, cons
           [start, step, &idx]() -> scalar_t {
             return start + step * (idx++);
           },
-          [start, step, &idx]() -> Vectorize<scalar_t> {
-            Vectorize<scalar_t> res;
-            res = Vectorize<scalar_t>::arange(start + step * idx, step);
-            idx += Vectorize<scalar_t>::size();
+          [start, step, &idx]() -> Vectorized<scalar_t> {
+            Vectorized<scalar_t> res;
+            res = Vectorized<scalar_t>::arange(start + step * idx, step);
+            idx += Vectorized<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });
@@ -60,15 +60,15 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
               return end - step * (steps - (idx++) - 1);
             }
           },
-          [start, end, step, halfway, steps, &idx]() -> Vectorize<scalar_t> {
-            Vectorize<scalar_t> res;
+          [start, end, step, halfway, steps, &idx]() -> Vectorized<scalar_t> {
+            Vectorized<scalar_t> res;
             if (idx < halfway) {
-              res = Vectorize<scalar_t>::arange(start + step * idx, step);
+              res = Vectorized<scalar_t>::arange(start + step * idx, step);
             } else {
-              res = Vectorize<scalar_t>::arange(
+              res = Vectorized<scalar_t>::arange(
                   end - step * (steps - idx - 1), step);
             }
-            idx += Vectorize<scalar_t>::size();
+            idx += Vectorized<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });

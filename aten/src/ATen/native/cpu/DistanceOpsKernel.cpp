@@ -12,7 +12,7 @@ namespace at { namespace native { namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -39,7 +39,7 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vectorize.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
     return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
       vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));

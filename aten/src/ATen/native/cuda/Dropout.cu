@@ -62,7 +62,7 @@ __global__ void fused_dropout_kernel_vec(
 
   float4 rand;
 
-  // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
+  // Note: Vectorizedd loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
       linearIndex < totalElements;
       linearIndex += gridDim.x * blockDim.x * VEC) {
@@ -105,7 +105,7 @@ __global__ void fused_dropout_kernel_vec(
       r[ii] = src[ii]*(&rand.x)[ii]*pinv;
       mask[ii] = (uint8_t)(&rand.x)[ii];
     }
-    // Vectorized writes for both mask & result
+    // Vectorizedd writes for both mask & result
     *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
     *(reinterpret_cast<MaskLoadT*>(&c.data[linearIndex])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
 

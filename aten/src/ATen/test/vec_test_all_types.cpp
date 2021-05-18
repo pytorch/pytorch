@@ -484,7 +484,7 @@ namespace {
             if (val & (1 << i)) {
               test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
               // All bits are set to 1 if true, otherwise 0.
-              // same rule as at::Vectorize<T>::binary_pred.
+              // same rule as at::Vectorized<T>::binary_pred.
               std::memset(static_cast<void*>(&expected_vals[i]), 0xFF, sizeof(VT));
             } else {
               test_vals[i] = (VT)0.123;
@@ -493,7 +493,7 @@ namespace {
           }
           vec actual = vec::loadu(test_vals).isnan();
           vec expected = vec::loadu(expected_vals);
-          AssertVectorize<vec>(NAME_INFO(isnan), expected, actual).check();
+          AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -570,8 +570,8 @@ namespace {
         auto a = vec::loadu(vals);
         auto b = vec::loadu(vals + vec::size());
         auto cc = interleave2(a, b);
-        AssertVectorize<vec>(NAME_INFO(Interleave FirstHalf), std::get<0>(cc), vec::loadu(interleaved)).check(true);
-        AssertVectorize<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved + vec::size())).check(true);
+        AssertVectorized<vec>(NAME_INFO(Interleave FirstHalf), std::get<0>(cc), vec::loadu(interleaved)).check(true);
+        AssertVectorized<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved + vec::size())).check(true);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Interleave, DeInterleave) {
@@ -592,8 +592,8 @@ namespace {
         auto a = vec::loadu(interleaved);
         auto b = vec::loadu(interleaved + vec::size());
         auto cc = deinterleave2(a, b);
-        AssertVectorize<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
-        AssertVectorize<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
+        AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
+        AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Plus) {
@@ -834,7 +834,7 @@ namespace {
         at::vec::convert(input1, actual_vals1, vec::size());
         auto expected1 = VecType<IntVT>::loadu(expected_vals1);
         auto actual1 = VecType<IntVT>::loadu(actual_vals1);
-        if (AssertVectorize<VecType<IntVT>>(NAME_INFO(test_convert_to_int), expected1, actual1).check()) {
+        if (AssertVectorized<VecType<IntVT>>(NAME_INFO(test_convert_to_int), expected1, actual1).check()) {
           return;
         }
 
@@ -852,7 +852,7 @@ namespace {
         at::vec::convert(input2, actual_vals2, vec::size());
         auto expected2 = vec::loadu(expected_vals2);
         auto actual2 = vec::loadu(actual_vals2);
-        AssertVectorize<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
+        AssertVectorized<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
@@ -895,7 +895,7 @@ namespace {
         auto expected = vec::loadu(expected_val);
         auto actual = vec::template blend<mask>(vec_a, vec_b);
         auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
-        if (AssertVectorize<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
+        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
         test_blend<vec, VT, mask - 1>(expected_val, a, b);
     }
     template<typename vec, typename VT, int64_t idx, int64_t N>
@@ -918,7 +918,7 @@ namespace {
         for (int64_t i = 0; i < vec::size(); i++) {
             mask_str += std::to_string(mask[i]) + " ";
         }
-        if (AssertVectorize<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
+        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
             return false;
         }
         return true;
@@ -1015,7 +1015,7 @@ namespace {
         auto actual = vec::set(vec_a, vec_b, count);
 
         auto count_str = std::string("\ncount: ") + std::to_string(count);
-        if (AssertVectorize<vec>(std::string(NAME_INFO(test_set)) + count_str, expected, actual).check()) {
+        if (AssertVectorized<vec>(std::string(NAME_INFO(test_set)) + count_str, expected, actual).check()) {
           return;
         }
         test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
@@ -1059,7 +1059,7 @@ namespace {
         }
         auto expected = vec::loadu(expected_val);
         auto actual = vec::arange(base, step);
-        AssertVectorize<vec>(NAME_INFO(test_arange), expected, actual).check();
+        AssertVectorized<vec>(NAME_INFO(test_arange), expected, actual).check();
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
@@ -1082,9 +1082,9 @@ namespace {
         auto expected1 = vcomplex::loadu(exp);
         auto expected3 = vcomplex::loadu(exp3);
         auto expected4 = vcomplex::loadu(exp4);
-        AssertVectorize<vcomplex>(NAME_INFO(complex real), expected1, actual1).check();
-        AssertVectorize<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
-        AssertVectorize<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
+        AssertVectorized<vcomplex>(NAME_INFO(complex real), expected1, actual1).check();
+        AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
+        AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Quantize) {
@@ -1125,7 +1125,7 @@ namespace {
             }
             auto expected = vec::loadu(expected_qint_vals);
             auto actual = vec::quantize(float_ret, scale, zero_point_val, inv_scale);
-            if (AssertVectorize<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
+            if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1170,9 +1170,9 @@ namespace {
                 vfloat expected = vfloat::loadu(unit_exp_vals);
                 const auto& actual = actual_float_ret[j];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
-                if (AssertVectorize<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check(false, true, 1.e-3f)) return;
+                if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check(false, true, 1.e-3f)) return;
 #else
-                if (AssertVectorize<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
+                if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
 #endif
             }
         } //trials;
@@ -1210,7 +1210,7 @@ namespace {
             }
             auto expected = vec::loadu(expected_qint_vals);
             auto actual = vec::requantize_from_int(int_ret, multiplier, zero_point_val);
-            if (AssertVectorize<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) {
+            if (AssertVectorized<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) {
                 return;
             }
         } //trials;
@@ -1254,7 +1254,7 @@ namespace {
                 }
                 auto expected = vqint::loadu(unit_exp_vals);
                 const auto& actual = actual_int_ret[j];
-                if (AssertVectorize<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
+                if (AssertVectorized<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
             }
         } //trials;
     }

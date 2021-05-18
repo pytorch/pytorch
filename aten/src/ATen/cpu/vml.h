@@ -35,21 +35,8 @@
 #include <mkl.h>
 #endif
 
-// [Note SSE-AVX transitions]
-// There is a bug in Glibc2.23
-// https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
-// when using AVX/AVX2 code resolves this.
-#if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type_)                              \
-  using value_t = typename c10::scalar_value_type<type_>::type;\
-  volatile value_t x = (value_t)(1);                           \
-  x = std::op(x);                                              \
-  _mm256_zeroall();
-#define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
-#else
 #define DL_RUNTIME_BUG(op, type_)
 #define DL_RUNTIME_BUG_BFLOAT16()
-#endif
 
 namespace at {
 namespace vml {
@@ -61,8 +48,8 @@ template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
     map(
-        [](const Vectorize<scalar_t>& x) {
-          return Vectorize<scalar_t>((scalar_t)(1)) / x.sqrt();
+        [](const Vectorized<scalar_t>& x) {
+          return Vectorized<scalar_t>((scalar_t)(1)) / x.sqrt();
         },
         out + begin,
         in + begin,
@@ -86,7 +73,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
     DL_RUNTIME_BUG(op, scalar_t)                                                  \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      map([](const Vectorize<scalar_t>& x) { return x.op(); },                       \
+      map([](const Vectorized<scalar_t>& x) { return x.op(); },                       \
           out + begin,                                                            \
           in + begin,                                                             \
           end - begin);                                                           \
@@ -97,7 +84,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
       c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
       DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      map([](const Vectorize<c10::BFloat16>& x) { return x.op(); },                  \
+      map([](const Vectorized<c10::BFloat16>& x) { return x.op(); },                  \
           out + begin,                                                            \
           in + begin,                                                             \
           end - begin);                                                           \
@@ -108,7 +95,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-      map([](const Vectorize<scalar_t>& x) { return x.op(); },             \
+      map([](const Vectorized<scalar_t>& x) { return x.op(); },             \
           out + begin,                                                  \
           in + begin,                                                   \
           end - begin);                                                 \

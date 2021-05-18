@@ -60,7 +60,7 @@ static inline __m512i merge_compare_result(const __m512& a, const __m512& b) {
   return _mm512_permutex_epi64(out, 0xd8);
 }
 
-template <> class Vectorize<BFloat16> {
+template <> class Vectorized<BFloat16> {
 private:
   __m512i values;
 public:
@@ -69,13 +69,13 @@ public:
   static constexpr size_type size() {
     return 32;
   }
-  Vectorize() {}
-  Vectorize(__m512i v) : values(v) {}
-  Vectorize(BFloat16 val) {
+  Vectorized() {}
+  Vectorized(__m512i v) : values(v) {}
+  Vectorized(BFloat16 val) {
     value_type uw = val.x;
     values = _mm512_set1_epi16(uw);
   }
-  Vectorize(BFloat16 val1, BFloat16 val2, BFloat16 val3, BFloat16 val4,
+  Vectorized(BFloat16 val1, BFloat16 val2, BFloat16 val3, BFloat16 val4,
          BFloat16 val5, BFloat16 val6, BFloat16 val7, BFloat16 val8,
          BFloat16 val9, BFloat16 val10, BFloat16 val11, BFloat16 val12,
          BFloat16 val13, BFloat16 val14, BFloat16 val15, BFloat16 val16,
@@ -98,10 +98,10 @@ public:
     // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     return _mm512_cmpeq_epi16_mask(values, _mm512_set1_epi16(0));
   }
-  static Vectorize<BFloat16> loadu(const void* ptr) {
+  static Vectorized<BFloat16> loadu(const void* ptr) {
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
-  static Vectorize<BFloat16> loadu(const void* ptr, int16_t count) {
+  static Vectorized<BFloat16> loadu(const void* ptr, int16_t count) {
     __at_align64__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
@@ -116,7 +116,7 @@ public:
     }
   }
   template <int64_t mask>
-  static Vectorize<BFloat16> blend(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+  static Vectorized<BFloat16> blend(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
     __at_align64__ int16_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
@@ -185,15 +185,15 @@ public:
       tmp_values[31] = b.values[0];
     return loadu(tmp_values);
   }
-  static Vectorize<BFloat16> blendv(const Vectorize<BFloat16>& a,
-      const Vectorize<BFloat16>& b, const Vectorize<BFloat16>& mask) {
+  static Vectorized<BFloat16> blendv(const Vectorized<BFloat16>& a,
+      const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& mask) {
     auto msb_one = _mm512_set1_epi16(0x8000);
     auto mask_ = _mm512_cmp_epi16_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi16(mask_, a.values, b.values);
   }
   template<typename step_t>
-  static Vectorize<BFloat16> arange(BFloat16 base = 0.f, step_t step = static_cast<step_t>(1)) {
-    return Vectorize<BFloat16>(
+  static Vectorized<BFloat16> arange(BFloat16 base = 0.f, step_t step = static_cast<step_t>(1)) {
+    return Vectorized<BFloat16>(
       base,             base +      step, base +  2 * step, base +  3 * step,
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
       base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
@@ -203,8 +203,8 @@ public:
       base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
       base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step);
   }
-  static Vectorize<BFloat16> set(const Vectorize<BFloat16>& a,
-      const Vectorize<BFloat16>& b, int64_t count = size()) {
+  static Vectorized<BFloat16> set(const Vectorized<BFloat16>& a,
+      const Vectorized<BFloat16>& b, int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -273,14 +273,14 @@ public:
     }
     return b;
   }
-  Vectorize<BFloat16> map(const __m512 (*vop)(__m512)) const {
+  Vectorized<BFloat16> map(const __m512 (*vop)(__m512)) const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = vop(lo);
     auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> abs() const {
+  Vectorized<BFloat16> abs() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto mask = _mm512_set1_ps(-0.f);
@@ -288,7 +288,7 @@ public:
     auto o2 = _mm512_andnot_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> angle() const {
+  Vectorized<BFloat16> angle() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto angle_lambda = [](__m512 values) {
@@ -310,25 +310,25 @@ public:
     auto o2 = angle_lambda(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> real() const {
+  Vectorized<BFloat16> real() const {
     return *this;
   }
-  Vectorize<BFloat16> imag() const {
+  Vectorized<BFloat16> imag() const {
     return _mm512_set1_epi16(0);
   }
-  Vectorize<BFloat16> conj() const {
+  Vectorized<BFloat16> conj() const {
     return *this;
   }
-  Vectorize<BFloat16> acos() const {
+  Vectorized<BFloat16> acos() const {
     return map(Sleef_acosf16_u10);
   }
-  Vectorize<BFloat16> asin() const {
+  Vectorized<BFloat16> asin() const {
     return map(Sleef_asinf16_u10);
   }
-  Vectorize<BFloat16> atan() const {
+  Vectorized<BFloat16> atan() const {
     return map(Sleef_atanf16_u10);
   }
-  Vectorize<BFloat16> atan2(const Vectorize<BFloat16> &b) const {
+  Vectorized<BFloat16> atan2(const Vectorized<BFloat16> &b) const {
     __m512 lo, hi;
     __m512 b1, b2;
     cvtbf16_fp32(values, lo, hi);
@@ -337,22 +337,22 @@ public:
     auto o2 = Sleef_atan2f16_u10(hi, b2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> copysign(const Vectorize<BFloat16> &sign) const {
+  Vectorized<BFloat16> copysign(const Vectorized<BFloat16> &sign) const {
     // copy sign bit (0x8000) from sign and remaining bits from values
     __m512i mask_value = _mm512_set1_epi32(~0x80008000);
     __m512i mask_signbit = _mm512_set1_epi32(0x80008000);
-    return Vectorize<BFloat16>(
+    return Vectorized<BFloat16>(
       _mm512_or_si512(
         _mm512_and_si512(values, mask_value),
         _mm512_and_si512(sign, mask_signbit)));
   }
-  Vectorize<BFloat16> erf() const {
+  Vectorized<BFloat16> erf() const {
     return map(Sleef_erff16_u10);
   }
-  Vectorize<BFloat16> erfc() const {
+  Vectorized<BFloat16> erfc() const {
     return map(Sleef_erfcf16_u15);
   }
-  Vectorize<BFloat16> erfinv() const {
+  Vectorized<BFloat16> erfinv() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
@@ -366,13 +366,13 @@ public:
     auto o2 = _mm512_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> exp() const {
+  Vectorized<BFloat16> exp() const {
     return map(Sleef_expf16_u10);
   }
-  Vectorize<BFloat16> expm1() const {
+  Vectorized<BFloat16> expm1() const {
     return map(Sleef_expm1f16_u10);
   }
-  Vectorize<BFloat16> fmod(const Vectorize<BFloat16> & q) const {
+  Vectorized<BFloat16> fmod(const Vectorized<BFloat16> & q) const {
     __m512 x_lo, x_hi;
     cvtbf16_fp32(values, x_lo, x_hi);
     __m512 q_lo, q_hi;
@@ -381,7 +381,7 @@ public:
     auto o2 = Sleef_fmodf16(x_hi, q_hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> hypot(const Vectorize<BFloat16> &b) const {
+  Vectorized<BFloat16> hypot(const Vectorized<BFloat16> &b) const {
     __m512 lo, hi;
     __m512 b1, b2;
     cvtbf16_fp32(values, lo, hi);
@@ -390,7 +390,7 @@ public:
     auto o2 = Sleef_hypotf16_u05(hi, b2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> i0() const {
+  Vectorized<BFloat16> i0() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
@@ -404,7 +404,7 @@ public:
     auto o2 = _mm512_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> i0e() const {
+  Vectorized<BFloat16> i0e() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto sz = size();
@@ -420,7 +420,7 @@ public:
     auto o2 = _mm512_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> igamma(const Vectorize<BFloat16> &x) const {
+  Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const {
     __m512 lo, hi;
     __m512 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
@@ -440,7 +440,7 @@ public:
     return cvtfp32_bf16(o1, o2);
   }
 
-  Vectorize<BFloat16> igammac(const Vectorize<BFloat16> &x) const {
+  Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const {
     __m512 lo, hi;
     __m512 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
@@ -459,46 +459,46 @@ public:
     auto o2 = _mm512_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> log() const {
+  Vectorized<BFloat16> log() const {
     return map(Sleef_logf16_u10);
   }
-  Vectorize<BFloat16> log2() const {
+  Vectorized<BFloat16> log2() const {
     return map(Sleef_log2f16_u10);
   }
-  Vectorize<BFloat16> log10() const {
+  Vectorized<BFloat16> log10() const {
     return map(Sleef_log10f16_u10);
   }
-  Vectorize<BFloat16> log1p() const {
+  Vectorized<BFloat16> log1p() const {
     return map(Sleef_log1pf16_u10);
   }
-  Vectorize<BFloat16> frac() const;
-  Vectorize<BFloat16> sin() const {
+  Vectorized<BFloat16> frac() const;
+  Vectorized<BFloat16> sin() const {
     return map(Sleef_sinf16_u10);
   }
-  Vectorize<BFloat16> sinh() const {
+  Vectorized<BFloat16> sinh() const {
     return map(Sleef_sinhf16_u10);
   }
-  Vectorize<BFloat16> cos() const {
+  Vectorized<BFloat16> cos() const {
     return map(Sleef_cosf16_u10);
   }
-  Vectorize<BFloat16> cosh() const {
+  Vectorized<BFloat16> cosh() const {
     return map(Sleef_coshf16_u10);
   }
-  Vectorize<BFloat16> ceil() const {
+  Vectorized<BFloat16> ceil() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm512_ceil_ps(lo);
     auto o2 = _mm512_ceil_ps(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> floor() const {
+  Vectorized<BFloat16> floor() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm512_floor_ps(lo);
     auto o2 = _mm512_floor_ps(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> neg() const {
+  Vectorized<BFloat16> neg() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto mask = _mm512_set1_ps(-0.f);
@@ -506,37 +506,37 @@ public:
     auto o2 = _mm512_xor_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> round() const {
+  Vectorized<BFloat16> round() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm512_roundscale_ps(lo, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
     auto o2 = _mm512_roundscale_ps(hi, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> tan() const {
+  Vectorized<BFloat16> tan() const {
     return map(Sleef_tanf16_u10);
   }
-  Vectorize<BFloat16> tanh() const {
+  Vectorized<BFloat16> tanh() const {
     return map(Sleef_tanhf16_u10);
   }
-  Vectorize<BFloat16> trunc() const {
+  Vectorized<BFloat16> trunc() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm512_roundscale_ps(lo, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
     auto o2 = _mm512_roundscale_ps(hi, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> lgamma() const {
+  Vectorized<BFloat16> lgamma() const {
     return map(Sleef_lgammaf16_u10);
   }
-  Vectorize<BFloat16> sqrt() const {
+  Vectorized<BFloat16> sqrt() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm512_sqrt_ps(lo);
     auto o2 = _mm512_sqrt_ps(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> reciprocal() const {
+  Vectorized<BFloat16> reciprocal() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto ones = _mm512_set1_ps(1);
@@ -544,7 +544,7 @@ public:
     auto o2 = _mm512_div_ps(ones, hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> rsqrt() const {
+  Vectorized<BFloat16> rsqrt() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto ones = _mm512_set1_ps(1);
@@ -552,7 +552,7 @@ public:
     auto o2 = _mm512_div_ps(ones, _mm512_sqrt_ps(hi));
     return cvtfp32_bf16(o1, o2);
   }
-  Vectorize<BFloat16> pow(const Vectorize<BFloat16> &b) const {
+  Vectorized<BFloat16> pow(const Vectorized<BFloat16> &b) const {
     __m512 lo, hi;
     __m512 b1, b2;
     cvtbf16_fp32(values, lo, hi);
@@ -562,24 +562,24 @@ public:
     return cvtfp32_bf16(o1, o2);
   }
 
-  Vectorize<BFloat16> inline operator>(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> inline operator<(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> inline operator>=(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> inline operator<=(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> inline operator==(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> inline operator!=(const Vectorize<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator>(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator<(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator>=(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator<=(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator==(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> inline operator!=(const Vectorized<BFloat16>& other) const;
 
-  Vectorize<BFloat16> eq(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> ne(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> gt(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> ge(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> lt(const Vectorize<BFloat16>& other) const;
-  Vectorize<BFloat16> le(const Vectorize<BFloat16>& other) const;
+  Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> ne(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> gt(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> ge(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> lt(const Vectorized<BFloat16>& other) const;
+  Vectorized<BFloat16> le(const Vectorized<BFloat16>& other) const;
 };
 
 template<typename Op>
-Vectorize<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vectorize<BFloat16>& a,
-                                                          const Vectorize<BFloat16>& b, Op op) {
+Vectorized<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vectorized<BFloat16>& a,
+                                                          const Vectorized<BFloat16>& b, Op op) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -590,8 +590,8 @@ Vectorize<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vectorize<BFl
 }
 
 template<typename Op>
-Vectorize<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorize<BFloat16>& a,
-                                                        const Vectorize<BFloat16>& b, Op op) {
+Vectorized<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorized<BFloat16>& a,
+                                                        const Vectorized<BFloat16>& b, Op op) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -601,42 +601,42 @@ Vectorize<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorize<BFloa
   return merge_compare_result(o1, o2);
 }
 
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator>(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GT_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator<(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LT_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator>=(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GE_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator<=(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LE_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator==(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_EQ_OQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
   });
 }
-Vectorize<BFloat16> inline Vectorize<BFloat16>::operator!=(const Vectorize<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
   return bfloat16_compare_as_fp32(*this, other, [](__m512 x, __m512 y) {
     auto zero_vec = _mm512_set1_epi32(0);
     auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_OQ);
@@ -644,62 +644,62 @@ Vectorize<BFloat16> inline Vectorize<BFloat16>::operator!=(const Vectorize<BFloa
   });
 }
 
-Vectorize<BFloat16> inline operator+(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator+(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return bfloat16_binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
 }
-Vectorize<BFloat16> inline operator-(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator-(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return bfloat16_binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_sub_ps(x, y); });
 }
-Vectorize<BFloat16> inline operator*(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator*(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return bfloat16_binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_mul_ps(x, y); });
 }
-Vectorize<BFloat16> inline operator/(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator/(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return bfloat16_binary_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_div_ps(x, y); });
 }
 
-Vectorize<BFloat16> inline operator&(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator&(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return _mm512_and_si512(a, b);
 }
-Vectorize<BFloat16> inline operator|(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator|(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return _mm512_or_si512(a, b);
 }
-Vectorize<BFloat16> inline operator^(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline operator^(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   return _mm512_xor_si512(a, b);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::eq(const Vectorize<BFloat16>& other) const {
-  return (*this == other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
+  return (*this == other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::ne(const Vectorize<BFloat16>& other) const {
-  return (*this != other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
+  return (*this != other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::gt(const Vectorize<BFloat16>& other) const {
-  return (*this > other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
+  return (*this > other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::ge(const Vectorize<BFloat16>& other) const {
-  return (*this >= other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
+  return (*this >= other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::lt(const Vectorize<BFloat16>& other) const {
-  return (*this < other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
+  return (*this < other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorize<BFloat16> Vectorize<BFloat16>::le(const Vectorize<BFloat16>& other) const {
-  return (*this <= other) & Vectorize<BFloat16>(1.0f);
+Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
+  return (*this <= other) & Vectorized<BFloat16>(1.0f);
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorize<BFloat16> Vectorize<BFloat16>::frac() const {
+Vectorized<BFloat16> Vectorized<BFloat16>::frac() const {
   return *this - this->trunc();
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorize<BFloat16> inline maximum(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline maximum(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -719,7 +719,7 @@ Vectorize<BFloat16> inline maximum(const Vectorize<BFloat16>& a, const Vectorize
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorize<BFloat16> inline minimum(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& b) {
+Vectorized<BFloat16> inline minimum(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   __m512i zero_vec = _mm512_set1_epi32(0);
@@ -740,8 +740,8 @@ Vectorize<BFloat16> inline minimum(const Vectorize<BFloat16>& a, const Vectorize
 }
 
 template <>
-Vectorize<BFloat16> inline clamp(const Vectorize<BFloat16>& a,
-    const Vectorize<BFloat16>& min, const Vectorize<BFloat16>& max) {
+Vectorized<BFloat16> inline clamp(const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& min, const Vectorized<BFloat16>& max) {
   __m512 a_lo, a_hi;
   __m512 min_lo, min_hi;
   __m512 max_lo, max_hi;
@@ -754,7 +754,7 @@ Vectorize<BFloat16> inline clamp(const Vectorize<BFloat16>& a,
 }
 
 template <>
-Vectorize<BFloat16> inline clamp_max(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& max) {
+Vectorized<BFloat16> inline clamp_max(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& max) {
   __m512 a_lo, a_hi;
   __m512 max_lo, max_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -765,7 +765,7 @@ Vectorize<BFloat16> inline clamp_max(const Vectorize<BFloat16>& a, const Vectori
 }
 
 template <>
-Vectorize<BFloat16> inline clamp_min(const Vectorize<BFloat16>& a, const Vectorize<BFloat16>& min) {
+Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& min) {
   __m512 a_lo, a_hi;
   __m512 min_lo, min_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -779,7 +779,7 @@ template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
 #pragma unroll
-  for (i = 0; i <= (n - Vectorize<BFloat16>::size()); i += Vectorize<BFloat16>::size()) {
+  for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
     auto vsrc = _mm512_loadu_si512(reinterpret_cast<__m512i*>((void*)(src + i)));
     _mm512_storeu_si512(reinterpret_cast<__m512i*>((void*)(dst + i)), vsrc);
   }
@@ -790,8 +790,8 @@ inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
 }
 
 template <>
-Vectorize<BFloat16> inline fmadd(const Vectorize<BFloat16>& a,
-    const Vectorize<BFloat16>& b, const Vectorize<BFloat16>& c) {
+Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& c) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   __m512 c_lo, c_hi;

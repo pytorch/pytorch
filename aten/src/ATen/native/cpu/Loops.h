@@ -20,7 +20,7 @@
 //
 //   cpu_kernel_vec(iter,
 //     [](float a, float b) { return a * b; },
-//     [](Vectorize<float> a, Vectorize<float> b) { return a * b; });
+//     [](Vectorized<float> a, Vectorized<float> b) { return a * b; });
 //
 // See BinaryOpsKernel.cpp for the complete implementation
 //
@@ -200,7 +200,7 @@ static inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   constexpr int ntensors = traits::arity + 1;
 
   char* C10_RESTRICT data[ntensors];

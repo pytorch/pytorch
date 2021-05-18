@@ -25,7 +25,7 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  using Vec = vec::Vectorize<T>;
+  using Vec = vec::Vectorized<T>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
@@ -107,7 +107,7 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  using Vec = vec::Vectorize<T>;
+  using Vec = vec::Vectorized<T>;
   DCHECK_EQ(dY.numel(), M * N);
   DCHECK_EQ(X.numel(), M * N);
   DCHECK_EQ(mean.numel(), M);

@@ -112,9 +112,9 @@ void cpu_max_pool_channels_last(
   int64_t output_height = output.size(2);
   int64_t output_width = output.size(3);
 
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<scalar_t>;
-  using iVec = vec::Vectorize<integer_t>;
+  using iVec = vec::Vectorized<integer_t>;
   // for the convience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow

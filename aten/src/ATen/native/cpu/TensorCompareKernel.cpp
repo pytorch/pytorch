@@ -307,7 +307,7 @@ static void clamp_kernel_impl(TensorIterator& iter) {
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
         return std::min(std::max(a, min), max);
       },
-      [](Vectorize<scalar_t> a, Vectorize<scalar_t> min, Vectorize<scalar_t> max) {
+      [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
         return vec::clamp(a, min, max);
       });
   });
@@ -317,13 +317,13 @@ static void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min_, Scalar m
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
-    const Vectorize<scalar_t> min_vec(min);
-    const Vectorize<scalar_t> max_vec(max);
+    const Vectorized<scalar_t> min_vec(min);
+    const Vectorized<scalar_t> max_vec(max);
     cpu_kernel_vec(iter,
       [=](scalar_t a) -> scalar_t {
         return std::min(std::max(a, min), max);
       },
-      [=](Vectorize<scalar_t> a) {
+      [=](Vectorized<scalar_t> a) {
         return vec::clamp(a, min_vec, max_vec);
       });
   });
@@ -335,7 +335,7 @@ static void clamp_max_kernel_impl(TensorIterator& iter) {
       [](scalar_t a, scalar_t max) -> scalar_t {
         return std::min(a, max);
       },
-      [](Vectorize<scalar_t> a, Vectorize<scalar_t> max) {
+      [](Vectorized<scalar_t> a, Vectorized<scalar_t> max) {
         return vec::clamp_max(a, max);
       });
   });
@@ -344,12 +344,12 @@ static void clamp_max_kernel_impl(TensorIterator& iter) {
 static void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
     const auto max = max_.to<scalar_t>();
-    const Vectorize<scalar_t> max_vec(max);
+    const Vectorized<scalar_t> max_vec(max);
     cpu_kernel_vec(iter,
       [=](scalar_t a) -> scalar_t {
         return std::min(a, max);
       },
-      [=](Vectorize<scalar_t> a) {
+      [=](Vectorized<scalar_t> a) {
         return vec::clamp_max(a, max_vec);
       });
   });
@@ -361,7 +361,7 @@ static void clamp_min_kernel_impl(TensorIterator& iter) {
         [](scalar_t a, scalar_t min) -> scalar_t {
           return std::max(a, min);
         },
-        [](Vectorize<scalar_t> a, Vectorize<scalar_t> min) {
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min) {
           return vec::clamp_min(a, min);
         });
   });
@@ -370,12 +370,12 @@ static void clamp_min_kernel_impl(TensorIterator& iter) {
 static void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
-    const Vectorize<scalar_t> min_vec(min);
+    const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {
           return std::max(a, min);
         },
-        [=](Vectorize<scalar_t> a) {
+        [=](Vectorized<scalar_t> a) {
           return vec::clamp_min(a, min_vec);
         });
   });

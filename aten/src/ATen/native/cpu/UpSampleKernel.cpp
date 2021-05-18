@@ -279,7 +279,7 @@ void cpu_upsample_nearest_channels_last(
 
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
 
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -375,7 +375,7 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
         input_height, output_height, align_corners, scales[0]);

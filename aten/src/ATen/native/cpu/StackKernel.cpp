@@ -35,7 +35,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
     inputs.emplace_back(tensor, dim, tensor.strides()[dim]);
   }
 
-  using Vec = vec::Vectorize<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
   for (int64_t i = 0; i < outer; ++i) {
     for (int64_t j = 0; j < ninputs; j++) {

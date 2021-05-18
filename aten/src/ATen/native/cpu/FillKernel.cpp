@@ -20,7 +20,7 @@ void fill_non_native_type(TensorIterator& iter, const Scalar& value_scalar) {
   cpu_kernel_vec</*check_dynamic_cast=*/false>(
       iter,
       [val]() -> H { return val; },
-      [val]() { return Vectorize<H>(val); });
+      [val]() { return Vectorized<H>(val); });
 }
 
 template <>
@@ -31,7 +31,7 @@ void fill_non_native_type<c10::complex<at::Half>>(TensorIterator& iter, const Sc
   cpu_kernel_vec</*check_dynamic_cast=*/false>(
       iter,
       [val]() -> int32_t { return val; },
-      [val]() { return Vectorize<int32_t>(val); });
+      [val]() { return Vectorized<int32_t>(val); });
 }
 
 void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
@@ -47,7 +47,7 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
       cpu_kernel_vec(
           iter,
           [=]() -> scalar_t { return value; },
-          [=]() { return Vectorize<scalar_t>(value); });
+          [=]() { return Vectorized<scalar_t>(value); });
     });
   }
 }

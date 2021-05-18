@@ -48,7 +48,7 @@ void batch_norm_cpu_inference_contiguous_impl(Tensor& output,
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     const Tensor& mean, const Tensor& variance, double eps) {
 
-  using Vec = Vectorize<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   int64_t n_batch = input.size(0);
   int64_t n_channel = input.size(1);
   int64_t image_size = input.numel() / n_batch / n_channel;
