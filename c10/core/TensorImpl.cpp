@@ -27,6 +27,10 @@ std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
 
+void PyInterpreter::disarm() noexcept {
+  name_fn_ = &noop_name_fn;
+}
+
 } // namespace impl
 
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
