@@ -91,8 +91,9 @@ void scatter_meta_impl(
     const Tensor& index,
     const c10::optional<Tensor>& src = nullopt,
     const c10::optional<c10::string_view> reduce = nullopt) {
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
-  at::native::scatter_shape_check(self, dim, index, src);
+  at::native::scatter_shape_check(self, wrapped_dim, index, src);
 
   if (src.has_value()) {
     at::assert_no_overlap(self, src.value());

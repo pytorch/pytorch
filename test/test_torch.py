@@ -1179,6 +1179,14 @@ class AbstractTestCases:
                         else:
                             getattr(base.clone(), method)(dim, idx, src)
 
+                # test for empty index, should be a no-op
+                idx = cast(torch.LongTensor())
+                if reduction:
+                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                else:
+                    actual = getattr(base.clone(), method)(dim, idx, src)
+                self.assertEqual(actual, base, atol=0, rtol=0)
+
         def test_scatter(self):
             self._test_scatter_base(self, lambda t: t, 'scatter_')
 
