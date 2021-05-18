@@ -587,9 +587,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
   }
   TORCH_INTERNAL_ASSERT(
       stack.size() == 1,
-      "Return value of a builtin operator or a "
-      "TorchScript function should be a single IValue, got a vector of "
-      "size ",
+      "Return value of a builtin operator or a TorchScript function should be "
+      "a single IValue, got a vector of size ",
       stack.size());
   TypePtr type = stack.front().type();
   return asFuture(std::move(stack.front()), std::move(type));

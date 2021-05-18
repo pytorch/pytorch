@@ -542,14 +542,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             childFut->setError(std::current_exception());
             return;
           }
-          intermediateFut->addCallback([childFut](Future& intermediateFut) {
-            if (intermediateFut.hasError()) {
-              childFut->setError(intermediateFut.exception_ptr());
-            } else {
-              childFut->markCompleted(
-                  intermediateFut.value(), intermediateFut.dataPtrs());
-            }
-          });
+          intermediateFut->addCallback(
+              [childFut = std::move(childFut)](Future& intermediateFut) {
+                if (intermediateFut.hasError()) {
+                  childFut->setError(intermediateFut.exception_ptr());
+                } else {
+                  childFut->markCompleted(
+                      intermediateFut.value(), intermediateFut.dataPtrs());
+                }
+              });
         });
     return childFut;
   }
