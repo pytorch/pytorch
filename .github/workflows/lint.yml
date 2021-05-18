@@ -142,7 +142,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
-        run: .github/scripts/generate_linux_ci_workflows.py
+        run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
         run: .github/scripts/report_git_status.sh
 
