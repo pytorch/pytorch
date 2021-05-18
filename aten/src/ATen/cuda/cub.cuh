@@ -122,17 +122,10 @@ static inline void sort_pairs(
 
 namespace impl {
 
-template<typename scalar_t, class ScanOpT>
+template<typename InputIteratorT1, typename InputIteratorT2, typename OutputIteratorT, class ScanOpT>
 C10_LAUNCH_BOUNDS_1(1)
-__global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, ScanOpT scan_op){
+__global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputIteratorT out, ScanOpT scan_op){
    *out = scan_op(*a, *b);
-}
-
-template<typename InputIteratorT, typename OutputIteratorT>
-C10_LAUNCH_BOUNDS_1(1)
-__global__ void copy(OutputIteratorT dest, InputIteratorT from) {
-  using output_t = decltype(*dest);
-  *dest = static_cast<output_t>(*from);
 }
 
 }
@@ -140,50 +133,51 @@ __global__ void copy(OutputIteratorT dest, InputIteratorT from) {
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
   // non synchronizing cub call
-  using input_t = std::remove_reference_t<decltype(*input)>;
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
-  // need to save the first element for all iterations other than first
-  c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
-  for (int64_t i = 0; i < num_items; i += max_cub_size) {
-    int size_cub = std::min<int64_t>(num_items - i, max_cub_size);
-    if (i > 0) {
-      // need to temporarily transform first element of the range we are
-      // operating on; self might be multi-d, but we need to index a single
-      // element
-      impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-        reinterpret_cast<input_t *>(first_elem.get()), input + i);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input + i,
-          output + i - 1,
-          input + i,
-          scan_op);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+  int size_cub = std::min<int64_t>(num_items, max_cub_size);
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+      input,
+      output,
+      scan_op,
+      size_cub,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  using input_t = std::remove_reference_t<decltype(*input)>;
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
+  auto first_elem_ptr = reinterpret_cast<input_t *>(first_elem.get());
+  for (int64_t i = 1; i < num_items; i += max_cub_size) {
+    size_cub = std::min<int64_t>(num_items - i, max_cub_size);
+    impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        output + i - 1,
         input + i,
+        first_elem_ptr,
+        scan_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    using ArgIndexInputIterator = detail::cub::ArgIndexInputIterator<InputIteratorT>;
+    using tuple = typename ArgIndexInputIterator::value_type;
+    auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
+      if (x.key == 0) {
+        return *first_elem_ptr;
+      } else {
+        return x.value;
+      }
+    };
+    auto input_ = detail::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+      ArgIndexInputIterator(input + i), input_iter_transform);
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+        input_,
         output + i,
         scan_op,
         size_cub,
         at::cuda::getCurrentCUDAStream());
-    if (i > 0) {
-      if (input != output) {
-        // restore modified first element only if it's not an inplace operation
-        impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input + i, reinterpret_cast<input_t *>(first_elem.get()));
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    }
   }
 }
 
-template<typename InputIteratorT, typename OutputIteratorT>
-void exclusive_sum(InputIteratorT input, OutputIteratorT output, int64_t n) {
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveSum,
-    input, output, n, c10::cuda::getCurrentCUDAStream());
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT>
+inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
 }
 
 }}}
