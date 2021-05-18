@@ -172,9 +172,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("erfc", CppFunction::makeFallthrough());
   m.impl("erfc.out", CppFunction::makeFallthrough());
   m.impl("erfc_", CppFunction::makeFallthrough());
-  m.impl("erfcx", CppFunction::makeFallthrough());
-  m.impl("erfcx.out", CppFunction::makeFallthrough());
-  m.impl("erfcx_", CppFunction::makeFallthrough());
   m.impl("erfinv", CppFunction::makeFallthrough());
   m.impl("erfinv.out", CppFunction::makeFallthrough());
   m.impl("erfinv_", CppFunction::makeFallthrough());

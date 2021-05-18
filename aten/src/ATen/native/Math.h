@@ -2091,7 +2091,7 @@ calc_erfcx(T x)
     return erfcx_y100(400/(4+x));
   }
   else {
-    return x < -26.7 ? std::numeric_limits<double>::max() : (x < -6.1 ? 2*exp(x*x)
+    return x < -26.7 ? std::numeric_limits<T>::infinity() : (x < -6.1 ? 2*exp(x*x)
                                    : 2*exp(x*x) - erfcx_y100(400/(4-x)));
   }
 }

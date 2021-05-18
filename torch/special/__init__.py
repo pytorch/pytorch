@@ -144,7 +144,7 @@ Computes the scaled complementary error function for each element of :attr:`inpu
 The scaled complementary error function is defined as follows:
 
 .. math::
-    \mathrm{erfcx}(x) = e^{x^2) \mathrm{erfc}(x)
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
 """ + r"""
 
 """ + r"""

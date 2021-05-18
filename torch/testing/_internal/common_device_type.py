@@ -942,21 +942,22 @@ class precisionOverride(object):
         fn.precision_overrides = self.d
         return fn
 
-# Specifies per-dtype tolerance (rtol, atol) overrides. It has priority over precisonOverride.
+# Specifies per-dtype tolerance (rtol, atol) overrides. It has priority over
+# precisionOverride.
 # Ex.
 #
-# @toleranceOverride({torch.float32 : (1e-3, 1e-2}, torch.float64 : {0, 1e-4}, })
+# @toleranceOverride({torch.float : (1e-3, 1e-2}, torch.double : {0, 1e-4}, })
 # @dtypes(torch.half, torch.float, torch.double)
 # def test_X(self, device, dtype):
 #   ...
 #
 # When the test is instantiated its class's tolerance will be set to the
 # corresponding override, if it exists.
-# self.rtol and self.precision can be accessed directly, and they also control the behavior of
-# functions like self.assertEqual().
+# self.rtol and self.precision can be accessed directly, and they also control
+# the behavior of functions like self.assertEqual().
 #
-# The above example set rtol = 1e-3 and atol = 1e-2 for torch.float32 and rtol = 0 and atol = 1e-4
-# for torch.float64.
+# The above example sets rtol = 1e-3 and atol = 1e-2 for torch.float and
+# rtol = 0 and atol = 1e-4 for torch.double.
 class toleranceOverride(object):
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : precision dict!"
