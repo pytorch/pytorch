@@ -131,6 +131,7 @@ def _slice_argnums(args, argnums):
     raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
 
 def grad_and_value(f, argnums=0, has_aux=False):
+    @wraps(f)
     def wrapper(*args):
         level = _grad_increment_nesting()
         output, aux, grad_input = None, None, None
