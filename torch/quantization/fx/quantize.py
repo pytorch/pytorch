@@ -853,9 +853,6 @@ WEIGHT_PREPACK_OPS = {
 
 class Quantizer:
     def __init__(self):
-        # mapping from node name to qconfig that should be used for that node
-        # filled out for a model during _generate_qconfig_map
-        self.qconfig_map: Dict[str, QConfigAny] = {}
         # mapping from fully qualified module name to module instance
         # for example,
         # {
