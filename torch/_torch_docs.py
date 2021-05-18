@@ -3279,7 +3279,7 @@ sign as the dividend :attr:`input`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i - trunc(\frac{\text{{input}}_i}{\text{{other}}_}) * \text{{other}}_i
-
+""" + r"""
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
@@ -7645,7 +7645,7 @@ sign as the divisor :attr:`other`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i - round(\frac{\text{{input}}_i}{\text{{other}}_i}) * \text{{other}}_i
-
+""" + r"""
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
