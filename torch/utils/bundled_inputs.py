@@ -3,6 +3,7 @@ from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Seque
 import textwrap
 import torch
 from torch._C import TupleType, ListType
+from torch.jit._recursive import wrap_cpp_module
 
 
 T = TypeVar("T")
@@ -10,9 +11,111 @@ T = TypeVar("T")
 MAX_RAW_TENSOR_SIZE = 16
 
 class InflatableArg(NamedTuple):
+    """ Helper type for bundled inputs.
+
+        'value' is the compressed/deflated input that is stored in the model. Value
+        must be of the same type as the argument to the function that it is a deflated
+        input for.
+
+        'fmt' is a formatable code string that is executed to inflate the compressed data into
+        the appropriate input. It can use 'value' as an input to the format str. It must result
+        in a value of the same type as 'value'.
+
+    Note: Only top level InflatableArgs can be inflated. i.e. you cannot place
+    an inflatable arg inside of some other structure. You should instead create
+    an inflatable arg such that the fmt code string returns the full structure
+    of your input.
+    """
     value: Any
     fmt: str
 
+
+def bundle_inputs(
+        model: torch.jit.ScriptModule,
+        inputs: Union[Optional[Sequence[Tuple[Any, ...]]], Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
+        info: Optional[Union[List[str], Dict[Callable, List[str]]]] = None,
+        *,
+        _receive_inflate_expr: Optional[List[str]] = None,
+) -> torch.jit.ScriptModule:
+    """Creates and returns a copy of the specified model with inputs attached. The original model is
+    not mutated or changed in any way.
+
+    Models with bundled inputs can be invoked in a uniform manner by
+    benchmarking and code coverage tools.
+
+    If inputs is passed in as a list then the inputs will be bundled for 'forward'.
+    If inputs is instead passed in as a map then all the methods specified in the map
+    will have their corresponding inputs bundled. Info should match watchever type is
+    chosen for the inputs.
+
+    The returned model will support the following methods:
+
+        `get_all_bundled_inputs_for_<function_name>() -> List[Tuple[Any, ...]]`
+            Returns a list of tuples suitable for passing to the model like
+            `for inp in model.get_all_bundled_inputs_for_foo(): model.foo(*inp)`
+
+        `get_bundled_inputs_functions_and_info() -> Dict[str, Dict[str: List[str]]]`
+            Returns a dictionary mapping function names to a metadata dictionary.
+            This nested dictionary maps preset strings like:
+                'get_inputs_function_name' -> the name of a function attribute in this model that can be
+                    run to get back a list of inputs corresponding to that function.
+                'info' -> the user provided extra information about the bundled inputs
+
+    If forward has bundled inputs then these following functions will also be defined on the returned module:
+
+        `get_all_bundled_inputs() -> List[Tuple[Any, ...]]`
+            Returns a list of tuples suitable for passing to the model like
+            `for inp in model.get_all_bundled_inputs(): model(*inp)`
+
+        `get_num_bundled_inputs() -> int`
+            Equivalent to `len(model.get_all_bundled_inputs())`,
+            but slightly easier to call from C++.
+
+    Inputs can be specified in one of two ways:
+
+      - The model can define `_generate_bundled_inputs_for_<function_name>`.
+        If the user chooses this method inputs[<function>] should map to None
+
+      - The `inputs` argument to this function can be a dictionary mapping functions to a
+        list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
+        Alternatively if only bundling inputs for forward the map can be omitted and a singular list of inputs
+        can be provided instead.
+
+        The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
+        list of inputs, the inner tuple is the list of args that together make up one input.
+        For inputs of functions that take one arg, this will be a tuple of length one. The Any, ...
+        is the actual data that makes up the args, e.g. a tensor.
+
+    Info is an optional parameter that maps functions to a list of strings providing extra information about that
+    function's bundled inputs. Alternatively if only bundling inputs for forward the map can be omitted and
+    a singular list of information can be provided instead. This could be descriptions, expected outputs, etc.
+        - Ex: info={model.forward : ['man eating icecream', 'an airplane', 'a dog']}
+
+    This function will attempt to optimize arguments so that (e.g.)
+    arguments like `torch.zeros(1000)` will be represented compactly.
+    Only top-level arguments will be optimized.
+    Tensors in lists or tuples will not.
+    """
+    if not isinstance(model, torch.jit.ScriptModule):
+        raise Exception("Only ScriptModule is supported.")
+
+    ignored_methods, ignored_attrs = _get_bundled_inputs_attributes_and_methods(model)
+    clone = torch._C._hack_do_not_use_clone_module_with_class(  # type: ignore[attr-defined]
+        model._c,
+        ignored_methods,
+        ignored_attrs,
+    )
+
+    # The above cloning function returns a torch._C.scriptmodule and we need a torch.jit.scriptmodule.
+    # Fortunately theres a function in _recursive that does exactly that conversion.
+    cloned_module = wrap_cpp_module(clone)
+    if isinstance(inputs, dict):
+        assert(isinstance(info, dict) or info is None)
+        augment_many_model_functions_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
+    else:
+        assert(isinstance(info, list) or info is None)
+        augment_model_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
+    return cloned_module
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
@@ -20,8 +123,35 @@ def augment_model_with_bundled_inputs(
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
 ) -> None:
-    """ Wrapper around augment_many_model_functions_with_bundled_inputs to provide a streamlined api for forward
-    which is the only function the vast majority of models need bundled inputs for.
+    """ Add bundled sample inputs to a model for the forward function.
+
+    Models with bundled inputs can be invoked in a uniform manner by
+    benchmarking and code coverage tools.
+
+    Augmented models will support the following methods:
+
+        `get_all_bundled_inputs() -> List[Tuple[Any, ...]]`
+            Returns a list of tuples suitable for passing to the model like
+            `for inp in model.get_all_bundled_inputs(): model(*inp)`
+
+        `get_num_bundled_inputs() -> int`
+            Equivalent to `len(model.get_all_bundled_inputs())`,
+            but slightly easier to call from C++.
+
+        `get_bundled_inputs_functions_and_info() -> Dict[str, Dict[str: List[str]]]`
+            Returns a dictionary mapping function names to a metadata dictionary.
+            This nested dictionary maps preset strings like:
+                'get_inputs_function_name' -> the name of a function attribute in this model that can be
+                    run to get back a list of inputs corresponding to that function.
+                'info' -> the user provided extra information about the bundled inputs
+
+    Inputs can be specified in one of two ways:
+
+      - The model can define `_generate_bundled_inputs_for_forward`.
+        If the user chooses this method inputs should be None
+
+      - `inputs` is a list of inputs of form List[Tuple[Any, ...]]. A list of tuples where the elements
+        of each tuple are the args that make up one input.
     """
 
     if not isinstance(model, torch.jit.ScriptModule):
@@ -74,15 +204,11 @@ def augment_many_model_functions_with_bundled_inputs(
             Equivalent to `len(model.get_all_bundled_inputs())`,
             but slightly easier to call from C++.
 
-        `run_on_bundled_input(idx: int) -> Any`
-            Run the model on bundled input number `idx`
-
     Inputs can be specified in one of two ways:
 
-      - The model can define `_generate_bundled_inputs_for_<function_name>`
-        get_all_bundled_inputs will simply call this method
-        and cache the value. If the user chooses this method inputs[<function>]
-        should map to None
+      - The model can define `_generate_bundled_inputs_for_<function_name>`.
+        If the user chooses this method inputs[<function>] should map to None
+
       - The `inputs` argument to this function can be a dictionary mapping functions to a
         list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
         The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
@@ -205,10 +331,6 @@ def augment_many_model_functions_with_bundled_inputs(
                 def get_num_bundled_inputs(self):
                     return len(self.get_all_bundled_inputs_for_forward())
                 """))
-            model.define(textwrap.dedent("""
-                def run_on_bundled_input(self, idx: int):
-                    return self(*self.get_all_bundled_inputs()[idx])
-                """))
 
 
     # Define some high level helper methods that act on all bundled inputs
@@ -249,6 +371,26 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
         )
     else:
         return arg, ref
+
+def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str], List[str]]:
+    methods: List[str] = []
+    attributes: List[str] = []
+
+    # Has bundled inputs for forward
+    if hasattr(script_module, 'get_all_bundled_inputs'):
+        methods.append('get_all_bundled_inputs')
+        methods.append('get_num_bundled_inputs')
+        methods.append('run_on_bundled_input')
+
+    if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
+        methods.append('get_bundled_inputs_functions_and_info')
+        all_info = script_module.get_bundled_inputs_functions_and_info()
+        for function_name in all_info:
+            methods.append("get_all_bundled_inputs_for_" + function_name)
+            methods.append("_generate_bundled_inputs_for_" + function_name)
+            attributes.append("_bundled_inputs_deflated_" + function_name)
+    return (methods, attributes)
+
 
 
 def bundle_randn(*size, dtype=None):

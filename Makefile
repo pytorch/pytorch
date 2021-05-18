@@ -28,7 +28,7 @@ shellcheck-gha:
 	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
 generate-gha-workflows:
-	./.github/scripts/generate_linux_ci_workflows.py
+	.github/scripts/generate_ci_workflows.py
 	$(MAKE) shellcheck-gha
 
 setup_lint:
@@ -66,6 +66,7 @@ quick_checks:
 		--step 'Ensure no tabs' \
 		--step 'Ensure no non-breaking spaces' \
 		--step 'Ensure canonical include' \
+		--step 'Ensure no versionless Python shebangs' \
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
