@@ -806,7 +806,7 @@ endif()
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
-    scalaropts transformutils native orcjit)
+    scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
 
@@ -1417,8 +1417,9 @@ target_link_libraries(torch PUBLIC torch_cpu_library)
 if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
   if(BUILD_SPLIT_CUDA)
-    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
+    # NS: Library order is important here to prevent cudnn double linking
     target_link_libraries(torch_cuda PUBLIC torch_cuda_cpp_library)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)

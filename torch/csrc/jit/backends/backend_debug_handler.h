@@ -150,6 +150,12 @@ class TORCH_API BackendDebugInfoRecorder {
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
 
+// This is a RAII class that on ctor captures pointer to
+// BackendDebugInfoRecorder and initializes thread_local pointer
+// debug_info_recorder to it. Upon dtor it sets debug_info_recorder
+// pointer back to null. Note that this context manager always requires
+// that debug_info_recorder be nullptr when initializing the context.
+// This is because nested scopes with debug_info_recorder are not yet allowed.
 class WithBackendDebugInfoRecorder {
  public:
   WithBackendDebugInfoRecorder(BackendDebugInfoRecorder* recorder) throw();
