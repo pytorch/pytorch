@@ -9,6 +9,7 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 GITHUB_DIR = Path(__file__).parent.parent
 
+
 # it would be nice to statically specify that build_environment must be
 # present, but currently Python has no easy way to do that
 # https://github.com/python/mypy/issues/4617
@@ -18,10 +19,12 @@ WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
 
 
-def PyTorchWindowsWorkflow(*,
-                           build_environment: str,
-                           test_runner_type: str,
-                           on_pull_request: bool = False) -> PyTorchWorkflow:
+def PyTorchWindowsWorkflow(
+    *,
+    build_environment: str,
+    test_runner_type: str,
+    on_pull_request: bool = False
+) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "test_runner_type": test_runner_type,
@@ -75,8 +78,7 @@ WINDOWS_WORKFLOWS = [
 LINUX_WORKFLOWS = [
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
-        docker_image_base=
-        f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
@@ -113,8 +115,7 @@ LINUX_WORKFLOWS = [
     # ),
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
-        docker_image_base=
-        f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
     ),
     # PyTorchLinuxWorkflow(
@@ -201,11 +202,8 @@ if __name__ == "__main__":
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.in"),
-         WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
-            print(
-                generate_workflow_file(workflow=workflow,
-                                       workflow_template=template))
+            print(generate_workflow_file(workflow=workflow, workflow_template=template))
