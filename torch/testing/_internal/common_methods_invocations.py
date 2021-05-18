@@ -4191,6 +4191,7 @@ op_db: List[OpInfo] = [
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_contiguous,
+           supports_forward_ad=True,
            skips=(
                # JIT has issue when op is passed as lambda
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
