@@ -1073,7 +1073,9 @@ struct PythonPrintImpl {
         if (auto selfClass = self->type()->cast<ClassType>()) {
           deps_table_.add(selfClass);
           // check if the method is overloaded and if it is, we serialize
-          // only the qualified name
+          // only the qualified name. Since this call happens after first
+          // round of schema matching, we guarantee that methodName is
+          // either mangled or a name of not-overloaded method.
           Function* method = selfClass->findMethod(methodName);
           if (auto overloaded_methods =
                   selfClass->findOverloadedMethod(method->name())) {
