@@ -8,15 +8,14 @@ import tarfile
 import zipfile
 import numpy as np
 import sys
-from PIL import Image
 from unittest import skipIf
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import \
-    (IterDataPipe, RandomSampler, DataLoader,
-     argument_validation, runtime_validation_disabled, runtime_validation)
+from torch.utils.data import (
+    IterDataPipe, RandomSampler, DataLoader,
+    argument_validation, runtime_validation_disabled, runtime_validation)
 
 from typing import \
     (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
@@ -34,6 +33,12 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+skipIfNoPIL = skipIf(not HAS_PIL, "no PIL")
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -178,6 +183,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
 
 
+    @skipIfNoPIL
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
@@ -707,7 +713,7 @@ class TestTyping(TestCase):
         dp2 = DP1(5)
         self.assertEqual(dp1.type, dp2.type)
 
-        with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
+        with self.assertRaisesRegex(TypeError, r"is not a generic class"):
             class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
@@ -754,7 +760,8 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
         dp = DP5()  # type: ignore[assignment]
-        self.assertTrue(dp.type.param == Any)
+        from torch.utils.data._typing import issubtype
+        self.assertTrue(issubtype(dp.type.param, Any) and issubtype(Any, dp.type.param))
 
         class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
