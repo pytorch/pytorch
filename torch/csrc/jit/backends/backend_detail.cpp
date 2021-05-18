@@ -67,7 +67,7 @@ Module codegen_backend_module(
 
   // 1. Initialized debug info recorder.
   // 2. Later call debug_info_recorder.stopRecording() to gather
-  //    recorded debug info and save it in __backend.
+  //    recorded debug info and save it in __backend_debug_info.
   BackendDebugInfoRecorder debug_info_recorder;
   WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 

@@ -239,9 +239,8 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
 TEST(LiteTrainerTest, SequentialSampler) {
   // test that sampler can be used with dataloader
   const int kBatchSize = 10;
-  auto data_loader =
-      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          DummyDataset(25), kBatchSize);
+  auto data_loader = torch::data::make_data_loader<mobile::SequentialSampler>(
+      DummyDataset(25), kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {
