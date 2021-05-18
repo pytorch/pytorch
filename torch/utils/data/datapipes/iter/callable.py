@@ -47,6 +47,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  batch_level: bool = False,
+                 nesting_level: int = 0,
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -58,14 +59,24 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
         self.batch_level = batch_level
+        self.nesting_level = nesting_level
+
+    def _apply(self, data, nesting_level, fn, args, kwargs):
+        if nesting_level == 0:
+            return fn(data, *args, **kwargs)
+        elif nesting_level > 0:
+            result = [self._apply(i, nesting_level - 1, fn, args, kwargs) for i in data]
+            return result
+        else:
+            if isinstance(data, list):
+                result = [self._apply(i, nesting_level, fn, args, kwargs) for i in data]
+                return result
+            else:
+                return fn(data, *args, **kwargs)
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            if self.batch_level or not isinstance(data, list):
-                yield self.fn(data, *self.args, **self.kwargs)
-            else:
-                result = [self.fn(item, *self.args, **self.kwargs) for item in data]
-                yield result
+            yield self._apply(data, self.nesting_level, self.fn, self.args, self.kwargs)
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
