@@ -324,7 +324,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: "0"
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -6568,12 +6568,14 @@ workflows:
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_metal_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
@@ -6588,6 +6590,7 @@ workflows:
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_custom_build
           op_list: mobilenetv2.yaml
       - pytorch_linux_build:
