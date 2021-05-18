@@ -26,9 +26,9 @@ SystemEnv = namedtuple('SystemEnv', [
     'clang_version',
     'cmake_version',
     'os',
-    'kernel_version',
     'libc_version',
     'python_version',
+    'python_platform',
     'is_cuda_available',
     'cuda_runtime_version',
     'nvidia_driver_version',
@@ -253,17 +253,18 @@ def get_os(run_lambda):
     # Unknown platform
     return platform
 
-def get_kernel_version():
-    import platform
-    if get_platform() == 'linux':
-        return '{} {}'.format(platform.release(), platform.version())
-    else:
-        return platform.release()
 
-def get_libc_version(run_lambda):
+def get_python_platform():
+    import platform
+    return platform.platform()
+
+
+def get_libc_version():
+    import platform
     if get_platform() != 'linux':
         return 'N/A'
-    return run_and_return_first_line(run_lambda, '/lib64/libc.so.6')
+    return '-'.join(platform.libc_ver())
+
 
 def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
@@ -321,6 +322,7 @@ def get_env_info():
         torch_version=version_str,
         is_debug_build=debug_mode_str,
         python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
+        python_platform = get_python_platform(),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
@@ -334,8 +336,7 @@ def get_env_info():
         pip_packages=pip_list_output,
         conda_packages=get_conda_packages(run_lambda),
         os=get_os(run_lambda),
-        kernel_version = get_kernel_version(),
-        libc_version = get_libc_version(run_lambda),
+        libc_version = get_libc_version(),
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
@@ -351,10 +352,10 @@ OS: {os}
 GCC version: {gcc_version}
 Clang version: {clang_version}
 CMake version: {cmake_version}
-Kernel version: {kernel_version}
 Libc version: {libc_version}
 
 Python version: {python_version}
+Python platform: {python_platform}
 Is CUDA available: {is_cuda_available}
 CUDA runtime version: {cuda_runtime_version}
 GPU models and configuration: {nvidia_gpu_models}
