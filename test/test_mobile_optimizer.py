@@ -359,6 +359,9 @@ class TestOptimizer(TestCase):
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
 
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
     def test_preserve_bundled_inputs_methods(self):
         class MyBundledInputModule(torch.nn.Module):
             def __init__(self):
