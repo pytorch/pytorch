@@ -62,6 +62,17 @@ void gemm(
     float beta,
     float *c, int64_t ldc);
 
+#ifdef BLAS_HAS_SBGEMM
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) alpha,
+    const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int64_t lda,
+    const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int64_t ldb,
+    decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) beta,
+    decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *c, int64_t ldc);
+#endif // BLAS_HAS_SBGEMM
+
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
