@@ -1,10 +1,6 @@
 #import "Benchmark.h"
 #include <string>
 #include <vector>
-#include "caffe2/core/timer.h"
-#include "caffe2/utils/string_utils.h"
-#include "torch/csrc/autograd/grad_mode.h"
-//#include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
 #include <torch/csrc/jit/mobile/function.h>
@@ -75,7 +71,6 @@ static int iter = 10;
   }
 
   c10::InferenceMode mode;
-//  torch::jit::GraphOptimizerEnabledGuard opguard(false);
   auto module = torch::jit::_load_for_mobile(model);
 
 //  module.eval();
