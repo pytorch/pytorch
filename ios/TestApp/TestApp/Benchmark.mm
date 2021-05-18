@@ -1,6 +1,13 @@
 #import "Benchmark.h"
 #include <string>
 #include <vector>
+#include "torch/script.h"
+
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include "ATen/ATen.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
@@ -18,9 +25,9 @@ static int iter = 10;
 @implementation Benchmark
 
 + (BOOL)setup:(NSDictionary*)config {
-  NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"pt"];
+  NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"ptl"];
   if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
-    NSLog(@"model.pt doesn't exist!");
+    NSLog(@"model.ptl doesn't exist!");
     return NO;
   }
   model = std::string(modelPath.UTF8String);
@@ -66,8 +73,7 @@ static int iter = 10;
   }
 
   c10::InferenceMode mode;
-  torch::jit::GraphOptimizerEnabledGuard opguard(false);
-  auto module = torch::jit::load(model);
+  auto module = torch::jit::_load_for_mobile(model);
 
   module.eval();
   if (print_output) {
