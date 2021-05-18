@@ -37,12 +37,10 @@ class TestOpInfo(TestCase):
         # sample_inputs can have a function for generating the input that doesn't work for specified dtype
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
-            samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
             # NOTE: only tests on first sample
-            sample = samples[0]
+            sample = op.get_one_sample_input(device, dtype)
+            if sample is None:
+                self.skipTest("Skipped! No sample inputs!")
             op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
@@ -453,12 +451,10 @@ class TestCommon(JitCommonTestCase):
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         # NOTE: only tests on first sample
-        sample = samples[0]
+        sample = op.get_one_sample_input(device, dtype, requires_grad=True)
+        if sample is None:
+            self.skipTest("Skipped! No sample inputs!")
 
         # [Scripting Data Preparation]
         # Prepare data for test scripting
@@ -571,8 +567,7 @@ class TestCommon(JitCommonTestCase):
             self.skipTest("Skipped! Op doesn't support out= kwarg.")
 
         # NOTE: only tests on first sample
-        samples = op.sample_inputs(device, dtype)
-        sample = samples[0]
+        sample = op.get_one_sample_input(device, dtype)
 
         # calls it normally to get the expected result
         expected = op(sample.input, *sample.args, **sample.kwargs)

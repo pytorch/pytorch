@@ -349,6 +349,13 @@ class OpInfo(object):
                 sample.name = str(i)
         return [SampleInputCtx(sample) for sample in samples]
 
+    def get_one_sample_input(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns a single SampleInput if it exists, else None"""
+        samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
+        if len(samples) == 0:
+            return None
+        return samples[0]
+
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype)
