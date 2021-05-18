@@ -7644,7 +7644,7 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the divisor :attr:`other`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - round(\frac{\text{{input}}_i}{\text{{other}}_i} * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - round(\frac{\text{{input}}_i}{\text{{other}}_i}) * \text{{other}}_i
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
