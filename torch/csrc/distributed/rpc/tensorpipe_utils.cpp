@@ -228,7 +228,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       c10::Device device(c10::kCUDA, tensor.targetDevice->index);
-      auto stream = at::cuda::CUDAStream(getStreamForDevice(device));
+      auto stream = at::cuda::CUDAStream(getStreamForDevice(streams, device));
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
