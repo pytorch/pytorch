@@ -16,6 +16,7 @@ jobs:
 - job: checkjob1
   pool: server
   timeoutInMinutes: 60
+  dependsOn: Delay5MinForCircleCI
   continueOnError: true
   steps:
   - template: wheel-wait-job-template.yml
