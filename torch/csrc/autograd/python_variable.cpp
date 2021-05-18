@@ -78,11 +78,13 @@ static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
-// Creates a new Python object for a Variable. The Variable must not already
-// have a PyObject* associated with it for any interpreter, and also must not
-// be already tagged by another interpreter.  If unchecked, then we assume that
-// our interpreter has already tagged this Varible, and we can do a direct
-// setter.
+// Creates a new Python object for a Variable.  The status parameter
+// specifies what the interpreter tag status on the object is; for
+// example, if you ran check_pyobj, the return optional of this object
+// tells you if the tensor was already tagged or not so you can pass
+// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
+// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
+// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
 static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var, c10::impl::PyInterpreterStatus status)
 {
   PyObject* obj = type->tp_alloc(type, 0);
@@ -111,6 +113,9 @@ PyObject * THPVariable_Wrap(Variable var)
     }
     // TODO: a better invariant is that if we tagged, we MUST have a valid
     // PyObject.  That's PyObject preservation
+    // (https://github.com/pytorch/pytorch/pull/56017).  Prior to this PR
+    // being a thing, the PyObject field will get cleared when all references
+    // to the Python object are removed.
     status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   } else {
     status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
@@ -167,6 +172,9 @@ static int THPVariable_clear(THPVariable *self)
     // objects stay live, buster!  See
     // https://github.com/pytorch/pytorch/issues/22884 for an example of
     // this actually showing up.
+    //
+    // [torchdeploy] Note that we DON'T clear the interpreter field. Once on an
+    // interpreter, always on an interpreter.
     tensor.unsafeGetTensorImpl()->unchecked_clear_pyobj(self_interpreter.get());
   }
   self->cdata.reset();
@@ -211,7 +219,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = r.tensor(1).detach();
+  auto data = r.tensor(1).detach();  // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
   // allow the following use case for backward compatibility:
   //
