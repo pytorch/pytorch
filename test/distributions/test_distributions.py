@@ -1975,13 +1975,13 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
         prec_batched = cov_batched.inverse()
-        scale_tril_batched = cov_batched.cholesky(upper=False)
+        scale_tril_batched = torch.linalg.cholesky(cov_batched)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -2036,7 +2036,7 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
@@ -2074,7 +2074,7 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         self._check_sampler_sampler(MultivariateNormal(mean, cov),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
@@ -2095,7 +2095,7 @@ class TestDistributions(TestCase):
         m = MultivariateNormal(loc=loc, scale_tril=scale_tril)
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
-        self.assertEqual(m.scale_tril, torch.cholesky(m.covariance_matrix, upper=False))
+        self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -2606,7 +2606,7 @@ class TestDistributions(TestCase):
             # correlation matrices.
             if dim == 2:
                 # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
-                self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
+                self.assertTrue(all(torch.allclose(x, torch.tensor(0.5).log(), atol=1e-10) for x in log_probs))
             self.assertEqual(log_probs[0], log_probs[1])
             invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
             self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
