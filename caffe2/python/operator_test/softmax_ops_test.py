@@ -407,7 +407,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             gc, op, [X, label, weights], 0, [1], stepsize=1e-4, threshold=1e-2)
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_softmax_with_loss_label_prob_weighted(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
