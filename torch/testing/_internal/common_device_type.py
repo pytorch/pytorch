@@ -283,6 +283,7 @@ class DeviceTypeTestBase(TestCase):
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
     _tls.precision = TestCase._precision
+    _tls.rel_tol = TestCase._rel_tol
 
     @property
     def precision(self):
@@ -291,6 +292,14 @@ class DeviceTypeTestBase(TestCase):
     @precision.setter
     def precision(self, prec):
         self._tls.precision = prec
+
+    @property
+    def rel_tol(self):
+        return self._tls.rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec):
+        self._tls.rel_tol = prec
 
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
@@ -319,6 +328,11 @@ class DeviceTypeTestBase(TestCase):
         if not hasattr(test, 'precision_overrides'):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
+
+    def _get_tolerance_override(self, test, dtype):
+        if not hasattr(test, 'tolerance_overrides'):
+            return self.rel_tol, self.precision
+        return test.tolerance_overrides.get(dtype, (self.rel_tol, self.precision))
 
     # Creates device-specific tests.
     @classmethod
@@ -374,8 +388,10 @@ class DeviceTypeTestBase(TestCase):
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
+                guard_rel_tol = self.rel_tol
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
+                    self.rel_tol, self.precision = self._get_tolerance_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
                 except RuntimeError as rte:
@@ -385,6 +401,7 @@ class DeviceTypeTestBase(TestCase):
                     raise rte
                 finally:
                     self.precision = guard_precision
+                    self.rel_tol = guard_rel_tol
 
                 return result
 
@@ -925,6 +942,34 @@ class precisionOverride(object):
         fn.precision_overrides = self.d
         return fn
 
+# Specifies per-dtype tolerance (rtol, atol) overrides. It has priority over precisonOverride.
+# Ex.
+#
+# @toleranceOverride({torch.float32 : (1e-3, 1e-2}, torch.float64 : {0, 1e-4}, })
+# @dtypes(torch.half, torch.float, torch.double)
+# def test_X(self, device, dtype):
+#   ...
+#
+# When the test is instantiated its class's tolerance will be set to the
+# corresponding override, if it exists.
+# self.rtol and self.precision can be accessed directly, and they also control the behavior of
+# functions like self.assertEqual().
+#
+# The above example set rtol = 1e-3 and atol = 1e-2 for torch.float32 and rtol = 0 and atol = 1e-4
+# for torch.float64.
+class toleranceOverride(object):
+    def __init__(self, d):
+        assert isinstance(d, dict), "toleranceOverride not given a dtype : precision dict!"
+        for dtype, prec in d.items():
+            assert isinstance(dtype, torch.dtype), "toleranceOverride given unknown dtype {0}".format(dtype)
+            assert isinstance(prec, tuple) and len(prec) == 2, \
+                "toleranceOverride not given a dtype : (rtol, atol) dict!"
+
+        self.d = d
+
+    def __call__(self, fn):
+        fn.tolerance_overrides = self.d
+        return fn
 
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
