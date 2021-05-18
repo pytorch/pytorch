@@ -13,7 +13,6 @@ class AverageParameterServer(AverageParameterServerBase):
         self,
         rank,
         trainer_count,
-        lc,
         use_cuda_rpc
     ):
         super().__init__(rank)
@@ -22,7 +21,6 @@ class AverageParameterServer(AverageParameterServerBase):
 
         self.rank = rank
         self.trainer_count = trainer_count
-        self.lc = lc
         self.use_cuda_rpc = use_cuda_rpc
 
         self.batch_number = 0
@@ -93,6 +91,6 @@ class AverageParameterServer(AverageParameterServerBase):
                 if param_loc_avg.is_sparse:
                     param_loc_avg = self.sparse_tensor_to_rpc_format(param_loc_avg)
                 for cur_fut in self.futures[param_loc]:
-                    cur_fut.set_result([param_loc_avg])
+                    cur_fut.set_result(param_loc_avg)
                 self.record_batch_end(self.param_key(param_loc))
         return fut
