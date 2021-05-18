@@ -61,7 +61,8 @@ class IOSJob:
 
 
 WORKFLOW_DATA = [
-    IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
+    IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False, extra_props={
+        "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("x86_64", "full_jit"), is_org_member_context=False, extra_props={
         "lite_interpreter": miniutils.quote(str(int(False)))}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64")),
