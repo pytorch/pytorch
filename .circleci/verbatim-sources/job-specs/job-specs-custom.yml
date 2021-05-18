@@ -557,6 +557,9 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
+            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
+              echo "Run Simulator Tests is not for full jit, skipping."
+              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
