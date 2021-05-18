@@ -69,8 +69,8 @@ static std::vector<c10::IValue> setupInputs() {
   at::manual_seed(0);
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  c10::IntArrayRef input_shape{6, 512, 4096};
-  c10::IntArrayRef bias_shape{4096};
+  std::vector<int64_t> input_shape{6, 512, 4096};
+  std::vector<int64_t> bias_shape{4096};
   auto at_input = at::randn(input_shape, options);
   auto at_bias = at::randn(bias_shape, options);
   auto at_grad = at::randn(input_shape, options);
