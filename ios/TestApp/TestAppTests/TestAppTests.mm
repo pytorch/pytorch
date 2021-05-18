@@ -16,7 +16,7 @@
 @end
 
 @implementation TestAppTests {
-  torch::jit::Module _module;
+  torch::jit::mobile::Module _module;
 }
 
 + (void)setUp {
@@ -33,7 +33,7 @@
 }
 
 - (void)testForward {
-  _module.eval();
+//  _module.eval();
   c10::InferenceMode mode;
   std::vector<c10::IValue> inputs;
   inputs.push_back(torch::ones({1, 3, 224, 224}, at::ScalarType::Float));
