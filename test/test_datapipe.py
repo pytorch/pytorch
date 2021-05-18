@@ -780,7 +780,7 @@ class TestTyping(TestCase):
         self.assertTrue(issubclass(DP6, IterDataPipe))
         self.assertTrue(DP7.type.param == Awaitable[T_co])
 
-        class DP8(DP8[str]):
+        class DP8(DP7[str]):
             r""" DataPipe subclass from a DataPipe with abc type"""
 
         self.assertTrue(issubclass(DP8, IterDataPipe))
