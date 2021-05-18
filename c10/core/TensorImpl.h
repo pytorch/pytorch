@@ -236,7 +236,6 @@ struct C10_API AutogradMetaFactoryRegisterer {
 // another word consider doing this!
 
 struct PyInterpreter;
-C10_API std::string noop_name_fn(const PyInterpreter*);
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
   using decref_sig = void(const PyInterpreter*, PyObject*);
@@ -265,12 +264,14 @@ struct C10_API PyInterpreter {
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
-  // This is not really thread safe, but the hope is that long lived tensors
-  // will die after a synchronization even from the dlclose, typically when
-  // the main process begins shutdown.
-  void disarm() noexcept {
-    name_fn_ = &noop_name_fn;
-  }
+  // Because the function pointers are raw pointers (not atomics),
+  // a disarm() invocation that is concurrent with active destructors
+  // is not thread safe and will trigger TSAN.  My hope is that this
+  // situations doesn't ever actually happen; tensor destruction should
+  // quiesce when a dlclose happens, and any long lived tensors whose
+  // destructors would be disarmed here only begin the destruction process
+  // on process shutdown (long after the dlclose has occurred).
+  void disarm() noexcept;
 };
 
 // PyInterpreterStatus describes what the state of its interpreter tag
@@ -426,7 +427,7 @@ struct C10_API VariableVersion {
   // accessed.
   uint32_t current_version() const {
     TORCH_CHECK(
-        version_counter_, "Inference tensor do not track version counter.");
+        version_counter_, "Inference tensors do not track version counter.");
     return version_counter_->version_;
   }
 };
@@ -1447,6 +1448,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
                 expected, self_interpreter, std::memory_order_acq_rel)) {
           break;
         }
+        // test if, actually, it was already tagged by us!  this situation can't
+        // be caused by a race, but it could be caused by a situation
+        // where someone conservatively tagged the tensor as MAYBE_UNINITIALIZED
+        // (because they didn't pre-check the tag) when actually it was
+        // owned by the interpreter
+        if (expected == self_interpreter) {
+          break;
+        }
         // fallthrough, we lost the race.  We are guaranteed not to lose the
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
@@ -1473,7 +1482,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
   c10::optional<PyObject*> check_pyobj(
-      impl::PyInterpreter* self_interpreter) noexcept {
+      impl::PyInterpreter* self_interpreter) {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);
@@ -2226,6 +2235,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // However, on x86, it doesn't matter if I use acquire or relaxed on the load
   // as I get the same assembly in both cases.  So I just use the more
   // conservative acquire (which will impede compiler optimizations but I don't
+  // care)
   std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
 
   // This field contains a weak reference to a PyObject representing
