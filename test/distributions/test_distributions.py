@@ -2606,7 +2606,7 @@ class TestDistributions(TestCase):
             # correlation matrices.
             if dim == 2:
                 # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
-                self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
+                self.assertTrue(all(torch.allclose(x, torch.tensor(0.5).log(), atol=1e-10) for x in log_probs))
             self.assertEqual(log_probs[0], log_probs[1])
             invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
             self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
