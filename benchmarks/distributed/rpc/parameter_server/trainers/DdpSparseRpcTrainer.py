@@ -56,24 +56,30 @@ class DdpSparseRpcTrainer(DdpTrainerBase, RpcTrainerBase):
             tensor = tensor.cpu()
         if sparse:
             tensor = cref.sparse_tensor_to_rpc_format(tensor)
-        if state.batch_number > 0:
-            ps = cref.ps
-            ps_args = [
-                cref.ps_rref,
-                state.batch_number,
-                state.param_loc,
-                tensor
-            ]
-            fut = cref.send_async_request(
-                state.get_key(),
-                cref.ps_rref,
-                ps.average_gradient,
-                *ps_args
-            )
-        else:
-            fut = cref.get_tensor_fut(bucket)
+        ps = cref.ps
+        ps_args = [
+            cref.ps_rref,
+            state.batch_number,
+            state.param_loc,
+            tensor
+        ]
+        fut = cref.send_async_request(
+            state.get_key(),
+            cref.ps_rref,
+            ps.average_gradient,
+            *ps_args
+        )
         state.param_loc += tensors_count
-        return fut
+
+        def callback(fut):
+            tensor = fut.wait()
+            if type(tensor) is list:
+                tensor = cref.sparse_rpc_format_to_tensor(tensor)
+            if not cref.use_cuda_rpc:
+                tensor = tensor.cuda(cref.rank)
+            return [tensor]
+
+        return fut.then(callback)
 
     @staticmethod
     def hook(state, bucket):
