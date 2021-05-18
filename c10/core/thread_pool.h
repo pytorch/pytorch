@@ -62,7 +62,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   std::condition_variable completed_;
   std::atomic_bool running_;
   bool complete_;
-  std::size_t available_;
+  std::atomic<std::size_t> available_;
   std::size_t total_;
   int numa_node_id_;
 
