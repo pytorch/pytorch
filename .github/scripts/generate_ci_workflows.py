@@ -71,7 +71,6 @@ WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
-        on_pull_request=True
     )
 ]
 
