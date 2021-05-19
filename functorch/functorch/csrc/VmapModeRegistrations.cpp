@@ -1,9 +1,14 @@
 #include <torch/library.h>
+#include <ATen/ATen.h>
+#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/BatchedTensorImpl.h>
+#include <functorch/csrc/PlumbingHelper.h>
+#include <functorch/csrc/Constants.h>
+#include <functorch/csrc/DynamicLayer.h>
 
 
 namespace at {
 namespace functorch {
-
 template <typename... Args> Tensor unsupportedRandomOp(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
@@ -17,6 +22,22 @@ template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
 TORCH_LIBRARY_IMPL(_, FuncTorchVmapMode, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
+
+#define TENSOROPTIONSPARAMS c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory
+
+#define TENSOROPTIONSARGS dtype, layout, device, pin_memory
+
+Tensor randn_mbatching_rule(IntArrayRef shape, TENSOROPTIONSPARAMS) {
+    TORCH_WARN("Automatically expanding the shape of randn. This means that different elements of vmap will get different random values. If you want different behavior, like using the same random values across vmap, please make a github issue.");
+    c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    VmapDimVector shapeVec(shape.begin(), shape.end());
+    shapeVec.insert(shapeVec.begin(), maybe_layer->batchSize());
+    return makeBatched(at::randn(shapeVec, TENSOROPTIONSARGS), 0, maybe_layer->layerId());
+}
+
+#undef TENSOROPTIONSARGS
+#undef TENSOROPTIONSPARAMS
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   // NB: I'd really like to register a special kernel like
@@ -68,7 +89,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   m.impl("rand.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl("rand.generator_out", unsupportedRandomOp_<IntArrayRef, optional<Generator>, Tensor&>);
 
-  m.impl("randn", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
+//   m.impl("randn", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl("randn.generator", unsupportedRandomOp<IntArrayRef, optional<Generator>, TENSOROPTIONS>);
   m.impl("randn.names", unsupportedRandomOp<IntArrayRef, optional<DimnameList>, TENSOROPTIONS>);
   m.impl("randn.generator_with_names", unsupportedRandomOp<IntArrayRef, optional<Generator>, optional<DimnameList>, TENSOROPTIONS>);
@@ -92,6 +113,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   m.impl("uniform_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
 
 #undef TENSOROPTIONS
+
+  m.impl("randn", randn_mbatching_rule);
 }
 
 
