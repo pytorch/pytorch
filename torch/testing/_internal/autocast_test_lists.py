@@ -188,6 +188,8 @@ class AutocastTestLists(object):
             ("cat", (pointwise0_fp16 + pointwise1_fp32,)),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
             ("equal", pointwise0_fp32 + pointwise1_fp16),
+            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
+                              torch.randn((2, 3, 22, 11), dtype=torch.float32, device=dev))),
             ("index_put", pointwise0_fp32 + ((torch.tensor([1], device=dev, dtype=torch.long),),
                                              torch.randn(1, device=dev, dtype=torch.float16))),
             ("index_put", pointwise0_fp16 + ((torch.tensor([1], device=dev, dtype=torch.long),),
