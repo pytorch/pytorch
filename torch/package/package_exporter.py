@@ -36,6 +36,8 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
+_gate_torchscript_serialization = True
+
 ActionHook = Callable[["PackageExporter", str], None]
 
 
@@ -195,7 +197,8 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
-        self.serialized_storages: Dict[str, Any] = {}
+        self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -204,6 +207,7 @@ class PackageExporter:
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
         self.verbose = verbose
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -675,11 +679,32 @@ node [shape=box];
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
             location = location_tag(obj)
-            self.serialized_storages[obj_key] = obj
+            name = f".data/{obj_key}.storage"
 
+            if name not in self.serialized_storages:
+                # check to see if storage was previously serialized
+                serialized_files = self.zip_file.get_all_written_records()
+                if name not in serialized_files:
+                    if obj.device.type != "cpu":
+                        obj = obj.cpu()
+                    num_bytes = obj.size() * obj.element_size()
+                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
+                self.serialized_storages.add(name)
             return ("storage", storage_type, obj_key, location, obj.size())
+
         if hasattr(obj, "__reduce_package__"):
-            return ("reduce_package", *obj.__reduce_package__(self))
+            if _gate_torchscript_serialization and isinstance(
+                obj, torch.jit.RecursiveScriptModule
+            ):
+                raise Exception(
+                    "Serializing ScriptModules directly into a package is a beta feature. "
+                    "To use, set global "
+                    "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
+                )
+            if self.serialized_reduces.get(id(obj)) is None:
+                self.serialized_reduces[id(obj)] = ("reduce_package", id(obj), *obj.__reduce_package__(self))
+
+            return self.serialized_reduces[id(obj)]
 
         return None
 
@@ -825,16 +850,7 @@ node [shape=box];
 
         self._execute_dependency_graph()
 
-        # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-        for key in sorted(self.serialized_storages.keys()):
-            name = f".data/{key}.storage"
-            storage = self.serialized_storages[key]
-            # location information is saved in python, but to actually
-            # get the data from non cpu tensors we need to move them over first
-            if storage.device.type != "cpu":
-                storage = storage.cpu()
-            num_bytes = storage.size() * storage.element_size()
-            self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        self.script_module_serializer.write_files()
         self._finalize_zip()
 
     def _finalize_zip(self):
