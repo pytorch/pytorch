@@ -201,7 +201,8 @@ class Vec256<int16_t> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
 
-  static Vec256<int16_t> arange(int16_t base = 0, int16_t step = 1) {
+  template <typename step_t>
+  static Vec256<int16_t> arange(int16_t base = 0, step_t step = static_cast<step_t>(1)) {
     return Vec256<int16_t>(
         base,
         base + step,
