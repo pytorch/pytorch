@@ -72,6 +72,39 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
+static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  cublasOperation_t trans = CUBLAS_OP_N;
+
+  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = b.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto lu_stride = matrixStride(lu);
+  auto b_stride = matrixStride(b);
+  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
+  auto m = cuda_int_cast(lu.size(-2), "m");
+  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
+  auto ldb = cuda_int_cast(std::max<int>(1, nrhs), "ldb");
+  Tensor infos_getrs = at::zeros({std::max<int>(1, batch_size)}, lu.options().dtype(kInt));
+  auto infos_getrs_data = infos_getrs.data_ptr<int>();
+
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
+  auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
+    lda, pivots_data, b_ptr_array_data, ldb, infos_getrs_data, batch_size);
+}
+
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots);
+  });
+}
+
+template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;

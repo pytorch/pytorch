@@ -240,6 +240,18 @@ void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<dou
 template<>
 void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
 
+#define CUDABLAS_GETRS_ARGTYPES(Dtype)  \
+  cublasHandle_t handle, cublasOperation_t trans, \
+  int n, int nrhs, Dtype** dA_array, int lda, int* ipiv_array, \
+  Dtype** dB_array, int ldb, int* info_array, int batchsize
+
+template<class Dtype>
+void getrsBatched(CUDABLAS_GETRS_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getrsBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double));
+
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
   int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize

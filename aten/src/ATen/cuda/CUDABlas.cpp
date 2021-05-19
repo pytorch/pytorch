@@ -1007,6 +1007,22 @@ void getrfBatched<c10::complex<float>>(
 }
 
 template <>
+void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      dA_array,
+      lda,
+      ipiv_array,
+      dB_array,
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
 void getriBatched<double>(
     int n, double** dA_array, int ldda, int* ipiv_array, double** dC_array, int lddc, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();

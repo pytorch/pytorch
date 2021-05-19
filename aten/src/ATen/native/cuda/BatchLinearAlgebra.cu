@@ -2842,6 +2842,10 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 }
 
 static void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+
+#if 0
+  lu_solve_cublas(b, lu, pivots);
+#endif
 #ifdef USE_CUSOLVER
   if (b.dim() == 2) {
     lu_solve_looped_cusolver(b, lu, pivots);
