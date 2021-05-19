@@ -343,7 +343,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       // Gradient is undefined. When find_unused_parameters=True, ensure it is
       // not marked as locally used, otherwise we will be allreducing zero's
       // instead of not touching .grad field of parameter.
-      if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
+      if (this->dynamic_graph_find_unused() || this->static_graph_first_iteration()) {
         TORCH_CHECK(
             local_used_maps_[index.replica_index][index.variable_index]
                     .item()
