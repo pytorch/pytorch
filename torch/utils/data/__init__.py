@@ -3,8 +3,7 @@ from torch.utils.data.sampler import \
      SubsetRandomSampler, WeightedRandomSampler, BatchSampler)
 from torch.utils.data.dataset import \
     (Dataset, IterableDataset, TensorDataset, ConcatDataset, ChainDataset,
-     Subset, random_split)
-from torch.utils.data.dataset import IterableDataset as IterDataPipe
+     Subset, random_split, Dataset as MapDataPipe, IterableDataset as IterDataPipe)
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
 from torch.utils.data._decorator import \
@@ -17,9 +16,10 @@ __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
            'DistributedSampler', 'Dataset', 'IterableDataset', 'TensorDataset',
            'ConcatDataset', 'ChainDataset', 'Subset', 'random_split',
            'DataLoader', '_DatasetKind', 'get_worker_info',
-           'IterDataPipe', 'functional_datapipe', 'guaranteed_datapipes_determinism',
-           'non_deterministic', 'argument_validation',
-           'runtime_validation_disabled', 'runtime_validation']
+           'IterDataPipe', 'MapDataPipe', 'functional_datapipe',
+           'guaranteed_datapipes_determinism', 'non_deterministic',
+           'argument_validation', 'runtime_validation_disabled',
+           'runtime_validation']
 
 
 ################################################################################
