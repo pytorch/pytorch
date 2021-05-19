@@ -675,6 +675,12 @@ void initJITBindings(PyObject* module) {
             getCatWoConditionals() = optimize_cat;
           })
       .def(
+          "_jit_opt_conditionals",
+          [](bool opt_conds) {
+            using namespace torch::jit::tensorexpr;
+            getOptConditionals() = opt_conds;
+          })
+      .def(
           "_llvm_enabled",
           []() {
 #ifdef TORCH_ENABLE_LLVM
@@ -1403,7 +1409,8 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);
