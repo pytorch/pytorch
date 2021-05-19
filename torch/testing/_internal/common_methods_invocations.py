@@ -1892,6 +1892,17 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples + [vec_sample]
 
+def sample_inputs_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, low=None, high=None, device=device, requires_grad=requires_grad)
+
+    shapes = ((S, S),)
+
+    def generator():
+        for shape in shapes:
+            yield SampleInput(make_arg(shape))
+
+    return list(generator())
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
 
@@ -2824,6 +2835,10 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            sample_inputs_func=sample_inputs_diag),
+    OpInfo('diag_embed',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_diag_embed),
     OpInfo('fmax',
            op=torch.fmax,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4561,7 +4576,6 @@ def method_tests():
         ('clone', (), NO_ARGS, 'scalar'),
         ('contiguous', (S, S), NO_ARGS, '', (True,)),
         ('contiguous', torch.randn(S, S).transpose(0, 1), NO_ARGS, 'not_contiguous', (True,)),
-        ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
         ('diagonal', (3, 5), (2,), '2d_wide_pos'),
