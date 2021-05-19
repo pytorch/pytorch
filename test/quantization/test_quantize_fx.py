@@ -76,6 +76,8 @@ from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
+from torch.testing._internal.common_quantization import ConvModel
+
 from torch.testing import FileCheck
 
 import copy
@@ -274,33 +276,7 @@ class TestFuseFx(QuantizationTestCase):
         fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
                                                 "preserved_attributes"}
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1d = nn.Conv1d(1, 1, 1)
-                self.conv2d = nn.Conv2d(1, 1, 1)
-                self.conv3d = nn.Conv3d(1, 1, 1)
-                self.bn1d = nn.BatchNorm1d(1)
-                self.bn2d = nn.BatchNorm2d(1)
-                self.bn3d = nn.BatchNorm3d(1)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.conv1d(x)
-                x = self.relu(x)
-                x = self.conv2d(x)
-                x = self.relu(x)
-                x = self.conv3d(x)
-                x = self.relu(x)
-                x = self.bn1d(x)
-                x = self.relu(x)
-                x = self.bn2d(x)
-                x = self.relu(x)
-                x = self.bn3d(x)
-                x = self.relu(x)
-                return x
-
-        m = M().eval()
+        m = ConvModel().eval()
         from torch.quantization.quantize_fx import fuse_fx
         fuse_custom_config_dict = {"typo": None}
 
@@ -1069,18 +1045,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
-                return x
-
-        m = M().eval()
+        m = ConvModel().eval()
         qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
 
         with self.assertRaises(ValueError) as context:
@@ -1111,18 +1076,7 @@ class TestQuantizeFx(QuantizationTestCase):
                                                    "output_quantized_idxs",
                                                    "preserved_attributes"}
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
-                return x
-
-        m = M().eval()
+        m = ConvModel().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         prepare_custom_config_dict = {"typo": None}
 
@@ -1145,18 +1099,7 @@ class TestQuantizeFx(QuantizationTestCase):
                                                    "observed_to_quantized_custom_module_class",
                                                    "preserved_attributes"}
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
-                return x
-
-        m = M().eval()
+        m = ConvModel().eval()
         qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         convert_custom_config_dict = {"typo": None}
