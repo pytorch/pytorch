@@ -28,7 +28,7 @@ shellcheck-gha:
 	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
 generate-gha-workflows:
-	./.github/scripts/generate_linux_ci_workflows.py
+	.github/scripts/generate_ci_workflows.py
 	$(MAKE) shellcheck-gha
 
 setup_lint:
