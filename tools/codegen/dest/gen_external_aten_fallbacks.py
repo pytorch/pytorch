@@ -241,7 +241,6 @@ class GenExternalAtenFallback:
                 # TODO: uncomment the resize line below. Taken out temporarily for testing
                 update_tensors = '''
   for (int i : external_tensors_update_indices) {
-    // if (external_tensors_tensors[i].sizes() != external_tensors[i].sizes()) external_tensors_tensors[i].resize_(external_tensors[i].sizes());
     at::_copy_from_and_resize(external_tensors[i], external_tensors_tensors[i]);
   }
 '''
