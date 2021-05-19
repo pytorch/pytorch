@@ -224,13 +224,9 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        try:
+        with self.assertRaisesRegex(PackagingError, "did not match against any action"):
             with PackageExporter(buffer, verbose=False) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
-        except PackagingError as e:
-            self.assertEqual(e.unhandled, set(["package_a", "package_a.subpackage"]))
-        else:
-            self.fail("PackagingError should have been raised")
 
         # Interning all dependencies should work
         with PackageExporter(buffer, verbose=False) as he:
@@ -262,16 +258,12 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        try:
+        with self.assertRaisesRegex(PackagingError, "C extension"):
             with PackageExporter(
                 buffer, verbose=False, importer=BrokenImporter()
             ) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
-        except PackagingError as e:
-            self.assertEqual(set(e.broken.keys()), set(["foo", "bar"]))
-        else:
-            self.fail("PackagingError should have been raised")
 
 
 if __name__ == "__main__":
