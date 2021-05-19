@@ -2474,6 +2474,29 @@ class TestVmapOperators(Namespace.TestVmapBase):
         for loop_out, batched_out in get_fallback_and_vmap_exhaustive(torch.conv2d, arg_values, kwarg_values):
             self.assertEqual(loop_out, batched_out)
 
+    def test_mode_key(self):
+        def vmap_f(x):
+            return x + torch.randn(())
+
+        def naive_f(x, shape):
+            return x + torch.randn(shape)
+
+        torch.manual_seed(0)
+        out1 = vmap(vmap(vmap_f))(torch.ones(2, 3))
+
+        torch.manual_seed(0)
+        out2 = naive_f(torch.ones(2, 3), (2, 3))
+        self.assertEqual(out1, out2)
+
+        torch.manual_seed(0)
+        out1 = vmap(vmap(vmap_f))(torch.ones(2, 3, 4))
+
+        torch.manual_seed(0)
+        out2 = naive_f(torch.ones(2, 3, 4), (2, 3, 1))
+        self.assertEqual(out1, out2)
+
+        self.assertTrue(torch.randn(()).dim() == 0)
+
     @parameterized('op', {'abs': torch.abs, 'acos': torch.acos})
     def test_parameterize(self, op):
         pass

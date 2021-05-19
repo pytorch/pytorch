@@ -2,7 +2,7 @@ import torch
 import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
 from .pytree_hacks import tree_flatten_hack, tree_map_
 from functools import partial
 import warnings
@@ -43,10 +43,7 @@ def _as_tuple(value: Any, num_elements: int, error_message_lambda: Callable[[], 
         raise ValueError(error_message_lambda())
     return value
 
-# Creates BatchedTensors for every Tensor in arg that should be batched.
-# Returns the (potentially) batched arguments and the batch_size.
-def _create_batched_inputs(
-        in_dims: in_dims_t, args: Tuple, vmap_level: int, func: Callable) -> Tuple[Tuple, int]:
+def _process_batched_inputs(in_dims: in_dims_t, args: Tuple, func: Callable) -> Tuple[int, List[Any], List[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f'vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): '
@@ -86,12 +83,17 @@ def _create_batched_inputs(
                 f'of dimensionality {arg.dim()} so expected in_dim to satisfy '
                 f'0 <= in_dim < {arg.dim()}.')
 
-    batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
+    return _validate_and_get_batch_size(flat_in_dims, flat_args), flat_in_dims, flat_args, args_spec
+
+# Creates BatchedTensors for every Tensor in arg that should be batched.
+# Returns the (potentially) batched arguments and the batch_size.
+def _create_batched_inputs(
+        flat_in_dims: List[Any], flat_args: List[Any], vmap_level: int, args_spec) -> Tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [arg if in_dim is None else
                       _add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
-    return tree_unflatten(batched_inputs, args_spec), batch_size
+    return tree_unflatten(batched_inputs, args_spec)
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
@@ -261,13 +263,12 @@ def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> C
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
-        vmap_level = _vmap_increment_nesting()
-        torch._C._vmapmode_increment_nesting()
+        batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(in_dims, args, func)
+        vmap_level = _vmap_increment_nesting(batch_size)
         try:
-            batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
+            batched_inputs = _create_batched_inputs(flat_in_dims, flat_args, vmap_level, args_spec)
             batched_outputs = func(*batched_inputs)
             return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
         finally:
-            torch._C._vmapmode_decrement_nesting()
             _vmap_decrement_nesting()
     return wrapped
