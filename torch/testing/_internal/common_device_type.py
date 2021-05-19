@@ -228,12 +228,9 @@ class DeviceTypeTestBase(TestCase):
         return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     def _get_precision_override(self, test, dtype):
-        if hasattr(test, 'precision_overrides'):
-            return test.precision_overrides.get(dtype, self.precision)
-        elif hasattr(self, 'precision_overrides'):
-            return getattr(self, 'precision_overrides').get(dtype, self.precision)
-        else:
+        if not hasattr(test, 'precision_overrides'):
             return self.precision
+        return test.precision_overrides.get(dtype, self.precision)
 
     # Creates device-specific tests.
     @classmethod
