@@ -727,6 +727,9 @@ def silu(g, input):
 def relu(g, input):
     return g.op("Relu", input)
 
+def relu6(g, input):
+    relu = g.op("Relu", input)
+    return clamp_max(g, relu, 6)
 
 def ceil(g, input):
     return g.op("Ceil", input)

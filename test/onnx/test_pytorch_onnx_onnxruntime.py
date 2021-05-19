@@ -5474,6 +5474,21 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"x": [1, 2]},
                       test_with_inputs=[y])
 
+    def test_relu6(self):
+        class Relu6Model(torch.nn.Module):
+            def __init__(self):
+                super(Relu6Model, self).__init__()
+                self.relu6 = torch.nn.ReLU6()
+
+            def forward(self, x):
+                return self.relu6(x)
+
+        x = torch.randn(2, 3, 4) * 100.0
+        y = torch.randn(2, 4, 5) * 100.0
+        self.run_test(Relu6Model(), x, input_names=['x'],
+                      dynamic_axes={'x': [1, 2]},
+                      test_with_inputs=[y])
+
     def test_silu(self):
         class SiLUModel(torch.nn.Module):
             def __init__(self):
