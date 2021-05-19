@@ -1,5 +1,5 @@
 # Template is at:    .github/templates/linux_ci_workflow.yml
-# Generation script: .github/scripts/generate_linux_ci_workflows.py
+# Generation script: .github/scripts/generate_ci_workflows.py
 name: Linux CI (!{{ build_environment }})
 
 on:
