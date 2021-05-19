@@ -238,6 +238,18 @@ class TestNNAPI(TestCase):
             convert_args=[torch.zeros(0, 0)],
         )
 
+    def test_to(self):
+        # FIXME (axit) Fails if this is the only op (return value?)
+        class ToCPU(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.to("cpu")
+                return torch.nn.functional.relu(y)
+
+        self.check(ToCPU(), torch.randn(1, 2, 3, 3))
+
     def test_mean(self):
         class MeanModule(torch.nn.Module):
             def __init__(self, dim, keep=False):
