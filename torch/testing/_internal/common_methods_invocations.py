@@ -2742,6 +2742,7 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
 
 def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autodiffed=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    samples = ()
 
     if autodiffed:
         samples = (
