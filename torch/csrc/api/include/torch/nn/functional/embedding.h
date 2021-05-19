@@ -9,7 +9,7 @@ namespace functional {
 inline Tensor one_hot(
     const Tensor& tensor,
     int64_t num_classes = -1,
-    c10::optional<ScalarType> dtype = c10::nullopt) {
+    ScalarType dtype = c10::kLong) {
   return torch::one_hot(tensor, num_classes, dtype);
 }
 

@@ -4109,7 +4109,7 @@
   dispatch:
     MkldnnCPU: mkldnn_transpose_
 
-- func: one_hot(Tensor self, int num_classes=-1, ScalarType? dtype=None) -> Tensor
+- func: one_hot(Tensor self, int num_classes=-1, ScalarType dtype=long) -> Tensor
   python_module: nn
   variants: function
 

@@ -2561,8 +2561,8 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
     return input
 
 
-@parse_args('v', 'i')
-def one_hot(g, self, num_classes):
+@parse_args('v', 'i', 'v')
+def one_hot(g, self, num_classes, dtype):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
     return g.op("OneHot", self, depth, values, axis_i=-1)

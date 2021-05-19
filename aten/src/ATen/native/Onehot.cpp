@@ -2,11 +2,10 @@
 
 namespace at { namespace native {
 
-Tensor one_hot(const Tensor &self, int64_t num_classes, c10::optional<ScalarType> dtype) {
+Tensor one_hot(const Tensor &self, int64_t num_classes, ScalarType dtype) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
-    auto output_dtype = dtype.value_or(kLong);
-    auto output_options = self.options().dtype(output_dtype);
+    auto output_options = self.options().dtype(dtype);
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
