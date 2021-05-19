@@ -265,6 +265,14 @@ class TestDependencyAPI(PackageTestCase):
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
 
+    def test_invalid_import(self):
+        """An incorrectly-formed import should raise a PackagingError."""
+        buffer = BytesIO()
+        with self.assertRaisesRegex(PackagingError, "attempted relative import"):
+            with PackageExporter(buffer, verbose=False) as exporter:
+                # This import will fail to load
+                exporter.save_source_string("foo", "from ........ import lol")
+
 
 if __name__ == "__main__":
     run_tests()

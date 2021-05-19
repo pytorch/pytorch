@@ -232,7 +232,16 @@ class PackageExporter:
         package_name = (
             module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
         )
-        dep_pairs = find_files_source_depends_on(src, package_name)
+        try:
+            dep_pairs = find_files_source_depends_on(src, package_name)
+        except Exception as e:
+            self.dependency_graph.add_node(
+                module_name,
+                error=PackagingErrorReason.DEPENDENCY_RESOLUTION_FAILED,
+                error_context=str(e),
+            )
+            return []
+
         # Use a dict to get uniquing but also deterministic order
         dependencies = {}
         for dep_module_name, dep_module_obj in dep_pairs:
