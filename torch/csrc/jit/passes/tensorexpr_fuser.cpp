@@ -124,6 +124,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::tanh(Tensor self) -> Tensor",
       "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
       "aten::hardswish(Tensor self) -> Tensor",
+      "aten::hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
       "aten::abs(Tensor self) -> Tensor",
@@ -1025,6 +1026,13 @@ class TensorExprFuser {
             constant_as<bool>(inp).value_or(true)) {
           return false;
         }
+      }
+    }
+
+    if (node->kind() == aten::unsqueeze) {
+      // `dim` argument must be a constant.
+      if (node->input(1)->node()->kind() != prim::Constant) {
+        return false;
       }
     }
 

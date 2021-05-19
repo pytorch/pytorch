@@ -681,7 +681,7 @@ class Module:
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self: T) -> T:
-        r"""Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to ``float`` datatype.
 
         .. note::
             This method modifies the module in-place.
@@ -1634,6 +1634,8 @@ class Module:
         Returns:
             Module: self
         """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
         self.training = mode
         for module in self.children():
             module.train(mode)
