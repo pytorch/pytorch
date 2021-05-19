@@ -5,6 +5,8 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/mkldnn_utils.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 
@@ -120,6 +122,20 @@ template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp
     3>::unpack();
 #endif // USE_PYTORCH_QNNPACK
 
+#if AT_MKLDNN_ENABLED()
+template <int kSpatialDim>
+std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsMkldnn<
+    kSpatialDim>::unpack() {
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+      orig_weight_, orig_bias_);
+}
+
+template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsMkldnn<
+    2>::unpack();
+template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsMkldnn<
+    3>::unpack();
+#endif // #if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace {
@@ -154,6 +170,12 @@ class QConvUnpackWeightsInt8 final {
     }
 #endif
 
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      return packed_weight->unpack();
+    }
+#endif // #if AT_MKLDNN_ENABLED()
+
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::conv2d_unpack ",
@@ -184,6 +206,14 @@ class QConv1dUnpackWeightsInt8 final {
       return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
+
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      std::tie(weight, bias) = packed_weight->unpack();
+      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
+    }
+#endif // #if AT_MKLDNN_ENABLED()
 
     TORCH_CHECK(
         false,

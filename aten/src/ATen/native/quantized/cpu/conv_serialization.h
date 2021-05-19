@@ -5,6 +5,7 @@
 
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/mkldnn_utils.h>
 
 #include <tuple>
 
@@ -268,6 +269,20 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     );
   }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+  if (ctx.qEngine() == at::QEngine::MKLDNN) {
+    return PackedConvWeightsMkldnn<kSpatialDim>::prepack(
+      weight,
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose
+    );
+  }
+#endif
 TORCH_CHECK(
   false,
   "Didn't find engine for when deserializing ConvPackedParams: ",

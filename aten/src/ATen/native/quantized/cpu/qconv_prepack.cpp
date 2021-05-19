@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/mkldnn_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
@@ -315,6 +316,142 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
         bool transpose);
 #endif // USE_PYTORCH_QNNPACK
 
+#if AT_MKLDNN_ENABLED()
+template <int kSpatialDim>
+c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
+    kSpatialDim>::
+    prepack(
+        at::Tensor weight,
+        c10::optional<at::Tensor> bias,
+        torch::List<int64_t> stride,
+        torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
+        torch::List<int64_t> dilation,
+        int64_t groups,
+        bool transpose) {
+  TORCH_CHECK(
+      transpose == false,
+      "Quantized::conv_prepack (mkldnn): "
+      "Convolution transpose is not supported.");
+  TORCH_CHECK(
+      weight.ndimension() == kSpatialDim + 2,
+      "Weights are expected to have ", kSpatialDim + 2, " dimensions");
+  TORCH_CHECK(
+      stride.size() == kSpatialDim,
+      "stride should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      padding.size() == kSpatialDim,
+      "Specify front/top/left padding only. "
+      "end/bottom/right padding assumed to be equal to front/top/left");
+  TORCH_CHECK(
+      !transpose || output_padding.size() == kSpatialDim,
+      "quantized::conv_prepack: Specify top/left output padding "
+      "only. bottom/right padding assumed to be equal to top/left");
+  TORCH_CHECK(
+      dilation.size() == kSpatialDim,
+      "dilation should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      weight.q_zero_point()==0,
+      "quantized::conv_prepack: MKLDNN requires zero point of weight to be 0.");
+
+  // Weight
+  auto dims = weight.sizes().vec();
+  auto strides = stride.vec();
+  auto padding_l = padding.vec();
+  auto padding_r = padding.vec();
+  auto dilates = dilation.vec();
+  auto op_attr = ideep::attr_t();
+  std::vector<int32_t> wgt_zero_points;
+  ideep::scale_t wgt_scales;
+  const int output_channels = transpose ? weight.size(1) * groups
+                                        : weight.size(0);
+  const auto qtype = weight.qscheme();
+  if (qtype == c10::kPerTensorAffine) {
+    wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
+    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of MKLDNN and PyTorch are reciprocal
+  } else if (qtype == c10::kPerChannelAffine) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+    int64_t axis = weight.q_per_channel_axis();
+    TORCH_CHECK(
+        !transpose,
+        "Per Channel Quantization is currently disabled for transposed conv");
+    wgt_zero_points.resize(output_channels);
+    wgt_scales.resize(output_channels);
+    for (int i = 0; i < output_channels; ++i) {
+      wgt_zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
+      wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of MKLDNN and PyTorch are reciprocal
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
+  }
+
+  // Prepack weight in case that the zero point of src is non-zero.
+  // A dummy case to align with qconv.cpp (Cannot use {0} as zero point)
+  auto src_zero_point = std::vector<int32_t>(1, 1);
+  op_attr.set_zero_points(DNNL_ARG_SRC,
+                          ideep::utils::tensor_zp_mask(src_zero_point.size()),
+                          src_zero_point);
+  auto w_desc = ideep::convolution_forward::expected_weights_desc(dims, dnnl::memory::data_type::s8,
+                                                                  strides, padding_l, padding_r, dilates, groups,
+                                                                  dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+                                                                  dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight.data_ptr());
+  ideep::tensor exp_wgt;
+  exp_wgt.init(w_desc);
+  exp_wgt.feed_from(wgt);
+  ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
+  // Weight format: OIHW
+  packed_weight_p->set_scale(wgt_scales);
+  packed_weight_p->set_zero_point(wgt_zero_points);
+  std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
+
+  // Prepack another weight in case that the zero point of src is zero.
+  auto w_desc_nzp = w_desc;
+  w_desc_nzp.data.extra.asymm_compensation_mask = 0;
+  w_desc_nzp.data.extra.flags = 0;
+  ideep::tensor exp_wgt_nzp;
+  exp_wgt_nzp.init(w_desc_nzp);
+  exp_wgt_nzp.feed_from(wgt);
+  ideep::tensor * packed_weight_nzp_p = new ideep::tensor(exp_wgt_nzp);
+  packed_weight_nzp_p->set_scale(wgt_scales);
+  packed_weight_nzp_p->set_zero_point(wgt_zero_points);
+  std::unique_ptr<ideep::tensor> weight_nzp_ptr(packed_weight_nzp_p);
+  // Bias
+  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  if (bias.has_value()) {
+    at::Tensor bias_vec = bias.value();
+    TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+    TORCH_CHECK(
+        bias_vec.size(0) == output_channels,
+        "bias should have K elements: " + std::to_string(output_channels));
+    auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
+    ideep::tensor packed_bias;
+    packed_bias.init(bias_desc, bias.value().data_ptr());
+    mkldnn_bias = c10::optional<ideep::tensor>(packed_bias);
+  }
+  auto ret_ptr = c10::make_intrusive<PackedConvWeightsMkldnn<kSpatialDim>>(
+      PackedConvWeightsMkldnn<kSpatialDim>{
+        std::move(weight_ptr),
+        std::move(weight_nzp_ptr),
+        mkldnn_bias,
+        weight,
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      });
+  return ret_ptr;
+}
+
+template struct PackedConvWeightsMkldnn<2>;
+template struct PackedConvWeightsMkldnn<3>;
+#endif // #if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace {
@@ -381,6 +518,14 @@ class QConvPackWeightInt8 final {
     }
 #endif
 
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      return PackedConvWeightsMkldnn<kSpatialDim>::prepack(
+        weight, bias, stride, padding, output_padding, dilation, groups,
+            transpose);
+    }
+#endif
+
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::conv2d_prepack ",
@@ -442,8 +587,6 @@ class QConv1dPackWeightInt8 final {
     }
 #endif
 
-
-
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
@@ -451,6 +594,15 @@ class QConv1dPackWeightInt8 final {
           transpose);
     }
 #endif
+
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      return PackedConvWeightsMkldnn<2>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
+    }
+#endif
+
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::conv1d_prepack ",
