@@ -1173,8 +1173,10 @@ static int THPVariable_subclass_traverse(PyObject* self, visitproc visit, void *
   // to do reachability.  Bypassing traverse during root discovery forces Python
   // to treat self as a root for everything it refers to.  For a full
   // explanation of the algorithm see https://devguide.python.org/garbage_collector/
-  const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.defined() && tensor.use_count() > 1) return 0;
+  if (!var->cdata.unsafeIsBorrowed()) {
+    const auto& tensor = THPVariable_Unpack(self);
+    if (tensor.defined() && tensor.use_count() > 1) return 0;
+  }
 
   // Crappy version of subtype_traverse; same deal as
   // THPVariable_subclass_dealloc
