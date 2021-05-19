@@ -47,7 +47,7 @@ THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, 
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
   , event_(INVALID_HANDLE_VALUE) // to be filled later
-  , eventname_(filename ? std::string(filename) + "_event" : unknown_eventname)
+  , eventname_(filename)
 #else
   , fd_(fd)
 #endif
