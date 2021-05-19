@@ -21,7 +21,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature,
                                      ArrayRefCType, ConstRefCType, MutRefCType,
-                                     OptionalCType, Expr)
+                                     OptionalCType, CType, Expr)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -141,7 +141,7 @@ def mk_dispatch_arg(arg: Expr) -> str:
         ConstRefCType,
         MutRefCType,
     )
-    def dontmove(type):
+    def dontmove(type: CType) -> bool:
         return isinstance(type, free_copy_types) or type.cpp_type() in basic_types
 
     if dontmove(arg.type.type) or \
@@ -265,8 +265,7 @@ class ComputeFunction:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
-            dispatcher_exprs = mk_dispatch_args(dispatcher_exprs)
+            dispatcher_exprs = mk_dispatch_args(translate(sig.arguments(), dispatcher_sig.arguments()))
             if self.is_redispatching_fn:
                 dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + dispatcher_exprs)
                 dispatcher_call = 'redispatch'
