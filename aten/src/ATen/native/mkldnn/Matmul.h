@@ -14,4 +14,3 @@ TORCH_API void mkldnn_matmul(
         float alpha=1);
 
 }}
-

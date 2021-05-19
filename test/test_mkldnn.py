@@ -942,9 +942,9 @@ class TestMkldnn(TestCase):
             linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
             cpu_linear_bf16 = copy.deepcopy(linear).bfloat16()
             mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
-            mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
             if has_bf16_support():
                 y = mkldnn_linear(x.to_mkldnn()).to_dense()
+                mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
                 y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense()
                 cpu_y_bf16 = cpu_linear_bf16(x_bf16)
 
@@ -954,7 +954,7 @@ class TestMkldnn(TestCase):
                 msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
-                                       lambda: mkldnn_linear_bf16(x_bf16.to_mkldnn()))
+                                       lambda: mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16))
 
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10

@@ -16,7 +16,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/mkldnn/Matmul.h>
-#include <ATen/native/mkldnn/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -1033,7 +1032,7 @@ static void addmm_impl_cpu_(
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
   if (checkMklDnnBf16GemmUsable(a, b, c)){
-    if (m1_sizes[0] == m2_sizes[1]){
+    if (transpose_c){
       // m1, m2 are swaped
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
     } else {

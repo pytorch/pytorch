@@ -27,9 +27,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     const Tensor& weight, std::array<bool,3> output_mask) {
   TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
 }
-Tensor mkldnn_linear_weight_pack(const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_linear_weight_pack: ATen not compiled with MKLDNN support");
-}
+
 } // namespace native
 } // namespace at
 
@@ -173,24 +171,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
-}
-
-Tensor mkldnn_linear_weight_pack(const Tensor& weight) {
-  TORCH_CHECK(weight.is_mkldnn(), "mkldnn_linear_weight_pack only pack mkldnn tensor");
-  const ideep::tensor w = itensor_from_tensor(weight);
-  auto expected_w_desc = ideep::inner_product_forward::expected_weights_desc(
-    w.get_dims(),
-    /*dummy src dims*/ideep::dims(),
-    w.get_data_type(),
-    /*assume src dtype should same with weight*/w.get_data_type()
-  );
-  if (w.get_desc() == expected_w_desc){
-    return weight;
-  }
-  ideep::tensor expected_w {expected_w_desc};
-  expected_w.feed_from(w);
-  return new_with_itensor_mkldnn(std::move(expected_w), optTypeMetaToScalarType(weight.options().dtype_opt()),
-                                    weight.options().device_opt());
 }
 
 } // namespace native

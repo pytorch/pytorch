@@ -141,6 +141,29 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
+Tensor mkldnn_reorder_linear_weight(const Tensor& weight) {
+  TORCH_CHECK(weight.is_mkldnn(), "mkldnn_reorder_linear_weight only pack mkldnn tensor");
+  if (weight.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_linear_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  auto w = itensor_from_mkldnn(weight);
+  auto desc = ideep::inner_product_forward::expected_weights_desc(
+    w.get_dims(),
+    /*dummy src dims*/ideep::dims(),
+    w.get_data_type(),
+    /*assume src dtype should same with weight*/w.get_data_type()
+  );
+  if (w.get_desc() == desc){
+    return weight;
+  }
+  ideep::tensor result {desc};
+  result.feed_from(w);
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(weight.options().dtype_opt()),
+                                    weight.options().device_opt());
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
@@ -167,6 +190,10 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef dilation,
     int64_t groups) {
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
+}
+
+Tensor mkldnn_reorder_linear_weight(const Tensor& weight) {
+  TORCH_CHECK(false, "mkldnn_reorder_linear_weight: ATen not compiled with MKLDNN support");
 }
 
 #endif // AT_MKLDNN_ENABLED()
