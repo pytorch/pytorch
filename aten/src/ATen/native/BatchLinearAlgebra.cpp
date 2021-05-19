@@ -749,6 +749,15 @@ std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
   TORCH_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
@@ -759,6 +768,15 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
   checkSameDevice("solve", solution, self, "solution");
   checkSameDevice("solve", lu, self, "lu");
   checkLinalgCompatibleDtype("solve", solution, self, "solution");
@@ -1028,8 +1046,11 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
   checkSameDevice("linalg_inv", result, input);
   checkLinalgCompatibleDtype("linalg_inv", result, input);
 
-  TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
-  TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_lu.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_getri.scalar_type() == kInt);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_lu.device() == input.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_getri.device() == input.device());
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
@@ -1043,11 +1064,29 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
   copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
   copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
   // we have to allocate a temporary tensor
+
+  // similar conditions for infos_lu and infos_getri tensors
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  copy_needed |= (infos_lu.numel() != 0 && !infos_lu.is_contiguous());
+  copy_needed |= (infos_lu.numel() != 0 && !(infos_lu.sizes().equals(expected_info_shape)));
+
+  copy_needed |= (infos_getri.numel() != 0 && !infos_getri.is_contiguous());
+  copy_needed |= (infos_getri.numel() != 0 && !(infos_getri.sizes().equals(expected_info_shape)));
+
   if (copy_needed) {
-    Tensor result_tmp = at::empty({0}, input.options());
-    result_tmp = linalg_inv_out_info(result_tmp, infos_lu, infos_getri, input);
+    Tensor result_tmp = at::empty(input.sizes(), input.options());
+    result_tmp.transpose_(-2, -1);
+    Tensor infos_lu_tmp = at::zeros({expected_info_shape}, input.options().dtype(kInt));
+    Tensor infos_getri_tmp = at::zeros({expected_info_shape}, input.options().dtype(kInt));
+
+    result_tmp = linalg_inv_out_info(result_tmp, infos_lu_tmp, infos_getri_tmp, input);
+
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
+    at::native::resize_output(infos_lu, infos_lu_tmp.sizes());
+    infos_lu.copy_(infos_lu_tmp);
+    at::native::resize_output(infos_getri, infos_getri_tmp.sizes());
+    infos_getri.copy_(infos_getri_tmp);
     return result;
   }
   // else  use result's storage directly
@@ -1058,12 +1097,28 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
     result.transpose_(-2, -1);
   }
 
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
-  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+
+  // if info has no elements we can modify it
+  if (infos_lu.numel() == 0) {
+    infos_lu.resize_(expected_info_shape);
+    infos_lu.fill_(0);
+  }
+  if (infos_getri.numel() == 0) {
+    infos_getri.resize_(expected_info_shape);
+    infos_getri.fill_(0);
+  }
+
+  // info tensors must be contiguous
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_lu.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_lu.sizes().equals(expected_info_shape));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_getri.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_getri.sizes().equals(expected_info_shape));
 
   // _linalg_inv_out_helper_ (apply_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
@@ -1075,8 +1130,9 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
-  auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-  auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  auto info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  auto infos_lu = at::zeros({info_shape}, input.options().dtype(kInt));
+  auto infos_getri = at::zeros({info_shape}, input.options().dtype(kInt));
   result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
@@ -1093,9 +1149,55 @@ Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
 
 // Computes the inverse matrix of 'input'
 Tensor linalg_inv(const Tensor &input) {
-  Tensor result = at::empty({0}, input.options());
-  result = at::linalg_inv_out(result, input);
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_inv_ex(input, /*check_errors=*/false);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  if (input.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.inv");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.inv");
+  }
+
   return result;
+}
+
+std::tuple<Tensor&, Tensor&> linalg_inv_ex_out(const Tensor& input, bool check_errors, Tensor& inverse, Tensor& info) {
+  squareCheckInputs(input);
+  ScalarType info_output_type = ScalarType::Int;
+  TORCH_CHECK(
+      info.scalar_type() == info_output_type,
+      "torch.linalg.inv_ex: ",
+      "Expected info to have ", info_output_type, " dtype, but got info with dtype ", info.scalar_type());
+
+  // provided `info` tensor is used to save the information about the LU decomposition of `input`
+  // in addition current implementation requires a separate tensor
+  // for saving the information about the inversion process after the LU decomposition
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  auto info_inversion = at::zeros({expected_info_shape}, input.options().dtype(kInt));
+
+  linalg_inv_out_info(inverse, info, info_inversion, input);
+
+  if (check_errors) {
+    if (input.dim() > 2) {
+      batchCheckErrors(info, "torch.linalg.inv_ex");
+    } else {
+      singleCheckErrors(info.item().toInt(), "torch.linalg.inv_ex");
+    }
+  }
+
+  return std::tuple<Tensor&, Tensor&>(inverse, info);
+}
+
+std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors) {
+  squareCheckInputs(input);
+  Tensor inverse = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
+  inverse.transpose_(-2, -1); // make `inverse` tensor with batched column major format
+  auto info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  Tensor info = at::zeros({info_shape}, input.options().dtype(kInt));
+  std::tie(inverse, info) = at::native::linalg_inv_ex_out(input, check_errors, inverse, info);
+  return std::make_tuple(inverse, info);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2383,11 +2485,37 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 }
 
 std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {
+  TORCH_WARN_ONCE(
+    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
+    "PyTorch release.\n",
+    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
+    "to using the lower triangular portion.\n",
+    "L, _ = torch.symeig(A, upper=upper)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
+    "and\n",
+    "L, V = torch.symeig(A, eigenvectors=True)\n"
+    "should be replaced with\n",
+    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
+  );
   squareCheckInputs(self);
   return at::_symeig_helper(self, eigenvectors, upper);
 }
 
 std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, bool upper, Tensor& vals, Tensor& vecs) {
+  TORCH_WARN_ONCE(
+    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
+    "PyTorch release.\n",
+    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
+    "to using the lower triangular portion.\n",
+    "L, _ = torch.symeig(A, upper=upper)\n",
+    "should be replaced with\n",
+    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
+    "and\n",
+    "L, V = torch.symeig(A, eigenvectors=True)\n"
+    "should be replaced with\n",
+    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
+  );
   checkSameDevice("symeig", vals, self, "eigenvalues");
   checkSameDevice("symeig", vecs, self, "eigenvectors");
   checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
@@ -2734,6 +2862,12 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 }
 
 Tensor linalg_eigvals(const Tensor& input) {
+  // if input requires grad we must compute the eigenvectors to make this function differentiable
+  // the eigenvectors are not exposed to the user
+  if (at::GradMode::is_enabled() && input.requires_grad()) {
+    return std::get<0>(at::linalg_eig(input));
+  }
+
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
 
@@ -2907,6 +3041,21 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
+  // TODO: uncomment the following when svd is deprecated not only in docs
+  // torch/xla is blocking the transition from at::svd to at::linalg_svd in at::linalg_pinv code
+  // see https://github.com/pytorch/xla/issues/2755
+  // TORCH_WARN_ONCE(
+  //     "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
+  //     "removed in a future PyTorch release.\n",
+  //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
+  //     "should be replaced with\n",
+  //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
+  //     "V = Vh.transpose(-2, -1).conj()\n",
+  //     "and\n",
+  //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
+  //     "should be replaced with\n",
+  //     "S = torch.linalg.svdvals(A)");
+
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
@@ -2923,7 +3072,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
   checkLinalgCompatibleDtype("svd", S.scalar_type(), real_dtype, "S");
 
   Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
+  std::tie(U_tmp, S_tmp, V_tmp) = at::native::svd(self, some, compute_uv);
 
   at::native::resize_output(U, U_tmp.sizes());
   at::native::resize_output(S, S_tmp.sizes());

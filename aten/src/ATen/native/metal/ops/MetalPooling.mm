@@ -56,8 +56,8 @@ Tensor max_pool2d(
   int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
   int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
 
-  std::vector<int64_t> outputSize{oN, oC, oH, oW};
-  MetalTensorImplStorage mt{outputSize};
+  SmallVector<int64_t, 4>outputSize{oN, oC, oH, oW};
+  MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
@@ -84,9 +84,9 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   [pool setOffset:{.x = static_cast<NSInteger>(X.width / 2),
                    .y = static_cast<NSInteger>(X.height / 2),
                    .z = 0}];
-  std::vector<int64_t> outputSize{
+  SmallVector<int64_t, 4> outputSize{
       input.sizes()[0], input.sizes()[1], output_size[0], output_size[1]};
-  MetalTensorImplStorage mt{outputSize};
+  MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();

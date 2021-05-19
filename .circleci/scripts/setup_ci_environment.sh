@@ -24,7 +24,9 @@ retry sudo apt-get -y install \
 echo "== DOCKER VERSION =="
 docker version
 
-retry sudo pip -q install awscli==1.16.35
+if ! command -v aws >/dev/null; then
+  retry sudo pip3 -q install awscli==1.19.64
+fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
@@ -55,9 +57,9 @@ add_to_env_file() {
 }
 
 add_to_env_file "IN_CI=1"
-add_to_env_file "COMMIT_SOURCE=${CIRCLE_BRANCH:-}"
-add_to_env_file "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
-add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"
+add_to_env_file "COMMIT_SOURCE='${CIRCLE_BRANCH:-}'"
+add_to_env_file "BUILD_ENVIRONMENT='${BUILD_ENVIRONMENT}'"
+add_to_env_file "CIRCLE_PULL_REQUEST='${CIRCLE_PULL_REQUEST}'"
 
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
@@ -93,5 +95,7 @@ fi
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4:-}
-eval "$(aws ecr get-login --region us-east-1 --no-include-email)"
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+export AWS_REGION=us-east-1
+aws ecr get-login-password --region $AWS_REGION|docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 set -x
