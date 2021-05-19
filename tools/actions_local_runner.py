@@ -226,6 +226,8 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
 
 async def run_shellcheck(files: Optional[List[str]], quiet: bool) -> bool:
     if files is not None:
+        # The files list should already be filtered by '--file-filter ".sh"' when
+        # calling this script
         passed, stdout, stderr = await shell_cmd(
             ["tools/run_shellcheck.sh"] + [
                 os.path.join(REPO_ROOT, f) for f in files
