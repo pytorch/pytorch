@@ -20,6 +20,9 @@ std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
     std::vector<bool> to_translate(tensors.size());
     for (size_t i = 0; i < tensors.size(); ++i) {
         const at::Tensor& tensor = tensors[i];
+        // Explicitly handling undefined tensors here instead of letting `at::_to_cpu` handle it.
+        // Otherwise, we'd need to require all backends with their own implementation of _to_cpu
+        // to properly handle undefined tensors.
         if (tensor.defined()) {
             to_translate[i] = true;
             valid_tensors.push_back(tensor);
@@ -54,10 +57,14 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       tensor_args.push_back(ivalue.toTensor());
       tensor_args_indices.push_back(idx);
     } else if (ivalue.isTensorList()) {
+      // Note: we copy each TensorList argument to CPU individually out of convenience,
+      // but XLA would benefit from materializing all tensor and TensorList args onto the CPU at the same time.
+      // We can improve this if we need better perf for XLA's CPU fallbacks.
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
     }
   }
+  // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
   auto cpu_tensors = to_cpu(tensor_args);
 
   for (auto i = 0; i < tensor_args_indices.size(); ++i) {
@@ -84,6 +91,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // to move the ORIGINAL input tensor back onto the stack, in place of
   // the temporary CPU output tensor that we created.
   //
+  // Note [CPU Fallback Does Not Handle View Operators]
   // Also note that we are incapable of handling immutable alises properly.
   // Why?
   // Schemas with an immutable alias'd tensor outputs correspond to view operators.
@@ -93,8 +101,8 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // a NEW tensor that shares the SAME storage as the original tensor.
   // However, the new tensor that we created cannot share the same storage,
   // since it lives on CPU and the original tensor lives on a different device.
-  // Because of that, we treat immutable aliases the same way that we treat non-aliases:
-  // as a fresh tensor that has entirely new storage.
+  // Because of that, we explicitly error out if someone attempts to call the
+  // CPU fallback on a view operator.
   const auto& schema_returns = op.schema().returns();
   const auto& num_returns = schema_returns.size();
   auto returns = torch::jit::last(stack, num_returns);
@@ -123,6 +131,13 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
           }
           TORCH_CHECK(found_alias, "The operator ", op.schema().operator_name(), " appears to have invalid alias information. ",
                       "Found a return tensor argument with a mismatched mutable alias: ", schema_returns[idx]);
+        } else if (alias_info.has_value() && !alias_info.value().isWrite()) {
+          // immutable alias (view) case: Fail here. If this operator is needed, the backend should provide a kernel for it.
+          // See Note [CPU Fallback Does Not Handle View Operators]
+          auto tgt_device = tensor_args[0].device();
+          TORCH_CHECK(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                      "but it has no implementation for the backend \"", tgt_device, "\". View operators don't support ",
+                      "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
         } else {
           // copy case: copy the cpu output tensor to the original device.
           auto tgt_device = tensor_args[0].device();
