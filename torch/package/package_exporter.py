@@ -36,8 +36,6 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
-_gate_torchscript_serialization = True
-
 ActionHook = Callable[["PackageExporter", str], None]
 
 
@@ -693,14 +691,6 @@ node [shape=box];
             return ("storage", storage_type, obj_key, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
-            if _gate_torchscript_serialization and isinstance(
-                obj, torch.jit.RecursiveScriptModule
-            ):
-                raise Exception(
-                    "Serializing ScriptModules directly into a package is a beta feature. "
-                    "To use, set global "
-                    "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
-                )
             if self.serialized_reduces.get(id(obj)) is None:
                 self.serialized_reduces[id(obj)] = ("reduce_package", id(obj), *obj.__reduce_package__(self))
 
