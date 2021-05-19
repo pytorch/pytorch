@@ -11,13 +11,21 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
@@ -80,6 +88,7 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
 template <typename T>
 void checkZeroPoints(const std::string& fn_name, Tensor zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < zero_points.numel(); ++i) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
@@ -106,6 +115,7 @@ Tensor quantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -174,6 +184,7 @@ Tensor quantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
@@ -206,6 +217,7 @@ Tensor dequantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -269,6 +281,7 @@ Tensor dequantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });

@@ -84,6 +84,19 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   for (size_t i = 0; i < ninterp; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+
+  // test kwargs api with args
+  std::vector<c10::IValue> args;
+  args.emplace_back(input);
+  std::unordered_map<std::string, c10::IValue> kwargs_empty;
+  auto jit_output_args = model.call_kwargs(args, kwargs_empty).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_args));
+
+  // and with kwargs only
+  std::unordered_map<std::string, c10::IValue> kwargs;
+  kwargs["input"] = input;
+  auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
@@ -120,4 +133,16 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   for (size_t i = 0; i < nthreads; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+}
+
+TEST(TorchpyTest, ThrowsSafely) {
+  // See explanation in deploy.h
+  torch::deploy::InterpreterManager manager(3);
+  EXPECT_THROW(manager.load_package("some garbage path"), c10::Error);
+
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
+  EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
+
+  auto model = p.load_pickle("model", "model.pkl");
+  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }

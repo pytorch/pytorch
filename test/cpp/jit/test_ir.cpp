@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
@@ -34,6 +35,7 @@ TEST(IRTest, Attributes) {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
@@ -93,6 +95,7 @@ TEST(IRTest, Blocks) {
       ->run(*g2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
@@ -130,6 +133,7 @@ graph(%x : Tensor,
       value_names.begin(), value_names.end());
 
   /* clang-format off */
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int ref_blocks_from_graph[4][4] = {
     /* (6, 6), (6, 7), (6, 9), (6, 10) */
     {   2,     1,      0,      0        },

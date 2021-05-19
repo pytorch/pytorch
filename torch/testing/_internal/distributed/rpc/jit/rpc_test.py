@@ -370,7 +370,7 @@ def owner_create_rref_my_script_class(a):
 
 
 def owner_create_rref_my_script_module(a):
-    return rpc.RRef(MyScriptModule(a), MyModuleInterface)
+    return rpc.RRef(MyScriptModule(a), type_hint=MyModuleInterface)
 
 
 @torch.jit.script

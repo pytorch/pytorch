@@ -124,7 +124,7 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+    : PyRRef([&value, &type_hint]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         // jit::toIValue takes a py::handle as the first argument, and it calls

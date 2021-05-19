@@ -3,6 +3,7 @@ import inspect
 import numbers
 import typing
 import enum
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
 from torch._jit_internal import boolean_dispatched
 
@@ -103,16 +104,32 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     return signatures
 
 def create_type_hint(x):
-    if isinstance(x, tuple):
+    if isinstance(x, list) or isinstance(x, tuple):
+        # todo(chilli): Figure out the right way for mypy to handle this
+        if isinstance(x, list):
+            def ret_type(x):
+                return List[x]  # type: ignore[valid-type]
+        else:
+            def ret_type(x):
+                return Tuple[x, ...]
         if len(x) == 0:
-            return Tuple[()]
-        if all(type(i) is type(x[0]) for i in x):
-            return Tuple[type(x[0]), ...]
-        return Tuple[Any, ...]
-    return type(x)
+            return ret_type(Any)
+        base_type = x[0]
+        for t in x:
+            if issubclass(t, base_type):
+                continue
+            elif issubclass(base_type, t):
+                base_type = t
+            else:
+                return ret_type(Any)
+        return ret_type(base_type)
+    return x
 
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
+
+    if signature_type is argument_type:
+        return True
 
     # Union types in signature. Given type needs to match one of the
     # contained types in the Union
@@ -124,18 +141,25 @@ def type_matches(signature_type : Any, argument_type : Any):
         # int can be promoted to List[int]
         return True
 
-    def is_homogeneous_int_tuple(t):
-        if not getattr(t, '__origin__', None) in {tuple, Tuple}:
+    if getattr(signature_type, '__origin__', None) in {list, List}:
+        sig_el_type = signature_type.__args__[0]
+        if not inspect.isclass(sig_el_type):
+            warnings.warn(
+                f"Does not support nested parametric types, got {signature_type}. Please file a bug.")
             return False
+        if getattr(argument_type, '__origin__', None) in {list, List}:
+            return issubclass(argument_type.__args__[0], sig_el_type)
 
-        contained = t.__args__
-        if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
-            return True
-        return all(c is int or (c is Ellipsis) for c in contained)
+        def is_homogeneous_tuple(t):
+            if not getattr(t, '__origin__', None) in {tuple, Tuple}:
+                return False
+            contained = t.__args__
+            if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
+                return True
+            return all((c is Ellipsis) or issubclass(c, sig_el_type) for c in contained)
 
-    if signature_type is List[int]:
-        # Tuple[int] is accepted for List[int] parameters
-        return is_homogeneous_int_tuple(argument_type)
+        # Tuple[T] is accepted for List[T] parameters
+        return is_homogeneous_tuple(argument_type)
 
     # Dtype is an int in schemas
     if signature_type is int and argument_type is torch.dtype:
@@ -143,7 +167,10 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     if signature_type is numbers.Number and argument_type in {int, float}:
         return True
-    return issubclass(argument_type, signature_type)
+    if inspect.isclass(argument_type) and inspect.isclass(signature_type):
+        return issubclass(argument_type, signature_type)
+
+    return False
 
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
@@ -218,16 +245,14 @@ def normalize_function(
                     arg_types = arg_types if arg_types else cast(Tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
                     for candidate_signature in torch_op_schemas:
+                        sig_matches = True
                         try:
                             bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
+                            for arg_name, arg_type in bound_types.arguments.items():
+                                param = candidate_signature.parameters[arg_name]
+                                sig_matches = sig_matches and type_matches(param.annotation, arg_type)
                         except TypeError as e:
-                            continue
-
-                        sig_matches = True
-                        for arg_name, arg_type in bound_types.arguments.items():
-                            param = candidate_signature.parameters[arg_name]
-                            sig_matches = sig_matches and type_matches(param.annotation, arg_type)
-
+                            sig_matches = False
                         if sig_matches:
                             new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(candidate_signature, args, kwargs,
                                                                                          normalize_to_only_use_kwargs)
