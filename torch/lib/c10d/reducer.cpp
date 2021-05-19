@@ -307,8 +307,6 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
-  const auto offset = replica.offsets[bucket_index.intra_bucket_index];
-  const auto length = replica.lengths[bucket_index.intra_bucket_index];
   auto& bucket_view = replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   // Copy contents of gradient tensor to bucket tensor.
@@ -556,10 +554,16 @@ void Reducer::autograd_hook(VariableIndex index) {
         "then got used in the second iteration. this is not ",
         "compatible with static_graph set to True.");
     if (--numGradHooksTriggeredMapPerIteration_[index] == 0) {
+      if (should_rebuild_buckets()) {
+        push_rebuilt_params(index);
+      }
       // Finally mark variable for which this function was originally called.
       mark_variable_ready(index);
     }
   } else {
+    if (should_rebuild_buckets()) {
+      push_rebuilt_params(index);
+    }
     // Finally mark variable for which this function was originally called.
     mark_variable_ready(index);
   }
@@ -696,10 +700,6 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
   // will be broadcasted and initialized. Also we only need to dump tensors
   // and parameter indices of one replica.
-  if (should_rebuild_buckets()) {
-    push_rebuilt_params(index);
-  }
-
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
   TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
@@ -767,6 +767,11 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
+      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+        for (const auto& unused_index : unused_parameters_) {
+          push_rebuilt_params(unused_index);
+        }
+      }
       this->finalize_backward();
     });
   }
