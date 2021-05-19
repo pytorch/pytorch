@@ -536,14 +536,15 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   return vector_case;
 }
 
-static inline bool checkMklDnnBf16GemmUsable(const Tensor& mat1, const Tensor& mat2, const Tensor& bias, const Tensor& result, const Scalar& alpha) {
+static inline bool checkMklDnnBf16GemmUsable(const Tensor& mat1, const Tensor& mat2, const Tensor& result) {
   return (
+    at::hasMKLDNN() &&
     mkldnn_bf16_device_check() &&
-    mat1.scalar_type() == kBFloat16 && mat1.numel() != 0 &&
-    mat2.scalar_type() == kBFloat16 && mat2.numel() != 0 &&
-    (bias.defined() ? (bias.scalar_type() ==  kBFloat16 && bias.numel() != 0) : true) &&
-    (alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() != 0.0f &&
-    (result.defined() ? result.scalar_type() ==  kBFloat16 : true));
+    mat1.scalar_type() == kBFloat16 &&
+    mat2.scalar_type() == kBFloat16 &&
+    result.scalar_type() == kBFloat16 &&
+    mat1.numel() != 0 &&
+    mat2.numel() != 0);
 }
 
 }}  // namespace at::native

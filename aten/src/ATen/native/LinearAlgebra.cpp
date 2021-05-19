@@ -15,6 +15,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -1030,7 +1032,18 @@ static void addmm_impl_cpu_(
   const int64_t lda = a.strides()[(transpose_a == transpose_c) ? 1 : 0];
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
-
+  if (checkMklDnnBf16GemmUsable(a, b, c)){
+    if (m1_sizes[0] == m2_sizes[1]){
+      // m1, m2 are swaped
+      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+    } else {
+      mkldnn_matmul(a, b, c, beta.to<float>(), alpha.to<float>());
+    }
+    if (!c.is_same(result)) {
+      result.copy_(c);
+  }
+    return;
+  }
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
@@ -1082,6 +1095,11 @@ static void addbmm_impl_(
     } else {
       result.zero_();
     }
+    return;
+  }
+
+  if (checkMklDnnBf16GemmUsable(batch1, batch2, result)){
+    mkldnn_matmul(batch1, batch2, result, beta.to<float>(), alpha.to<float>());
     return;
   }
 
@@ -1245,6 +1263,8 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
+  } else if (checkMklDnnBf16GemmUsable(batch1, batch2, self_or_result)){
+    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
