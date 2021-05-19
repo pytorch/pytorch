@@ -62,19 +62,19 @@ class ChunkShardingSpec(PlacementSpec):
                 2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
     """
 
-    ShardPlacement = Union[List[Device], List[PlacementSpec]]
+    ShardPlacements = List[Union[Device, PlacementSpec]]
     ShardingDim = Union[int, str]
 
-    def __init__(self, dim: ShardingDim, placement: ShardPlacement):
+    def __init__(self, dim: ShardingDim, placements: ShardPlacements):
         super(ChunkShardingSpec, self).__init__()
         self._verify_dim(dim)
-        self._verify_devices(placement)
+        self._verify_devices(placements)
         self._dim = dim
-        self._placement = placement
+        self._placements = placements
 
     @staticmethod
-    def _verify_devices(placement):
-        for dev in placement:
+    def _verify_devices(placements):
+        for dev in placements:
             if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')
 
@@ -91,8 +91,8 @@ class ChunkShardingSpec(PlacementSpec):
         return self._dim
 
     @property
-    def placement(self) -> ShardPlacement:
+    def placements(self) -> ShardPlacements:
         """
-        Retrieves the shard placement.
+        Retrieves the shard placements.
         """
-        return self._placement
+        return self._placements
