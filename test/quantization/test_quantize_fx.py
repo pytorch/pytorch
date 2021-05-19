@@ -263,7 +263,54 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_module(nni.BNReLU2d),
             ns.call_module(nni.BNReLU3d),
         ]
-        self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
+
+    def test_fuse_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a fuse_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
+                                                "preserved_attributes"}
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1d = nn.Conv1d(1, 1, 1)
+                self.conv2d = nn.Conv2d(1, 1, 1)
+                self.conv3d = nn.Conv3d(1, 1, 1)
+                self.bn1d = nn.BatchNorm1d(1)
+                self.bn2d = nn.BatchNorm2d(1)
+                self.bn3d = nn.BatchNorm3d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1d(x)
+                x = self.relu(x)
+                x = self.conv2d(x)
+                x = self.relu(x)
+                x = self.conv3d(x)
+                x = self.relu(x)
+                x = self.bn1d(x)
+                x = self.relu(x)
+                x = self.bn2d(x)
+                x = self.relu(x)
+                x = self.bn3d(x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        from torch.quantization.quantize_fx import fuse_fx
+        fuse_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = fuse_fx(m, fuse_custom_config_dict=fuse_custom_config_dict)
+        self.assertTrue(
+            str(context.exception) ==
+            'Expected fuse_custom_config_dict to have the ' +
+            'following keys: ' + str(fuse_custom_config_dict_allowed_keys) +
+            '. But found \'typo\' instead.'
+        )
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -1044,24 +1091,24 @@ class TestQuantizeFx(QuantizationTestCase):
             '\'object_typo\' instead.'
         )
 
-    def test_custom_config_dict_validity(self):
+    def test_prepare_custom_config_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
         constructing a prepare_custom_config_dict, an error will be thrown and
         users will be notified of what keys are supported.
         """
-        custom_config_dict_allowed_keys = {"standalone_module_name",
-                                           "standalone_module_class",
-                                           "float_to_observed_custom_module_class",
-                                           "non_traceable_module_name",
-                                           "non_traceable_module_class",
-                                           "additional_fuser_method_mapping",
-                                           "additional_qat__module_mapping",
-                                           "additional_fusion_pattern",
-                                           "additional_quant_pattern",
-                                           "input_quantized_idxs",
-                                           "output_quantized_idxs",
-                                           "preserved_attributes"}
+        prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
+                                                   "standalone_module_class",
+                                                   "float_to_observed_custom_module_class",
+                                                   "non_traceable_module_name",
+                                                   "non_traceable_module_class",
+                                                   "additional_fuser_method_mapping",
+                                                   "additional_qat__module_mapping",
+                                                   "additional_fusion_pattern",
+                                                   "additional_quant_pattern",
+                                                   "input_quantized_idxs",
+                                                   "output_quantized_idxs",
+                                                   "preserved_attributes"}
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -1083,7 +1130,42 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             str(context.exception) ==
             'Expected prepare_custom_config_dict to have the ' +
-            'following keys: ' + str(custom_config_dict_allowed_keys) +
+            'following keys: ' + str(prepare_custom_config_dict_allowed_keys) +
+            '. But found \'typo\' instead.'
+        )
+
+    def test_convert_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a convert_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
+                                                   "observed_to_quantized_custom_module_class",
+                                                   "preserved_attributes"}
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
+        m = prepare_fx(m, qconfig_dict)
+        convert_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
+        self.assertTrue(
+            str(context.exception) ==
+            'Expected convert_custom_config_dict to have the ' +
+            'following keys: ' + str(convert_custom_config_dict_allowed_keys) +
             '. But found \'typo\' instead.'
         )
 
