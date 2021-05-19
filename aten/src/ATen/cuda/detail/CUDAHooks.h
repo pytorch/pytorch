@@ -8,6 +8,9 @@
 
 namespace at { namespace cuda { namespace detail {
 
+// Callback to initialize THC Magma, which is implemented in torch_cuda_cu
+TORCH_CUDA_CPP_API extern std::function<void()> THCMagma_init;
+
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
