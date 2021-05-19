@@ -19,7 +19,9 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  assert_never, is_cuda_dispatch_key,
                                  is_generic_dispatch_key)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
-                                     DispatcherSignature, NativeSignature)
+                                     DispatcherSignature, NativeSignature,
+                                     ArrayRefCType, ConstRefCType, MutRefCType,
+                                     OptionalCType, Expr)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -128,6 +130,33 @@ def cpp_string(s: str) -> str:
     s = s.replace('\t', '\\t')
     return f'"{s}"'
 
+def mk_dispatch_arg(arg: Expr) -> str:
+    basic_types = {
+        'bool',
+        'int64_t',
+        'double',
+    }
+    free_copy_types = (
+        ArrayRefCType,
+        ConstRefCType,
+        MutRefCType,
+    )
+    def dontmove(type):
+        return isinstance(type, free_copy_types) or type.cpp_type() in basic_types
+
+    if dontmove(arg.type.type) or \
+       (isinstance(arg.type.type, OptionalCType) and dontmove(arg.type.type.elem)):
+        return arg.expr
+
+    # translate can introduce function calls; don't use std::move with those
+    if '(' in arg.expr:
+        return arg.expr
+
+    return f'std::move({arg.expr})'
+
+def mk_dispatch_args(args: List[Expr]) -> List[str]:
+    return [mk_dispatch_arg(arg) for arg in args]
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                        C++ CODE GENERATION
@@ -158,7 +187,7 @@ def static_dispatch(
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
     exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
-    exprs_str = ', '.join(a.expr for a in exprs)
+    exprs_str = ', '.join(mk_dispatch_args(exprs))
 
     if f.structured_delegate is not None:
         # TODO: for ops with structured_delegate it should check the dispatch table of
@@ -237,11 +266,12 @@ class ComputeFunction:
                 sig = sig_group.signature
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
+            dispatcher_exprs = mk_dispatch_args(dispatcher_exprs)
             if self.is_redispatching_fn:
-                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
+                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + dispatcher_exprs)
                 dispatcher_call = 'redispatch'
             else:
-                dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+                dispatcher_exprs_str = ', '.join(dispatcher_exprs)
                 dispatcher_call = 'call'
 
             static_dispatch_block = static_dispatch(f, sig, method=False, backend_index=self.static_dispatch_backend_index)
@@ -310,7 +340,7 @@ class ComputeTensorMethod:
                 sig = sig_group.signature
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
-            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+            dispatcher_exprs_str = ', '.join(mk_dispatch_args(dispatcher_exprs))
 
             static_dispatch_block = static_dispatch(f, sig, method=True, backend_index=self.static_dispatch_backend_index)
             if static_dispatch_block is None:
@@ -417,7 +447,7 @@ C10_ALWAYS_INLINE
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.redispatch(_dk, {', '.join(mk_dispatch_args(dispatcher_exprs))});
 }}
 """
         elif self.target is Target.REGISTRATION:
