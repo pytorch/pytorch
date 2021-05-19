@@ -341,13 +341,27 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+#define DISALLOW_TEMPORARIES_IMPL(methodname, maybestatic)                               \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, Tensor&& b) = delete;
+
+#define DISALLOW_TEMPORARIES(methodname) DISALLOW_TEMPORARIES_IMPL(methodname,)
+
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  DISALLOW_TEMPORARIES(build_borrowing_binary_float_op)
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
 
+#undef DISALLOW_TEMPORARIES
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -464,14 +478,18 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 
+#define DISALLOW_TEMPORARIES(methodname) DISALLOW_TEMPORARIES_IMPL(methodname, static)
+
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  DISALLOW_TEMPORARIES(borrowing_binary_op)
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
-  static TensorIterator borrowing_nullary_op(Tensor& out);
+  static TensorIterator borrowing_nullary_op(const Tensor& out);
+  static TensorIterator borrowing_nullary_op(Tensor&& out) = delete;;
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 

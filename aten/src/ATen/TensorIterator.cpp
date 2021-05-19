@@ -839,7 +839,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
-TensorIterator TensorIterator::borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_borrowing_binary_op(out, a, b);
   return iter;
@@ -907,7 +907,7 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
     .build();
 }
 
-TensorIterator TensorIterator::borrowing_nullary_op(Tensor& out) {
+TensorIterator TensorIterator::borrowing_nullary_op(const Tensor& out) {
   return NULLARY_OP_CONFIG()
     .add_borrowed_output(out)
     .build();
