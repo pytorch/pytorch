@@ -42,7 +42,7 @@ def _check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[
       `prepare_custom_config_dict`: customization configuration dictionary for
       quantization tool
     """
-    if not prevent_custom_config_dict:
+    if not prepare_custom_config_dict:
         return
 
     prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
