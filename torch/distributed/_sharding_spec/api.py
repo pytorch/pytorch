@@ -8,7 +8,9 @@ Device = Union[torch.device, int, str]
 
 class PlacementSpec(ABC):
     """
-    Base class representing the placement of an entity.
+    Base class representing the placement of an entity. Subclasses of this
+    class can be used to specify customized placements which might not be
+    covered by existing APIs.
     """
     pass
 
@@ -97,7 +99,7 @@ class ChunkShardingSpec(PlacementSpec):
         """
         return self._placements
 
-class GenericShardingSpec(PlacementSpec):
+class EnumerableShardingSpec(PlacementSpec):
 
     class Shard:
         """
@@ -175,13 +177,13 @@ class GenericShardingSpec(PlacementSpec):
     def __init__(self, shards: List[Shard]):
         """
         This is a type of PlacementSpec that allows users to specify a generic
-        sharding scheme by specifying exactly how each shard is laid out.
+        sharding scheme by enumerating exactly how each shard is laid out.
 
         Args:
             shards(List[Shard]): List of :class:`Shard` objects representing
                 each shard.
         """
-        super(GenericShardingSpec, self).__init__()
+        super(EnumerableShardingSpec, self).__init__()
         if len(shards) == 0:
             raise ValueError(f'Empty shard list provided: {shards}')
 
@@ -204,7 +206,7 @@ class GenericShardingSpec(PlacementSpec):
         # TODO: evaluate optimizing this if needed.
         for i in range(len(shards)):
             for j in range(i + 1, len(shards)):
-                if GenericShardingSpec._check_shard_pair_overlap(shards[i], shards[j]):
+                if EnumerableShardingSpec._check_shard_pair_overlap(shards[i], shards[j]):
                     raise ValueError(f'Shards {shards[i]} and {shards[j]} overlap')
 
     @staticmethod

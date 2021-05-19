@@ -3,7 +3,7 @@ from torch.testing._internal.common_utils import TestCase
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
     DevicePlacementSpec,
-    GenericShardingSpec,
+    EnumerableShardingSpec,
 )
 
 class TestShardingSpec(TestCase):
@@ -57,11 +57,11 @@ class TestShardingSpec(TestCase):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
     def test_generic_sharding_spec(self):
-        Shard = GenericShardingSpec.Shard
+        Shard = EnumerableShardingSpec.Shard
         # test valid specs
 
         # test row-wise sharding
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[5, 5],
@@ -76,7 +76,7 @@ class TestShardingSpec(TestCase):
         spec.check_tensor(torch.rand(10, 5))
 
         # test row and column sharding
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[3, 3],
@@ -101,7 +101,7 @@ class TestShardingSpec(TestCase):
         spec.check_tensor(torch.rand(6, 6))
 
         # test uneven shard sizes.
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[2, 4],
@@ -139,10 +139,10 @@ class TestShardingSpec(TestCase):
             Shard(shard_offsets=[0, 0], shard_lengths=[0, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, 'Empty shard list provided'):
-            GenericShardingSpec([])
+            EnumerableShardingSpec([])
 
         with self.assertRaisesRegex(ValueError, 'Found inconsistent ranks for shards'):
-            GenericShardingSpec([
+            EnumerableShardingSpec([
                 Shard(
                     shard_offsets=[0, 0],
                     shard_lengths=[1, 1],
@@ -156,7 +156,7 @@ class TestShardingSpec(TestCase):
             ])
 
         with self.assertRaisesRegex(ValueError, 'Shards.*overlap'):
-            GenericShardingSpec([
+            EnumerableShardingSpec([
                 Shard(
                     shard_offsets=[0, 0],
                     shard_lengths=[3, 3],
@@ -169,7 +169,7 @@ class TestShardingSpec(TestCase):
                 ),
             ])
 
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[5, 5],
@@ -185,7 +185,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, 'Rank of tensor is.*but shards rank'):
             spec.check_tensor(torch.rand(10, 10, 10))
 
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[5, 5],
@@ -201,7 +201,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, 'exceeds tensor dim'):
             spec.check_tensor(torch.rand(10, 3))
 
-        spec = GenericShardingSpec([
+        spec = EnumerableShardingSpec([
             Shard(
                 shard_offsets=[0, 0],
                 shard_lengths=[5, 5],
