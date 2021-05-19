@@ -369,13 +369,6 @@ template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
 
-  // Determine our output size
-  auto totalElements = mask.sum().item<int64_t>();
-
-  // The number of `1` elements present in the mask must be <= the
-  // number of elements available in `src`
-  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
-
   auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
@@ -385,6 +378,13 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
     mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
     []__device__(int64_t a, int64_t b) { return a + b; }, int64_t(0),
     mask_cont.numel());
+
+  // Determine our output size
+  auto totalElements = (maskPrefixSum[-1] + mask_cont[-1]).item<int64_t>();
+
+  // The number of `1` elements present in the mask must be <= the
+  // number of elements available in `src`
+  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");  
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
