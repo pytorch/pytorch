@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 This file verifies that the workflows that are potentially canceled in our cancel_redundant_workflow.yml
 match the workflows we have running on pull requests (found in .github/workflows). This way, anytime a
