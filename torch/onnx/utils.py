@@ -400,14 +400,14 @@ def _create_jit_graph(model, args, _retain_param_name):
             torch._C._jit_pass_onnx_function_substitution(graph)
             freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
             module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-            method_graph = module._get_method('forward').graph
+            method_graph = module._get_method("forward").graph
             args_params = tuple(args) + tuple(params)
             param_count_list = _get_param_count_list(method_graph, args_params)
             in_vars, _ = torch.jit._flatten(args_params)
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), param_count_list, False, False)
         except AttributeError as e:
-            raise RuntimeError('\'forward\' method must be a script method') from e
+            raise RuntimeError("'forward' method must be a script method") from e
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
@@ -621,10 +621,10 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type)
-    # The output 'unsupported_ops' will contain the names of all the ops that are not supported in ONNX
+    # The output "unsupported_ops" will contain the names of all the ops that are not supported in ONNX
     unsupported_ops = list()
     for node in graph.nodes():
-        if node.kind().split(':')[0] not in ['onnx', 'prim']:
+        if node.kind().split(":")[0] not in ["onnx", "prim"]:
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
 
@@ -642,10 +642,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
-        raise ValueError('torch.nn.DataParallel is not supported by ONNX '
-                         'exporter, please use \'attribute\' module to '
-                         'unwrap model from torch.nn.DataParallel. Try '
-                         'torch.onnx.export(model.module, ...)')
+        raise ValueError("torch.nn.DataParallel is not supported by ONNX "
+                         "exporter, please use 'attribute' module to "
+                         "unwrap model from torch.nn.DataParallel. Try "
+                         "torch.onnx.export(model.module, ...)")
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
@@ -719,14 +719,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
-                with torch.serialization._open_file_like(f, 'wb') as opened_file:
+                with torch.serialization._open_file_like(f, "wb") as opened_file:
                     opened_file.write(proto)
             elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
                 import zipfile
                 compression = zipfile.ZIP_DEFLATED \
                     if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
                     else zipfile.ZIP_STORED
-                with zipfile.ZipFile(f, 'w', compression=compression) as z:
+                with zipfile.ZipFile(f, "w", compression=compression) as z:
                     z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
@@ -738,15 +738,15 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     os.makedirs(f)
 
                 model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-                with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                with torch.serialization._open_file_like(model_proto_file, "wb") as opened_file:
                     opened_file.write(proto)
 
                 for k, v in export_map.items():
                     weight_proto_file = os.path.join(f, k)
-                    with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                    with torch.serialization._open_file_like(weight_proto_file, "wb") as opened_file:
                         opened_file.write(v)
             else:
-                raise RuntimeError('Unknown export type')
+                raise RuntimeError("Unknown export type")
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
@@ -764,8 +764,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
         for name, node in zip(name_list, node_list):
             if node.debugName() != name:
                 node.setDebugName(name)
-    set_names(list(graph.inputs()), input_names, 'input')
-    set_names(list(graph.outputs()), output_names, 'output')
+    set_names(list(graph.inputs()), input_names, "input")
+    set_names(list(graph.outputs()), output_names, "output")
 
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
@@ -841,8 +841,8 @@ def _newNode(g, opname, outputs, *args, **kwargs):
 
 def _graph_op(g, opname, *raw_args, **kwargs):
     r"""
-    Create an ONNX operator 'opname', taking 'args' as inputs and attributes
-    'kwargs'; returning the node representing the single output of this operator
+    Create an ONNX operator "opname", taking "args" as inputs and attributes
+    "kwargs"; returning the node representing the single output of this operator
     (see the `outputs` keyword argument for multi-return nodes).
 
     The set of operators and the inputs/attributes they take
@@ -867,7 +867,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
             of output `Node`, representing each output of the ONNX operator
             in positional.
     """
-    outputs = kwargs.pop('outputs', 1)
+    outputs = kwargs.pop("outputs", 1)
 
     # Filter out None attributes, this can be convenient client side because
     # now they can pass through None attributes, and have them not show up
@@ -957,11 +957,11 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         # Quantized op symbolics are registered for opset 9 only.
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
             import torch.onnx.symbolic_caffe2
-            torch.onnx.symbolic_caffe2.register_quantized_ops('caffe2', opset_version)
+            torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
-        if n.kind().endswith('_'):
+        if n.kind().endswith("_"):
             ns_op_name = n.kind()[:-1]
         else:
             ns_op_name = n.kind()
@@ -1016,7 +1016,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 return None
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
-            elif op_name == 'Loop' or op_name == 'If':
+            elif op_name == "Loop" or op_name == "If":
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
                 new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
                 for b in n.blocks():
@@ -1047,7 +1047,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                     torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
                 return new_op_outputs
             else:
-                symbolic_name = 'prim_' + op_name
+                symbolic_name = "prim_" + op_name
                 domain = ''
                 symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
                                                          operator_export_type)
@@ -1061,7 +1061,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         elif ns == "quantized":
             domain = ''
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                domain = 'caffe2'
+                domain = "caffe2"
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:
                 return None
@@ -1154,7 +1154,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
                            and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
-    ns, op_name = symbolic_name.split('::')
+    ns, op_name = symbolic_name.split("::")
     unaccepted_domain_names = ["onnx", "aten", "prim"]
     if ns in unaccepted_domain_names:
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
@@ -1171,7 +1171,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if len(dynamic_axes) == 0:
         return
 
-    if(hasattr(model, 'graph')):
+    if(hasattr(model, "graph")):
         # Extracting set of valid input/output names that shall be used for dynamic_axes
         if (input_names is None) or len(input_names) == 0:
             input_names = [x.debugName() for x in model.graph.inputs()]
@@ -1188,18 +1188,18 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
         if isinstance(value, list):
-            warnings.warn('No names were found for specified dynamic axes of provided input.'
-                          'Automatically generated names will be applied to each dynamic axes of input {}'.format(key))
+            warnings.warn("No names were found for specified dynamic axes of provided input."
+                          "Automatically generated names will be applied to each dynamic axes of input {}".format(key))
 
             value_dict = {}
             for i, x in enumerate(value):
                 if not isinstance(x, int):
                     raise ValueError("The type of axis index is expected to be an integer")
                 if x in value_dict:
-                    warnings.warn('Duplicate dynamic axis index {} was provided for input {}.'
+                    warnings.warn("Duplicate dynamic axis index {} was provided for input {}."
                                   .format(x, key))
                 else:
-                    value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
+                    value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
 
 
