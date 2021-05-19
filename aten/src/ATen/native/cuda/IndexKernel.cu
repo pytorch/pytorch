@@ -381,10 +381,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
-  // at::cuda::cub::exclusive_scan(
-  //   mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
-  //   [](int64_t a, int64_t b) __device__ { return a + b; }, int64_t(0),
-  //   mask_cont.numel());
+  at::cuda::cub::exclusive_scan(
+    mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
+    []__device__(int64_t a, int64_t b) { return a + b; }, int64_t(0),
+    mask_cont.numel());
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too

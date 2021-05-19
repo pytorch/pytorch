@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <iterator>
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
@@ -125,8 +126,36 @@ namespace impl {
 template<typename InputIteratorT1, typename InputIteratorT2, typename OutputIteratorT, class ScanOpT>
 C10_LAUNCH_BOUNDS_1(1)
 __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputIteratorT out, ScanOpT scan_op){
-   *out = scan_op(*a, *b);
+  *out = scan_op(*a, *b);
 }
+
+template<typename ValueT, typename InputIteratorT>
+struct chained_iterator {
+  using iterator_category = std::random_access_iterator_tag;
+  using difference_type   = std::ptrdiff_t;
+  using value_type        = ValueT;
+  using pointer           = ValueT*;
+  using reference         = ValueT&;
+
+  InputIteratorT iter;
+  ValueT *first;
+  difference_type offset = 0;
+
+  __device__ ValueT operator[](difference_type i) {
+    i +=  offset;
+    if (i == 0) {
+      return *first;
+    } else {
+      return ValueT(iter[i - 1]);
+    }
+  }
+  __device__ chained_iterator operator+(difference_type i) {
+    return chained_iterator{iter, first, i};
+  }
+  __device__ ValueT operator*() {
+    return (*this)[0];
+  }
+};
 
 }
 
@@ -148,7 +177,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
   auto first_elem_ptr = reinterpret_cast<input_t *>(first_elem.get());
-  for (int64_t i = 1; i < num_items; i += max_cub_size) {
+  for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
     size_cub = std::min<int64_t>(num_items - i, max_cub_size);
     impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         output + i - 1,
@@ -178,6 +207,39 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
+  int size_cub = std::min<int64_t>(num_items, max_cub_size);
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveScan,
+      input,
+      output,
+      scan_op,
+      init_value,
+      size_cub,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  c10::DataPtr first_elem = allocator->allocate(sizeof(InitValueT));
+  auto first_elem_ptr = reinterpret_cast<InitValueT *>(first_elem.get());
+  for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
+    size_cub = std::min<int64_t>(num_items - i, max_cub_size);
+    impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        output + i - 1,
+        input + i - 1,
+        first_elem_ptr,
+        scan_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
+      input + i, first_elem_ptr};
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+        input_,
+        output + i,
+        scan_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream());
+  }
 }
 
 }}}
