@@ -1,8 +1,11 @@
 #!/bin/bash
 
 # Move debug wheels out of the the package dir so they don't get installed
+ls /final_pkgs
 mkdir -p /tmp/debug_final_pkgs
 mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs
+echo WOW
+ls /final_pkgs
 
 source /home/circleci/project/env
 cat >/home/circleci/project/ci_test_script.sh <<EOL
@@ -41,6 +44,12 @@ fi
 if [[ "$DESIRED_CUDA" == "cu112" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
+
+ls /final_pkgs
+mkdir -p /tmp/debug_final_pkgs
+mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs
+echo WOW222
+ls /final_pkgs
 
 # Install the package
 # These network calls should not have 'retry's because they are installing
