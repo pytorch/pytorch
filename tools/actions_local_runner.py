@@ -233,7 +233,7 @@ async def run_shellcheck(files: Optional[List[str]], quiet: bool) -> bool:
                 os.path.join(REPO_ROOT, f) for f in files
             ],
         )
-        print_results("shellcheck: Run Shellcheck", passed, [
+        print_results("shellcheck: Run ShellCheck", passed, [
             stdout + "\n",
             stderr + "\n",
         ])

@@ -59,7 +59,6 @@ if sys.version_info >= (3, 8):
 
             result = f.getvalue()
             self.assertIn("say hello", result)
-            self.assertIn("hi", result)
 
     class TestEndToEnd(unittest.TestCase):
         expected = [
@@ -76,7 +75,7 @@ if sys.version_info >= (3, 8):
             "shellcheck: Regenerate workflows",
             "shellcheck: Assert that regenerating the workflows didn't change them",
             "shellcheck: Extract scripts from GitHub Actions workflows",
-            "shellcheck: Run Shellcheck",
+            "shellcheck: Run ShellCheck",
         ]
 
         def test_lint(self):

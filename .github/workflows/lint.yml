@@ -116,6 +116,8 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
       - name: Install requirements
         id: requirements
         run: |
