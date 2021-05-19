@@ -63,18 +63,18 @@ class ChunkShardingSpec(PlacementSpec):
     """
 
     ShardingDim = Union[int, str]
-    ShardPlacement = Union[List[Device], List[PlacementSpec]]
+    ShardPlacements = List[Union[Device, PlacementSpec]]
 
-    def __init__(self, dim: ShardingDim, placement: ShardPlacement):
+    def __init__(self, dim: ShardingDim, placements: ShardPlacements):
         super(ChunkShardingSpec, self).__init__()
         self._verify_dim(dim)
-        self._verify_devices(placement)
+        self._verify_devices(placements)
         self._dim = dim
-        self._placement = placement
+        self._placements = placements
 
     @staticmethod
-    def _verify_devices(placement):
-        for dev in placement:
+    def _verify_devices(placements):
+        for dev in placements:
             if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')
 
@@ -91,11 +91,11 @@ class ChunkShardingSpec(PlacementSpec):
         return self._dim
 
     @property
-    def placement(self) -> ShardPlacement:
+    def placements(self) -> ShardPlacements:
         """
-        Retrieves the shard placement.
+        Retrieves the shard placements.
         """
-        return self._placement
+        return self._placements
 
 class GenericShardingSpec(PlacementSpec):
 
@@ -126,6 +126,8 @@ class GenericShardingSpec(PlacementSpec):
         """
 
         ShardPlacement = Union[Device, PlacementSpec]
+
+        __slots__ = ['_shard_offsets', '_shard_lengths', '_placement']
 
         def __init__(
                 self,
@@ -199,6 +201,7 @@ class GenericShardingSpec(PlacementSpec):
         """
         Ensures none of the shards overlap with each other.
         """
+        # TODO: evaluate optimizing this if needed.
         for i in range(len(shards)):
             for j in range(i + 1, len(shards)):
                 if GenericShardingSpec._check_shard_pair_overlap(shards[i], shards[j]):
@@ -263,6 +266,8 @@ class GenericShardingSpec(PlacementSpec):
             tensor_volume *= size
 
         if total_shard_volume != tensor_volume:
+            # TODO: Can we improve this error message to point out the gaps?
             raise ValueError(
                 f'Total volume of shards: {total_shard_volume}'
-                f'does not match tensor volume: {tensor_volume}')
+                f'does not match tensor volume: {tensor_volume}, in other words'
+                f' all the individual shards do not cover the entire tensor')
