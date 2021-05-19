@@ -176,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -806,7 +806,7 @@ endif()
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
-    scalaropts transformutils native orcjit)
+    scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
 
@@ -1417,8 +1417,9 @@ target_link_libraries(torch PUBLIC torch_cpu_library)
 if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
   if(BUILD_SPLIT_CUDA)
-    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
+    # NS: Library order is important here to prevent cudnn double linking
     target_link_libraries(torch_cuda PUBLIC torch_cuda_cpp_library)
+    target_link_libraries(torch_cuda PUBLIC torch_cuda_cu_library)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)

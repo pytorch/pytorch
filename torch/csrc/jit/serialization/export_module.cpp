@@ -366,16 +366,23 @@ void ScriptModuleSerializer::serialize(
   // so loading the code does not depend on loading the data
   std::vector<IValue> ivalue_constants(
       constant_table_.begin(), constant_table_.end());
-  writeArchive(
-      c10::ivalue::Tuple::create(ivalue_constants),
-      /*archive_name=*/"constants",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/");
   if (bytecode_format) {
+    writeArchive(
+        c10::ivalue::Tuple::create(ivalue_constants),
+        /*archive_name=*/"constants",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"constants/",
+        /*tensor_cdata_naming_scheme=*/true);
+
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
+  } else {
+    writeArchive(
+        c10::ivalue::Tuple::create(ivalue_constants),
+        /*archive_name=*/"constants",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"constants/");
   }
-
   // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
     writer_.setMinVersion(item.value().minVersion());
@@ -572,7 +579,9 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/");
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
+
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental

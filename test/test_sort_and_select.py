@@ -562,12 +562,15 @@ class TestSortAndSelect(TestCase):
 
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_topk_integral(self, device, dtype):
-        a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max, size=(10,),
-                          dtype=dtype, device=device)
-        sort_topk = a.sort()[0][-5:].flip(0)
-        topk = a.topk(5)
-        self.assertEqual(sort_topk, topk[0])      # check values
-        self.assertEqual(sort_topk, a[topk[1]])   # check indices
+        small = 10
+        large = 4096
+        for curr_size in (small, large):
+            a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max,
+                              size=(curr_size,), dtype=dtype, device=device)
+            sort_topk = a.sort()[0][-(curr_size // 2):].flip(0)
+            topk = a.topk(curr_size // 2)
+            self.assertEqual(sort_topk, topk[0])      # check values
+            self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.float, torch.double)

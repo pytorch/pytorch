@@ -29,7 +29,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
     with open(derivatives_yaml_path, 'r') as f:
         definitions = yaml.load(f, Loader=Loader)
 
-    functions = parse_native_yaml(native_yaml_path)
+    functions = parse_native_yaml(native_yaml_path).native_functions
 
     # What's the difference between function schema v.s. signature?
     # function schema is the complete declaration including mutability annotation / default value and etc.
