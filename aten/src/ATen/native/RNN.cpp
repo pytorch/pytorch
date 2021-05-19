@@ -165,9 +165,13 @@ struct QuantizedCellParams : public CellParamsBase {
         packed_hh(std::move(_packed_hh)),
         col_offsets_ih(std::move(_col_offsets_ih)),
         col_offsets_hh(std::move(_col_offsets_hh)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_ih(std::move(_scale_ih)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_hh(std::move(_scale_hh)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_ih(std::move(_zero_point_ih)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_hh(std::move(_zero_point_hh)) {}
 
   const Tensor w_ih;
@@ -212,8 +216,11 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(doubles_to_serialize),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(longs_to_serialize),
         {});
   }
@@ -247,9 +254,13 @@ struct QuantizedCellParams : public CellParamsBase {
         /*packed_hh=*/std::move(packed_hh),
         /*col_offsets_ih=*/std::move(col_offsets_ih),
         /*col_offsets_hh=*/std::move(col_offsets_hh),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*scale_ih=*/std::move(scale_ih),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*scale_hh=*/std::move(scale_hh),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*zero_point_ih=*/std::move(zero_point_ih),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*zero_point_hh=*/std::move(zero_point_hh));
   }
 };
@@ -284,9 +295,13 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_ih=*/std::move(scale_ih),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_hh=*/std::move(scale_hh),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_ih=*/std::move(zero_point_ih),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_hh=*/std::move(zero_point_hh));
 }
 
@@ -365,9 +380,11 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
         {},
         {reduce_range_},
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -444,6 +461,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
+        // NOLINTNEXTLINE(performance-move-const-arg)
         "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -469,6 +487,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
 static std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cell_params_deserializers = {
         {"quantized", &QuantizedCellParams::__setstate__},
         {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
@@ -710,6 +729,7 @@ struct Cell {
   using hidden_type = hidden_type_tmpl;
   using cell_params = cell_params_tmpl;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Cell() {} // This is really dumb, but enables projects with
                      // -Wnon-virtual-dtor to compile...
 
@@ -826,6 +846,7 @@ template<typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Layer() {} // This is really dumb, but enables projects with
                       // -Wnon-virtual-dtor to compile...
   virtual output_type operator()(
@@ -1373,6 +1394,7 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
@@ -1433,17 +1455,27 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_cudnn_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_miopen_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
@@ -1709,6 +1741,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
 
   std::tuple<Tensor, Tensor, Tensor> results;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
@@ -1769,6 +1802,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       train,
       bidirectional,
       batch_first,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dtype),
       use_dynamic);
 }
@@ -1799,6 +1833,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   PackedSequence input { data, batch_sizes };
   std::tuple<PackedSequence, Tensor, Tensor> results;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
@@ -1856,6 +1891,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
       dropout_p,
       train,
       bidirectional,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dtype),
       use_dynamic);
 }
@@ -1955,8 +1991,10 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto ensure_linear_params_registered = register_linear_params();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cell_params_base_registry =
     torch::class_<CellParamsBase>("rnn", "CellParamsBase")
         .def_pickle(

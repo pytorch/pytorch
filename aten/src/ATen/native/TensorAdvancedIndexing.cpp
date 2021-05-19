@@ -70,24 +70,42 @@
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_fill_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_copy_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_put_stub);
-DEFINE_DISPATCH(index_put_accum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(index_put_with_sort_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(put_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(take_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub, index_put_with_sort_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_serial_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_scatter_stub);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gather_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_fill_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_add_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_reduce_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -187,6 +205,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // simplify the CUDA kernel.
   if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (size_t i = 0; i < indices.size(); i++) {
         indices[i] = indices[i].contiguous();
       }
@@ -215,6 +234,7 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   // Ensure indices are on the same device as self
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < indices.size(); i++) {
     if (indices[i].defined() && indices[i].device() != self.device()) {
       indices[i] = indices[i].to(self.device());
@@ -235,10 +255,10 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   config.set_check_mem_overlap(false);
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
-  config.add_output(info.src);
-  config.add_input(value);
+  config.add_borrowed_output(info.src);
+  config.add_borrowed_input(value);
   for (auto& index : info.indices) {
-    config.add_input(index);
+    config.add_borrowed_input(index);
   }
   return config.build();
 }
@@ -249,9 +269,9 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
         .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
         .add_output(Tensor())
-        .add_input(info.src);
+        .add_borrowed_input(info.src);
   for (auto& index : info.indices) {
-    config.add_input(index);
+    config.add_borrowed_input(index);
   }
   return config.build();
 }
@@ -261,10 +281,10 @@ static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor&
   // info.src is a restrided view of result
   config.set_check_mem_overlap(false)
         .check_all_same_dtype(false)
-        .add_output(result)
-        .add_input(info.src);
+        .add_borrowed_output(result)
+        .add_borrowed_input(info.src);
   for (auto& index : info.indices) {
-    config.add_input(index);
+    config.add_borrowed_input(index);
   }
   return config.build();
 }
@@ -303,6 +323,7 @@ Tensor& index_out(Tensor& result, const Tensor & self, const torch::List<c10::op
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(result, *index);
@@ -348,8 +369,8 @@ Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const b
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
-    .add_input(source)
-    .add_input(index_reshaped)
+    .add_borrowed_input(source)
+    .add_borrowed_input(index_reshaped)
     .build();
 
   put_stub(iter.device_type(), iter, self, accumulate);
@@ -374,16 +395,17 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
   at::assert_no_overlap(self, value);
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
   }
 
-  if (accumulate && self.device().type() == DeviceType::CUDA) {
+  if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
       value.device(), " for value tensor");
-      index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
+      index_put_with_sort_stub(self.device().type(), self, indices, value, accumulate, unsafe);
       return self;
   }
 
@@ -413,8 +435,8 @@ Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
-    .add_output(out)
-    .add_input(index)
+    .add_borrowed_output(out)
+    .add_borrowed_input(index)
     .build();
 
   // Early return after out has been resized
@@ -434,18 +456,10 @@ Tensor take(const Tensor& self, const Tensor& index) {
 }
 
 Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
-  if (!accumulate) {
-    // See note [Writing Nondeterministic Operations]
-    // Nondeterministic when index contains duplicate entries
-    at::globalContext().alertNotDeterministic("index_put_ with accumulate=False");
-  }
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("index_copy");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
@@ -487,6 +501,18 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   }
   TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
+
+  // See Note [Enabling Deterministic Operations]
+  if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()){
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (const auto i: c10::irange(dim)) {
+      (void)i;
+      indices.emplace_back();
+    }
+    indices.emplace_back(index);
+    return self.index_put_(indices, source, false);
+  }
 
   return at::_index_copy_(self, dim, index, source);
 }
@@ -530,9 +556,9 @@ Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, con
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(self_restrided)
-    .add_input(index_restrided)
-    .add_input(source_nonzero)
+    .add_borrowed_output(self_restrided)
+    .add_borrowed_input(index_restrided)
+    .add_borrowed_input(source_nonzero)
     .build();
 
   auto self_dim_size = self_nonzero.size(dim);
@@ -588,7 +614,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
     auto self_dim_size = self.size(dim);
-    auto iter = TensorIterator::binary_op(selfSlice, selfSlice, sourceSlice);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
@@ -769,8 +795,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(resultSlice)
-      .add_input(selfSlice)
+      .add_borrowed_output(resultSlice)
+      .add_borrowed_input(selfSlice)
       .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
@@ -919,8 +945,8 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(self_restrided)
-    .add_input(index_restrided)
+    .add_borrowed_output(self_restrided)
+    .add_borrowed_input(index_restrided)
     .build();
 
   auto self_dim_size = (self_nonzero_dim.sizes())[dim];
@@ -1090,8 +1116,8 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const S
     .set_check_mem_overlap(false)  // deprecated, but not a hard error
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(self)
-    .add_input(mask)
+    .add_borrowed_output(self)
+    .add_borrowed_input(mask)
     .build();
 
   masked_fill_stub(iter.device_type(), iter, value);
@@ -1188,9 +1214,9 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(result_strided)
-      .add_input(*_self)
-      .add_input(*_mask)
+      .add_borrowed_output(result_strided)
+      .add_borrowed_input(*_self)
+      .add_borrowed_input(*_mask)
       .build();
 
     masked_select_serial_stub(iter.device_type(), iter, orig_stride);
@@ -1212,10 +1238,10 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .set_check_mem_overlap(false)  // result is intenionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(result_strided)
-    .add_input(*_self)
-    .add_input(*_mask)
-    .add_input(mask_prefix_sum)
+    .add_borrowed_output(result_strided)
+    .add_borrowed_input(*_self)
+    .add_borrowed_input(*_mask)
+    .add_borrowed_input(mask_prefix_sum)
     .build();
 
   masked_select_stub(iter.device_type(), iter, orig_stride);
@@ -1293,6 +1319,7 @@ static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Devi
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
   checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t dim;
     Tensor self_broadcasted, indices_broadcasted;
     std::tie(self_broadcasted, indices_broadcasted, dim) =
@@ -1307,6 +1334,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t dim;
     Tensor self_broadcasted, indices_broadcasted;
     std::tie(self_broadcasted, indices_broadcasted, dim) =
@@ -1379,8 +1407,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self)
-      .add_input(*b_mask)
+      .add_borrowed_output(self)
+      .add_borrowed_input(*b_mask)
       .build();
 
   masked_scatter_stub(iter.device_type(), iter, src_cont);

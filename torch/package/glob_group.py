@@ -46,6 +46,9 @@ class GlobGroup:
     def __str__(self):
         return self._dbg
 
+    def __repr__(self):
+        return self._dbg
+
     def matches(self, candidate: str) -> bool:
         candidate = self.separator + candidate
         return any(p.fullmatch(candidate) for p in self.include) and all(

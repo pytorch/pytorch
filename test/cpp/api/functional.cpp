@@ -10,6 +10,7 @@ using namespace torch::nn;
 
 struct FunctionalTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Conv1d) {
   auto x = torch::arange(30, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 5});
   auto weight = torch::arange(18, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3});
@@ -25,6 +26,7 @@ TEST_F(FunctionalTest, Conv1d) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Conv2dEven) {
   auto x = torch::arange(75, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5});
   auto weight = torch::arange(54, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3});
@@ -42,6 +44,7 @@ TEST_F(FunctionalTest, Conv2dEven) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Conv2dUneven) {
   auto x = torch::arange(60, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 4});
   auto weight = torch::arange(36, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 2});
@@ -59,6 +62,7 @@ TEST_F(FunctionalTest, Conv2dUneven) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Conv3d) {
   auto x = torch::arange(375, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5, 5});
   auto weight = torch::arange(162, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3, 3});
@@ -93,6 +97,7 @@ TEST_F(FunctionalTest, Conv3d) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::max_pool1d(x, F::MaxPool1dFuncOptions(3).stride(2));
@@ -102,6 +107,7 @@ TEST_F(FunctionalTest, MaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxPool2d) {
   auto x = torch::ones({2, 5, 5});
   auto y = F::max_pool2d(x, F::MaxPool2dFuncOptions(3).stride(2));
@@ -111,6 +117,7 @@ TEST_F(FunctionalTest, MaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxPool2dBackward) {
   auto input = torch::rand({1, 2, 4, 4}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = F::max_pool2d(input, F::MaxPool2dFuncOptions(2));
@@ -119,6 +126,7 @@ TEST_F(FunctionalTest, MaxPool2dBackward) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));
@@ -128,6 +136,7 @@ TEST_F(FunctionalTest, MaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AvgPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::avg_pool1d(x, F::AvgPool1dFuncOptions(3).stride(2));
@@ -137,6 +146,7 @@ TEST_F(FunctionalTest, AvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AvgPool2d) {
   auto x = torch::ones({2, 5, 5});
   auto y = F::avg_pool2d(x, F::AvgPool2dFuncOptions(3).stride(2));
@@ -146,6 +156,7 @@ TEST_F(FunctionalTest, AvgPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AvgPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::avg_pool3d(x, F::AvgPool3dFuncOptions(3).stride(2));
@@ -155,6 +166,7 @@ TEST_F(FunctionalTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, FractionalMaxPool2d) {
   auto x = torch::ones({2, 5, 5});
   auto y = F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
@@ -174,6 +186,7 @@ TEST_F(FunctionalTest, FractionalMaxPool2d) {
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, FractionalMaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
@@ -197,6 +210,7 @@ TEST_F(FunctionalTest, FractionalMaxPool3d) {
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LPPool1d) {
   int norm_type = 2;
   int stride = 2;
@@ -211,6 +225,7 @@ TEST_F(FunctionalTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LPPool2d) {
   int norm_type = 2;
   int stride = 2;
@@ -225,6 +240,7 @@ TEST_F(FunctionalTest, LPPool2d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -234,6 +250,7 @@ TEST_F(FunctionalTest, CosineSimilarity) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -246,10 +263,12 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SmoothL1LossBeta) {
   auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-argument-comment)
       F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
   auto expected = torch::tensor(1.67, torch::kFloat);
   auto s = output.sum();
@@ -258,10 +277,12 @@ TEST_F(FunctionalTest, SmoothL1LossBeta) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       F::smooth_l1_loss(input, target, /*reduction=*/torch::kNone);
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
@@ -270,6 +291,7 @@ TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, HuberLossDefaultOptions) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -282,6 +304,7 @@ TEST_F(FunctionalTest, HuberLossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, HuberLossDelta) {
   auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -294,6 +317,7 @@ TEST_F(FunctionalTest, HuberLossDelta) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, HuberLossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -306,6 +330,7 @@ TEST_F(FunctionalTest, HuberLossNoReduction) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
@@ -319,6 +344,7 @@ TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
@@ -332,6 +358,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
@@ -345,6 +372,7 @@ TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
@@ -360,6 +388,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PairwiseDistance) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -369,6 +398,7 @@ TEST_F(FunctionalTest, PairwiseDistance) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PDist) {
   {
     auto input = torch::tensor({{-1.0, -5.0, -1.0}, {2.0, 4.0, 6.0}});
@@ -384,6 +414,7 @@ TEST_F(FunctionalTest, PDist) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::adaptive_max_pool1d(x, F::AdaptiveMaxPool1dFuncOptions(3));
@@ -393,6 +424,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveMaxPool2d) {
   auto x = torch::ones({2, 5, 5});
   auto y = F::adaptive_max_pool2d(x, F::AdaptiveMaxPool2dFuncOptions(3));
@@ -402,6 +434,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveMaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::adaptive_max_pool3d(x, F::AdaptiveMaxPool3dFuncOptions(3));
@@ -411,6 +444,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveAvgPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::adaptive_avg_pool1d(x, F::AdaptiveAvgPool1dFuncOptions(3));
@@ -420,6 +454,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveAvgPool2d) {
   auto x = torch::ones({2, 5, 5});
   auto y = F::adaptive_avg_pool2d(x, F::AdaptiveAvgPool2dFuncOptions(3));
@@ -429,6 +464,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::adaptive_avg_pool3d(x, F::AdaptiveAvgPool3dFuncOptions(3));
@@ -438,6 +474,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, L1Loss) {
   auto input = torch::randn({5,6}, torch::requires_grad());
   auto target = torch::empty({5,6}).random_(2);
@@ -449,6 +486,7 @@ TEST_F(FunctionalTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MSELoss) {
   auto input = torch::randn({5,6}, torch::requires_grad());
   auto target = torch::empty({5,6}).random_(2);
@@ -460,6 +498,7 @@ TEST_F(FunctionalTest, MSELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BCELoss) {
   auto input = torch::randn({5,6}, torch::requires_grad());
   auto target = torch::empty({5,6}).random_(2);
@@ -471,6 +510,7 @@ TEST_F(FunctionalTest, BCELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, KLDivLoss) {
   KLDivLoss loss;
   auto input = torch::randn({5,6}, torch::requires_grad());
@@ -483,6 +523,7 @@ TEST_F(FunctionalTest, KLDivLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::kFloat);
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
@@ -493,6 +534,7 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, GridSample) {
   auto input = torch::arange(9, torch::kFloat).view(std::vector<int64_t>({1, 1, 3, 3}));
   auto grid = torch::tensor({{
@@ -557,6 +599,7 @@ TEST_F(FunctionalTest, GridSample) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
@@ -658,6 +701,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MultiMarginLoss) {
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
   auto input = torch::tensor(
@@ -671,6 +715,7 @@ TEST_F(FunctionalTest, MultiMarginLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}});
   auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}});
@@ -682,6 +727,7 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
@@ -694,6 +740,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
@@ -707,6 +754,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, TripletMarginLoss) {
   auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
   auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
@@ -718,6 +766,7 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
   // Check that if we use torch::pairwise_distance with the default
   // TripletMarginLoss options as our distance function, the outputs
@@ -768,6 +817,7 @@ TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, NLLLoss) {
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
                               {-3.7038, -0.1038, -2.6038},
@@ -781,6 +831,7 @@ TEST_F(FunctionalTest, NLLLoss) {
   ASSERT_TRUE(F::nll_loss(input, target).allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CrossEntropy) {
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::kFloat);
   auto target = torch::tensor({0, 1}, torch::kLong);
@@ -792,6 +843,7 @@ TEST_F(FunctionalTest, CrossEntropy) {
   ASSERT_TRUE(F::cross_entropy(input, target).allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -822,6 +874,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxUnpool2d) {
   auto indices = torch::tensor({
   {{{ 6,  8,  9},
@@ -854,6 +907,7 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxUnpool3d) {
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
   auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -873,6 +927,7 @@ TEST_F(FunctionalTest, MaxUnpool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ELU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -894,6 +949,7 @@ TEST_F(FunctionalTest, ELU) {
   ASSERT_TRUE(F::elu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SELU) {
   {
     const double scale = 1.0507009873554804934193349852946;
@@ -921,6 +977,7 @@ TEST_F(FunctionalTest, SELU) {
   ASSERT_TRUE(F::selu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, GLU) {
   int64_t dim = 1;
   auto input = torch::randn({4, 2}, torch::requires_grad());
@@ -934,6 +991,7 @@ TEST_F(FunctionalTest, GLU) {
   ASSERT_TRUE(F::glu(input).allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
@@ -942,6 +1000,7 @@ TEST_F(FunctionalTest, GELU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -960,6 +1019,7 @@ TEST_F(FunctionalTest, Hardshrink) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, OneHot) {
   { // Test #1
     auto x = torch::arange(0, 5, torch::kLong);
@@ -1003,6 +1063,7 @@ TEST_F(FunctionalTest, OneHot) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Hardtanh) {
   const auto size = 3;
   for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
@@ -1028,6 +1089,7 @@ TEST_F(FunctionalTest, Hardtanh) {
   ASSERT_TRUE(F::hardtanh(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LeakyReLU) {
   const auto size = 3;
   for (const auto negative_slope : {0.0, 0.42, 1.0}) {
@@ -1049,6 +1111,7 @@ TEST_F(FunctionalTest, LeakyReLU) {
   ASSERT_TRUE(F::leaky_relu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LogSigmoid) {
   const auto size = 3;
   LogSigmoid model;
@@ -1062,6 +1125,7 @@ TEST_F(FunctionalTest, LogSigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, GumbelSoftmax) {
   // Test 1: No-options
   {
@@ -1105,7 +1169,9 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
   }
 
   // Test 4: 3D shape, 1 and -1 dim
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int dims[] = {1, -1};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int expected[] = {5*3, 5*4};
   for(auto i=0; i<2; i++) {
     auto logits = torch::randn({5, 4, 3});
@@ -1149,8 +1215,10 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Softmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
@@ -1160,8 +1228,10 @@ TEST_F(FunctionalTest, Softmax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Softmin) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::softmin(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(-input), 1);
 
@@ -1171,8 +1241,10 @@ TEST_F(FunctionalTest, Softmin) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LogSoftmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::log_softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
@@ -1182,6 +1254,7 @@ TEST_F(FunctionalTest, LogSoftmax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PReLU) {
   const auto x = torch::rand({42, 24}) * 200 - 100;
   const auto w = torch::rand(24) * 200 - 100;
@@ -1191,6 +1264,7 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LayerNorm) {
   const auto input = torch::randn({2, 2});
   auto y = F::layer_norm(input, F::LayerNormFuncOptions({2, 2}).eps(2e-5));
@@ -1198,6 +1272,7 @@ TEST_F(FunctionalTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, GroupNorm) {
   const auto input = torch::randn({2, 2});
   auto y = F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
@@ -1205,6 +1280,7 @@ TEST_F(FunctionalTest, GroupNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, LocalResponseNorm) {
   const auto x = torch::arange(100, 118).resize_({3, 3, 2});
   const auto y = F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
@@ -1225,6 +1301,7 @@ TEST_F(FunctionalTest, LocalResponseNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Linear) {
   {
     const auto x = torch::arange(100., 118).resize_({3, 3, 2});
@@ -1269,6 +1346,7 @@ TEST_F(FunctionalTest, Linear) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Embedding) {
   const auto input = torch::tensor({{1,2,4,5}, {4,3,2,9}}, torch::kLong);
   auto weight = torch::empty({10, 3});
@@ -1278,6 +1356,7 @@ TEST_F(FunctionalTest, Embedding) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, EmbeddingBag) {
   const auto input = torch::tensor({1,2,4,5,4,3,2,9}, torch::kLong);
   auto offsets = torch::tensor({0,4}, torch::kLong);
@@ -1295,6 +1374,7 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8 ,9}});
@@ -1314,6 +1394,7 @@ TEST_F(FunctionalTest, Bilinear) {
   ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
@@ -1351,6 +1432,7 @@ TEST_F(FunctionalTest, Normalize) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -1366,6 +1448,7 @@ TEST_F(FunctionalTest, ReLU) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
 
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     y = F::relu(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
@@ -1378,6 +1461,7 @@ TEST_F(FunctionalTest, ReLU) {
   ASSERT_TRUE(F::relu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ReLUDefaultOptions) {
   const auto size = 3;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
@@ -1390,6 +1474,7 @@ TEST_F(FunctionalTest, ReLUDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ReLU6) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -1405,6 +1490,7 @@ TEST_F(FunctionalTest, ReLU6) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
 
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     y = F::relu6(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
@@ -1417,6 +1503,7 @@ TEST_F(FunctionalTest, ReLU6) {
   ASSERT_TRUE(F::relu6(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ReLU6DefaultOptions) {
   const auto size = 3;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
@@ -1429,6 +1516,7 @@ TEST_F(FunctionalTest, ReLU6DefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, RReLU) {
   const auto size = 3;
   for (const auto lower : {0.01, 0.1, 0.2}) {
@@ -1454,6 +1542,7 @@ TEST_F(FunctionalTest, RReLU) {
   ASSERT_TRUE(F::rrelu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, RReLUDefaultOptions) {
   const auto size = 3;
   const auto lower = 1.0 / 8.0;
@@ -1470,6 +1559,7 @@ TEST_F(FunctionalTest, RReLUDefaultOptions) {
   ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CELU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -1491,6 +1581,7 @@ TEST_F(FunctionalTest, CELU) {
   ASSERT_TRUE(F::celu(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CELUDefaultOptions) {
   const auto size = 3;
   const auto alpha = 1.0;
@@ -1505,6 +1596,7 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PixelShuffle) {
   auto x = torch::tensor(
     {{{{-17, 19}, {-1, 2}},
@@ -1523,6 +1615,7 @@ TEST_F(FunctionalTest, PixelShuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PixelUnshuffle) {
   auto x = torch::tensor(
       {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
@@ -1540,6 +1633,7 @@ TEST_F(FunctionalTest, PixelUnshuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
@@ -1559,6 +1653,7 @@ TEST_F(FunctionalTest, Softplus) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   const auto size = 3;
   const auto beta = 1.0;
@@ -1575,6 +1670,7 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Fold) {
   auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::kDouble);
   auto output = F::fold(input, F::FoldFuncOptions({3, 2}, {2, 2}));
@@ -1588,6 +1684,7 @@ TEST_F(FunctionalTest, Fold) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Unfold) {
   auto input = torch::arange(0, 12, torch::kDouble).view({1, 2, 2, 3});
   auto output = F::unfold(input, F::UnfoldFuncOptions({2, 2}).padding(1).stride(2));
@@ -1606,11 +1703,13 @@ TEST_F(FunctionalTest, Unfold) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     auto y = F::softshrink(x, /*lambda=*/lambda);
     torch::Tensor s = y.sum();
 
@@ -1624,6 +1723,7 @@ TEST_F(FunctionalTest, Softshrink) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
   const auto size = 3;
   const auto lambda = 0.5;
@@ -1640,6 +1740,7 @@ TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
   auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Softsign) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x / (1 + x.abs());
@@ -1648,6 +1749,7 @@ TEST_F(FunctionalTest, Softsign) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Tanhshrink) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x - x.tanh();
@@ -1656,6 +1758,7 @@ TEST_F(FunctionalTest, Tanhshrink) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Threshold) {
   const auto size = 3;
   for (const auto threshold : {0.5, 1.0, 2.0}) {
@@ -1679,6 +1782,7 @@ TEST_F(FunctionalTest, Threshold) {
   ASSERT_TRUE(F::threshold(torch::tensor(1.), F::ThresholdFuncOptions(0.5, 0.5)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm1d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1696,6 +1800,7 @@ TEST_F(FunctionalTest, BatchNorm1d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
   auto input = torch::randn({2, 5});
   auto mean = torch::randn(5);
@@ -1705,6 +1810,7 @@ TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm2d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1722,6 +1828,7 @@ TEST_F(FunctionalTest, BatchNorm2d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm2dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1734,6 +1841,7 @@ TEST_F(FunctionalTest, BatchNorm2dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm3d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1751,6 +1859,7 @@ TEST_F(FunctionalTest, BatchNorm3d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BatchNorm3dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1763,6 +1872,7 @@ TEST_F(FunctionalTest, BatchNorm3dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm1d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1795,6 +1905,7 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
   auto input = torch::arange(40.).view({2, 5, 4});
   auto output = F::instance_norm(input);
@@ -1811,6 +1922,7 @@ TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm2d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1853,6 +1965,7 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1882,6 +1995,7 @@ TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm3d) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1944,6 +2058,7 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
@@ -1993,6 +2108,7 @@ TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Interpolate) {
   {
     // 1D interpolation
@@ -2079,6 +2195,7 @@ TEST_F(FunctionalTest, Interpolate) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Pad) {
   {
     auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
@@ -2220,6 +2337,7 @@ TEST_F(FunctionalTest, Pad) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, CTCLoss) {
   { // test CTCLoss typechecks
     const auto target_lengths = torch::tensor({30, 25, 20});
@@ -2286,6 +2404,7 @@ TEST_F(FunctionalTest, CTCLoss) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, PoissonNLLLoss) {
   const auto input = torch::tensor({0.5, 1.5, 2.5});
   const auto target = torch::tensor({1., 2., 3.});
@@ -2303,6 +2422,7 @@ TEST_F(FunctionalTest, PoissonNLLLoss) {
     F::PoissonNLLLossFuncOptions().reduction(torch::kMean))));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MarginRankingLoss) {
   {
     const auto input1 = torch::randn(15) * 10;
@@ -2339,6 +2459,7 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ConvTranspose1d) {
   auto x = torch::arange(20.).view({2, 2, 5});
   auto weight = torch::arange(18.).view({2, 3, 3});
@@ -2355,6 +2476,7 @@ TEST_F(FunctionalTest, ConvTranspose1d) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ConvTranspose2dEven) {
   auto x = torch::arange(50.).view({1, 2, 5, 5});
   auto weight = torch::arange(54.).view({2, 3, 3, 3});
@@ -2386,6 +2508,7 @@ TEST_F(FunctionalTest, ConvTranspose2dEven) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ConvTranspose2dUneven) {
   auto x = torch::arange(40.).view({1, 2, 5, 4});
   auto weight = torch::arange(36.).view({2, 3, 3, 2});
@@ -2417,6 +2540,7 @@ TEST_F(FunctionalTest, ConvTranspose2dUneven) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, ConvTranspose3d) {
   auto x = torch::arange(16.).view({1, 2, 2, 2, 2});
   auto weight = torch::arange(32.).view({2, 2, 2, 2, 2});
@@ -2445,6 +2569,7 @@ TEST_F(FunctionalTest, ConvTranspose3d) {
   ASSERT_TRUE(torch::allclose(y_no_options, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AlphaDropout) {
   auto input = torch::randn(5000);
   auto input_mean = input.mean();
@@ -2466,6 +2591,7 @@ TEST_F(FunctionalTest, AlphaDropout) {
   ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, FeatureAlphaDropout) {
   auto input = torch::randn(5000);
   auto input_mean = input.mean();
@@ -2487,6 +2613,7 @@ TEST_F(FunctionalTest, FeatureAlphaDropout) {
   ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Dropout) {
   auto input = torch::randn(5000);
   auto input_mean = input.mean();
@@ -2503,6 +2630,7 @@ TEST_F(FunctionalTest, Dropout) {
   ASSERT_TRUE(F::dropout(torch::tensor(1.)).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Dropout2d) {
   auto input = torch::randn({50, 100});
   auto input_mean = input.mean();
@@ -2519,6 +2647,7 @@ TEST_F(FunctionalTest, Dropout2d) {
   ASSERT_TRUE(F::dropout2d(torch::randn({50, 100})).defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Dropout3d) {
   auto input = torch::randn({50, 10, 10});
   auto input_mean = input.mean();
@@ -2582,6 +2711,7 @@ void test_isfinite(const at::Device& device) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, isfinite) {
   const at::Device device("cpu");
   test_isfinite<torch::kUInt8, uint8_t>(device);
@@ -2593,6 +2723,7 @@ TEST_F(FunctionalTest, isfinite) {
   test_isfinite<torch::kFloat64, double>(device);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, isfinite_CUDA) {
   const at::Device device("cuda");
   test_isfinite<torch::kUInt8, uint8_t>(device);
@@ -2652,6 +2783,7 @@ void test_isinf(const at::Device& device) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, isinf) {
   const at::Device device("cpu");
   test_isinf<torch::kUInt8, uint8_t>(device);
@@ -2663,6 +2795,7 @@ TEST_F(FunctionalTest, isinf) {
   test_isinf<torch::kFloat64, double>(device);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, isinf_CUDA) {
   const at::Device device("cuda");
   test_isinf<torch::kUInt8, uint8_t>(device);
@@ -2726,6 +2859,7 @@ void test_allclose(const at::Device& device) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AllClose) {
   const at::Device device("cpu");
   test_allclose<torch::kUInt8, uint8_t>(device);
@@ -2737,6 +2871,7 @@ TEST_F(FunctionalTest, AllClose) {
   test_allclose<torch::kFloat64, double>(device);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, AllClose_CUDA) {
   const at::Device device("cuda");
   test_allclose<torch::kUInt8, uint8_t>(device);
@@ -2749,6 +2884,7 @@ TEST_F(FunctionalTest, AllClose_CUDA) {
   test_allclose<torch::kFloat16, c10::Half>(device);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {
   { // test BCE with logits raises if target and input are different size
     {
@@ -2894,6 +3030,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
       F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum)
     ).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const auto grad = output.grad();
     ASSERT_TRUE(torch::allclose(grad, expected_grad));
   }

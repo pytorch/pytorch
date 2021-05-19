@@ -18,13 +18,13 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const override;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 
   void processScriptCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const override;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 
   TypePtr getScriptRemoteCallType(
       ScriptRemoteCall& scriptRemoteCall) const override;
@@ -39,13 +39,13 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   void processPythonRRefFetchCall(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
@@ -54,7 +54,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   bool cudaAvailable() const override;
@@ -62,7 +62,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   void processRRefBackward(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const override;
+      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 };
 
 } // namespace rpc

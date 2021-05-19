@@ -51,6 +51,7 @@ bool is_numpy_available() {
     }
     // Try to get exception message, print warning and return false
     std::string message = "Failed to initialize NumPy";
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     PyErr_Fetch(&type, &value, &traceback);
     if (auto str = value ? PyObject_Str(value) : nullptr) {
@@ -312,12 +313,14 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
   {
     PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr *descr;
     if(!PyArray_DescrConverter(py_typestr, &descr)) {
       throw ValueError("cannot parse `typestr`");
@@ -328,6 +331,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['data']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void *data_ptr;
   {
     PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");

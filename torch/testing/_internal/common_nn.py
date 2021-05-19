@@ -18,7 +18,7 @@ from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.autograd.gradcheck import _get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
@@ -4787,7 +4787,7 @@ class NNTestCase(TestCase):
 
         if jacobian_input:
             jacobian_inp = self._jacobian(input, output_size)
-            flat_jacobian_input = list(iter_tensors(jacobian_inp))
+            flat_jacobian_input = list(_iter_tensors(jacobian_inp))
 
         if jacobian_parameters:
             num_param = sum(p.numel() for p in self._get_parameters(module)[0])
@@ -4810,7 +4810,7 @@ class NNTestCase(TestCase):
             d_input = self._backward(module, input, output, d_out)
 
             if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
+                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
                     jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
@@ -4844,8 +4844,8 @@ class NNTestCase(TestCase):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = list(iter_tensors(analytical))
-        numerical_t = list(iter_tensors(numerical))
+        analytical_t = list(_iter_tensors(analytical))
+        numerical_t = list(_iter_tensors(numerical))
 
         differences = []
         for a, n in zip(analytical_t, numerical_t):

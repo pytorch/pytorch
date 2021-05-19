@@ -1,21 +1,26 @@
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Dict, Set, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 
 import torch
 from torch.fx.experimental.graph_manipulation import get_size_of_node
 from torch.fx.node import map_arg
-from torch.fx.passes import shape_prop
 
 from .operator_support import (
     get_node_target,
     OperatorSupport,
 )
 from .graph_drawer import FxGraphDrawer
+from .shape_prop import ShapeProp
 from .split_utils import split_by_tags
-from .tools_common import CALLABLE_NODE_OPS, Tensors, Nodes
-
+from .tools_common import (
+    FxNetAccFusionsFinder,
+    CALLABLE_NODE_OPS,
+    Tensors,
+    NodeList,
+    NodeSet,
+)
 
 class _SplitterSettingBase:
     def __init__(self):
@@ -78,8 +83,8 @@ class FxNetAccNodesFinder:
         self.allow_non_tensor = allow_non_tensor
 
     def reduce_acc_nodes_non_tensor_input_helper(
-        self, cpu_worklist: Nodes
-    ) -> None:
+        self, cpu_worklist: NodeList
+    ):
         """
         Transitively excludes nodes from ACC supported set.
         For every node in the worklist:
@@ -96,12 +101,12 @@ class FxNetAccNodesFinder:
                     if "tensor_meta" not in user.meta:
                         cpu_worklist.append(user)
 
-    def reduce_acc_nodes_non_tensor_input(self) -> None:
+    def reduce_acc_nodes_non_tensor_input(self):
         """
         Excludes nodes from ACC supported set that have direct
         upstream CPU nodes that produce non-tensor outputs.
         """
-        non_tensor_cpu_nodes: Nodes = []
+        non_tensor_cpu_nodes: NodeList = []
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -114,13 +119,13 @@ class FxNetAccNodesFinder:
 
         self.reduce_acc_nodes_non_tensor_input_helper(non_tensor_cpu_nodes)
 
-    def reduce_acc_nodes_non_tensor_output(self) -> None:
+    def reduce_acc_nodes_non_tensor_output(self):
         """
         Excludes nodes from ACC supported set that produce non-tensor
         outputs and have downstream CPU nodes.
         """
         while True:
-            new_cpu_nodes: Nodes = []
+            new_cpu_nodes: NodeList = []
 
             for acc_node in self.acc_nodes:
                 if "tensor_meta" in acc_node.meta:
@@ -138,7 +143,7 @@ class FxNetAccNodesFinder:
 
             self.reduce_acc_nodes_non_tensor_input_helper(new_cpu_nodes)
 
-    def __call__(self) -> Set[torch.fx.Node]:
+    def __call__(self) -> NodeSet:
         submodules = dict(self.module.named_modules())
         self.acc_nodes = {
             n
@@ -154,70 +159,6 @@ class FxNetAccNodesFinder:
         return self.acc_nodes
 
 
-class FxNetAccFusionsFinderError(Exception):
-    pass
-
-
-class FxNetAccFusionsFinder:
-    """
-    Finds groups of connected ACC nodes that pass non-tensor data between each other.
-    Such groups are called fusion groups.
-    """
-
-    def __init__(self, module: torch.fx.GraphModule, acc_nodes: Set[torch.fx.Node]):
-        self.module = module
-        self.acc_nodes = acc_nodes
-
-    def __call__(self) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
-        result: Dict[torch.fx.Node, Set[torch.fx.Node]] = {}
-
-        for node in self.acc_nodes:
-            if node in result:
-                continue
-            if node.op not in CALLABLE_NODE_OPS:
-                continue
-            if "tensor_meta" in node.meta:
-                continue
-
-            fusion_nodes: Set[torch.fx.Node] = set()
-            current_fusion_nodes: Nodes = [node]
-            while current_fusion_nodes:
-                node = current_fusion_nodes.pop(0)
-                fusion_nodes.add(node)
-
-                # Optionally add downstream nodes
-                if "tensor_meta" not in node.meta:
-                    for user in node.users:
-                        if user.op not in CALLABLE_NODE_OPS:
-                            continue
-                        if user in fusion_nodes:
-                            continue
-                        if user in result:
-                            raise FxNetAccFusionsFinderError(
-                                "Node can't belong to more than one fusion group"
-                            )
-                        current_fusion_nodes.append(user)
-
-                # Add some upstream nodes
-                for arg in node.all_input_nodes:
-                    if arg.op not in CALLABLE_NODE_OPS:
-                        continue
-                    if "tensor_meta" in arg.meta:
-                        continue
-                    if arg in fusion_nodes:
-                        continue
-                    if arg in result:
-                        raise FxNetAccFusionsFinderError(
-                            "Node can't belong to more than one fusion group"
-                        )
-                    current_fusion_nodes.append(arg)
-
-            for fusion_node in fusion_nodes:
-                result[fusion_node] = fusion_nodes
-
-        return result
-
-
 class FxNetSplitterInternalError(Exception):
     pass
 
@@ -225,7 +166,7 @@ class FxNetSplitterInternalError(Exception):
 @dataclass
 class Subgraph:
     is_acc: bool
-    nodes: Nodes
+    nodes: NodeList
 
 
 class _SplitterBase:
@@ -289,8 +230,10 @@ class _SplitterBase:
         - builds a map of fused nodes to their fusions.
         As a result we get self.acc_nodes, self.deps and self.fusions.
         """
+        assert isinstance(module, torch.fx.GraphModule)
+
         self.module = module
-        shape_prop.ShapeProp(self.module).propagate(*sample_input)
+        ShapeProp(self.module).propagate(*sample_input)
 
         self.settings = settings
         self.operator_support = operator_support
@@ -310,7 +253,7 @@ class _SplitterBase:
     # Helpers for ctor and initial state
     # ===============================================================
 
-    def find_deps(self) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+    def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
         """
         Builds a graph of node dependencies. Leaf nodes don't have any
         dependencies and the "output" node doesn't have nodes depending on it.
@@ -318,7 +261,7 @@ class _SplitterBase:
         Resulting graph has only direct dependencies, i.e. there are no
         transitive dependencies.
         """
-        deps: Dict[torch.fx.Node, Set[torch.fx.Node]] = defaultdict(set)
+        deps: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
@@ -328,7 +271,7 @@ class _SplitterBase:
                     deps[user].add(node)
         return deps
 
-    def update_deps_for_fusions(self) -> None:
+    def update_deps_for_fusions(self):
         """
         Updates graph of dependencies so that:
         - nodes from the same fusion depend on the same set of outer nodes,
@@ -367,7 +310,7 @@ class _SplitterBase:
         return "Unable to find a culprit because _find_culprit() function is not implemented."
 
     def _draw_graph_based_on_node_support(
-        self, mod: torch.fx.GraphModule, supported_nodes: Nodes
+        self, mod: torch.fx.GraphModule, supported_nodes: NodeList
     ):
         color_map = {
             "default": "AliceBlue",
@@ -394,13 +337,13 @@ class _SplitterBase:
     def node_support_preview(self, dump_graph: bool = False):
         submodules = dict(self.module.named_modules())
 
-        supported_nodes = []
+        supported_nodes: NodeList = []
         supported_node_types = defaultdict(set)
         unsupported_node_types = defaultdict(set)
 
         def get_dtype(arg):
             tensor_meta = arg.meta.get("tensor_meta")
-            return tensor_meta.dtype if tensor_meta else None
+            return getattr(tensor_meta, "dtype", None)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -510,7 +453,7 @@ class _SplitterBase:
                 submod_inputs = get_submod_inputs(
                     split_mod, submod, self.sample_input
                 )
-                shape_prop.ShapeProp(submod).propagate(*submod_inputs)
+                ShapeProp(submod).propagate(*submod_inputs)
 
                 total_input_bytes = 0
                 total_output_bytes = 0
@@ -572,12 +515,12 @@ class _SplitterBase:
 
     def find_reverse_deps(
         self, tag_id: Optional[int] = None
-    ) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+    ) -> Dict[torch.fx.Node, NodeSet]:
         """
         Builds reversed topological node dependencies, if tag_id is specified,
         we ignore nodes that are in later subgraph i.e. nodes have greater tag_id.
         """
-        result: Dict[torch.fx.Node, Set[torch.fx.Node]] = defaultdict(set)
+        result: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -593,7 +536,7 @@ class _SplitterBase:
         return result
 
     def update_reverse_deps_for_fusions(
-        self, deps: Dict[torch.fx.Node, Set[torch.fx.Node]]
+        self, deps: Dict[torch.fx.Node, NodeSet]
     ):
         processed_node = set()
 
@@ -621,7 +564,7 @@ class _SplitterBase:
 
                 processed_node.add(n)
 
-    def find_parent_nodes_of_subgraph(self, tag: str) -> Set[torch.fx.Node]:
+    def find_parent_nodes_of_subgraph(self, tag: str) -> NodeSet:
         """
         Finds parent nodes of the `tag` subgraph.
 
@@ -650,7 +593,7 @@ class _SplitterBase:
         # Parent nodes of the subgraph
         parent_nodes = self.find_parent_nodes_of_subgraph(tag)
 
-        visited_nodes: Set[torch.fx.Node] = set()
+        visited_nodes: NodeSet = set()
 
         while parent_nodes:
             node = None
@@ -684,12 +627,12 @@ class _SplitterBase:
     # Helpers for split() method
     # ===============================================================
 
-    def starter_nodes(self) -> Tuple[Set[torch.fx.Node], Set[torch.fx.Node]]:
+    def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
         """
         Finds nodes that consume module inputs or getattr nodes.
         """
-        starter_cpu_nodes: Set[torch.fx.Node] = set()
-        starter_acc_nodes: Set[torch.fx.Node] = set()
+        starter_cpu_nodes: NodeSet = set()
+        starter_acc_nodes: NodeSet = set()
         for node in self.module.graph.nodes:
             if node.op not in {"placeholder", "getattr"}:
                 continue
@@ -703,11 +646,11 @@ class _SplitterBase:
     def put_nodes_into_subgraphs(self) -> List[Subgraph]:
         # We start graph traversal from leaf nodes
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
-        visited_nodes: Set[torch.fx.Node] = set()
+        visited_nodes: NodeSet = set()
 
         # If there are CPU nodes, start with them
         acc_subgraph: bool = not current_cpu_nodes
-        current_subgraph_nodes: Nodes = []
+        current_subgraph_nodes: NodeList = []
 
         # Result accumulator
         subgraphs: List[Subgraph] = []

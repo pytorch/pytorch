@@ -32,6 +32,7 @@ private:
 };
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 OpRegistrationListener::~OpRegistrationListener() {}
 
 Dispatcher::Dispatcher()
@@ -41,6 +42,7 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 Dispatcher::~Dispatcher() {}
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
@@ -201,6 +203,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
+    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)

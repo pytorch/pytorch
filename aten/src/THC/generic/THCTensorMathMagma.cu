@@ -117,46 +117,6 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #endif
 }
 
-void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");
-
-  THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
-  int64_t m = a->size(0);
-  int64_t n = a->size(1);
-  int64_t k = (m < n ? m : n);
-
-#if defined(THC_REAL_IS_FLOAT)
-  int64_t nb = magma_get_sgeqrf_nb(m, n);
-#else
-  int64_t nb = magma_get_dgeqrf_nb(m, n);
-#endif
-
-  scalar_t *rtau_data = th_magma_malloc_pinned<scalar_t>(k);
-  scalar_t *a_data = THCTensor_(data)(state, a);
-
-  int info;
-  {
-    at::native::MagmaStreamSyncGuard guard;
-#if defined(THC_REAL_IS_FLOAT)
-    magma_sgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
-#else
-    magma_dgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
-#endif
-  }
-
-  if (info != 0)
-    THError("MAGMA geqrf2 : Argument %d : illegal value.", -info);
-
-  THCTensor_(freeCopyTo)(state, a, ra_);
-  THCTensor_(copyArray1d)(state, rtau_, rtau_data, k);
-  magma_free_pinned(rtau_data);
-#else
-  THError(NoMagma(geqrf));
-#endif
-}
-
 #endif
 
 #endif
