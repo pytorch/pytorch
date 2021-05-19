@@ -1698,9 +1698,8 @@ bool Reducer::should_collect_runtime_stats() {
 void Reducer::record_forward_compute_start_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Record event only for single process single device
-    // and single device module.
-    if (replicas_.size() == 1 && !is_multi_device_module_) {
+    // Record event only for single device module.
+    if (!is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
       at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.forward_start.record();
@@ -1714,9 +1713,8 @@ void Reducer::record_forward_compute_start_time() {
 void Reducer::record_backward_compute_start_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Record event only for single process single device
-    // and single device module.
-    if (replicas_.size() == 1 && !is_multi_device_module_) {
+    // Record event only for single device module.
+    if (!is_multi_device_module_) {
       // Create and record event on the replicas_[0][0].device().
       at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_compute_start.record();
@@ -1728,9 +1726,8 @@ void Reducer::record_backward_compute_start_time() {
 void Reducer::record_backward_compute_end_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Record event only for single process single device
-    // and single device module.
-    if (replicas_.size() == 1 && !is_multi_device_module_) {
+    // Record event only for single device module.
+    if (!is_multi_device_module_) {
       at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_compute_end.record();
     }
@@ -1743,9 +1740,8 @@ void Reducer::record_backward_compute_end_time() {
 void Reducer::record_backward_comm_start_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Record event only for single process single device
-    // and single device module.
-    if (replicas_.size() == 1 && !is_multi_device_module_) {
+    // Record event only for single device module
+    if (!is_multi_device_module_) {
       at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_comm_start.record();
     }
@@ -1758,9 +1754,8 @@ void Reducer::record_backward_comm_start_time() {
 void Reducer::record_backward_comm_end_time() {
   if (replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Record event only for single process single device
-    // and single device module.
-    if (replicas_.size() == 1 && !is_multi_device_module_) {
+    // Record event only for single device module.
+    if (!is_multi_device_module_) {
       at::DeviceGuard g(replicas_[0][0].device());
       gpu_timer_.backward_comm_end.record();
     }
