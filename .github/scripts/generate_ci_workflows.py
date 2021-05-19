@@ -8,11 +8,44 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 GITHUB_DIR = Path(__file__).parent.parent
 
-CPU_TEST_RUNNER = "linux.2xlarge"
-CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
 
+class PyTorchWindowsWorkflow:
+    CPU_TEST_RUNNER = "windows.4xlarge"
+    CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
+
+    def __init__(
+            self,
+            build_environment: str,
+            on_pull_request: bool = False
+    ):
+        self.build_environment = build_environment
+        self.test_runner_type = self.CPU_TEST_RUNNER
+        self.on_pull_request = on_pull_request
+        if "cuda" in build_environment:
+            self.test_runner_type = self.CUDA_TEST_RUNNER
+
+    def generate_workflow_file(
+        self, workflow_template: jinja2.Template,
+    ) -> Path:
+        output_file_path = GITHUB_DIR.joinpath(
+            f"workflows/{self.build_environment}.yml"
+        )
+        with open(output_file_path, "w") as output_file:
+            output_file.writelines(["# @generated DO NOT EDIT MANUALLY\n"])
+            output_file.write(
+                workflow_template.render(
+                    build_environment=self.build_environment,
+                    test_runner_type=self.test_runner_type,
+                    on_pull_request=self.on_pull_request
+                )
+            )
+            output_file.write('\n')
+        return output_file_path
 
 class PyTorchLinuxWorkflow:
+    CPU_TEST_RUNNER = "linux.2xlarge"
+    CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+
     def __init__(
             self,
             build_environment: str,
@@ -22,14 +55,14 @@ class PyTorchLinuxWorkflow:
     ):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
-        self.test_runner_type = CPU_TEST_RUNNER
+        self.test_runner_type = self.CPU_TEST_RUNNER
         self.on_pull_request = on_pull_request
         self.enable_doc_jobs = enable_doc_jobs
         if "cuda" in build_environment:
-            self.test_runner_type = CUDA_TEST_RUNNER
+            self.test_runner_type = self.CUDA_TEST_RUNNER
 
     def generate_workflow_file(
-        self, workflow_template: jinja2.Template, jinja_env: jinja2.Environment
+        self, workflow_template: jinja2.Template,
     ) -> Path:
         output_file_path = GITHUB_DIR.joinpath(
             f"workflows/{self.build_environment}.yml"
@@ -49,7 +82,13 @@ class PyTorchLinuxWorkflow:
         return output_file_path
 
 
-WORKFLOWS = [
+WINDOWS_WORKFLOWS = [
+    PyTorchWindowsWorkflow(
+        build_environment="pytorch-win-vs2019-cpu-py3",
+    )
+]
+
+LINUX_WORKFLOWS = [
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
@@ -151,11 +190,10 @@ if __name__ == "__main__":
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
     )
-    workflow_template = jinja_env.get_template("linux_ci_workflow.yml.in")
-    for workflow in WORKFLOWS:
-        print(
-            workflow.generate_workflow_file(
-                workflow_template=workflow_template,
-                jinja_env=jinja_env
-            )
-        )
+    template_and_workflows = [
+        (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
+    ]
+    for template, workflows in template_and_workflows:
+        for workflow in workflows:
+            print(workflow.generate_workflow_file(workflow_template=template))
