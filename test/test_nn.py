@@ -1145,6 +1145,25 @@ class TestNN(NNTestCase):
         s = nn.Sequential(l1, l2, l1, l2, subnet)
         self.assertEqual(list(s.children()), [l1, l2, subnet])
 
+    def test_train_errors_for_invalid_mode(self):
+        class SubclassNet(nn.Module):
+            def __init__(self):
+                super(SubclassNet, self).__init__()
+                self.l1 = nn.Linear(2, 2)
+
+            def forward(self, inputs):
+                return self.l1(inputs)
+
+        subclass_net = SubclassNet()
+        sequential_net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+
+        error_modes = ["invalid_str", torch.device('cpu')]
+        modules_to_check = [subclass_net, sequential_net]
+
+        for error_mode, module in itertools.product(error_modes, modules_to_check):
+            with self.assertRaises(ValueError):
+                module.train(error_mode)
+
     def test_dir(self):
         linear = nn.Linear(2, 2)
         linear._test_submodule = nn.Linear(2, 2)
