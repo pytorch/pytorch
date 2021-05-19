@@ -54,6 +54,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, TestSimple_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -77,6 +78,7 @@ TEST(FuserTest, TestSimple_CUDA) {
   ASSERT_EQ(max_diff, 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, TestOne_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -137,6 +139,7 @@ TEST(FuserTest, TestOne_CUDA) {
   testOne(0, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, FusedConcat_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -182,6 +185,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, FusionAliasing) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -210,6 +214,7 @@ TEST(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, KernelCaching) {
 #if defined(FBCODE_CAFFE2)
   return;

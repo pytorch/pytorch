@@ -178,7 +178,7 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
-  result: auto_element_wise
+  result: handle_r_to_c(result.scalar_type(), self_t.conj() * self_p.sgn())
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt()).conj()
@@ -187,11 +187,6 @@
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
   result: self_t + maybe_multiply(other_t, alpha)
-
-- name: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  self: handle_r_to_c(self.scalar_type(), grad)
-  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t.add_(maybe_multiply(other_t, alpha))
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -319,8 +314,8 @@
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
 
-- name: linalg_cholesky(Tensor self) -> Tensor
-  self: cholesky_backward(grad, false, result)
+- name: linalg_cholesky_ex(Tensor self, *, bool check_errors=False) -> (Tensor L, Tensor info)
+  self: cholesky_backward(grad, false, L)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -330,14 +325,26 @@
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
+- name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
+  self: clamp_backward(grad, self, min, max)
+  min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
+
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
-  self: grad * (self >= min).to(grad.dtype())
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+
+- name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
-  self: grad * (self <= max).to(grad.dtype())
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+
+- name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -606,7 +613,7 @@
 
 - name: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
-  value: grad.index_select(dim, index).sum()
+  value: grad.index_select(dim, std::get<0>(at::_unique(index, /*sorted=*/false))).sum()
   index: non_differentiable
 
 - name: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
@@ -624,8 +631,8 @@
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
-- name: linalg_inv(Tensor self) -> Tensor
-  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+- name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+  self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
@@ -691,6 +698,16 @@
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
 
+- name: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  self: grad * other.log1p()
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  self: grad * log1p(other.toDouble())
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 
@@ -704,7 +721,7 @@
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
 
-- name: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+- name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self: not_implemented("linalg_lstsq")
   b: not_implemented("linalg_lstsq")
   output_differentiability: [True, True]
@@ -721,6 +738,10 @@
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self: not_implemented("lu_solve")
+
+- name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
+  LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
+  LU_pivots: non_differentiable
 
 - name: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   self: grad.clone().masked_fill_(mask, 0)
@@ -819,12 +840,7 @@
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: mul_tensor_backward(grad, other, self.scalar_type())
   other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: other_t * self_p.conj() + self_t * other_p.conj()
-
-- name: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  self: mul_tensor_backward(grad, other, self.scalar_type())
-  other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: self_t.mul_(other_p.conj()).add_(other_t * (self_p / other_p).conj())
+  result: other_t * self_p + self_t * other_p
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
@@ -879,7 +895,7 @@
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
 
-- name: linalg_vector_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
@@ -1031,12 +1047,12 @@
   self: grad * self.cos().conj()
 
 - name: sinc(Tensor self) -> Tensor
-  self: grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj()
+  self: sinc_backward(grad, self)
 
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
@@ -1091,11 +1107,11 @@
 - name: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
   self: unsqueeze_to(grad, dim, self.sizes())
 
-- name: std(Tensor self, bool unbiased=True) -> Tensor
-  self: std_backward(result, grad, self, unbiased)
+- name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+  self: std_backward(result, grad, self, dim, correction, keepdim)
 
-- name: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  self: std_backward(result, grad, self, dim, unbiased, keepdim)
+- name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, true)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -1127,16 +1143,13 @@
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: symeig_backward(grads, self, eigenvectors, upper, eigenvalues, eigenvectors_return)
+  self: eigh_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
+  self: eigh_backward(grads, self, /*eigenvectors=*/true, eigenvalues, eigenvectors)
 
-- name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
-  self: non_differentiable
-
-- name: linalg_eigvals(Tensor self) -> Tensor
-  self: non_differentiable
+- name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
+  self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -1235,11 +1248,11 @@
 - name: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   self: grad.squeeze(dim)
 
-- name: var(Tensor self, bool unbiased=True) -> Tensor
-  self: var_backward(grad, self, unbiased)
+- name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+  self: var_backward(grad, self, dim, correction, keepdim)
 
-- name: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  self: var_backward(grad, self, dim, unbiased, keepdim)
+- name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, false)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
@@ -1249,9 +1262,11 @@
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
+  result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
   self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
@@ -1997,18 +2012,6 @@
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
 
-- name: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
-
-- name: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
-
-- name: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, unbiased, true)
-
-- name: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, unbiased, false)
-
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor
   output_differentiability: [False]
@@ -2051,3 +2054,6 @@
 
 - name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]
+
+- name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+  data: segment_reduce_backward(grad, result, data, lengths)

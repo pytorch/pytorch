@@ -540,6 +540,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -961,6 +969,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
 
 def fake_range():

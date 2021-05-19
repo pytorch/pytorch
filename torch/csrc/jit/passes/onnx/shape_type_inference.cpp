@@ -94,6 +94,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
       {});
   if (onnx_tensor_type.has_shape()) {
     std::vector<c10::ShapeSymbol> sizes;
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
@@ -107,6 +108,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Search if this is already known,
           // and assign the same Symbol.
           GRAPH_UPDATE("Got dim_param:", dim.dim_param());
+          // NOLINTNEXTLINE(performance-for-range-copy)
           for (auto pair : symbol_map) {
             if (pair.second == dim.dim_param()) {
               sym = pair.first;
@@ -144,8 +146,10 @@ ListTypePtr TorchListTypeFromONNX(
     SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
       auto v_tensor_type =
           TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
@@ -164,6 +168,7 @@ void UpdateTorchValueByOnnxValueInfo(
     return;
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto p_type = p_info.type();
   if (p_type.has_tensor_type()) {
     auto torch_tensor_type =
@@ -446,6 +451,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   auto it_minus_one = std::find(reshape.begin(), reshape.end(), -1);
   int minus_one_pos = it_minus_one == reshape.end()
       ? -1
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       : std::distance(reshape.begin(), it_minus_one);
 
   if (!reshape_has_zero && minus_one_pos == -1) {
@@ -486,6 +492,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
 c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = reshape.begin(); it != reshape.end(); ++it) {
     if (*it < 0) {
       return c10::nullopt;
@@ -528,6 +535,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
   TORCH_INTERNAL_ASSERT(
       input_shape.size() == reshape.size(),
       "ONNX Tile input shapes do not match.");
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = reshape.begin(); it != reshape.end(); ++it) {
     if (*it < 0) {
       return c10::nullopt;
@@ -1144,6 +1152,7 @@ void SpecialPostProcess(Node* n) {
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
       auto list_node = n->input(0)->node();
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       auto t_node = n->input(1)->node();
       if (!list_node || list_node->kind() != prim::ListConstruct ||
           list_node->inputs().size() != 0) {
@@ -1157,6 +1166,60 @@ void SpecialPostProcess(Node* n) {
       }
       break;
     }
+    case ::c10::onnx::Cast: {
+      // ONNX shape inference is not able to assign output tensor shape,
+      // when input to onnx::Cast has incomplete tensor shape, for example
+      // missing shape, rank, dtype, etc. This postprocess sets the correct
+      // dtype for output tensor, since the dtype info is stored in Cast
+      // attribute.
+      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
+      if (nullptr != t_type && !t_type->scalarType().has_value()) {
+        auto onnx_dtype = n->i(attr::to);
+        auto aten_dtype = ONNXTypeToATenType(onnx_dtype);
+        n->output()->setType(t_type->withScalarType(aten_dtype));
+      }
+      break;
+    }
+    case ::c10::onnx::ConstantOfShape: {
+      // ONNX shape inference is not able to propagate output tensor shape
+      // for onnx::ConstantOfShape if input `shape` is not constant.
+      // This is a temporary solution when some partial information is
+      // available, for example, knowing rank of output tensor, or knowing
+      // symbolic shape. This solution won't be needed once we have proper
+      // symbolic propagation.
+      auto shape_node = n->input(0)->node();
+      if (shape_node->kind() == ::c10::onnx::Shape) {
+        // Shape -> ConstantOfShape
+        auto orig_type = shape_node->input()->type()->cast<TensorType>();
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          if (orig_type && orig_type->dim()) {
+            // Assign symbolic shape of original input of onnx::Shape.
+            v_type = v_type->withSymbolicShapes(orig_type->symbolic_sizes());
+            n->output()->setType(v_type);
+          } else if (
+              shape_node->input()->node()->kind() ==
+              ::c10::prim::ListConstruct) {
+            // Assign rank of original input of onnx::Shape.
+            v_type = v_type->withSizes({static_cast<int64_t>(
+                shape_node->input()->node()->inputs().size())});
+            n->output()->setType(v_type);
+          }
+        }
+      } else if (shape_node->kind() == ::c10::prim::ListConstruct) {
+        // ListConstruct -> ConstantOfShape
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          auto value = n->t(attr::value);
+          v_type = v_type->withScalarType(value.scalar_type());
+          std::vector<c10::ShapeSymbol> sizes(
+              shape_node->inputs().size(), c10::ShapeSymbol::newSymbol());
+          v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+          n->output()->setType(v_type);
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -1165,6 +1228,7 @@ void UpdateOutputTypeByONNXProto(
     Node* clone_node,
     const onnx::ModelProto& model_proto,
     SymbolDimMap& symbol_map) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
@@ -1281,9 +1345,13 @@ void ONNXShapeTypeInference(
           ex.what(),
           " on graph: ",
           n_graph->toString());
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char shape_err[] = "ShapeInferenceError";
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char type_err[] = "TypeInferenceError";
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       if ((strstr(ex.what(), shape_err) == NULL) &&
+          // NOLINTNEXTLINE(modernize-use-nullptr)
           (strstr(ex.what(), type_err) == NULL))
         throw;
     }
@@ -1330,6 +1398,7 @@ void ONNXSetDynamicInputShape(
           shape_ref.has_value(), "Input tensor shape should have value.");
       auto shape = shape_ref.value();
 
+      // NOLINTNEXTLINE(performance-for-range-copy)
       for (auto pair : axes_names) {
         auto axis = pair.first;
         auto name = pair.second;
@@ -1390,6 +1459,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     at::Tensor var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
@@ -1406,6 +1476,11 @@ size_t ONNXAssignOutputShape(
   } else if (PyList_Check(output_obj)) {
     size_t list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+      auto output_type = graph->outputs().at(outputs_index)->type();
+      TORCH_CHECK(
+          output_type->cast<ListType>(),
+          "Expected a sequence type, but received a non-iterable type in graph output index ",
+          outputs_index);
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
@@ -1463,6 +1538,11 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
+  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+    // For cases with tracing, simply ignore NoneType outputs
+    // For cases with scripting, TODO: Add logic to handle NoneType outputs
+    // when such output types are supported. For now test cases with NoneType
+    // outputs have been disabled.
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "

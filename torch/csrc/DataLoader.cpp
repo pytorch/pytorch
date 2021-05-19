@@ -97,12 +97,16 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
 static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int error;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<pid_t> *pid_set;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t worker_pid;
   siginfo_t infop;
 
@@ -214,6 +218,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 PyMethodDef DataLoaderMethods[] = {
   {"_set_worker_signal_handlers",  THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
   {"_set_worker_pids",             THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},

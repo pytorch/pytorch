@@ -68,20 +68,21 @@ class MaybeOwned final {
   };
 
   /// Don't use this; use borrowed() instead.
-  explicit MaybeOwned(const owned_type& t) : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
+  explicit MaybeOwned(const owned_type& t)
+      : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
 
   /// Don't use this; use owned() instead.
-  explicit MaybeOwned(T&& t) noexcept(std::is_nothrow_move_constructible<T>::value)
-  : isBorrowed_(false), own_(std::move(t)) {}
+  explicit MaybeOwned(T&& t) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : isBorrowed_(false), own_(std::move(t)) {}
 
   /// Don't use this; use owned() instead.
   template <class... Args>
   explicit MaybeOwned(in_place_t, Args&&... args)
-  : isBorrowed_(false)
-  , own_(std::forward<Args>(args)...) {}
+      : isBorrowed_(false), own_(std::forward<Args>(args)...) {}
 
  public:
-  explicit MaybeOwned(): isBorrowed_(true), borrow_() {}
+  explicit MaybeOwned() : isBorrowed_(true), borrow_() {}
 
   // Copying a borrow yields another borrow of the original, as with a
   // T*. Copying an owned T yields another owned T for safety: no
@@ -120,8 +121,9 @@ class MaybeOwned final {
     return *this;
   }
 
-  MaybeOwned(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_constructible<T>::value)
-  : isBorrowed_(rhs.isBorrowed_) {
+  MaybeOwned(MaybeOwned&& rhs) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : isBorrowed_(rhs.isBorrowed_) {
     if (C10_LIKELY(rhs.isBorrowed_)) {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
     } else {
@@ -129,15 +131,16 @@ class MaybeOwned final {
     }
   }
 
-  MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_assignable<T>::value) {
+  MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(
+      std::is_nothrow_move_assignable<T>::value) {
     if (this == &rhs) {
       return *this;
     }
     if (C10_UNLIKELY(!isBorrowed_)) {
       if (rhs.isBorrowed_) {
-          own_.~T();
-          MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
-          isBorrowed_ = true;
+        own_.~T();
+        MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
+        isBorrowed_ = true;
       } else {
         own_ = std::move(rhs.own_);
       }
@@ -158,7 +161,8 @@ class MaybeOwned final {
     return MaybeOwned(t);
   }
 
-  static MaybeOwned owned(T&& t) noexcept(std::is_nothrow_move_constructible<T>::value) {
+  static MaybeOwned owned(T&& t) noexcept(
+      std::is_nothrow_move_constructible<T>::value) {
     return MaybeOwned(std::move(t));
   }
 
@@ -175,22 +179,24 @@ class MaybeOwned final {
     }
   }
 
-  const T& operator*() const & {
+  const T& operator*() const& {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
     }
     return C10_LIKELY(isBorrowed_)
-      ? MaybeOwnedTraits<T>::referenceFromBorrow(borrow_)
-      : own_;
+        ? MaybeOwnedTraits<T>::referenceFromBorrow(borrow_)
+        : own_;
   }
 
   const T* operator->() const {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
     }
     return C10_LIKELY(isBorrowed_)
-      ? MaybeOwnedTraits<T>::pointerFromBorrow(borrow_)
-      : &own_;
+        ? MaybeOwnedTraits<T>::pointerFromBorrow(borrow_)
+        : &own_;
   }
 
   // If borrowed, copy the underlying T. If owned, move from
@@ -199,13 +205,13 @@ class MaybeOwned final {
   // T.
   T operator*() && {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
       return MaybeOwnedTraits<T>::referenceFromBorrow(borrow_);
     } else {
       return std::move(own_);
     }
   }
 };
-
 
 } // namespace c10

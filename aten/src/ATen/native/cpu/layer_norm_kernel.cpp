@@ -256,9 +256,11 @@ void LayerNormBackwardKernelImplInternal(
           dbeta_v += buffer_data[num_threads * N + i * N + j];
         }
         if (!dgamma_null) {
+          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           dgamma_data[j] = dgamma_v;
         }
         if (!dbeta_null) {
+          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           dbeta_data[j] = dbeta_v;
         }
       }
@@ -286,7 +288,9 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 
 } // namespace native

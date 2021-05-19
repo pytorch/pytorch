@@ -227,6 +227,12 @@ struct TORCH_API RecordFunction {
   // Calls end callbacks. After end(), accessors will no longer provide useful results.
   void end();
 
+  // Internal-only, used only force async event for distributed events profiling.
+  void _setAsync();
+
+  // Returns whether this RecordFunction corresponds to an async event orn ot.
+  bool isAsync() const;
+
   RecordFunctionHandle handle() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called handle() on inactive RecordFunction");
     return state_->handle_;
@@ -313,6 +319,11 @@ struct TORCH_API RecordFunction {
     // Unique id for this RecordFunction, used in callbacks to track start
     // and end of ranges
     RecordFunctionHandle handle_ {0};
+
+    // Whether this record_function corresponds to an async event or not. Async
+    // events can complete in different threads or follow a future-like pattern
+    // of use.
+    bool is_async_{false};
   };
 
   std::unique_ptr<State> state_;
@@ -578,10 +589,6 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
   virtual ~DisableRecordFunctionGuard() {}
 };
-
-// Internal, used in ThreadLocalState to propagate TLS callbacks across threads
-TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
-TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
 
 struct TORCH_API RecordFunctionTLS {
   // Thread local vector of callbacks, holds pairs (callbacks, unique_id);

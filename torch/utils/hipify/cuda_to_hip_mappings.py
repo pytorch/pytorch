@@ -7736,8 +7736,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::CountingInputIterator", ("hipcub::CountingInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceRadixSort", ("hipcub::DeviceRadixSort", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceReduce", ("hipcub::DeviceReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::DeviceRunLengthEncode", ("hipcub::DeviceRunLengthEncode", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceScan", ("hipcub::DeviceScan", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceSegmentedRadixSort", ("hipcub::DeviceSegmentedRadixSort", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::DeviceSegmentedReduce", ("hipcub::DeviceSegmentedReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceSelect", ("hipcub::DeviceSelect", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::KeyValuePair", ("hipcub::KeyValuePair", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Max", ("hipcub::Max", CONV_SPECIAL_FUNC, API_RUNTIME)),
@@ -7775,6 +7777,8 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("cusparseMatDescr_t", ("hipsparseMatDescr_t", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseScsrmm2", ("hipsparseScsrmm2", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseDcsrmm2", ("hipsparseDcsrmm2", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseCcsrmm2", ("hipsparseCcsrmm2", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseZcsrmm2", ("hipsparseZcsrmm2", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseScsrmm", ("hipsparseScsrmm", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseDcsrmm", ("hipsparseDcsrmm", CONV_MATH_FUNC, API_SPARSE)),
         (
@@ -7912,6 +7916,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "OptionalCUDAStreamGuard",
             ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDAMultiStreamGuard",
+            ("hip::HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "CUDAMultiStreamGuard",
+            ("HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
         ),
         # Only get needs to be transformed this way; all the other ones can go
         # straight to the normal versions hip::HIPCachingAllocator
@@ -8126,6 +8138,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("getDefaultCUDAStream", ("getDefaultHIPStream", API_C10)),
         ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStream", API_C10)),
         ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
+        ("cuda::get_cuda_check_prefix", ("hip::get_cuda_check_prefix", API_C10)),
         ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),

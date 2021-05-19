@@ -25,7 +25,7 @@ Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->setTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 

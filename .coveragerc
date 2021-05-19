@@ -1,4 +1,6 @@
 [run]
+plugins =
+    coverage_plugins.jit_plugin
 omit =
     */tmp*
     */Temp/*

@@ -4,8 +4,10 @@ namespace caffe2 {
 
 // From CPU Context, the op takes CPU tensor as input, and produces
 // TensorCPU
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(EnsureCPUOutput, EnsureCPUOutputOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumInputs(1)
     .NumOutputs(1)
@@ -27,5 +29,6 @@ this Op accepts either CUDA or CPU Tensor input.
     .Input(0, "input", "The input CUDA or CPU tensor.")
     .Output(0, "output", "TensorCPU that is a copy of the input.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(EnsureCPUOutput);
 } // namespace caffe2

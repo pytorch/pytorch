@@ -34,6 +34,7 @@ namespace c10 {
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
   _(prim, MKLDNNHardTanh)            \
+  _(prim, MKLDNNClamp)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -97,6 +98,7 @@ namespace c10 {
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
+  _(aten, gelu_)                     \
   _(aten, relu6)                     \
   _(aten, relu6_)                    \
   _(aten, dropout_)                  \
@@ -206,6 +208,7 @@ namespace c10 {
   _(aten, linalg_multi_dot)          \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
+  _(aten, linalg_matrix_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -289,6 +292,7 @@ namespace c10 {
   _(aten, fix)                       \
   _(aten, fix_)                      \
   _(aten, to_mkldnn)                 \
+  _(aten, positive)                  \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \

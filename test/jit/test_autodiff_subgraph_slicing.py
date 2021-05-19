@@ -1,7 +1,8 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, \
+    num_profiled_runs, enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.common_jit import check_against_reference
 import torch
 
@@ -50,6 +51,35 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
+    def test_diff_graph_inline_threshold(self):
+        with enable_profiling_mode_for_profiling_tests():
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                @torch.jit.script
+                def foo(x):
+
+                    #  two nodes should be fused
+                    #  see https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/runtime/graph_executor_impl.h#L49
+                    return torch.sigmoid(torch.sigmoid(x))
+
+                @torch.jit.script
+                def bar(x):
+                    #  two nodes should NOT be fused
+                    return torch.sigmoid(x)
+
+                input = torch.rand([4, 4], requires_grad=True)
+                foo(input)
+                foo(input)
+
+                bar(input)
+                bar(input)
+
+                print(foo.graph_for(input))
+                self.assertGraphContainsExactly(foo.graph_for(input), 'prim::DifferentiableGraph', 1)
+                self.assertGraphContainsExactly(bar.graph_for(input), 'prim::DifferentiableGraph', 0)
 
     def test_bias_as_module_attr(self):
 

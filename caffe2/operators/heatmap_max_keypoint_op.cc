@@ -4,14 +4,17 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HeatmapMaxKeypoint,
     HeatmapMaxKeypointOp<float, CPUContext>);
 
 // Input: heatmaps [size x size], boxes [x0, y0, x1, y1]
 // Output: keypoints (#rois, 4, #keypoints)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HeatmapMaxKeypoint).NumInputs(2).NumOutputs(1);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HeatmapMaxKeypoint);
 } // namespace
 
@@ -122,6 +125,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       // Solve Ax=b
       const float div = A.determinant();
       EVecXf delta(2);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float deltaScore;
       const float MAX_DELTA = 1.5;
       if (std::abs(div) < 1e-4f) {

@@ -289,6 +289,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* has_exited;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
@@ -393,6 +394,7 @@ struct ExitTransformer {
   // otherwise, target_block_ remains the same.
   void updateTargetBlock(Block* block) {
     if (owningNodeKind(block) == prim::Loop &&
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         current_exit_kind_ == prim::LoopContinuation) {
       target_block_ = block;
     } else if (
@@ -549,7 +551,9 @@ bool inlineConsecutiveIfs(Node* node) {
   bool else_value = maybe_else_value->toBool();
 
   for (auto i = 0; i < 2; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Block* first_if_block;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Block* second_if_block;
 
     if (i == 0) {
