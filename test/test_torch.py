@@ -5697,9 +5697,9 @@ else:
     def test_masked_scatter_large_tensor(self, device):
         t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
         t = t_cpu.to(device)
-        t_cpu.masked_scatter_(t_cpu, t_cpu)
-        t.masked_scatter_(t, t)
-        self.assertEqual(t, t_cpu)
+        result_cpu = t_cpu.masked_scatter(t_cpu, t_cpu)
+        result = t.masked_scatter(t, t)
+        self.assertEqual(result, result_cpu)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
