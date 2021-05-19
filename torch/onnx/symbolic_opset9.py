@@ -14,6 +14,7 @@ import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 
 from typing import Optional
+from sys import maxsize as maxsize
 
 import numpy
 import math
@@ -3109,7 +3110,6 @@ def index_add(g, self, dim, index, other):
     warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
                   "this will cause the ONNX model to be incorrect.")
     from torch.onnx.symbolic_opset9 import scatter_add
-    from sys import maxsize as maxsize
 
     dim = sym_help._maybe_get_const(dim, "i")
     if dim is None:
@@ -3160,3 +3160,27 @@ def index_add(g, self, dim, index, other):
         index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
 
     return scatter_add(g, self, dim, expand_as(g, index, other), other)
+
+
+@parse_args('v', 'is', 'is')
+def roll(g, self, shifts, dims):
+    assert len(shifts) == len(dims)
+
+    result = self
+    for i in range(len(shifts)):
+        shapes = []
+        shape = sym_help._slice_helper(g,
+                                       result,
+                                       axes=[dims[i]],
+                                       starts=[-shifts[i]],
+                                       ends=[maxsize])
+        shapes.append(shape)
+        shape = sym_help._slice_helper(g,
+                                       result,
+                                       axes=[dims[i]],
+                                       starts=[0],
+                                       ends=[-shifts[i]])
+        shapes.append(shape)
+        result = g.op("Concat", *shapes, axis_i=dims[i])
+
+    return result
