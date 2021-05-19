@@ -32,7 +32,7 @@ pytorch_android_params: &pytorch_android_params
       default: ""
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
     DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -59,7 +59,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: "0"
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>

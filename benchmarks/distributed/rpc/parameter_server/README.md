@@ -19,7 +19,9 @@
     - Update benchmark_class_helper.py to include your parameter_server class in the ps_map
     - Add configurations to parameter_server_configurations.json in the configurations directory
 5. Script
-    - Create a bash script for your experiment and add it to the bash_experiment_scripts directory
+    - Create a bash script for your experiment and add it to the experiment_scripts directory
+6. Testing
+    - Add a test method for your script to test_scripts.py
 
 ## Trainer class
 
@@ -54,3 +56,7 @@ Inherit from a base class and implement your parameter server. The benchmark has
     ```python
     def reset_state(ps_rref):
     ```
+
+## Testing
+
+Use `pytest` to run the test methods added to test_scripts.py. To test all the scripts added use `pytest test_scripts.py`.

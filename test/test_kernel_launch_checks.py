@@ -39,10 +39,8 @@ some_function_call<TemplateArg><<<1,2,0,stream>>> ( arg1 , arg2 , arg3 ) ;
         """))
 
     def test_check_cuda_launches(self):
-        check_cuda_kernel_launches()
-        # TODO: Enable this after warning messages have been dealt with.
-        self.assertTrue(True)
-        # self.assertTrue(check_cuda_kernel_launches() == 0)
+        unsafeLaunchesCount = check_cuda_kernel_launches()
+        self.assertTrue(unsafeLaunchesCount == 0)
 
 
 if __name__ == '__main__':
