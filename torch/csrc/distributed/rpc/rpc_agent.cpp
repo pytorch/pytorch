@@ -64,13 +64,13 @@ c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
       c10::make_intrusive<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
-  auto jitFuture = send(to, std::move(message));
   auto firstRetryRpc = std::make_shared<RpcRetryInfo>(
       to,
       message,
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
+  auto jitFuture = send(to, std::move(message));
   jitFuture->addCallback([this, newTime, firstRetryRpc](JitFuture& future) {
     rpcRetryCallback(future, newTime, firstRetryRpc);
   });
