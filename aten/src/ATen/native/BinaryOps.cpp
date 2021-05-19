@@ -24,28 +24,28 @@ TORCH_META_FUNC2(sub, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
   native::sub_check(self, other);
-  build_binary_op(maybe_get_output(), self, other);
+  build_borrowing_binary_op(maybe_get_output(), self, other);
   native::alpha_check(dtype(), alpha);
 }
 
 TORCH_META_FUNC2(mul, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
-  build_binary_op(maybe_get_output(), self, other);
+  build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
-  build_binary_float_op(maybe_get_output(), self, other);
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   if (!rounding_mode.has_value()) {
-    build_binary_float_op(maybe_get_output(), self, other);
+    build_borrowing_binary_float_op(maybe_get_output(), self, other);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (*rounding_mode == "trunc") {
-    build_binary_op(maybe_get_output(), self, other);
+    build_borrowing_binary_op(maybe_get_output(), self, other);
   } else if (*rounding_mode == "floor") {
-    build_binary_op(maybe_get_output(), self, other);
+    build_borrowing_binary_op(maybe_get_output(), self, other);
   } else {
     TORCH_CHECK(false,
         "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
@@ -54,13 +54,13 @@ TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10
 }
 
 TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
-  build_binary_float_op(maybe_get_output(), self, other);
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
-  build_binary_float_op(maybe_get_output(), self, other);
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(heaviside) (
@@ -77,13 +77,13 @@ TORCH_META_FUNC(heaviside) (
 }
 
 TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
-  build_binary_float_op(maybe_get_output(), self, other);
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
-    build_binary_op(maybe_get_output(), self, other);                 \
+    build_borrowing_binary_op(maybe_get_output(), self, other);                 \
   }
 
 CREATE_BINARY_META_FUNC(logaddexp);
@@ -97,12 +97,12 @@ CREATE_BINARY_META_FUNC(nextafter);
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
-  build_binary_op(maybe_get_output(), self, other);
+  build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
-  build_binary_op(maybe_get_output(), self, other);
+  build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 } // namespace meta
