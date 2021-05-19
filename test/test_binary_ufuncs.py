@@ -2764,7 +2764,7 @@ tensor_binary_ops = [
     '__matmul__', '__rmatmul__',
     '__truediv__', '__rtruediv__', '__itruediv__',
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__imod__',
+    '__mod__', '__rmod__', '__imod__',
     '__pow__', '__rpow__', '__ipow__',
     '__lshift__', '__ilshift__',
     '__rshift__', '__irshift__',
@@ -2773,7 +2773,7 @@ tensor_binary_ops = [
     '__or__', '__ior__',
 
     # Unsupported operators
-    # '__rmod__', '__imatmul__',
+    # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
     # '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
 ]
