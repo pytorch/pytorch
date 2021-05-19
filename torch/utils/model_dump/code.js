@@ -439,6 +439,114 @@ class OnePickleSection extends Component {
   }
 }
 
+function computeTensorMemory(numel, dtype) {
+  const sizes = {
+    "Byte": 1,
+    "Char": 1,
+    "Short": 2,
+    "Int": 4,
+    "Long": 8,
+    "Half": 2,
+    "Float": 4,
+    "Double": 8,
+    "ComplexHalf": 4,
+    "ComplexFloat": 8,
+    "ComplexDouble": 16,
+    "Bool": 1,
+    "QInt8": 1,
+    "QUInt8": 1,
+    "QInt32": 4,
+    "BFloat16": 2,
+  };
+  let dtsize = sizes[dtype];
+  if (!dtsize) {
+    throw new Error("Unrecognized dtype: " + dtype);
+  }
+  return numel * dtsize;
+}
+
+// TODO: Maybe track by dtype as well.
+// TODO: Maybe distinguish between visible size and storage size.
+// TODO: Maybe don't double-count if the model has
+// multiple references to the same submodule or tensor.
+function getTensorMemoryByDevice(data) {
+  if (data === null) {
+    return {};
+  }
+  if (typeof(data) == "boolean") {
+    return {};
+  }
+  if (typeof(data) == "number") {
+    return {};
+  }
+  if (typeof(data) == "string") {
+    return {};
+  }
+  if (typeof(data) != "object") {
+    throw new Error("Not an object");
+  }
+  if (Array.isArray(data)) {
+    let result = {};
+    for (const item of data) {
+      const sizes = getTensorMemoryByDevice(item);
+      for (const [device, size] of Object.entries(sizes)) {
+        result[device] = (result[device] || 0) + size;
+      }
+    }
+    return result;
+  }
+  if (data.__tuple_values__) {
+    return getTensorMemoryByDevice(data.__tuple_values__);
+  }
+  if (data.__is_dict__) {
+    return getTensorMemoryByDevice(data.values);
+  }
+  if (data.__module_type__) {
+    return getTensorMemoryByDevice(data.state);
+  }
+  if (data.__tensor_v2__) {
+    const [storage, offset, size, stride, grad] = data.__tensor_v2__;
+    const [dtype, key, device, numel] = storage;
+    return {[device]: computeTensorMemory(numel, dtype)};
+  }
+  if (data.__qtensor__) {
+    const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
+    const [dtype, key, device, numel] = storage;
+    return {[device]: computeTensorMemory(numel, dtype)};
+  }
+  throw new Error("Can't handle data type.", data);
+}
+
+// Make this a separate component so it is rendered lazily.
+class OpenTensorMemorySection extends Component {
+  render({model_data}) {
+    let sizes = getTensorMemoryByDevice(model_data);
+    return html`
+      <table>
+        <thead>
+          <tr>
+            <th>Device</th>
+            <th>Bytes</th>
+            <th>Human</th>
+          </tr>
+        </thead>
+        <tbody style="font-family:monospace;">
+          ${Object.entries(sizes).map(([dev, size]) => html`<tr>
+            <td>${dev}</td>
+            <td>${size}</td>
+            <td>${humanFileSize(size)}</td>
+          </tr>`)}
+        </tbody>
+      </table>`;
+  }
+}
+
+function TensorMemorySection({model: {model_data}}) {
+  return html`
+    <${Hider} name="Tensor Memory" shown=false>
+    <${OpenTensorMemorySection} model_data=${model_data} /><//>`;
+}
+
 class AuxContentPane extends Component {
   constructor() {
     super();
@@ -531,6 +639,7 @@ class App extends Component {
         <${CodeSection} model=${model}/>
         <${ExtraJsonSection} files=${model.extra_files_jsons}/>
         <${ExtraPicklesSection} files=${model.extra_pickles}/>
+        <${TensorMemorySection} model=${model}/>
       </div>
       <div id=aux_content style="position:absolute;width:99%;top:80%;height:20%;overflow:scroll">
         <${AuxContentPane}
