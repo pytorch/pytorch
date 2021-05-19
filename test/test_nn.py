@@ -12860,7 +12860,7 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 
-    @dtypes(torch.uint8, torch.float, torch.bool)
+    @dtypes(torch.uint8, torch.long, torch.bool)
     def test_one_hot(self, device, dtype):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
             with self.assertRaises(RuntimeError):
