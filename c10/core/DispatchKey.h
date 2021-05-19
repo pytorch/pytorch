@@ -66,6 +66,7 @@ enum class DispatchKey : uint8_t {
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
+  HPU, // For out of tree & closed source integration of HPU / Habana
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -214,6 +215,7 @@ enum class DispatchKey : uint8_t {
   AutogradXLA,
   AutogradXPU,
   AutogradMLC,
+  AutogradHPU,
   AutogradNestedTensor, // lives out of tree at
   // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
