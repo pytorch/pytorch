@@ -141,7 +141,7 @@ Keyword args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> fft2 = torch.fft.fft2(t)
+    >>> fft2 = torch.fft.fft2(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.fft2`
     here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
@@ -187,7 +187,7 @@ Keyword args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> ifft2 = torch.fft.ifft2(t)
+    >>> ifft2 = torch.fft.ifft2(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.ifft2`
     here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
@@ -468,7 +468,7 @@ Example:
     here is equivalent to a combination of :func:`~torch.fft.fft` and
     :func:`~torch.fft.rfft`:
 
-    >>> two_ffts = torch.fft.fft(torch.fft.rfft(x, dim=1), dim=0)
+    >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.allclose(rfft2, two_ffts)
 
 """.format(**common_args))
@@ -603,7 +603,7 @@ Example:
     here is equivalent to a combination of :func:`~torch.fft.fft` and
     :func:`~torch.fft.rfft`:
 
-    >>> two_ffts = torch.fft.fft(torch.fft.rfft(x, dim=1), dim=0)
+    >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.allclose(rfftn, two_ffts)
 
 """.format(**common_args))

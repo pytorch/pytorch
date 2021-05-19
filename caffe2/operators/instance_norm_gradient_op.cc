@@ -149,6 +149,7 @@ void InstanceNormGradientOp<float, CPUContext>::ComputeMoments(
     const std::array<int, 2> Y_dims = {static_cast<int>(N * C), 1};
     math::Moments<float, CPUContext>(
         2, X_dims.data(), Y_dims.data(), X, mean, rstd, &context_);
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     math::InvStd<float, CPUContext>(N * C, epsilon_, rstd, rstd, &context_);
   } else {
     const float c = 1.0f / static_cast<float>(HxW);
@@ -257,12 +258,15 @@ class GetInstanceNormGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     InstanceNormGradient,
     InstanceNormGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(InstanceNormGradient).NumInputs(4, 6).NumOutputs(3);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(InstanceNorm, GetInstanceNormGradient);
 
 } // namespace caffe2

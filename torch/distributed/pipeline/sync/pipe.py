@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -68,10 +68,10 @@ def _verify_module(module: nn.Sequential) -> None:
 
 
 def _verify_splitting(
-    partitions: nn.Sequential, devices: List[torch.device]
+    module: nn.Sequential, partitions: nn.Sequential, devices: List[torch.device]
 ) -> None:
-    num_parameters = len(list(partitions.parameters()))
-    num_child_parameters = sum(len(list(child.parameters())) for child in partitions.children())
+    num_parameters = len(list(module.parameters()))
+    num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
     if num_parameters == num_child_parameters:
         return
 
@@ -117,12 +117,54 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
-def _retrieve_devices(modules: nn.Sequential) -> List[torch.device]:
-    devices = []
-    for name, module in modules.named_children():
-        devices.append(_retrieve_device(module))
 
-    return devices
+class PipeSequential(nn.Sequential):
+    """
+    Pipe variant of ``nn.Sequential`` which supports multiple inputs.
+    """
+
+    def forward(self, *inputs):
+        for module in self:
+            if isinstance(inputs, Tuple):
+                inputs = module(*inputs)
+            else:
+                # Don't expand single variables (ex: lists/Tensor)
+                inputs = module(inputs)
+        return inputs
+
+
+def _assemble_partition(modules: List[nn.Module]):
+    modules_list: List[nn.Module] = []
+    for module in modules:
+        if isinstance(module, nn.Sequential):
+            modules_list.extend(module.children())
+        else:
+            modules_list.append(module)
+    return PipeSequential(*modules_list)
+
+def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
+    partitions = []
+    devices = []
+
+    current_partition = []
+    current_device = None
+    for name, module in modules.named_children():
+        device = _retrieve_device(module)
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
+            partitions.append(_assemble_partition(current_partition))
+            devices.append(current_device)
+            current_partition = []
+        current_device = device
+        current_partition.append(module)
+
+    if current_device is not None:
+        partitions.append(_assemble_partition(current_partition))
+        devices.append(current_device)
+
+    partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
+
+    return partitions, devices
+
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -240,9 +282,8 @@ class Pipe(Module):
         if deferred_batch_norm:
             module = DeferredBatchNorm.convert_deferred_batch_norm(module, chunks)
 
-        self.partitions = module
-        self.devices = _retrieve_devices(module)
-        _verify_splitting(self.partitions, self.devices)
+        self.partitions, self.devices = _split_module(module)
+        _verify_splitting(module, self.partitions, self.devices)
 
         self._copy_streams: List[List[AbstractStream]] = []
         self._skip_layout = inspect_skip_layout(self.partitions)

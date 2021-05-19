@@ -60,6 +60,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward(edge_list&& next_edges)
     : Node(std::move(next_edges)) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   UndefinedGradBackward() {}
 
   variable_list apply(variable_list&& inputs) override;

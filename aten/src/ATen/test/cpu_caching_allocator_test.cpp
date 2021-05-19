@@ -5,6 +5,7 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUCachingAllocatorTest, check_alloc_free) {
   c10::CPUCachingAllocator caching_allocator;
   c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
@@ -17,18 +18,21 @@ TEST(CPUCachingAllocatorTest, check_alloc_free) {
 }
 
 // This should just free the pointer correctly.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUCachingAllocatorTest, check_alloc_outside_free_inside) {
   c10::CPUCachingAllocator caching_allocator;
   at::Tensor a = at::rand({23, 23});
   {
     c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
         &caching_allocator);
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     float* data_ptr = a.data_ptr<float>();
     a.reset();
     a = at::rand({23, 23});
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUCachingAllocatorTest, check_alloc_inside_free_outside) {
   c10::CPUCachingAllocator caching_allocator;
   at::Tensor a;

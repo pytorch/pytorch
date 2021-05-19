@@ -30,7 +30,7 @@
 namespace at {
 namespace native {
 
-namespace {
+namespace CPU_CAPABILITY {
 
 using namespace vec256;
 
@@ -226,7 +226,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
   }
 }
 
-static void frac_kernel(TensorIteratorBase& iter) {
+void frac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -235,7 +235,7 @@ static void frac_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void logical_not_kernel(TensorIteratorBase& iter) {
+void logical_not_kernel(TensorIteratorBase& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
@@ -247,7 +247,7 @@ static void logical_not_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void reciprocal_kernel(TensorIteratorBase& iter) {
+void reciprocal_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -256,7 +256,7 @@ static void reciprocal_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void neg_kernel(TensorIteratorBase& iter) {
+void neg_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -265,7 +265,7 @@ static void neg_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void sign_kernel(TensorIteratorBase& iter){
+void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
@@ -426,38 +426,6 @@ static void nan_to_num_kernel(
   });
 }
 
-static void clamp_kernel(TensorIteratorBase& iter, const Scalar& min_scalar, const Scalar& max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    auto min = min_scalar.to<scalar_t>();
-    auto max = max_scalar.to<scalar_t>();
-    auto min_vec = Vec256<scalar_t>(min);
-    auto max_vec = Vec256<scalar_t>(max);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
-  });
-}
-
-static void clamp_max_kernel(TensorIteratorBase& iter, const Scalar& max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    auto max = max_scalar.to<scalar_t>();
-    auto max_vec = Vec256<scalar_t>(max);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(a, max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
-  });
-}
-
-static void clamp_min_kernel(TensorIteratorBase& iter, const Scalar& min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    auto min = min_scalar.to<scalar_t>();
-    auto min_vec = Vec256<scalar_t>(min);
-    cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::max(a, min); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
-  });
-}
-
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
     const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
@@ -587,8 +555,8 @@ static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, c10::opti
   templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }
 
-static void rsqrt_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "rsqrt_cpu", [&] {
+void rsqrt_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -668,7 +636,8 @@ static void i0e_kernel(TensorIteratorBase& iter) {
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
-  static void op##_kernel(TensorIteratorBase& iter) {                                   \
+  namespace CPU_CAPABILITY {                                                        \
+  void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
       iter.serial_for_each(                                                         \
@@ -677,10 +646,12 @@ static void i0e_kernel(TensorIteratorBase& iter) {
     });                                                                             \
     iter.cast_outputs();                                                            \
   }                                                                                 \
-  REGISTER_DISPATCH(op##_stub, &op##_kernel)
+  }                                                                                 \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
-  static void op##_kernel(TensorIteratorBase& iter) {                                                \
+  namespace CPU_CAPABILITY {                                                                     \
+  void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
       iter.serial_for_each(                                                                      \
@@ -689,79 +660,142 @@ static void i0e_kernel(TensorIteratorBase& iter) {
     });                                                                                          \
     iter.cast_outputs();                                                                         \
   }                                                                                              \
-  REGISTER_DISPATCH(op##_stub, &op##_kernel)
+  }                                                                                              \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
-} // anonymous namespace
+} // CPU_CAPABILITY namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
-REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
-REGISTER_DISPATCH(logit_stub, &logit_kernel);
-REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
-REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
-REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
-REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
-REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
-REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-REGISTER_DISPATCH(normal_stub, &normal_kernel);
-REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
-REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
-REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
-REGISTER_DISPATCH(random_stub, &random_kernel);
-REGISTER_DISPATCH(abs_stub, &abs_kernel);
-REGISTER_DISPATCH(angle_stub, &angle_kernel);
-REGISTER_DISPATCH(real_stub, &real_kernel);
-REGISTER_DISPATCH(imag_stub, &imag_kernel);
-REGISTER_DISPATCH(conj_stub, &conj_kernel);
-REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
-REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
-REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
-REGISTER_DISPATCH(frac_stub, &frac_kernel);
-REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
-REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel);
-REGISTER_DISPATCH(neg_stub, &neg_kernel);
-REGISTER_DISPATCH(sign_stub, &sign_kernel);
-REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
-REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
-REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
-REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
-REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
-REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
-REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
-REGISTER_DISPATCH(atanh_stub, &atanh_kernel);
-REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
-REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
-REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
-REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
-REGISTER_DISPATCH(special_entr_stub, &entr_kernel);
-REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
-REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(bernoulli_tensor_stub, &CPU_CAPABILITY::bernoulli_tensor_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(bernoulli_scalar_stub, &CPU_CAPABILITY::bernoulli_scalar_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(cauchy_stub, &CPU_CAPABILITY::cauchy_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(exponential_stub, &CPU_CAPABILITY::exponential_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(geometric_stub, &CPU_CAPABILITY::geometric_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(log_normal_stub, &CPU_CAPABILITY::log_normal_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(normal_stub, &CPU_CAPABILITY::normal_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(uniform_stub, &CPU_CAPABILITY::uniform_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(random_from_to_stub, &CPU_CAPABILITY::random_from_to_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(random_full_64_bits_range_stub, &CPU_CAPABILITY::random_full_64_bits_range_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(random_stub, &CPU_CAPABILITY::random_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(real_stub, &CPU_CAPABILITY::real_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(imag_stub, &CPU_CAPABILITY::imag_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(conj_stub, &CPU_CAPABILITY::conj_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(asin)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(atan)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(ceil)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(cos)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erf)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfc)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfinv)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(exp)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(expm1)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(floor)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(log)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(log10)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(log1p)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(log2)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(i0)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(round)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(sin)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(sqrt)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(tan)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(tanh)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(trunc)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(lgamma)
 
 } // namespace native
