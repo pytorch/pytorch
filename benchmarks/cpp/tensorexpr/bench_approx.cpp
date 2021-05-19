@@ -12,17 +12,18 @@ using namespace torch::jit::tensorexpr;
 
 void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
+  For *inner, *tail;
+  ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
 }
 
 void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], 16 * 8, &outer, &inner, &tail);
+  For *inner, *tail;
+  ln->splitWithTail(loops[0], 16 * 8, &inner, &tail);
+  For* outer = loops[0];
   ln->vectorize(inner);
-  ln->splitWithTail(outer, 8, &outer, &inner, &tail);
+  ln->splitWithTail(outer, 8, &inner, &tail);
   Stmt* unrolled;
   LoopNest::unroll(inner, &unrolled);
 }

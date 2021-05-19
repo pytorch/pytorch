@@ -1,6 +1,6 @@
 import torch
 from torch.fx import GraphModule
-from torch.fx.symbolic_trace import Tracer
+from torch.fx._symbolic_trace import Tracer
 from torch.fx.node import Target, Node, Argument
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401

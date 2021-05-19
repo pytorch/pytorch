@@ -1033,6 +1033,16 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
 
+    def test_return_none(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                pass
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+
     def test_default_quant_after_none_qconfig(self):
         """ Make sure default quant is inserted properly"""
         class M(torch.nn.Module):
@@ -2186,8 +2196,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict,
-            print_debug_info=True)
+            prepare_custom_config_dict=prepare_custom_config_dict)
 
         # quantizeable node, quantized output
         class M2(torch.nn.Module):
@@ -2209,8 +2218,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict,
-            print_debug_info=True)
+            prepare_custom_config_dict=prepare_custom_config_dict)
 
         # quantizeable node, quantized dictionary output
         class M3(torch.nn.Module):
@@ -2252,6 +2260,24 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
+
+    def test_output_lists_and_dicts(self):
+        """Verify that specifying complicated output types does not crash.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return {'foo': [x]}, [{'foo': [[x]]}]
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mc = convert_fx(mp)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
