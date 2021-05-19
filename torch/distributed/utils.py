@@ -47,7 +47,7 @@ def _parse_remote_device(remote_device: str):
     if len(fields) == 2:
         # rank:<rank>/device format, extract rank
         if fields[0] == 'rank' and fields[1].isdigit():
-            on = int(fields[1])
+            on = int(fields[1])  # type: ignore
         else:
             raise ValueError(PARSE_ERROR)
     elif len(fields) > 2:

@@ -8,7 +8,9 @@ Device = Union[torch.device, int, str]
 
 class PlacementSpec(ABC):
     """
-    Base class representing the placement of an entity.
+    Base class representing the placement of an entity. Subclasses of this
+    class can be used to specify customized placements which might not be
+    covered by existing APIs.
     """
     pass
 
