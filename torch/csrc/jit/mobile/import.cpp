@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -45,10 +46,22 @@
 //  ...)
 
 // In addition, the module debugging information can be saved
-// in mobile_debug.pkl. An example for it looks like:
+// in mobile_debug_handles.pkl. An example for it looks like:
 // (4,
 //  ('__torch__.m.forward',
-//   (('module_debug_info', (top(A).foo(B).forward)))))
+//   (('module_debug_handles', 10))))
+//   Here 10 is the debug handle.
+// We also store separately and optionally callstack_debug_map.
+// This serializes inlined callstack (InlinedCallStack data structure)
+// corresponding to the debug handles.
+// Callstack_debug_map serializes tuples of
+// (int64_t(debug_handle), int64_t(source_range_tag), InlinedCallStack)
+// source_range_tag maps to .debug_pkl files where this tag maps it to
+// source range.
+// InlinedCallStack is serialized as:
+// IValue(InlinedCallStack) = {IValue(ModuleInstanceInfo),
+// int64_t(source_range_tag), IValue(InlinedCallStack)} ModuleInstanceInfo is
+// serialized as a tuple of (class_type_name, instance_name)
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisited and redesigned if we want to
@@ -95,6 +108,89 @@ std::string operator_str(
   return result;
 }
 
+TypePtr resolveTypeNameMobile(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit) {
+  // HACK: first we check whether the name starts with special prefix to
+  // tell if it's a supported pytorch class type. There are two special
+  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
+  // This is a reliable
+  // check today, but there is no guarantee that this is the case. The
+  // real solution is to merge type parsers so we can share class
+  // resolution logic.
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  static const c10::QualifiedName jitPrefix = "torch.jit";
+  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
+    if (compilation_unit->get_class(qn) == nullptr) {
+      auto typeptr = ClassType::create(qn, compilation_unit, true);
+      compilation_unit->register_type(typeptr);
+    }
+    return compilation_unit->get_class(qn);
+  } else {
+    return c10::parseType(qn.qualifiedName());
+  }
+}
+
+c10::StrongTypePtr typeResolverMobile(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit) {
+  return c10::StrongTypePtr(
+      compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
+}
+
+c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
+    at::StrongTypePtr type,
+    IValue input,
+    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
+  auto cls = type.type_->expect<at::ClassType>();
+  auto qn = cls->name();
+  c10::QualifiedName method_name(qn.value(), "__setstate__");
+  auto setstate = mobile_compilation_unit->find_function(method_name);
+  auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+    auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+    if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
+      return custom_class_type;
+    }
+    return nullptr;
+  };
+  if (setstate) {
+    auto obj = c10::ivalue::Object::create(type, 0);
+    Stack stack({obj, input});
+    setstate->run(stack);
+    return obj;
+  } else if (auto custom_class_type = find_custom_class_with_setstate()) {
+    auto obj = c10::ivalue::Object::create(
+        c10::StrongTypePtr(nullptr, custom_class_type), 1);
+    Stack stack({obj, input});
+    custom_class_type->getMethod("__setstate__").run(stack);
+    return obj;
+  } else {
+    auto dict = std::move(input).toGenericDict();
+    size_t ndict = dict.size();
+    auto obj = c10::ivalue::Object::create(type, ndict);
+    auto it = dict.begin();
+    for (size_t i = 0; i < ndict; ++i) {
+      std::stringstream name;
+      name << it->key();
+      cls->addOrCheckAttribute(name.str(), it->key().type());
+      obj->setSlot(i, it->value());
+      ++it;
+    }
+    return obj;
+  }
+}
+
+bool isTensorInBytecodeArchive(
+    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+  auto records = stream_reader.getAllRecords();
+  for (const auto& record : records) {
+    if (record.find("bytecode/") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -130,7 +226,7 @@ class BytecodeDeserializer final {
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
   void parseMethods(
       const std::vector<IValue>& vals,
-      const c10::optional<std::vector<IValue>>& debug_info_vals,
+      const c10::optional<std::vector<IValue>>& debug_handles,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
@@ -171,10 +267,18 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() == 2, "There should be two parts in an operator name.");
+        op_item.size() >= 2,
+        "There should be either two parts (name and overload name), ",
+        "or three parts (name, overload name and number of specified args) ",
+        "for an operator");
+    c10::optional<int> num_args;
+    if (op_item.size() > 2) {
+      num_args = op_item[2].toInt();
+    }
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
+        num_args,
         model_version);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
@@ -185,29 +289,12 @@ std::unordered_set<std::string> BytecodeDeserializer::
 }
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  // HACK: first we check whether the name starts with special prefix to
-  // tell if it's a supported pytorch class type. There are two special
-  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
-  // This is a reliable
-  // check today, but there is no guarantee that this is the case. The
-  // real solution is to merge type parsers so we can share class
-  // resolution logic.
-  static const c10::QualifiedName torchPrefix = "__torch__";
-  static const c10::QualifiedName jitPrefix = "torch.jit";
-  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
-    }
-    return compilation_unit_->get_class(qn);
-  } else {
-    return c10::parseType(qn.qualifiedName());
-  }
+  return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
 void BytecodeDeserializer::parseMethods(
     const std::vector<IValue>& vals,
-    const c10::optional<std::vector<IValue>>& debug_info_vals,
+    const c10::optional<std::vector<IValue>>& debug_handles,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -232,10 +319,10 @@ void BytecodeDeserializer::parseMethods(
       "But the model version is ",
       model_version);
 
-  bool has_debug_info = debug_info_vals.has_value();
-  if (has_debug_info) {
+  bool has_debug_handles = debug_handles.has_value();
+  if (has_debug_handles) {
     TORCH_CHECK(
-        debug_info_vals->size() == vals.size(),
+        debug_handles->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
   }
 
@@ -274,28 +361,30 @@ void BytecodeDeserializer::parseMethods(
         expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    std::vector<IValue> module_debug_info_list;
-    if (has_debug_info) {
-      const auto& debug_info_element = (*debug_info_vals)[i];
-      const auto& debug_info_m_tuple = debug_info_element.toTuple()->elements();
+    std::vector<IValue> debug_handles_list;
+    if (has_debug_handles) {
+      const auto& debug_handles_element = (*debug_handles)[i];
+      const auto& debug_handles_m_tuple =
+          debug_handles_element.toTuple()->elements();
       const std::string& debug_info_function_name =
-          debug_info_m_tuple[0].toStringRef();
+          debug_handles_m_tuple[0].toStringRef();
       TORCH_CHECK(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
-      IValue debug_info_table = debug_info_m_tuple[1];
-      module_debug_info_list = expect_field(
-                                   debug_info_table,
-                                   "module_debug_info",
-                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
-                                   .toTuple()
-                                   ->elements();
+      IValue debug_handles_table = debug_handles_m_tuple[1];
+      debug_handles_list = (expect_field(
+                                debug_handles_table,
+                                "function_debug_handles",
+                                BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+                                .toTuple()
+                                ->elements())[0]
+                               .toList()
+                               .vec();
       TORCH_CHECK(
-          module_debug_info_list.size() == ops_list.size(),
-          "The numbers of operators and module info strings do not match.");
+          debug_handles_list.size() == ins_list.size(),
+          "The numbers of instructions and debug handles strings do not match.");
     }
 
-    function->set_module_debug_info_list_size(ins_list.size());
     for (size_t i = 0; i < ins_list.size(); ++i) {
       auto ins_item = ins_list[i].toTuple()->elements();
       TORCH_CHECK(
@@ -305,12 +394,11 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      function->append_instruction(op_code, X, N);
-      if (op_code == OP) {
-        std::string module_debug_info = (has_debug_info)
-            ? module_debug_info_list[X].toString()->string()
-            : "";
-        function->set_module_info(module_debug_info, i);
+      if (has_debug_handles) {
+        int64_t debug_handle = debug_handles_list[i].toInt();
+        function->append_instruction(op_code, X, N, debug_handle);
+      } else {
+        function->append_instruction(op_code, X, N);
       }
     }
 
@@ -435,13 +523,19 @@ mobile::Module BytecodeDeserializer::deserialize(
   //
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
-  c10::optional<std::vector<IValue>> debug_info_bvals;
-  if (reader_->hasRecord("mobile_debug.pkl")) {
-    debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
+  c10::optional<std::vector<IValue>> debug_handles;
+  if (reader_->hasRecord("mobile_debug_handles.pkl")) {
+    debug_handles =
+        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
-  parseMethods(bvals, debug_info_bvals, *mcu);
+  parseMethods(bvals, debug_handles, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
-  return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+  auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
+  m.setDebugTable(std::move(debug_table));
+#endif
+  return m;
 }
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
@@ -463,50 +557,26 @@ c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
   auto type_resolver = [this](const c10::QualifiedName& qn) {
-    return c10::StrongTypePtr(compilation_unit_, resolveTypeName(qn));
+    return typeResolverMobile(qn, compilation_unit_);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    auto cls = type.type_->expect<at::ClassType>();
-    auto qn = cls->name();
-    c10::QualifiedName method_name(qn.value(), "__setstate__");
-    auto setstate = mcu->find_function(method_name);
-    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
-      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
-        return custom_class_type;
-      }
-      return nullptr;
-    };
-    if (setstate) {
-      auto obj = c10::ivalue::Object::create(type, 0);
-      Stack stack({obj, input});
-      setstate->run(stack);
-      return obj;
-    } else if (auto custom_class_type = find_custom_class_with_setstate()) {
-      auto obj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(nullptr, custom_class_type), 1);
-      Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__").run(stack);
-      return obj;
-    } else {
-      auto dict = std::move(input).toGenericDict();
-      size_t ndict = dict.size();
-      auto obj = c10::ivalue::Object::create(type, ndict);
-      auto it = dict.begin();
-      for (size_t i = 0; i < ndict; ++i) {
-        std::stringstream name;
-        name << it->key();
-        cls->addOrCheckAttribute(name.str(), it->key().type());
-        obj->setSlot(i, it->value());
-        ++it;
-      }
-      return obj;
-    }
+    return objLoaderMobile(type, input, mcu);
   };
 
+  bool bytecode_tensor_in_constants_archive =
+      (archive_name == "bytecode" &&
+       !isTensorInBytecodeArchive(*reader_.get()));
+
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/
+      bytecode_tensor_in_constants_archive ? "constants/" : "",
+      type_resolver,
+      obj_loader,
+      device_,
+      *reader_.get());
   return ivalues;
 }
 
@@ -593,6 +663,18 @@ mobile::Module _load_for_mobile_impl(
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+  std::string error_message;
+  auto guard = c10::make_scope_exit([&]() {
+    if (!observer) {
+      return;
+    }
+
+    observer->onFailLoadModel(
+        instance_key,
+        error_message.empty() ? "Unknown exception" : error_message.c_str(),
+        deserializer.deserializeMetadata(device));
+  });
+
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
@@ -604,38 +686,11 @@ mobile::Module _load_for_mobile_impl(
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
+    guard.release();
     return result;
   } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailLoadModel(
-          instance_key,
-          error.what(),
-          // NOLINTNEXTLINE(performance-move-const-arg)
-          deserializer.deserializeMetadata(std::move(device)));
-    }
+    error_message = error.what();
     TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailLoadModel(
-            instance_key,
-            error.what(),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            deserializer.deserializeMetadata(std::move(device)));
-      }
-      TORCH_RETHROW(error);
-    }
   }
 }
 

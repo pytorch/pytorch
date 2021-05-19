@@ -126,7 +126,8 @@ void onnxifi(
     bool predictor_net_ssa_rewritten,
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
-    const c10::optional<size_t> &min_ops) {
+    const c10::optional<size_t> &min_ops,
+    const std::unordered_set<std::string> &blocklist_blobs) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -180,6 +181,13 @@ void onnxifi(
         ArgumentHelper helper(op);
         more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
+    }
+  }
+  // exclude blocklisted blobs, which is supposed to be loaded to NVM selectively.
+  for (const auto& op : net->op()) {
+    if (blocklist_blobs.count(op.input(0))) {
+      ArgumentHelper helper(op);
+      more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
     }
   }
 

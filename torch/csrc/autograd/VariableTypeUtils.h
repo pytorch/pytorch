@@ -213,8 +213,14 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) && is_bw_differentiable && is_fw_differentiable) {
     c10::optional<ViewInfo> new_shared_info;
     if (diff_view_meta) {
-      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // TODO: fix fb internal use-case so that it doesn't trigger this internal assert when the base is not a view.
+      // For now, we only do that same (wrong) thing as the old code which is to only check when the inputs is a
+      // backward differentiable view
+      if (diff_view_meta->has_bw_view()) {
+        TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
+            creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
+            "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
+      }
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       new_shared_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
@@ -229,6 +235,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
         tensor = make_variable_non_differentiable_view(base, tensor);
       }
     }
+    return tensors;
   }
 
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
@@ -238,8 +245,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
-      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // TODO: fix fb internal use-case so that it doesn't trigger this internal assert when the base is not a view.
+      // In this code, the assert should be outside of the if statement.
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
+          creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
+          "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
       new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
@@ -255,8 +265,9 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
-      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::NO_GRAD_MODE || creation_meta == CreationMeta::INFERENCE_MODE ||
+          creation_meta == CreationMeta::MULTI_OUTPUT_NODE,
+          "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
       new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
