@@ -185,7 +185,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    using ArgIndexInputIterator = detail::cub::ArgIndexInputIterator<InputIteratorT>;
+    using ArgIndexInputIterator = NO_ROCM(detail)::cub::ArgIndexInputIterator<InputIteratorT>;
     using tuple = typename ArgIndexInputIterator::value_type;
     auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
       if (x.key == 0) {
@@ -194,7 +194,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = detail::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+    auto input_ = NO_ROCM(detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
       ArgIndexInputIterator(input + i), input_iter_transform);
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
         input_,
