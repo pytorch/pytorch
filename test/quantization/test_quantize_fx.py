@@ -1013,12 +1013,14 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
-    def test_qconfig_validity(self):
+    def test_qconfig_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
         constructing a qconfig_dict, an error will be thrown and users will be
         notified of what keys are supported.
         """
+        qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1037,9 +1039,52 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare_fx(m, qconfig_dict)
         self.assertTrue(
             str(context.exception) ==
-            'Expected qconfig_dict to have global, object_type, ' +
-            'module_name_regex, or module_name as keys but found ' +
+            'Expected qconfig_dict to have the following keys: ' +
+            str(qconfig_dict_allowed_keys) + '. But found ' +
             '\'object_typo\' instead.'
+        )
+
+    def test_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a prepare_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        custom_config_dict_allowed_keys = {"standalone_module_name",
+                                           "standalone_module_class",
+                                           "float_to_observed_custom_module_class",
+                                           "non_traceable_module_name",
+                                           "non_traceable_module_class",
+                                           "additional_fuser_method_mapping",
+                                           "additional_qat__module_mapping",
+                                           "additional_fusion_pattern",
+                                           "additional_quant_pattern",
+                                           "input_quantized_idxs",
+                                           "output_quantized_idxs",
+                                           "preserved_attributes"}
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
+        prepare_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        self.assertTrue(
+            str(context.exception) ==
+            'Expected prepare_custom_config_dict to have the ' +
+            'following keys: ' + str(custom_config_dict_allowed_keys) +
+            '. But found \'typo\' instead.'
         )
 
     def test_remove_qconfig(self):
