@@ -69,7 +69,6 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::ones({10, 20});
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
@@ -108,7 +107,6 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::ones({10, 20});
 
   std::vector<at::Tensor> outputs;
@@ -116,9 +114,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<std::future<at::Tensor>> futures;
   for (size_t i = 0; i < nthreads; i++) {
     futures.push_back(std::async(std::launch::async, [&model]() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto input = torch::ones({10, 20});
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (int i = 0; i < 100; ++i) {
         model({input}).toTensor();
       }
@@ -137,4 +133,16 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   for (size_t i = 0; i < nthreads; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+}
+
+TEST(TorchpyTest, ThrowsSafely) {
+  // See explanation in deploy.h
+  torch::deploy::InterpreterManager manager(3);
+  EXPECT_THROW(manager.load_package("some garbage path"), c10::Error);
+
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
+  EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
+
+  auto model = p.load_pickle("model", "model.pkl");
+  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }

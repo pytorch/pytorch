@@ -57,11 +57,11 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       "crow_indices.numel() must be size(0) + 1, but got: ",
       crow_indices.numel());
   TORCH_CHECK(
-      col_indices.size(0) == values.size(0),
-      "col_indices and values must have equal sizes, but got col_indices.size(0): ",
-      col_indices.size(0),
-      ", values.size(0): ",
-      values.size(0));
+      col_indices.numel() == values.numel(),
+      "col_indices and values must have equal sizes, but got col_indices.numel(): ",
+      col_indices.numel(),
+      ", values.numel(): ",
+      values.numel());
 
   // Indices invariants
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
@@ -125,8 +125,7 @@ Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_i
       options.layout());
 
   SparseCsrTensor self = new_csr_tensor(options);
-  get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values);
+  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
   return self;
 }
 

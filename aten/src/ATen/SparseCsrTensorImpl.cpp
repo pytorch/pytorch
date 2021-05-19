@@ -57,17 +57,6 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       col_indices_(std::move(col_indices)),
       values_(std::move(values)) {}
 
-void SparseCsrTensorImpl::resize_and_clear_(
-    const int64_t nnz_size,
-    IntArrayRef size) {
-  at::native::resize_output(crow_indices_, size[0] + 1);
-  at::native::resize_output(col_indices_, nnz_size);
-  at::native::resize_output(values_, nnz_size);
-
-  sizes_and_strides_.set_sizes(size);
-  this->refresh_numel();
-}
-
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
   crow_indices_ = at::empty_like(
       src.crow_indices(),
@@ -82,13 +71,14 @@ void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
       src.values().options(),
       src.values().suggest_memory_format());
   sizes_and_strides_.set_sizes(src.sizes());
-  this->refresh_numel();
+  refresh_numel();
 }
 
 void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& crow_indices,
     const Tensor& col_indices,
-    const Tensor& values) {
+    const Tensor& values,
+    IntArrayRef size) {
 
   // CSR Type Invariants
   auto crow_indices_type = crow_indices.scalar_type();
@@ -134,5 +124,8 @@ void SparseCsrTensorImpl::set_member_tensors(
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;
   values_ = values;
+
+  sizes_and_strides_.set_sizes(size);
+  refresh_numel();
 }
 } // namespace at
