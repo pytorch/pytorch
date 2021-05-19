@@ -224,7 +224,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
   auto future = runPythonFunction(
-      uprc.pythonUdf(), std::move(lsctx), uprc.isAsyncExecution());
+      uprc.pythonUdf(), lsctx, uprc.isAsyncExecution());
 
   return assignOwnerRRef(
       uprc.rrefId(), uprc.forkId(), std::move(future), std::move(lsctx));
