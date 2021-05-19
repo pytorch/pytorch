@@ -30,9 +30,9 @@ at::Tensor PackedLinearWeight::apply_impl(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
   // TODO: contiguous is called for further jit optimizations.
-  auto input_contig = input.contiguous();
+  auto input_contig = input.expect_contiguous();
   const auto* input_ptr =
-      reinterpret_cast<uint8_t*>(input_contig.data_ptr<c10::quint8>());
+      reinterpret_cast<uint8_t*>(input_contig->data_ptr<c10::quint8>());
 
   TORCH_CHECK(
       input.dim() >= 2,
@@ -45,7 +45,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   auto packB = w.get();
 
   int64_t N = static_cast<int64_t>(packB->numCols());
-  int64_t K = input.size(input.dim() - 1);
+  int64_t K = input.sizes()[input.dim() - 1];
   TORCH_CHECK(
       K == static_cast<int64_t>(packB->numRows()),
       "The number of rows in the packB should be equal to K: " +
@@ -78,21 +78,21 @@ at::Tensor PackedLinearWeight::apply_impl(
   int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
   const float* bias_ptr = nullptr;
-  at::Tensor bias;
+  c10::MaybeOwned<at::Tensor> bias_contig;
   if (this->bias_.has_value()) {
-    bias = this->bias_.value();
-    bias = bias.contiguous();
-    TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+    auto& bias = this->bias_.value();
+    bias_contig = bias.expect_contiguous();
+    TORCH_CHECK(bias_contig->dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
-        bias.size(0) == N, "bias should have N elements: " + std::to_string(N));
-    bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+        bias_contig->sizes()[0] == N, "bias should have N elements: " + std::to_string(N));
+    bias_ptr = reinterpret_cast<float*>(bias_contig->data_ptr<float>());
   }
 
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  at::DimVector out_sizes(input.sizes());
   out_sizes.back() = N;
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::_empty_affine_quantized(
