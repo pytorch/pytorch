@@ -1078,21 +1078,11 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
-bool AllGraphInputsStatic(const Graph* g) {
-  for (auto n : g->inputs()) {
-    if (!n->isCompleteTensor()) {
-      return false;
-    }
-  }
-  return true;
-}
-
 void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update ConstantValueMap on node outputs from onnx shape inference
   // For outputs, only update static shapes. For input, we update symbolic
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
-  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i = 0; i < n->outputs().size(); i++) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1113,17 +1103,9 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
         ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
-        // Only update shape if the input is onnx node.
-        // If it is aten operators, for example,
-        //   Float(20, 20, strides=[1, 0], requires_grad=0, device=cpu),
-        //     %399 : Float(20, 20, strides=[0, 1], requires_grad=0, device=cpu)
-        //     = prim::ListUnpack(%397)
-        // The tracer shape may not be correct when dynamic_axes is enabled.
-        if (n->input(i)->node()->kind().is_onnx() || static_input_shape) {
-          auto shape = input_type->symbolic_sizes();
-          if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
-            UpdateShape(n->input(i), shape);
-          }
+        auto shape = input_type->symbolic_sizes();
+        if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
+          UpdateShape(n->input(i), shape);
         }
       }
     } else if (IsListConstructIntType(n->input(i))) {
@@ -1494,6 +1476,11 @@ size_t ONNXAssignOutputShape(
   } else if (PyList_Check(output_obj)) {
     size_t list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+      auto output_type = graph->outputs().at(outputs_index)->type();
+      TORCH_CHECK(
+          output_type->cast<ListType>(),
+          "Expected a sequence type, but received a non-iterable type in graph output index ",
+          outputs_index);
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
