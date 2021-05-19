@@ -23,6 +23,8 @@ def should_skip(obj: Any) -> bool:
         "re",
         "shutil",
         "numpy",
+        "pickle",
+        "json",
     ]
     for name in system_modules:
         if obj == importlib.import_module(name):
