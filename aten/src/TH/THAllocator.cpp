@@ -35,13 +35,14 @@ typedef struct {
 } THMapInfo;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-const char * unknown_filename = "filename not specified";
 #ifdef _WIN32
-const char * unknown_eventname = "eventname not specified";
+const std::string unknown_filename = "eventname not specified";
+#else
+const std::string unknown_filename = "filename not specified";
 #endif
 
 THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
-  : filename_(std::move(filename))
+  : filename_(filename.empty() ? unknown_filename : std::move(filename))
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
