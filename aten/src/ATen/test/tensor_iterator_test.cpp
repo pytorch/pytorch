@@ -67,7 +67,7 @@ TEST(TensorIteratorTest, SerialLoopUnary_##name) {                              
 TEST(TensorIteratorTest, SerialLoopUnaryNoOutput_##name) {                     \
   auto in = random_tensor_for_type(k##name);                                   \
   auto iter = at::TensorIteratorConfig()                                       \
-      .add_input(in)                                                           \
+      .add_owned_input(in)                                                           \
       .build();                                                                \
   int64_t acc = 0;                                                             \
   at::native::cpu_serial_kernel(iter, [&](ctype a) -> void { acc++; }); \
@@ -90,8 +90,8 @@ TEST(TensorIteratorTest, SerialLoopBinaryNoOutput_##name) {                     
   auto in1 = random_tensor_for_type(k##name);                                    \
   auto in2 = random_tensor_for_type(k##name);                                    \
   auto iter = at::TensorIteratorConfig()                                         \
-      .add_input(in1)                                                            \
-      .add_input(in2)                                                            \
+      .add_owned_input(in1)                                                            \
+      .add_owned_input(in2)                                                            \
       .build();                                                                  \
   int64_t acc = 0;                                                               \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b) -> void { acc++; }); \
@@ -107,9 +107,9 @@ TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                          
   auto expected = in1.add(in2).add(in3);                                                              \
   auto iter = at::TensorIteratorConfig()                                                              \
       .add_output(out)                                                                                \
-      .add_input(in1)                                                                                 \
-      .add_input(in2)                                                                                 \
-      .add_input(in3)                                                                                 \
+      .add_owned_input(in1)                                                                                 \
+      .add_owned_input(in2)                                                                                 \
+      .add_owned_input(in3)                                                                                 \
       .build();                                                                                       \
   at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> ctype { return a + b + c; }); \
   ASSERT_ANY_THROW(out.equal(expected));                                                              \
@@ -121,9 +121,9 @@ TEST(TensorIteratorTest, SerialLoopPoinwiseNoOutput_##name) {                   
   auto in2 = random_tensor_for_type(k##name);                                             \
   auto in3 = random_tensor_for_type(k##name);                                             \
   auto iter = at::TensorIteratorConfig()                                                  \
-      .add_input(in1)                                                                     \
-      .add_input(in2)                                                                     \
-      .add_input(in3)                                                                     \
+      .add_owned_input(in1)                                                                     \
+      .add_owned_input(in2)                                                                     \
+      .add_owned_input(in3)                                                                     \
       .build();                                                                           \
   int64_t acc = 0;                                                                        \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b, ctype c) -> void { acc++; }); \
@@ -183,8 +183,8 @@ TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
   EXPECT_TRUE(iter.input_dtype() == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(0) == at::kFloat);
@@ -195,8 +195,8 @@ TEST(TensorIteratorTest, InputDType) {
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .promote_inputs_to_common_dtype(true)
       .build();
   EXPECT_TRUE(iter.dtype(0) == at::kBool);
@@ -210,8 +210,8 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(at::ones({1, 1}, at::dtype(at::kLong)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
-      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
   EXPECT_TRUE(iter.dtype(0) == at::kLong);
   EXPECT_TRUE(iter.dtype(1) == at::kFloat);
@@ -223,8 +223,8 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   Tensor out;
   at::TensorIteratorConfig config;
   config.add_output(out);
-  config.add_input(at::ones({1,1}, at::dtype(at::kDouble)));
-  config.add_input(at::ones({1,1}, at::dtype(at::kInt)));
+  config.add_owned_input(at::ones({1,1}, at::dtype(at::kDouble)));
+  config.add_owned_input(at::ones({1,1}, at::dtype(at::kInt)));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(config.build());
 }
@@ -240,8 +240,8 @@ TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                     
   auto iter = at::TensorIteratorConfig()                                                            \
     .add_output(out1)                                                                               \
     .add_output(out2)                                                                               \
-    .add_input(in1)                                                                                 \
-    .add_input(in2)                                                                                 \
+    .add_owned_input(in1)                                                                                 \
+    .add_owned_input(in2)                                                                                 \
     .build();                                                                                       \
   at::native::cpu_kernel_multiple_outputs(iter, [=](ctype a, ctype b) -> std::tuple<ctype, ctype> { \
     ctype add = a + b;                                                                              \

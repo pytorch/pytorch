@@ -769,7 +769,7 @@ static TensorIterator build_addr_iter(Tensor& result,
     .set_check_mem_overlap(true)
     .add_borrowed_output(result)
     .add_borrowed_input(*self_)
-    .add_input(vec1.reshape({vec1_size0, 1}))
+    .add_owned_input(vec1.reshape({vec1_size0, 1}))
     .add_borrowed_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
