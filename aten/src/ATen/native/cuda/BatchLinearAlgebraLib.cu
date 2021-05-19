@@ -1262,17 +1262,17 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    int lda = std::max<int>(1, n);
     auto batch_size = batchCount(lu);
     auto infos = at::zeros(batch_size, lu.options().dtype(kInt));
     auto infos_data = infos.data_ptr<int>();
     auto b_data = b.data_ptr<scalar_t>();
     auto lu_data = lu.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
-    auto pivots_stride = cuda_int_cast(pivots.size(-1), "pivots_stride");
+    auto pivots_stride = pivots.size(-1);
     auto lu_stride = matrixStride(lu);
     auto b_stride = matrixStride(b);
-    int ldb = std::max<int>(1, nrhs);
+    int lda = cuda_int_cast(std::max<int>(1, lu_stride), "lda");
+    int ldb = cuda_int_cast(std::max<int>(1, b_stride), "ldb");
 
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       auto handle = at::cuda::getCurrentCUDASolverDnHandle();
