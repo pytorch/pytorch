@@ -666,8 +666,7 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     node = it.next();
   }
 
-  // The stack should not be empty; an Exit should have been found for every
-  // Enter.
+  // The stack should be empty; an Exit should have been found for every Enter.
   TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
 
   // Now, add a With block for each Enter-Exit pair. The innermost pairs were
