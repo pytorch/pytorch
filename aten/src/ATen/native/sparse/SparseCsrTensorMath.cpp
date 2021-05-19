@@ -37,10 +37,10 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& out) {
-  TORCH_INTERNAL_ASSERT(op1.is_sparse_csr());
+  AT_ASSERT(op1.is_sparse_csr());
   Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
-  TORCH_INTERNAL_ASSERT(expand_self.device().type() == kCPU);
+  AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(
       out.device().type() == kCPU,
       "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
