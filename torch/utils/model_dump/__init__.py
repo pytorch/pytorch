@@ -156,6 +156,12 @@ def hierarchical_pickle(data):
             ls, = data.args
             assert isinstance(ls, list)
             return hierarchical_pickle(ls)
+        if typename == "torch.device":
+            assert data.state is None
+            name, = data.args
+            assert isinstance(name, str)
+            # Just forget that it was a device and return the name.
+            return name
         raise Exception(f"Can't prepare fake object of type for JS: {typename}")
     raise Exception(f"Can't prepare data of type for JS: {type(data)}")
 
