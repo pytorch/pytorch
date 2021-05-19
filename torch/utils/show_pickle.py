@@ -5,7 +5,7 @@ import struct
 import pprint
 import zipfile
 import fnmatch
-from typing import IO, BinaryIO, Union
+from typing import Any, IO, BinaryIO, Union
 
 
 class FakeObject(object):
@@ -59,7 +59,10 @@ class FakeClass(object):
 
 
 class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
-    def __init__(self, file, *,
+    def __init__(
+            self,
+            file,
+            *,
             catch_invalid_utf8=False,
             **kwargs):
         super().__init__(file, **kwargs)
@@ -71,7 +74,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     def persistent_load(self, pid):
         return FakeObject("pers", "obj", (pid,))
 
-    dispatch = dict(pickle._Unpickler.dispatch)
+    dispatch = dict(pickle._Unpickler.dispatch)  # type: ignore[attr-defined]
 
     # Custom objects in TorchScript are able to return invalid UTF-8 strings
     # from their pickle (__getstate__) functions.  Install a custom loader
@@ -82,6 +85,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
         if strlen > sys.maxsize:
             raise Exception("String too long.")
         str_bytes = self.read(strlen)
+        obj: Any
         try:
             obj = str(str_bytes, "utf-8", "surrogatepass")
         except UnicodeDecodeError as exn:
