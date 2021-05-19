@@ -20,7 +20,7 @@
 #include <type_traits>
 #include <bitset>
 
-#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
@@ -41,7 +41,7 @@
 #endif
 
 namespace at {
-namespace vec256 {
+namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 // at::Half and at::BFloat16 should be treated as floating point
@@ -72,7 +72,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 
 // emulates vectorized types
 template <class T>
-struct Vec256 {
+struct Vectorized {
 private:
   __at_align32__ T values[32 / sizeof(T)];
 public:
@@ -96,7 +96,7 @@ public:
   // definition, you get a compile error like:
   //
   //    relocation R_X86_64_PC32 against undefined symbol
-  //    `_ZN2at6vec25612_GLOBAL__N_16Vec256IdE4sizeE' can not be used when making
+  //    `_ZN2at6vec25612_GLOBAL__N_16VectorizedIdE4sizeE' can not be used when making
   //    a shared object; recompile with -fPIC
   //
   // If this were C++17, we could replace a static constexpr variable with
@@ -113,15 +113,15 @@ public:
   static constexpr size_type size() {
     return 32 / sizeof(T);
   }
-  Vec256() : values{0} {}
-  Vec256(T val) {
+  Vectorized() : values{0} {}
+  Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
     }
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vec256(Args... vals) : values{vals...}{
+  Vectorized(Args... vals) : values{vals...}{
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
@@ -132,9 +132,9 @@ public:
     return values;
   }
   template <int64_t mask_>
-  static Vec256<T> blend(const Vec256<T>& a, const Vec256<T>& b) {
+  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
     int64_t mask = mask_;
-    Vec256 vec;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (mask & 0x01) {
         vec[i] = b[i];
@@ -145,9 +145,9 @@ public:
     }
     return vec;
   }
-  static Vec256<T> blendv(const Vec256<T>& a, const Vec256<T>& b,
-                          const Vec256<T>& mask) {
-    Vec256 vec;
+  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
+                          const Vectorized<T>& mask) {
+    Vectorized vec;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
     for (int64_t i = 0; i < size(); i++) {
@@ -161,15 +161,15 @@ public:
     return vec;
   }
   template<typename step_t>  // step sometimes requires a higher precision type (e.g., T=int, step_t=double)
-  static Vec256<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
-    Vec256 vec;
+  static Vectorized<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       vec.values[i] = base + i * step;
     }
     return vec;
   }
-  static Vec256<T> set(const Vec256<T>& a, const Vec256<T>& b, int64_t count = size()) {
-    Vec256 vec;
+  static Vectorized<T> set(const Vectorized<T>& a, const Vectorized<T>& b, int64_t count = size()) {
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (i < count) {
         vec[i] = b[i];
@@ -179,13 +179,13 @@ public:
     }
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr) {
-    Vec256 vec;
+  static Vectorized<T> loadu(const void* ptr) {
+    Vectorized vec;
     std::memcpy(vec.values, ptr, 32);
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr, int64_t count) {
-    Vec256 vec;
+  static Vectorized<T> loadu(const void* ptr, int64_t count) {
+    Vectorized vec;
     std::memcpy(vec.values, ptr, count * sizeof(T));
     return vec;
   }
@@ -202,8 +202,8 @@ public:
     }
     return mask;
   }
-  Vec256<T> isnan() const {
-    Vec256<T> vec;
+  Vectorized<T> isnan() const {
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (_isnan(values[i])) {
         std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
@@ -213,15 +213,15 @@ public:
     }
     return vec;
   }
-  Vec256<T> map(T (*f)(T)) const {
-    Vec256<T> ret;
+  Vectorized<T> map(T (*f)(T)) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
     }
     return ret;
   }
-  Vec256<T> map(T (*f)(const T &)) const {
-    Vec256<T> ret;
+  Vectorized<T> map(T (*f)(const T &)) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
     }
@@ -229,14 +229,14 @@ public:
   }
   template <typename other_t_abs = T,
             typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex<other_t_abs>::value, int>::type = 0>
-  Vec256<T> abs() const {
+  Vectorized<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
             typename std::enable_if<is_floating_point<float_t_abs>::value, int>::type = 0>
-  Vec256<T> abs() const {
+  Vectorized<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
@@ -245,7 +245,7 @@ public:
   }
   template <typename complex_t_abs = T,
             typename std::enable_if<c10::is_complex<complex_t_abs>::value, int>::type = 0>
-  Vec256<T> abs() const {
+  Vectorized<T> abs() const {
     // complex_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_abs, T>::value, "complex_t_abs must be T");
     // Specifically map() does not perform the type conversion needed by abs.
@@ -254,77 +254,77 @@ public:
 
   template <typename other_t_sgn = T,
             typename std::enable_if<c10::is_complex<other_t_sgn>::value, int>::type = 0>
-  Vec256<T> sgn() const {
+  Vectorized<T> sgn() const {
     return map(at::native::sgn_impl);
   }
 
   template <typename other_t_angle = T,
             typename std::enable_if<!c10::is_complex<other_t_angle>::value, int>::type = 0>
-  Vec256<T> angle() const {
+  Vectorized<T> angle() const {
     // other_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_angle, T>::value, "other_t_angle must be T");
     return map(at::native::angle_impl<T>);  // compiler is unable to resolve the overload without <T>
   }
   template <typename complex_t_angle = T,
             typename std::enable_if<c10::is_complex<complex_t_angle>::value, int>::type = 0>
-  Vec256<T> angle() const {
+  Vectorized<T> angle() const {
     // complex_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_angle, T>::value, "complex_t_angle must be T");
     return map([](T x) { return static_cast<T>(std::arg(x)); });
   }
   template <typename other_t_real = T,
             typename std::enable_if<!c10::is_complex<other_t_real>::value, int>::type = 0>
-  Vec256<T> real() const {
+  Vectorized<T> real() const {
     // other_t_real is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_real, T>::value, "other_t_real must be T");
     return *this;
   }
   template <typename complex_t_real = T,
             typename std::enable_if<c10::is_complex<complex_t_real>::value, int>::type = 0>
-  Vec256<T> real() const {
+  Vectorized<T> real() const {
     // complex_t_real is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_real, T>::value, "complex_t_real must be T");
     return map([](T x) { return static_cast<T>(x.real()); });
   }
   template <typename other_t_imag = T,
             typename std::enable_if<!c10::is_complex<other_t_imag>::value, int>::type = 0>
-  Vec256<T> imag() const {
+  Vectorized<T> imag() const {
     // other_t_imag is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_imag, T>::value, "other_t_imag must be T");
-    return Vec256(0);
+    return Vectorized(0);
   }
   template <typename complex_t_imag = T,
             typename std::enable_if<c10::is_complex<complex_t_imag>::value, int>::type = 0>
-  Vec256<T> imag() const {
+  Vectorized<T> imag() const {
     // complex_t_imag is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_imag, T>::value, "complex_t_imag must be T");
     return map([](T x) { return static_cast<T>(x.imag()); });
   }
   template <typename other_t_conj = T,
             typename std::enable_if<!c10::is_complex<other_t_conj>::value, int>::type = 0>
-  Vec256<T> conj() const {
+  Vectorized<T> conj() const {
     // other_t_conj is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_conj, T>::value, "other_t_conj must be T");
     return *this;
   }
   template <typename complex_t_conj = T,
             typename std::enable_if<c10::is_complex<complex_t_conj>::value, int>::type = 0>
-  Vec256<T> conj() const {
+  Vectorized<T> conj() const {
     // complex_t_conj is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_conj, T>::value, "complex_t_conj must be T");
     return map([](T x) { return static_cast<T>(std::conj(x)); });
   }
-  Vec256<T> acos() const {
+  Vectorized<T> acos() const {
     return map(std::acos);
   }
-  Vec256<T> asin() const {
+  Vectorized<T> asin() const {
     return map(std::asin);
   }
-  Vec256<T> atan() const {
+  Vectorized<T> atan() const {
     return map(std::atan);
   }
-  Vec256<T> atan2(const Vec256<T> &exp) const {
-    Vec256<T> ret;
+  Vectorized<T> atan2(const Vectorized<T> &exp) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::atan2(values[i], exp[i]);
     }
@@ -333,152 +333,152 @@ public:
   template <
     typename U = T,
     typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
-  Vec256<T> copysign(const Vec256<T> &sign) const {
-    Vec256<T> ret;
+  Vectorized<T> copysign(const Vectorized<T> &sign) const {
+    Vectorized<T> ret;
     for (size_type i = 0; i < size(); i++) {
       ret[i] = c10::copysign(values[i], sign[i]);
     }
     return ret;
   }
-  Vec256<T> erf() const {
+  Vectorized<T> erf() const {
     return map(std::erf);
   }
-  Vec256<T> erfc() const {
+  Vectorized<T> erfc() const {
     return map(std::erfc);
   }
-  Vec256<T> erfinv() const {
+  Vectorized<T> erfinv() const {
     return map(calc_erfinv);
   }
-  Vec256<T> exp() const {
+  Vectorized<T> exp() const {
     return map(std::exp);
   }
-  Vec256<T> expm1() const {
+  Vectorized<T> expm1() const {
     return map(std::expm1);
   }
-  Vec256<T> frac() const {
+  Vectorized<T> frac() const {
     return *this - this->trunc();
   }
   template <
     typename U = T,
     typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
-  Vec256<T> fmod(const Vec256<T>& q) const {
+  Vectorized<T> fmod(const Vectorized<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
     static_assert(std::is_same<U, T>::value, "U must be T");
-    Vec256<T> ret;
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::fmod(values[i], q[i]);
     }
     return ret;
   }
-  Vec256<T> log() const {
+  Vectorized<T> log() const {
     return map(std::log);
   }
-  Vec256<T> log10() const {
+  Vectorized<T> log10() const {
     return map(std::log10);
   }
-  Vec256<T> log1p() const {
+  Vectorized<T> log1p() const {
     return map(std::log1p);
   }
   template <typename other_t_log2 = T,
             typename std::enable_if<!c10::is_complex<other_t_log2>::value, int>::type = 0>
-  Vec256<T> log2() const {
+  Vectorized<T> log2() const {
     // other_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_log2, T>::value, "other_t_log2 must be T");
     return map(std::log2);
   }
   template <typename complex_t_log2 = T,
             typename std::enable_if<c10::is_complex<complex_t_log2>::value, int>::type = 0>
-  Vec256<T> log2() const {
+  Vectorized<T> log2() const {
     // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
     const T log_2 = T(std::log(2.0));
-    return Vec256(map(std::log))/Vec256(log_2);
+    return Vectorized(map(std::log))/Vectorized(log_2);
   }
-  Vec256<T> ceil() const {
+  Vectorized<T> ceil() const {
     return map(at::native::ceil_impl);
   }
-  Vec256<T> cos() const {
+  Vectorized<T> cos() const {
     return map(std::cos);
   }
-  Vec256<T> cosh() const {
+  Vectorized<T> cosh() const {
     return map(std::cosh);
   }
-  Vec256<T> floor() const {
+  Vectorized<T> floor() const {
     return map(at::native::floor_impl);
   }
-  Vec256<T> hypot(const Vec256<T> &b) const {
-    Vec256<T> ret;
+  Vectorized<T> hypot(const Vectorized<T> &b) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::hypot(values[i], b[i]);
     }
     return ret;
   }
-  Vec256<T> i0() const {
+  Vectorized<T> i0() const {
     return map(calc_i0);
   }
-  Vec256<T> i0e() const {
+  Vectorized<T> i0e() const {
     return map(calc_i0e);
   }
-  Vec256<T> igamma(const Vec256<T> &x) const {
-    Vec256<T> ret;
+  Vectorized<T> igamma(const Vectorized<T> &x) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = calc_igamma(values[i], x[i]);
     }
     return ret;
   }
-  Vec256<T> igammac(const Vec256<T> &x) const {
-    Vec256<T> ret;
+  Vectorized<T> igammac(const Vectorized<T> &x) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = calc_igammac(values[i], x[i]);
     }
     return ret;
   }
-  Vec256<T> neg() const {
+  Vectorized<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a
     // promotion
     return map([](T x) -> T { return -x; });
   }
-  Vec256<T> nextafter(const Vec256<T> &b) const {
-    Vec256<T> ret;
+  Vectorized<T> nextafter(const Vectorized<T> &b) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::nextafter(values[i], b[i]);
     }
     return ret;
   }
-  Vec256<T> round() const {
+  Vectorized<T> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(at::native::round_impl);
   }
-  Vec256<T> sin() const {
+  Vectorized<T> sin() const {
     return map(std::sin);
   }
-  Vec256<T> sinh() const {
+  Vectorized<T> sinh() const {
     return map(std::sinh);
   }
-  Vec256<T> tan() const {
+  Vectorized<T> tan() const {
     return map(std::tan);
   }
-  Vec256<T> tanh() const {
+  Vectorized<T> tanh() const {
     return map(std::tanh);
   }
-  Vec256<T> trunc() const {
+  Vectorized<T> trunc() const {
     return map(at::native::trunc_impl);
   }
-  Vec256<T> lgamma() const {
+  Vectorized<T> lgamma() const {
     return map(std::lgamma);
   }
-  Vec256<T> sqrt() const {
+  Vectorized<T> sqrt() const {
     return map(std::sqrt);
   }
-  Vec256<T> reciprocal() const {
+  Vectorized<T> reciprocal() const {
     return map([](T x) { return (T)(1) / x; });
   }
-  Vec256<T> rsqrt() const {
+  Vectorized<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });
   }
-  Vec256<T> pow(const Vec256<T> &exp) const {
-    Vec256<T> ret;
+  Vectorized<T> pow(const Vectorized<T> &exp) const {
+    Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::pow(values[i], exp[i]);
     }
@@ -486,9 +486,9 @@ public:
   }
 private:
   template <typename Op>
-  inline Vec256<T> binary_pred(const Vec256<T>& other, Op op) const {
+  inline Vectorized<T> binary_pred(const Vectorized<T>& other, Op op) const {
     // All bits are set to 1 if the pred is true, otherwise 0.
-    Vec256<T> vec;
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (op(values[i], other.values[i])) {
         std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
@@ -500,18 +500,18 @@ private:
   }
 
 public:
-  Vec256<T> operator==(const Vec256<T>& other) const { return binary_pred(other, std::equal_to<T>()); }
-  Vec256<T> operator!=(const Vec256<T>& other) const { return binary_pred(other, std::not_equal_to<T>()); }
-  Vec256<T> operator>=(const Vec256<T>& other) const { return binary_pred(other, std::greater_equal<T>()); }
-  Vec256<T> operator<=(const Vec256<T>& other) const { return binary_pred(other, std::less_equal<T>()); }
-  Vec256<T> operator>(const Vec256<T>& other) const { return binary_pred(other, std::greater<T>()); }
-  Vec256<T> operator<(const Vec256<T>& other) const { return binary_pred(other, std::less<T>()); }
+  Vectorized<T> operator==(const Vectorized<T>& other) const { return binary_pred(other, std::equal_to<T>()); }
+  Vectorized<T> operator!=(const Vectorized<T>& other) const { return binary_pred(other, std::not_equal_to<T>()); }
+  Vectorized<T> operator>=(const Vectorized<T>& other) const { return binary_pred(other, std::greater_equal<T>()); }
+  Vectorized<T> operator<=(const Vectorized<T>& other) const { return binary_pred(other, std::less_equal<T>()); }
+  Vectorized<T> operator>(const Vectorized<T>& other) const { return binary_pred(other, std::greater<T>()); }
+  Vectorized<T> operator<(const Vectorized<T>& other) const { return binary_pred(other, std::less<T>()); }
 
 private:
   template <typename Op>
-  inline Vec256<T> binary_pred_bool(const Vec256<T>& other, Op op) const {
+  inline Vectorized<T> binary_pred_bool(const Vectorized<T>& other, Op op) const {
     // 1 if the pred is true, otherwise 0.
-    Vec256<T> vec;
+    Vectorized<T> vec;
     for (int i = 0; i != size(); ++ i) {
       vec[i] = bool(op(values[i], other.values[i]));
     }
@@ -519,50 +519,50 @@ private:
   }
 
 public:
-  Vec256<T> eq(const Vec256<T>& other) const { return binary_pred_bool(other, std::equal_to<T>()); }
-  Vec256<T> ne(const Vec256<T>& other) const { return binary_pred_bool(other, std::not_equal_to<T>()); }
-  Vec256<T> gt(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater<T>()); }
-  Vec256<T> ge(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater_equal<T>()); }
-  Vec256<T> lt(const Vec256<T>& other) const { return binary_pred_bool(other, std::less<T>()); }
-  Vec256<T> le(const Vec256<T>& other) const { return binary_pred_bool(other, std::less_equal<T>()); }
+  Vectorized<T> eq(const Vectorized<T>& other) const { return binary_pred_bool(other, std::equal_to<T>()); }
+  Vectorized<T> ne(const Vectorized<T>& other) const { return binary_pred_bool(other, std::not_equal_to<T>()); }
+  Vectorized<T> gt(const Vectorized<T>& other) const { return binary_pred_bool(other, std::greater<T>()); }
+  Vectorized<T> ge(const Vectorized<T>& other) const { return binary_pred_bool(other, std::greater_equal<T>()); }
+  Vectorized<T> lt(const Vectorized<T>& other) const { return binary_pred_bool(other, std::less<T>()); }
+  Vectorized<T> le(const Vectorized<T>& other) const { return binary_pred_bool(other, std::less_equal<T>()); }
 };
 
-template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] + b[i];
   }
   return c;
 }
 
-template <class T> Vec256<T> inline operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] - b[i];
   }
   return c;
 }
 
-template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] * b[i];
   }
   return c;
 }
 
-template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] / b[i];
   }
   return c;
 }
 
-template <class T> Vec256<T> inline operator||(
-    const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+template <class T> Vectorized<T> inline operator||(
+    const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] || b[i];
   }
   return c;
@@ -572,9 +572,9 @@ template <class T> Vec256<T> inline operator||(
 // either input is a NaN.
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
@@ -588,9 +588,9 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) > std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
@@ -606,9 +606,9 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 // either input is a NaN.
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
@@ -622,9 +622,9 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) < std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
@@ -638,9 +638,9 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec, const Vectorized<T> &max_vec) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
   return c;
@@ -648,9 +648,9 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_vec) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
   }
   return c;
@@ -658,41 +658,41 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_vec) {
+  Vectorized<T> c = Vectorized<T>();
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
   }
   return c;
 }
 
-struct Vec256i;
+struct Vectorizedi;
 
 #ifdef CPU_CAPABILITY_AVX2
 
 template <class T, typename Op>
-static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
+static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   __m256i buffer;
   __m256i a_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)a));
   __m256i b_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)b));
   buffer = op(a_buffer, b_buffer);
-  __at_align32__ T results[Vec256<T>::size()];
+  __at_align32__ T results[Vectorized<T>::size()];
   _mm256_storeu_si256(reinterpret_cast<__m256i*>(results), buffer);
-  return Vec256<T>::loadu(results);
+  return Vectorized<T>::loadu(results);
 }
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm256_and_si256 with lambda because it is always_inline
   return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_and_si256(a, b); });
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm256_or_si256 with lambda because it is always_inline
   return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_or_si256(a, b); });
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm256_xor_si256 with lambda because it is always_inline
   return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_xor_si256(a, b); });
 }
@@ -700,7 +700,7 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 #else
 
 template<class T, typename Op>
-static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
+static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = 32 / sizeof(intmax_t);
   __at_align32__ intmax_t buffer[element_no];
   const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
@@ -708,81 +708,81 @@ static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b
   for (uint32_t i = 0U; i < element_no; ++ i) {
     buffer[i] = op(a_ptr[i], b_ptr[i]);
   }
-  return Vec256<T>::loadu(buffer);
+  return Vectorized<T>::loadu(buffer);
 }
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_and<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_or<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
 }
 
 #endif
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator~(const Vec256<T>& a) {
-  Vec256<T> ones;  // All bits are 1
+template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+inline Vectorized<T> operator~(const Vectorized<T>& a) {
+  Vectorized<T> ones;  // All bits are 1
   memset((T*) ones, 0xFF, 32);
   return a ^ ones;
 }
 
 
 template <typename T>
-inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a + b;
   return a;
 }
 template <typename T>
-inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+inline Vectorized<T>& operator -= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a - b;
   return a;
 }
 template <typename T>
-inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+inline Vectorized<T>& operator /= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a / b;
   return a;
 }
 template <typename T>
-inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+inline Vectorized<T>& operator %= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a % b;
   return a;
 }
 template <typename T>
-inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a * b;
   return a;
 }
 
 template <typename T>
-inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
+inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
   return a * b + c;
 }
 
 template <int64_t scale = 1, typename T = void>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
-inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
-  static constexpr int size = Vec256<T>::size();
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
+inline gather(T const* base_addr, const Vectorized<int_same_size_t<T>>& vindex) {
+  static constexpr int size = Vectorized<T>::size();
   int_same_size_t<T> index_arr[size];
   vindex.store(static_cast<void*>(index_arr));
   T buffer[size];
   for (int64_t i = 0; i < size; i++) {
     buffer[i] = base_addr[index_arr[i] * scale / sizeof(T)];
   }
-  return Vec256<T>::loadu(static_cast<void*>(buffer));
+  return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
 template <int64_t scale = 1, typename T = void>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
-inline mask_gather(const Vec256<T>& src, T const* base_addr,
-                   const Vec256<int_same_size_t<T>>& vindex, Vec256<T>& mask) {
-  static constexpr int size = Vec256<T>::size();
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
+inline mask_gather(const Vectorized<T>& src, T const* base_addr,
+                   const Vectorized<int_same_size_t<T>>& vindex, Vectorized<T>& mask) {
+  static constexpr int size = Vectorized<T>::size();
   T src_arr[size];
   int_same_size_t<T> mask_arr[size];  // use int type so we can logical and
   int_same_size_t<T> index_arr[size];
@@ -797,8 +797,8 @@ inline mask_gather(const Vec256<T>& src, T const* base_addr,
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vec256<T>();  // "zero out" mask
-  return Vec256<T>::loadu(static_cast<void*>(buffer));
+  mask = Vectorized<T>();  // "zero out" mask
+  return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
 // Cast a given vector to another type without changing the bits representation.
@@ -809,45 +809,45 @@ namespace {
   // partially specialize a templated function.
   template<typename dst_t, typename src_t>
   struct CastImpl {
-    static inline Vec256<dst_t> apply(const Vec256<src_t>& src) {
-      src_t src_arr[Vec256<src_t>::size()];
+    static inline Vectorized<dst_t> apply(const Vectorized<src_t>& src) {
+      src_t src_arr[Vectorized<src_t>::size()];
       src.store(static_cast<void*>(src_arr));
-      return Vec256<dst_t>::loadu(static_cast<const void*>(src_arr));
+      return Vectorized<dst_t>::loadu(static_cast<const void*>(src_arr));
     }
   };
 
   template<typename scalar_t>
   struct CastImpl<scalar_t, scalar_t> {
-    static inline Vec256<scalar_t> apply(const Vec256<scalar_t>& src) {
+    static inline Vectorized<scalar_t> apply(const Vectorized<scalar_t>& src) {
       return src;
     }
   };
 }
 template<typename dst_t, typename src_t>
-inline Vec256<dst_t> cast(const Vec256<src_t>& src) {
+inline Vectorized<dst_t> cast(const Vectorized<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
 }
 
 template <typename T>
-inline Vec256<int_same_size_t<T>> convert_to_int_of_same_size(const Vec256<T>& src) {
-  static constexpr int size = Vec256<T>::size();
+inline Vectorized<int_same_size_t<T>> convert_to_int_of_same_size(const Vectorized<T>& src) {
+  static constexpr int size = Vectorized<T>::size();
   T src_arr[size];
   src.store(static_cast<void*>(src_arr));
   int_same_size_t<T> buffer[size];
   for (int64_t i = 0; i < size; i++) {
     buffer[i] = static_cast<int_same_size_t<T>>(src_arr[i]);
   }
-  return Vec256<int_same_size_t<T>>::loadu(static_cast<void*>(buffer));
+  return Vectorized<int_same_size_t<T>>::loadu(static_cast<void*>(buffer));
 }
 
-// E.g., inputs: a           Vec256<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
-//               b           Vec256<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
-//       returns:            Vec256<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
-//                           Vec256<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
+// E.g., inputs: a           Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
+//               b           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
+//       returns:            Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
+//                           Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 template <typename T>
-inline std::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
-deinterleave2(const Vec256<T>& a, const Vec256<T>& b) {
-  static constexpr int size = Vec256<T>::size();
+inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
+deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
+  static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
   T a_arr[size];
   T b_arr[size];
@@ -861,19 +861,19 @@ deinterleave2(const Vec256<T>& a, const Vec256<T>& b) {
     buffer2[i] = a_arr[i * 2 + 1];
     buffer2[half_size + i] = b_arr[i * 2 + 1];
   }
-  return std::make_pair(Vec256<T>::loadu(static_cast<void*>(buffer1)),
-                        Vec256<T>::loadu(static_cast<void*>(buffer2)));
+  return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
+                        Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
 
 // inverse operation of deinterleave2
-// E.g., inputs: a           Vec256<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
-//               b           Vec256<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
-//       returns:            Vec256<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
-//                           Vec256<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
+// E.g., inputs: a           Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
+//               b           Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
+//       returns:            Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
+//                           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
 template <typename T>
-inline std::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
-interleave2(const Vec256<T>& a, const Vec256<T>& b) {
-  static constexpr int size = Vec256<T>::size();
+inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
+interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
+  static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
   T a_arr[size];
   T b_arr[size];
@@ -887,8 +887,8 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
     buffer2[i * 2] = a_arr[half_size + i];
     buffer2[i * 2 + 1] = b_arr[half_size + i];
   }
-  return std::make_pair(Vec256<T>::loadu(static_cast<void*>(buffer1)),
-                        Vec256<T>::loadu(static_cast<void*>(buffer2)));
+  return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
+                        Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
 
 template <typename src_T, typename dst_T>

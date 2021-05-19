@@ -21,9 +21,9 @@
 /* GCC-compatible compiler, targeting ARM with NEON */
 #include <arm_neon.h>
 #if defined (MISSING_ARM_VLD1)
-#include <ATen/cpu/vec256/missing_vld1_neon.h>
+#include <ATen/cpu/vec/vec256/missing_vld1_neon.h>
 #elif defined (MISSING_ARM_VST1)
-#include <ATen/cpu/vec256/missing_vst1_neon.h>
+#include <ATen/cpu/vec/vec256/missing_vst1_neon.h>
 #endif
 #elif defined(__GNUC__) && defined(__IWMMXT__)
 /* GCC-compatible compiler, targeting ARM with WMMX */

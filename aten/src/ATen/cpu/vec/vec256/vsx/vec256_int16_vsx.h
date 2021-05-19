@@ -1,15 +1,15 @@
 #pragma once
 
-#include <ATen/cpu/vec256/intrinsics.h>
-#include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/cpu/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {
-namespace vec256 {
+namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
 template <>
-class Vec256<int16_t> {
+class Vectorized<int16_t> {
  private:
   union {
     struct {
@@ -31,15 +31,15 @@ class Vec256<int16_t> {
   static constexpr size_type size() {
     return 16;
   }
-  Vec256() {}
-  C10_ALWAYS_INLINE Vec256(vint16 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vec256(vbool16 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vec256(vint16 v1, vint16 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vec256(vbool16 v1, vbool16 v2) : _vecb0{v1}, _vecb1{v2} {}
-  C10_ALWAYS_INLINE Vec256(int16_t scalar)
+  Vectorized() {}
+  C10_ALWAYS_INLINE Vectorized(vint16 v) : _vec0{v}, _vec1{v} {}
+  C10_ALWAYS_INLINE Vectorized(vbool16 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  C10_ALWAYS_INLINE Vectorized(vint16 v1, vint16 v2) : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool16 v1, vbool16 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(int16_t scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
 
-  C10_ALWAYS_INLINE Vec256(
+  C10_ALWAYS_INLINE Vectorized(
       int16_t scalar1,
       int16_t scalar2,
       int16_t scalar3,
@@ -82,26 +82,26 @@ class Vec256<int16_t> {
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<mask == 0, Vec256<int16_t>> C10_ALWAYS_INLINE
-  blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  static std::enable_if_t<mask == 0, Vectorized<int16_t>> C10_ALWAYS_INLINE
+  blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     return a;
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask & 65535) == 65535, Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  static std::enable_if_t<(mask & 65535) == 65535, Vectorized<int16_t>>
+      C10_ALWAYS_INLINE blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     return b;
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<mask == 255, Vec256<int16_t>> C10_ALWAYS_INLINE
-  blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  static std::enable_if_t<mask == 255, Vectorized<int16_t>> C10_ALWAYS_INLINE
+  blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     return {b._vec0, a._vec1};
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask > 0 && mask < 255), Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  static std::enable_if_t<(mask > 0 && mask < 255), Vectorized<int16_t>>
+      C10_ALWAYS_INLINE blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     constexpr int16_t g0 = (mask & 1) * 0xffff;
     constexpr int16_t g1 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2 = ((mask & 4) >> 2) * 0xffff;
@@ -118,8 +118,8 @@ class Vec256<int16_t> {
   template <uint64_t mask>
   static std::enable_if_t<
       (mask > 255 && (mask & 65535) != 65535 && ((mask & 255) == 255)),
-      Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      Vectorized<int16_t>>
+      C10_ALWAYS_INLINE blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     constexpr int16_t g0_2 = (mask & 1) * 0xffff;
     constexpr int16_t g1_2 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2_2 = ((mask & 4) >> 2) * 0xffff;
@@ -138,8 +138,8 @@ class Vec256<int16_t> {
   template <uint64_t mask>
   static std::enable_if_t<
       (mask > 255 && ((mask & 65535) != 65535) && ((mask & 255) == 0)),
-      Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      Vectorized<int16_t>>
+      C10_ALWAYS_INLINE blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     constexpr int16_t mask2 = (mask & 65535) >> 16;
     constexpr int16_t g0_2 = (mask & 1) * 0xffff;
     constexpr int16_t g1_2 = ((mask & 2) >> 1) * 0xffff;
@@ -160,8 +160,8 @@ class Vec256<int16_t> {
   static std::enable_if_t<
       (mask > 255 && ((mask & 65535) != 65535) && ((mask & 255) != 0) &&
        ((mask & 255) != 255)),
-      Vec256<int16_t>>
-      C10_ALWAYS_INLINE blend(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+      Vectorized<int16_t>>
+      C10_ALWAYS_INLINE blend(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
     constexpr int16_t g0 = (mask & 1) * 0xffff;
     constexpr int16_t g1 = ((mask & 2) >> 1) * 0xffff;
     constexpr int16_t g2 = ((mask & 4) >> 2) * 0xffff;
@@ -189,10 +189,10 @@ class Vec256<int16_t> {
         (vint16)vec_sel(a._vec1, b._vec1, (vbool16)mask_2nd)};
   }
 
-  static Vec256<int16_t> C10_ALWAYS_INLINE blendv(
-      const Vec256<int16_t>& a,
-      const Vec256<int16_t>& b,
-      const Vec256<int16_t>& mask) {
+  static Vectorized<int16_t> C10_ALWAYS_INLINE blendv(
+      const Vectorized<int16_t>& a,
+      const Vectorized<int16_t>& b,
+      const Vectorized<int16_t>& mask) {
     // the mask used here returned by comparision of vec256
     // assuming this we can use the same mask directly with vec_sel
     // warning intel style mask will not work properly
@@ -201,8 +201,8 @@ class Vec256<int16_t> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
 
-  static Vec256<int16_t> arange(int16_t base = 0, int16_t step = 1) {
-    return Vec256<int16_t>(
+  static Vectorized<int16_t> arange(int16_t base = 0, int16_t step = 1) {
+    return Vectorized<int16_t>(
         base,
         base + step,
         base + 2 * step,
@@ -220,9 +220,9 @@ class Vec256<int16_t> {
         base + 14 * step,
         base + 15 * step);
   }
-  static Vec256<int16_t> set(
-      const Vec256<int16_t>& a,
-      const Vec256<int16_t>& b,
+  static Vectorized<int16_t> set(
+      const Vectorized<int16_t>& a,
+      const Vectorized<int16_t>& b,
       size_t count = size()) {
     switch (count) {
       case 0:
@@ -260,7 +260,7 @@ class Vec256<int16_t> {
     }
     return b;
   }
-  static Vec256<value_type> C10_ALWAYS_INLINE
+  static Vectorized<value_type> C10_ALWAYS_INLINE
   loadu(const void* ptr, int count = size()) {
     if (count == size()) {
       return {
@@ -287,24 +287,24 @@ class Vec256<int16_t> {
   const int16_t& operator[](int idx) const = delete;
   int16_t& operator[](int idx) = delete;
 
-  Vec256<int16_t> angle() const {
-    return Vec256<int16_t>{0};
+  Vectorized<int16_t> angle() const {
+    return Vectorized<int16_t>{0};
   }
-  Vec256<int16_t> real() const {
+  Vectorized<int16_t> real() const {
     return *this;
   }
-  Vec256<int16_t> imag() const {
-    return Vec256<int16_t>{0};
+  Vectorized<int16_t> imag() const {
+    return Vectorized<int16_t>{0};
   }
-  Vec256<int16_t> conj() const {
+  Vectorized<int16_t> conj() const {
     return *this;
   }
 
-  Vec256<int16_t> C10_ALWAYS_INLINE abs() const {
+  Vectorized<int16_t> C10_ALWAYS_INLINE abs() const {
     return {vec_abs(_vec0), vec_abs(_vec1)};
   }
 
-  Vec256<int16_t> C10_ALWAYS_INLINE neg() const {
+  Vectorized<int16_t> C10_ALWAYS_INLINE neg() const {
     return {vec_neg(_vec0), vec_neg(_vec1)};
   }
 
@@ -333,20 +333,20 @@ class Vec256<int16_t> {
 };
 
 template <>
-Vec256<int16_t> inline maximum(
-    const Vec256<int16_t>& a,
-    const Vec256<int16_t>& b) {
+Vectorized<int16_t> inline maximum(
+    const Vectorized<int16_t>& a,
+    const Vectorized<int16_t>& b) {
   return a.maximum(b);
 }
 
 template <>
-Vec256<int16_t> inline minimum(
-    const Vec256<int16_t>& a,
-    const Vec256<int16_t>& b) {
+Vectorized<int16_t> inline minimum(
+    const Vectorized<int16_t>& a,
+    const Vectorized<int16_t>& b) {
   return a.minimum(b);
 }
 
 
 } // namespace
-} // namespace vec256
+} // namespace vec
 } // namespace at
