@@ -152,7 +152,7 @@ jobs:
           if-no-files-found: error
           path:
             artifacts.zip
-      - uses: seemethere/upload-artifact-s3@48f8f642f222503b2ea9f8a7dfe022cc99a2a08d
+      - uses: seemethere/upload-artifact-s3@450db1e33375dc01e2904de1cf5ed5b883487de2
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}

@@ -55,7 +55,7 @@ jobs:
           path: C:\w\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@48f8f642f222503b2ea9f8a7dfe022cc99a2a08d
+        uses: seemethere/upload-artifact-s3@450db1e33375dc01e2904de1cf5ed5b883487de2
         with:
           retention-days: 30
           if-no-files-found: error
