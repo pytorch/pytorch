@@ -143,6 +143,14 @@ class TestNNAPI(TestCase):
                 ReshapeModule((2, 4)),
                 nhwc(torch.randn(4, 2, 1, 1)))
 
+    def test_flatten(self):
+        for mod in [
+            torch.nn.Flatten(),
+            torch.nn.Flatten(start_dim=1)
+        ]:
+            self.check(mod, torch.randn(4, 2, 1, 1))
+
+
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
