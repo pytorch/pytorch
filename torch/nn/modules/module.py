@@ -1651,8 +1651,8 @@ class Module:
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
 
-        See `here <locally-disable-grad-doc_>`_ for a comparison between
-        `.eval()` and several similar mechanisms that may be conflated with it.
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
 
         Returns:
             Module: self
@@ -1669,8 +1669,8 @@ class Module:
         This method is helpful for freezing part of the module for finetuning
         or training parts of a model individually (e.g., GAN training).
 
-        See `here <locally-disable-grad-doc_>`_ for a comparison between
-        `.requires_grad_()` and several similar mechanisms that may be conflated with it.
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.requires_grad_()` and several similar mechanisms that may be confused with it.
 
         Args:
             requires_grad (bool): whether autograd should record operations on

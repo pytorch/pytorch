@@ -64,85 +64,108 @@ will also require them.
 Locally disabling gradient computation
 --------------------------------------
 
-There are two ways to locally disable gradients from Python: no-grad mode and
-inference mode. Below, we compare no-grad mode and inference mode. We also
-compare several other useful mechanisms that may be conflated with the two.
+There are several ways to locally disable gradients from Python: setting
+``requires_grad``, enabling no-grad mode, and enabling inference mode. Below, we
+describe the different mechanisms and how they are used. We also describe a
+similar mechanism, ``.eval()`` (evaluation mode), that is often mixed up with
+the three.
 
 Grad Mode (Default)
 ^^^^^^^^^^^^^^^^^^^
 
 Computations are performed in grad mode by default. In grad mode computations
 on tensors that require grad are tracked by autograd so that gradients can be
-computed with respect to the inputs when running ``output.backward()``. Note: this
-is the only mode where requires_grad is relevant. ``requires_grad`` is ignored in
-all other modes.
+computed with respect to the inputs when running ``output.backward()``.
 
-Setting requires_grad
-^^^^^^^^^^^^^^^^^^^^^
+Note that this is the only mode where requires_grad is relevant.
+``requires_grad`` is ignored in all other modes.
 
-As described `above <excluding-requires_grad_>`_,
-use ``.requires_grad`` for more fine-grained control over which parameters should
-be updated on the backward pass. Parameters with ``requires_grad=True`` will have
-gradients accumulated into their ``.grad`` fields on ``.backward()``.
+Setting ``requires_grad``
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Whether a tensor ``requires_grad`` also determines whether the computations are
-tracked by autograd in the first place. An operation is only tracked by
-autograd if at least one of its input tensors require grad.
+Setting ``requires_grad`` only makes sense for leaf tensors (tensors that do not
+have a ``grad_fn``, e.g., a module's parameters). Non-leaf tensors (tensors that
+do have ``grad_fn``) are defined to always have ``requires_grad=True``.
 
-For example, if you need to freeze the bottom part of your model while
-fine-tuning, you can apply ``requires_grad=False`` on layers that you’d like to
-avoid.
+As described in :ref:`excluding-requires_grad` above,
+Setting ``requires_grad`` can take effect in both the forward and backward passes:
+During the forward pass, an operation is only tracked by autograd if at least one
+of its input tensors require grad.
+During ``.backward()``, only leaf tensors with ``requires_grad=True`` will have
+gradients accumulated into their ``.grad`` fields.
 
-Note: you can only set the requires_grad of leaf nodes (i.e., parameters and
-other tensors that don’t have ``grad_fn``). Non-leaf tensor have ``requires_grad=True``
-by definition.
+``.requires_grad_()`` can be applied to individual tensors or to entire modules.
+When applied to a module, ``.requires_grad_()`` takes effect on all
+of the module's parameters (which sets ``requires_grad`` to ``True`` by default).
+
+``requires_grad`` should be the main way you should control which parts of the model
+are part of the gradient computation, for example, if you need to freeze part of
+your model during fine-tuning.
+Any layers you apply ``requires_grad=False`` to will not have their
+computations tracked during the forward pass and won't have their parameters
+updated by the optimizer.
 
 No-grad Mode
 ^^^^^^^^^^^^
 
 Computations in no-grad mode behave as if none of the inputs require grad.
+
 Enable no-grad mode when you need to perform operations that should not be
 tracked by autograd, but you’d still like to use the outputs of these
-computations in grad mode later. If you know that the outputs won’t be involved
-in computations in grad mode later, consider using inference mode.
+computations in grad mode later.
 
-For example, you would use no-grad if you are writing an optimizer, you’d like to update parameters
-in-place in order to perform a training step without the update being tracked
-by autograd. You also intend to use the updated parameters for computations in
+No-grad mode should be used when you have a block of code or a function
+for which no gradient computation is needed, or when you need to perform
+an in-place update on a parameter that should not be tracked by autograd.
+
+For example, no-grad mode might be useful when writing an optimizer. When
+performing the training update you’d like to update parameters
+in-place without the update being tracked by autograd.
+You also intend to use the updated parameters for computations in
 grad mode in the next forward pass.
+
+The implementations in :ref:`nn-init-doc` also
+rely on no-grad mode when initializing the parameters as to avoid
+autograd tracking when updating the intialized parameters in-place.
 
 Inference Mode
 ^^^^^^^^^^^^^^
 
-Inference mode (PyTorch >= 1.9) provides improved performance during the model
-evaluation phase in exchange for somewhat narrower application. Inference mode
-is similar to no-grad mode in that operations performed in inference mode will
-not be tracked by autograd. But for improved performance, computations in
-inference mode skips over more autograd-specific code.
+Inference mode is an extreme version of no-grad mode. Just like in no-grad
+mode, computations in inference mode are not tracked by autograd, but
+enabling inference mode will allow PyTorch to speed up your model even more.
+This better runtime comes with a drawback: tensors created in inference mode
+will not be able to be used in computations tracked by autograd after
+exiting inference mode.
 
 Enable inference mode when you are performing computations that don’t need
 tracked for the gradient computation, AND you don’t plan on using the tensors
 created in inference mode in any computation that is tracked by autograd later.
 
-It is recommended that you try out inference mode. If it works out of the box
+It is recommended that you try out inference mode in the parts of your code
+that do not require autograd tracking. If it works out of the box
 for your use case it’s a free performance win. If you run into errors after
-enabling inference mode, you may need to be more careful about how you use
-tensors created in inference mode outside of inference mode. It is also
-possible that inference mode does not work for your use case. If so, consider
-using no-grad mode.
-For more implementation details of inference mode please see
+enabling inference mode, check that you are not using tensors created in
+inference mode outside inference mode. It may also be possible that inference
+mode does not apply to your use case, in which case you can always switch
+back to no-grad mode.
+
+For implementation details of inference mode please see
 `RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
 
 Evaluation Mode (``nn.Module.eval()``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Evaluation mode is not actually a mechanism to locally disable gradient computation.
+It is included here anyway because it is sometimes confused to be such a mechanism.
 
 Functionally, ``module.eval()`` (or equivalently ``module.train()``) are completely
 orthogonal to no-grad mode and inference mode. How ``model.eval()`` affects
 your model depends entirely on the specific modules used in your model and
 whether they define any training-mode specific behavior.
 
-You are responsible for calling ``model.eval()`` and model.train() if your
-model relies on modules such as Dropout and BatchNorm that may behave
+You are responsible for calling ``model.eval()`` and ``model.train()`` if your
+model relies on modules such as :class:`torch.nn.Dropout` and
+:class:`torch.nn.BatchNorm` that may behave
 differently depending on training mode, for example, to avoid updating your
 BatchNorm running statistics on validation data.
 

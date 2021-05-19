@@ -98,8 +98,8 @@ class no_grad(_DecoratorContextManager):
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
     .. note::
-        no-grad is one of several mechanisms that can disable gradients locally
-        see `here <locally-disable-grad-doc_>`_ for more information on how they
+        No-grad is one of several mechanisms that can disable gradients locally
+        see :ref:`locally-disable-grad-doc` for more information on how they
         compare.
 
     Example::
@@ -227,8 +227,8 @@ class inference_mode(_DecoratorContextManager):
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
     .. note::
-        inference mode is one of several mechanisms that can disable gradients locally
-        see `here <locally-disable-grad-doc_>`_ for more information on how they
+        Inference mode is one of several mechanisms that can disable gradients locally
+        see :ref:`locally-disable-grad-doc` for more information on how they
         compare.
 
     Args:
