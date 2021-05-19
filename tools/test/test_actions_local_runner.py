@@ -63,18 +63,18 @@ if sys.version_info >= (3, 8):
 
     class TestEndToEnd(unittest.TestCase):
         expected = [
-            "✓ quick-checks: Extract scripts from GitHub Actions workflows",
-            "✓ cmakelint: Run cmakelint",
-            "✓ quick-checks: Ensure no direct cub include",
-            "✓ quick-checks: Ensure no unqualified type ignore",
-            "✓ quick-checks: Ensure no unqualified noqa",
-            "✓ quick-checks: Ensure canonical include",
-            "✓ quick-checks: Ensure no non-breaking spaces",
-            "✓ quick-checks: Ensure no tabs",
-            "✓ flake8",
-            "✓ quick-checks: Ensure correct trailing newlines",
-            "✓ quick-checks: Ensure no trailing spaces",
-            "✓ quick-checks: Run ShellCheck",
+            "quick-checks: Extract scripts from GitHub Actions workflows",
+            "cmakelint: Run cmakelint",
+            "quick-checks: Ensure no direct cub include",
+            "quick-checks: Ensure no unqualified type ignore",
+            "quick-checks: Ensure no unqualified noqa",
+            "quick-checks: Ensure canonical include",
+            "quick-checks: Ensure no non-breaking spaces",
+            "quick-checks: Ensure no tabs",
+            "flake8",
+            "quick-checks: Ensure correct trailing newlines",
+            "quick-checks: Ensure no trailing spaces",
+            "quick-checks: Run ShellCheck",
         ]
 
         def test_lint(self):
@@ -85,7 +85,7 @@ if sys.version_info >= (3, 8):
             for line in self.expected:
                 self.assertIn(line, stdout)
 
-            self.assertIn("✓ mypy", stdout)
+            self.assertIn("mypy", stdout)
 
         def test_quicklint(self):
             cmd = ["make", "quicklint", "-j", str(multiprocessing.cpu_count())]
@@ -96,7 +96,7 @@ if sys.version_info >= (3, 8):
                 self.assertIn(line, stdout)
 
             # TODO: See https://github.com/pytorch/pytorch/issues/57967
-            # self.assertIn("✓ mypy (skipped typestub generation)", stdout)
+            self.assertIn("mypy (skipped typestub generation)", stdout)
 
 
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):

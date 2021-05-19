@@ -33,6 +33,7 @@ static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = true; // NOLINT
+static bool opt_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -99,6 +100,10 @@ bool& getTEMustUseLLVMOnCPU() {
 
 bool& getCatWoConditionals() {
   return cat_wo_conditionals;
+}
+
+bool& getOptConditionals() {
+  return opt_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -2216,7 +2221,6 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
-
     case aten::hardswish: {
       return computeOneOperand(
           "aten_hardswish",
@@ -2232,7 +2236,21 @@ Tensor* tensorexpr::computeOperandValue(
             return a * clamp(zero, six, a + three) / six;
           });
     } break;
-
+    case aten::hardshrink: {
+      return computeTwoOperand(
+          "aten_hardshrink",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& lambd) {
+            auto pos_clambd = Cast::make(a.dtype(), lambd);
+            auto neg_clambd =
+                Cast::make(a.dtype(), ExprHandle(-0)) - pos_clambd;
+            auto zero = Cast::make(a.dtype(), 0);
+            auto mm = CompareSelect::make(a, neg_clambd, a, zero, kLT);
+            return CompareSelect::make(a, pos_clambd, a, mm, kGT);
+          });
+    } break;
     case aten::sqrt: {
       return computeOneOperand(
           "aten_sqrt",
@@ -2567,6 +2585,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::atan2:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardshrink:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -2723,11 +2742,21 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   // - On GPU, there's enough compute to hide the extra work, and inlining
   //   avoids synchronizing between kernels.
   l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+  GRAPH_DEBUG("after inline", *l.root_stmt());
+
+  // Optimizing conditionals needs to be performed after inlining because
+  // inlining wouldn't work once the loops are split. Also, it has to be
+  // performed before loop fusion because loop fusion introduces cases where
+  // multiple conditionals are in the same loop and this optimization does not
+  // handle such cases yet.
+  if (getOptConditionals()) {
+    l.optimizeConditionals();
+    GRAPH_DEBUG("after optimizing conditionals: ", *l.root_stmt());
+  }
 
   // Fuse loops "horizontally".  This pass allows us to combine loops that
   // write to different output buffers, as long as they have the same bounds.
   if (backendType == kLLVMCodeGen) {
-    GRAPH_DEBUG("after inline", *l.root_stmt());
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
   }
@@ -3043,9 +3072,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
           auto stride = strides[stride_index];
+          auto size = sizes[stride_index];
           auto index = Div::make(absolute_position, IntImm::make(stride));
-          absolute_position =
-              Mod::make(absolute_position, IntImm::make(stride));
+          if (size != 1) {
+            absolute_position =
+                Mod::make(absolute_position, IntImm::make(stride));
+          }
           new_axes[stride_index] = index;
         }
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
