@@ -2742,33 +2742,32 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
 
 def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autodiffed=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    samples = ()
 
     if autodiffed:
-        samples = (
+        samples = (  # type: ignore[assignment]
             ((S, S, S), 1.5, False),
             ((), 1.5, False),
         )
     else:
-        cases = (
+        cases = (  # type: ignore[assignment]
             ((S, S, S), (), False),
             ((S, S, S), (S, S, S), False),
             ((S, S, S), (S,), False),
         )
 
         # Sample inputs with scalars as torch tensors
-        cases_with_tensor_scalar = (
+        cases_with_tensor_scalar = (  # type: ignore[assignment]
             ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
         )
 
         # Sample inputs with broadcasting
-        cases_with_broadcasting = (
+        cases_with_broadcasting = (  # type: ignore[assignment]
             ((S,), (S, S, S), True),
             ((S, 1, S), (S, S, S), True),
             ((), (S, S, S), True),
         )
 
-        samples = cases + cases_with_tensor_scalar + cases_with_broadcasting
+        samples = cases + cases_with_tensor_scalar + cases_with_broadcasting  # type: ignore[assignment]
 
     def generator():
         for shape, arg_other, broadcasts_input in samples:
