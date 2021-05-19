@@ -49,6 +49,6 @@ jobs:
   pool: server
   timeoutInMinutes: 60
   dependsOn: checkjob4
-  continueOnError: false
+  continueOnError: true
   steps:
   - template: wheel-wait-job-template.yml
