@@ -42,6 +42,9 @@ def _check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[
       `prepare_custom_config_dict`: customization configuration dictionary for
       quantization tool
     """
+    if not prevent_custom_config_dict:
+        return
+
     prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
                                                "standalone_module_class",
                                                "float_to_observed_custom_module_class",
@@ -70,6 +73,8 @@ def _check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[
       `convert_custom_config_dict`: dictionary for custom configurations for
       convert function
     """
+    if not convert_custom_config_dict:
+        return
 
     convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
                                                "observed_to_quantized_custom_module_class",
