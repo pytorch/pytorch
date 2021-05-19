@@ -6,45 +6,6 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
-#ifdef USE_MAGMA
-
-static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, scalar_t *src, int k)
-{
-  int64_t size[1] = { k };
-  int64_t stride[1] = { 1 };
-  THCTensor_(resizeNd)(state, self, 1, size, stride);
-  size_t len = k * sizeof(scalar_t);
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-}
-
-static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, scalar_t *src, int m, int n)
-{
-  int64_t size[2] = { m, n };
-  int64_t stride[2] = { 1, m };
-  THCTensor_(resizeNd)(state, self, 2, size, stride);
-  size_t len = m * n * sizeof(scalar_t);
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-}
-
-static void THCTensor_(copyTensor2d)(THCState *state, scalar_t *dst, THCTensor *self)
-{
-  THAssert(self->dim() == 2);
-  size_t len = THCTensor_(nElement)(state, self)*sizeof(scalar_t);
-  THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
-  THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  THCudaCheck(cudaMemcpyAsync(dst, THCStorage_(data)(state, THTensor_getStoragePtr(selfc)) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost, stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  THCTensor_(free)(state, temp);
-  THCTensor_(free)(state, selfc);
-}
-
-#endif // USE_MAGMA
-
 static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THAssert(src->dim() == 2);
