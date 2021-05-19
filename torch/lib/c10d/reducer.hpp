@@ -12,8 +12,8 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
-#include <c10d/comm.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -40,8 +40,7 @@ class Reducer {
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string>
-          paramNames);
+      std::unordered_map<size_t, std::string> paramNames);
 
   ~Reducer() noexcept(false);
 
@@ -144,8 +143,7 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, size_t>
-      gradAccToVariableMap_;
+  std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -415,13 +413,14 @@ class Reducer {
 
   bool static_graph_;
 
-  // Key: size_t (index), Value: the number of times that a variable's autograd_hook()
-  // should be triggered before marking this variable's grad as ready for communication.
-  // Map will not change after 1st iteration.
+  // Key: size_t (index), Value: the number of times that a variable's
+  // autograd_hook() should be triggered before marking this variable's grad as
+  // ready for communication. Map will not change after 1st iteration.
   std::unordered_map<size_t, int> numGradHooksTriggeredMap_;
-  // Key: size_t (index), Value: the number of times that a variable's autograd_hook()
-  // are left to be triggered before marking this variable's grad as ready for communication.
-  // Map will change after 1st iteration to track a grad is ready for communication or not.
+  // Key: size_t (index), Value: the number of times that a variable's
+  // autograd_hook() are left to be triggered before marking this variable's
+  // grad as ready for communication. Map will change after 1st iteration to
+  // track a grad is ready for communication or not.
   std::unordered_map<size_t, int> numGradHooksTriggeredMapPerIteration_;
 
  private:
@@ -433,7 +432,8 @@ class Reducer {
   void set_divide_factor();
   // kick off all reduce for the ready bucket
   void all_reduce_bucket(Bucket& bucket);
-  // kick off all reduce to local used map, it can help find global unused parameters
+  // kick off all reduce to local used map, it can help find global unused
+  // parameters
   void all_reduce_local_used_map();
   // initialize locally used parameter maps
   void initialize_local_used_map();
