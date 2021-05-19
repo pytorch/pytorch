@@ -118,8 +118,7 @@ static void upsample_nearest2d_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU(
-      "upsample_nearest2d_out_cuda_template", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
   // This is a temporary hack to prevent a silence correctness issue when calling this kernel
@@ -210,9 +209,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
     c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
-  checkAllSameGPU(
-      "upsample_nearest2d_backward_out_cuda",
-      {grad_output_arg, grad_input_arg});
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
