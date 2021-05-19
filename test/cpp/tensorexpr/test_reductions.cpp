@@ -625,21 +625,18 @@ TEST(Reductions, SplitNonReduceAxis) {
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 2, &x_inner, &x_tail);
+  For* x_outer = loops[0];
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_2;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_1;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail_2;
-  l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
+  l.splitWithTail(x_outer, 2, &x_1, &x_tail_2);
 
   l.prepareForCodegen();
 
@@ -1133,8 +1130,8 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *o, *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+  For *i, *t;
+  loop.splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
   loop.reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
@@ -1526,15 +1523,13 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // Split outer reduction axis.
-  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1577,8 +1572,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // reorder outer reduction axes.
@@ -1586,7 +1579,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   l.reorderAxis(loops[0], loops[1]);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
