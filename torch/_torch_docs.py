@@ -3278,7 +3278,7 @@ Computes the element-wise remainder of division with the remainder having the sa
 sign as the dividend :attr:`input`.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i - trunc(\frac{\text{{input}}_i}{\text{{other}}_}) * \text{{other}}_i
+    \text{{out}}_i = \text{{input}}_i - trunc(\frac{\text{{input}}_i}{\text{{other}}_i}) * \text{{other}}_i
 """ + r"""
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
