@@ -5851,6 +5851,31 @@ class DistributedTest:
             inp = torch.randn(10, 10)
             a_local_grad = None
             a_dist_grad = None
+
+            # Ensure that if a param is not used in loss computation, its
+            # gradient is untouched, i.e. if it is None before it is None after,
+            # not zero.
+            if module_cls == DictOutputModule:
+                a, b = local_net(inp)["predictions"]
+                a_dist, b_dist = net(inp)["predictions"]
+            else:
+                a, b = local_net(inp)
+                a_dist, b_dist = net(inp)
+
+            loss_dist = b_dist.sum()
+            loss_dist.backward()
+
+            if module_cls == DictOutputModule:
+                self.assertTrue(net.module.module.a.weight.grad is None)
+                self.assertEqual(
+                    net.module.module.a.weight.grad, local_net.module.a.weight.grad
+                )
+            else:
+                self.assertTrue(net.module.a.weight.grad is None)
+                self.assertEqual(net.module.a.weight.grad, local_net.a.weight.grad)
+
+            net.zero_grad()
+            local_net.zero_grad()
             for i in range(6):
                 if module_cls == DictOutputModule:
                     a, b = local_net(inp)["predictions"]
@@ -5891,12 +5916,15 @@ class DistributedTest:
                         self.assertEqual(local_net.a.weight.grad, a_local_grad)
 
                 # Verify grads are the same
-                for (local_param, dist_param) in zip(local_net.parameters(), net.parameters()):
+                for (local_param, dist_param) in zip(
+                    local_net.parameters(), net.parameters()
+                ):
                     local_grad = local_param.grad
                     dist_grad = dist_param.grad
                     self.assertEqual(local_grad, dist_grad)
 
             dist.barrier()
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -5918,6 +5946,40 @@ class DistributedTest:
                 self._test_output_unused_in_loss(
                     module_cls,
                     grad_as_bucket_view
+                )
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_undefined_grad_parity_unused_parameters(self):
+            # TODO: enable this for general training use cases:
+            # https://github.com/pytorch/pytorch/issues/58511.
+            x = torch.ones(1, 2).to(self.rank)
+            net = Net().to(self.rank)
+            local_net = copy.deepcopy(net)
+            net = torch.nn.parallel.DistributedDataParallel(
+                net,
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+            out = net(x).sum()
+            local_out = local_net(x).sum()
+            # Simulates undefined gradients.
+            torch._C._functions.UndefinedGrad()(out).backward()
+            torch._C._functions.UndefinedGrad()(local_out).backward()
+            for (dist_param_name, dist_param), (local_param_name, local_param) in zip(
+                net.named_parameters(), local_net.named_parameters()
+            ):
+                dist_grad = dist_param.grad
+                local_grad = local_param.grad
+                self.assertEqual(
+                    dist_grad,
+                    local_grad,
+                    f"""DDP param {dist_param_name} with grad {dist_grad}
+                    does not match local param {local_param_name} with grad
+                    {local_grad}"""
                 )
 
         def _test_different_graph_across_ranks(self,

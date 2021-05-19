@@ -114,6 +114,9 @@ class _DDPUnevenInputsConfig(NamedTuple):
 class _DDPSink(Function):
     @staticmethod
     def forward(ctx, reducer, state_dict, *inputs):
+        # set_materialize_grads(False) will ensure that None gradients stay as
+        # None and are not filled with zeros.
+        ctx.set_materialize_grads(False)
         ctx.reducer = reducer
         ctx.state_dict = state_dict
         ctx.inputs = inputs
@@ -134,7 +137,9 @@ class _DDPSink(Function):
             # because outputs they produced do not get used in computing loss
             # for this call to backward. Due to this passthrough autograd
             # function, autograd hooks for these parameters are now triggered
-            # with zero gradient to maintain parity with local training.
+            # with undefined gradient to maintain parity with local training.
+            # DDP takes care of undefined grads in this case to ensure the .grad
+            # field of the param is not touched.
             ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
 
         return (None, None, *grad_outputs)

@@ -835,7 +835,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
-        input = torch.rand([batch_size, 2], dtype=torch.float).to(device_id)
+        input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(
             device_id
         )
