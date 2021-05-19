@@ -2156,7 +2156,9 @@ class TestNN(NNTestCase):
                 # If X is skew-symmetric it returns an orthogonal matrix
                 Id = torch.eye(X.size(0), device=X.device)
                 # We call contiguous because solve returns a tensor with strides that are Fortran-contiguous
-                # and autograd raises a performance warning
+                # and autograd raises a performance warning.
+                # This happens when we remove the parametrization with leave_parametrized=True,
+                # which does a set_ with a non-contiguous tensor while the gradient is contiguous
                 return torch.linalg.solve(Id + X, Id - X).contiguous()
 
         # Define a couple vector parametrizations
@@ -7371,7 +7373,7 @@ class TestNN(NNTestCase):
             weight = all_vars[4]
             weight_data = weight.data.clone()
             with torch.no_grad():
-                weight.set_(weight_data)
+                weight.copy_(weight_data)
 
             for _ in range(2):
                 with warnings.catch_warnings(record=True) as w:
