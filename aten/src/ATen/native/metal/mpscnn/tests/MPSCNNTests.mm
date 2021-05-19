@@ -426,8 +426,8 @@ bool test_mul_broadcast() {
 }
 
 bool test_mul_broadcast2() {
-  __block std::vector<int64_t> x2{1, 3, 192, 1};
   __block std::vector<int64_t> x1{1, 3, 192, 192};
+  __block std::vector<int64_t> x2{3, 192, 1};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -787,6 +787,17 @@ bool test_reshape() {
     auto Y1 = at::reshape(X1, {1, -1});
     auto X2 = X1.metal();
     auto Y2 = at::reshape(X2, {1, -1}).cpu();
+    return almostEqual(Y1, Y2);
+  });
+}
+
+bool test_reflection_pad2d() {
+  __block std::vector<int64_t> size{2, 3, 47, 63};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = X1.metal();
+    auto Y1 = at::reflection_pad2d(X1, {2,4,7,9});
+    auto Y2 = at::reflection_pad2d(X2, {2,4,7,9}).cpu();
     return almostEqual(Y1, Y2);
   });
 }

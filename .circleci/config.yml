@@ -316,7 +316,7 @@ jobs:
         default: ''
         type: string
       lite_interpreter:
-        default: '0'
+        default: '1'
         type: string
       op_list:
         default: ''
@@ -422,7 +422,7 @@ jobs:
   binary_linux_test:
     environment: *id006
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: *id007
     resource_class: << parameters.resource_class >>
     steps:
@@ -648,7 +648,7 @@ jobs:
       DOCKER_CLI_EXPERIMENTAL: enabled
       IMAGE_NAME: << parameters.image_name >>
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters:
       image_name:
         default: ''
@@ -660,9 +660,12 @@ jobs:
     - run:
         command: "set +x\nexport AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}\n\
           export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}\n\
-          eval $(aws ecr get-login --no-include-email --region us-east-1)\nset -x\n\
-          # Check if image already exists, if it does then skip building it\nif docker\
-          \ manifest inspect \"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}\"\
+          export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4\
+          \ -d\\\")\nexport AWS_REGION=us-east-1\naws ecr get-login-password --region\
+          \ $AWS_REGION|docker login --username AWS \\\n         --password-stdin\
+          \ $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com\nset -x\n# Check if\
+          \ image already exists, if it does then skip building it\nif docker manifest\
+          \ inspect \"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}\"\
           ; then\n  circleci-agent step halt\n  # circleci-agent step halt doesn't\
           \ actually halt the step so we need to\n  # explicitly exit the step here\
           \ ourselves before it causes too much trouble\n  exit 0\nfi\n# Covers the\
@@ -695,27 +698,18 @@ jobs:
         no_output_timeout: 1h
   docker_for_ecr_gc_build_job:
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - run:
-        command: 'cd .circleci/ecr_gc_docker
-
-          docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
-
-          set +x
-
-          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
-
-          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-
-          eval $(aws ecr get-login --no-include-email --region us-east-1)
-
-          set -x
-
-          docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
-
-          '
+        command: "cd .circleci/ecr_gc_docker\ndocker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr\n\
+          set +x\nexport AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}\n\
+          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}\n\
+          export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4\
+          \ -d\\\")\nexport AWS_REGION=us-east-1\naws ecr get-login-password --region\
+          \ $AWS_REGION|docker login --username AWS \\\n         --password-stdin\
+          \ $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com\nset -x\ndocker push\
+          \ $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/gc/ecr\n"
         name: build_docker_image_for_ecr_gc
         no_output_timeout: 1h
   ecr_gc_job:
@@ -793,7 +787,7 @@ jobs:
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       PYTHON_VERSION: '3.6'
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: large
     steps:
     - checkout
@@ -940,7 +934,7 @@ jobs:
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       PYTHON_VERSION: '3.6'
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: large
     steps:
     - checkout
@@ -1000,13 +994,13 @@ jobs:
       PYTHON_VERSION: '3.6'
       SELECTED_OP_LIST: << parameters.op_list >>
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: &id018
       build_environment:
         default: ''
         type: string
       lite_interpreter:
-        default: '0'
+        default: '1'
         type: string
       op_list:
         default: ''
@@ -1070,7 +1064,7 @@ jobs:
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       PYTHON_VERSION: '3.6'
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: large
     steps:
     - checkout
@@ -1123,7 +1117,7 @@ jobs:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: large
     steps:
     - checkout
@@ -1179,7 +1173,7 @@ jobs:
         root: /tmp/workspace
   pytorch_doc_push:
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters:
       branch:
         default: master
@@ -1205,7 +1199,7 @@ jobs:
       BUILD_ENVIRONMENT: pytorch-doc-test
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: medium
     steps:
     - checkout
@@ -1304,14 +1298,14 @@ jobs:
         name: Build
         no_output_timeout: 1h
     - run:
-        command: "set -e\nif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then\n  echo \"Run\
-          \ Build Test is not for BUILD_LITE_INTERPRETER, skipping.\"\n  exit 0\n\
-          fi\nPROJ_ROOT=/Users/distiller/project\nPROFILE=PyTorch_CI_2021\n# run the\
-          \ ruby build script\nif ! [ -x \"$(command -v xcodebuild)\" ]; then\n  echo\
-          \ 'Error: xcodebuild is not installed.'\n  exit 1\nfi\necho ${IOS_DEV_TEAM_ID}\n\
-          if [ ${IOS_PLATFORM} != \"SIMULATOR\" ]; then\n  ruby ${PROJ_ROOT}/scripts/xcode_build.rb\
-          \ -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj\
-          \ -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}\nelse\n  ruby ${PROJ_ROOT}/scripts/xcode_build.rb\
+        command: "set -e\nif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then\n  echo \"Run\
+          \ Build Test is not for full jit, skipping.\"\n  exit 0\nfi\nPROJ_ROOT=/Users/distiller/project\n\
+          PROFILE=PyTorch_CI_2021\n# run the ruby build script\nif ! [ -x \"$(command\
+          \ -v xcodebuild)\" ]; then\n  echo 'Error: xcodebuild is not installed.'\n\
+          \  exit 1\nfi\necho ${IOS_DEV_TEAM_ID}\nif [ ${IOS_PLATFORM} != \"SIMULATOR\"\
+          \ ]; then\n  ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install\
+          \ -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE}\
+          \ -t ${IOS_DEV_TEAM_ID}\nelse\n  ruby ${PROJ_ROOT}/scripts/xcode_build.rb\
           \ -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj\
           \ -p ${IOS_PLATFORM}\nfi\nif ! [ \"$?\" -eq \"0\" ]; then\n  echo 'xcodebuild\
           \ failed!'\n  exit 1\nfi\n"
@@ -1320,8 +1314,8 @@ jobs:
     - run:
         command: "set -e\nif [ ${IOS_PLATFORM} != \"SIMULATOR\" ]; then\n  echo \"\
           not SIMULATOR build, skip it.\"\n  exit 0\nelif [ ${BUILD_LITE_INTERPRETER}\
-          \ == 1 ]; then\n  echo \"Run Simulator Tests is not for BUILD_LITE_INTERPRETER,\
-          \ skipping.\"\n  exit 0\nfi\nWORKSPACE=/Users/distiller/workspace\nPROJ_ROOT=/Users/distiller/project\n\
+          \ == 0 ]; then\n  echo \"Run Simulator Tests is not for full jit, skipping.\"\
+          \n  exit 0\nfi\nWORKSPACE=/Users/distiller/workspace\nPROJ_ROOT=/Users/distiller/project\n\
           source ~/anaconda/bin/activate\npip install torch torchvision --progress-bar\
           \ off\n#run unit test\ncd ${PROJ_ROOT}/ios/TestApp/benchmark\npython trace_model.py\n\
           ruby setup.rb\ncd ${PROJ_ROOT}/ios/TestApp\ninstruments -s -devices\nfastlane\
@@ -1335,7 +1329,7 @@ jobs:
       DOCKER_IMAGE: << parameters.docker_image >>
       USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: &id015
       build_environment:
         default: ''
@@ -1380,7 +1374,7 @@ jobs:
   pytorch_linux_bazel_test:
     environment: *id014
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: *id015
     resource_class: << parameters.resource_class >>
     steps:
@@ -1413,7 +1407,7 @@ jobs:
   pytorch_linux_build:
     environment: *id014
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: *id015
     resource_class: << parameters.resource_class >>
     steps:
@@ -1472,7 +1466,7 @@ jobs:
   pytorch_linux_test:
     environment: *id014
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: *id015
     resource_class: << parameters.resource_class >>
     steps:
@@ -1782,7 +1776,7 @@ jobs:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: large
     steps:
     - checkout
@@ -2014,7 +2008,7 @@ jobs:
         path: test/coverage.xml
   pytorch_windows_test_multigpu:
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - run:
@@ -2030,7 +2024,7 @@ jobs:
   smoke_linux_test:
     environment: *id006
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters: *id007
     resource_class: << parameters.resource_class >>
     steps:
@@ -2136,7 +2130,7 @@ jobs:
         no_output_timeout: 1h
   update_s3_htmls:
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: medium
     steps:
     - checkout

@@ -40,8 +40,8 @@ void fillSliceWithIndex(Tensor& t,int dim) {
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
-void sortKeyValueInplace(Tensor& key,
-                         Tensor& value,
+void sortKeyValueInplace(const Tensor& key,
+                         const Tensor& value,
                          int dim, bool dir) {
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");
@@ -206,7 +206,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
-  checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
+  checkAllSameGPU(__func__, {self_arg, values_arg, indices_arg});
 
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t numel = self.numel();
