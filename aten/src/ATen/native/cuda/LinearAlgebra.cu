@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-//#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
