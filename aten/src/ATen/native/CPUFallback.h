@@ -12,6 +12,8 @@ namespace at { namespace native {
 // External backends can add their own custom logging on top if it to customize their own CPU fallbacks.
 TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
+// This is a helper function that backends can use to directly call their boxed CPU fallback
+// TODO: update and add a usage example after https://github.com/pytorch/pytorch/pull/58092 lands.
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class ReturnType, class... ParameterTypes>
 TORCH_API ReturnType call_fallback_fn(const char* name, const char* overload_name, ParameterTypes... args) {
     auto op = c10::Dispatcher::singleton()

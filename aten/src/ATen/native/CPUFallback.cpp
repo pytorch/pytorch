@@ -54,8 +54,6 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       tensor_args.push_back(ivalue.toTensor());
       tensor_args_indices.push_back(idx);
     } else if (ivalue.isTensorList()) {
-      // I'm worried about the ivalue storing a reference to the std::vector temporary that I create.
-      // To be extra safe I'm converting to a c10::List, IValue will take ownership of the items in the list.
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
     }
@@ -63,9 +61,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto cpu_tensors = to_cpu(tensor_args);
 
   for (auto i = 0; i < tensor_args_indices.size(); ++i) {
-    //auto cpu_ivalue = c10::IValue(cpu_tensors[i]);
     auto idx = tensor_args_indices[i];
-    //(*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
     (*stack)[arguments_begin + idx] = c10::IValue(cpu_tensors[i]);
   }
 
