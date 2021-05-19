@@ -2,7 +2,7 @@ from .graph_module import GraphModule
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
-from .symbolic_trace import Tracer
+from ._symbolic_trace import Tracer
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 class Interpreter:

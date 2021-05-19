@@ -675,6 +675,12 @@ void initJITBindings(PyObject* module) {
             getCatWoConditionals() = optimize_cat;
           })
       .def(
+          "_jit_opt_conditionals",
+          [](bool opt_conds) {
+            using namespace torch::jit::tensorexpr;
+            getOptConditionals() = opt_conds;
+          })
+      .def(
           "_llvm_enabled",
           []() {
 #ifdef TORCH_ENABLE_LLVM
@@ -727,6 +733,19 @@ void initJITBindings(PyObject* module) {
              std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
                 module, optimization_blocklist, preserved_methods);
+          })
+      .def(
+          "_hack_do_not_use_clone_module_with_class",
+          [](script::Module& module,
+             std::vector<std::string>& ignored_methods,
+             std::vector<std::string>& ignored_attributes) {
+            const bool inplace = false;
+            const std::unordered_set<std::string> ignored_methods_set(
+                ignored_methods.begin(), ignored_methods.end());
+            const std::unordered_set<std::string> ignored_attributes_set(
+                ignored_attributes.begin(), ignored_attributes.end());
+            return module.clone(
+                inplace, ignored_methods_set, ignored_attributes_set);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -1044,6 +1063,36 @@ void initJITBindings(PyObject* module) {
         return self.getAllRecords();
       });
 
+  // Used by torch.Package to coordinate deserialization of storages across
+  // ScriptModules and eager modules
+  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
+      m, "StorageContext")
+      .def(py::init<>())
+      .def(
+          "get_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             py::object data_type_obj) {
+            c10::Storage storage = self.getStorage(name);
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+
+            return at::Tensor(std::move(ptr));
+          })
+      .def(
+          "add_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             const at::Tensor& tensor) {
+            self.addStorage(name, tensor.storage());
+          })
+      .def("has_storage", &StorageContext::hasStorage);
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
@@ -1360,7 +1409,8 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);
