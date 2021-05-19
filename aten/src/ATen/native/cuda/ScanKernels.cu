@@ -233,7 +233,7 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg output_arg{ values, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU("cummax", {output_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
     self.scalar_type(), "cummax_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
@@ -245,7 +245,7 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg output_arg{ values, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU("cummin", {output_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
     self.scalar_type(), "cummin_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
@@ -557,7 +557,7 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
 
   TensorArg output_arg{ result, "output", 1 };
   TensorArg input_arg{ self, "input", 2 };
-  checkAllSameGPU("logcumsumexp", {output_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, input_arg});
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
@@ -588,7 +588,7 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
 Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumsum", {output_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, input_arg});
   checkSameType("cumsum", output_arg, input_arg);
 
   at::native::resize_output(result, self.sizes());
@@ -624,8 +624,8 @@ Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
 Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumprod", {output_arg, input_arg});
-  checkSameType("cumprod", output_arg, input_arg);
+  checkAllSameGPU(__func__, {output_arg, input_arg});
+  checkSameType(__func__, output_arg, input_arg);
 
   at::native::resize_output(result, self.sizes());
   if (self.dim() == 0) {
