@@ -1013,6 +1013,35 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
+    def test_qconfig_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a qconfig_dict, an error will be thrown and users will be
+        notified of what keys are supported.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
+
+        with self.assertRaises(ValueError) as context:
+            m = prepare_fx(m, qconfig_dict)
+        self.assertTrue(
+            str(context.exception) ==
+            'Expected qconfig_dict to have global, object_type, ' +
+            'module_name_regex, or module_name as keys but found ' +
+            '\'object_typo\' instead.'
+        )
+
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
             def __init__(self):
