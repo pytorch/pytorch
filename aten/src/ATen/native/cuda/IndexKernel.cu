@@ -365,6 +365,10 @@ void take_kernel(
 
 namespace {
 
+__global__ void masked_scatter_size_check(int64_t *totalElements, int64_t srcSize) {
+  CUDA_KERNEL_ASSERT(*totalElements <= srcSize);
+}
+
 template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
@@ -372,7 +376,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
+  auto maskPrefixSum = at::empty_like(mask_cont, mask.options().dtype(kLong));
 
   at::cuda::cub::exclusive_scan(
     mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
@@ -380,11 +384,13 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
     mask_cont.numel());
 
   // Determine our output size
-  auto totalElements = (maskPrefixSum[-1] + mask_cont[-1]).item<int64_t>();
+  auto totalElements = (at::_unsafe_view(maskPrefixSum, -1)[-1] + at::_unsafe_view(mask_cont, -1)[-1]);
 
-  // The number of `1` elements present in the mask must be <= the
-  // number of elements available in `src`
-  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
+  // Asynchronously check that the number of `1` elements present in the mask
+  // must be <= the number of elements available in `src`.
+  masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+      totalElements.data_ptr<int64_t>(), srcSize);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
