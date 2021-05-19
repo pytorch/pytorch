@@ -93,6 +93,26 @@ class TORCH_API LoopNest {
   bool computeInline(const Buf* b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
+  // Optimizes conditionals.
+  //
+  // Currently, only the following pattern of conditionals is optimized.
+  // This corresponds to the conditional format that is generated to handle
+  // `aten::cat` op.
+  //
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+  //
+  // Constraints that must be satisfied for this optimization:
+  //   * All conditions should be of the form "var < expr".
+  //   * All conditions should have the same variable, say v.
+  //   * The condition variable found should be the same as the inner-most
+  //     loop variable. TODO: Remove this constraint.
+  //   * If there are multiple stores that contain conditionals using the same
+  //     loop variable, only the first conditional will be optimized.
+  //     TODO: Remove this constraint.
+  bool optimizeConditionals();
+
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
       For* f,
@@ -232,7 +252,10 @@ class TORCH_API LoopNest {
 
   static void unroll(For* f, Stmt** unrolled);
   static void unroll(For* f);
+
   static bool normalize(For* f);
+  static bool isNormalized(For* f);
+
   static bool flatten(const std::vector<For*>& f, For** flattened);
   static bool flatten(const std::vector<For*>& f);
 
