@@ -5865,6 +5865,8 @@ class DistributedTest:
             loss_dist = b_dist.sum()
             loss_dist.backward()
 
+            # Ensure that gradient corresponding to parameter "a" was not
+            # touched, i.e. it is None and matches the local grad.
             if module_cls == DictOutputModule:
                 self.assertTrue(net.module.module.a.weight.grad is None)
                 self.assertEqual(
