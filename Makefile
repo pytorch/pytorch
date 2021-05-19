@@ -27,15 +27,9 @@ shellcheck-gha:
 	tools/extract_scripts.py --out=$(SHELLCHECK_GHA_GENERATED_FOLDER)
 	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
-# generate-gha-workflows:
-# 	.github/scripts/generate_ci_workflows.py
-# 	$(MAKE) shellcheck-gha
-
 generate-gha-workflows:
-	@python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'shellcheck'
-	@python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'templates' --step "Assert that regenerating the workflows didn't change them"
+	.github/scripts/generate_ci_workflows.py
+	$(MAKE) shellcheck-gha
 
 shellcheck:
 	@python tools/actions_local_runner.py \
@@ -54,7 +48,6 @@ shellcheck:
 		--file-filter '.sh' \
 		$(CHANGED_ONLY) \
 		--job 'shellcheck'
-
 
 setup_lint:
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
