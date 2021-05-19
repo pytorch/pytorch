@@ -97,14 +97,14 @@ Reducer::Reducer(
   {
     const auto replica_count = replicas_.size();
     grad_accumulators_.resize(replica_count);
-    for (size_t replica_index = 0; replica_index < replica_count;
-         replica_index++) {
+     // TODO: get rid of replica_index and nested
+    // containers such as replicas_, grad_accumulators_, etc.
+    size_t replica_index = 0;
       const auto variable_count = replicas_[replica_index].size();
       grad_accumulators_[replica_index].resize(variable_count);
       for (size_t variable_index = 0; variable_index < variable_count;
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
-        const auto index = VariableIndex(replica_index, variable_index);
 
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
@@ -125,7 +125,7 @@ Reducer::Reducer(
                       this->rpc_context_.set(
                           ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                      this->autograd_hook(index);
+                      this->autograd_hook(variable_index);
                       return outputs;
                     })),
             grad_accumulator);
@@ -138,10 +138,10 @@ Reducer::Reducer(
         // one to one as we deduplicate shared parameters before constructing
         // Reducer.
         if (find_unused_parameters_) {
-          gradAccToVariableMap_[grad_accumulator.get()] = index;
+          gradAccToVariableMap_[grad_accumulator.get()] = variable_index;
         }
 
-        numGradHooksTriggeredMap_[index] = 0;
+        numGradHooksTriggeredMap_[variable_index] = 0;
 
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
@@ -156,7 +156,6 @@ Reducer::Reducer(
         grad_accumulators_[replica_index][variable_index] =
             std::move(grad_accumulator);
       }
-    }
   }
 
   // Initialize backward stats vector.
@@ -300,9 +299,8 @@ void Reducer::copy_grad_to_bucket(
   }
 }
 
-void Reducer::mark_variable_ready_dense(VariableIndex index) {
-  const auto replica_index = index.replica_index;
-  const auto variable_index = index.variable_index;
+void Reducer::mark_variable_ready_dense(size_t variable_index) {
+  const auto replica_index = 0;
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
@@ -347,9 +345,8 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   });
 }
 
-void Reducer::mark_variable_ready_sparse(VariableIndex index) {
-  const auto replica_index = index.replica_index;
-  const auto variable_index = index.variable_index;
+void Reducer::mark_variable_ready_sparse(size_t variable_index) {
+  const auto replica_index = 0;
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
@@ -410,21 +407,17 @@ void Reducer::push_rebuilt_params_for_all_indices() {
     return;
   }
   const auto replica_count = replicas_.size();
-  for (size_t replica_index = 0; replica_index < replica_count;
-       ++replica_index) {
-    const auto variable_count = replicas_[replica_index].size();
+    const auto variable_count = replicas_[0].size();
     for (size_t variable_index = 0; variable_index < variable_count;
          ++variable_index) {
-      const auto index = VariableIndex(replica_index, variable_index);
-      push_rebuilt_params(index);
+      push_rebuilt_params(variable_index);
     }
-  }
 }
 
-void Reducer::push_rebuilt_params(const VariableIndex& index) {
+void Reducer::push_rebuilt_params(const size_t& index) {
   rebuilt_params_.push_back(
-      replicas_[index.replica_index][index.variable_index]);
-  rebuilt_param_indices_.push_back(index.variable_index);
+      replicas_[0][index]);
+  rebuilt_param_indices_.push_back(index);
 }
 
 void Reducer::set_divide_factor() {
@@ -476,24 +469,21 @@ void Reducer::delay_all_reduce() {
   unused_parameters_.clear();
 
   // copy all gradients to buckets
-  for (size_t replica_index = 0; replica_index < replicas_.size();
-       replica_index++) {
+  size_t replica_index = 0;
     for (size_t variable_index = 0; variable_index < replicas_[replica_index].size();
          variable_index++) {
-      const auto index = VariableIndex(replica_index, variable_index);
       // set unused_parameters_
-      if (numGradHooksTriggeredMap_[index] == 0) {
-        unused_parameters_.push_back(index);
+      if (numGradHooksTriggeredMap_[variable_index] == 0) {
+        unused_parameters_.push_back(variable_index);
       }
       require_finalize_ = true;
       set_divide_factor();
       if (expect_sparse_gradients_[replica_index][variable_index]) {
-        mark_variable_ready_sparse(index);
+        mark_variable_ready_sparse(variable_index);
       } else {
-        mark_variable_ready_dense(index);
+        mark_variable_ready_dense(variable_index);
       }
     }
-  }
 
   // launch all reduces for all buckets
   for (auto & bucket : buckets_) {
@@ -506,7 +496,7 @@ void Reducer::delay_all_reduce() {
 // The function `autograd_hook` is called after the gradient for a
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
-void Reducer::autograd_hook(VariableIndex index) {
+void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
   // Carry over thread local state from main thread. This allows for
@@ -526,7 +516,7 @@ void Reducer::autograd_hook(VariableIndex index) {
     // to mark it in local_used_maps_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
-    local_used_maps_[index.replica_index][index.variable_index] = 1;
+    local_used_maps_[0][index] = 1;
   }
 
   if (static_graph_first_iteration()) {
@@ -621,16 +611,16 @@ void Reducer::all_reduce_local_used_map() {
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 }
 
-void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
+void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
   // We don't expect the same variable to be marked ready twice.
-  bool marked_twice = perIterationReadyParams_.find(curVariableIndex) != perIterationReadyParams_.end();
+  bool marked_twice = perIterationReadyParams_.find(index) != perIterationReadyParams_.end();
 
   if (marked_twice) {
     // Report index of param that has been marked twice. In debug mode, also
     // report fully qualified parameter name.
-    auto param_name = param_names_.find(curVariableIndex);
+    auto param_name = param_names_.find(index);
     const bool found_param_name = param_name != param_names_.end();
     TORCH_INTERNAL_ASSERT(
       ddp_debug_level_ == c10d::DistributedDebugLevel::OFF
@@ -639,7 +629,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
     );
     std::string paramInfo = c10::str(
         "Parameter at index ",
-        curVariableIndex,
+        index,
         found_param_name ? c10::str(" with name ", param_name->second) : "",
         " has been marked as ready twice. This means that multiple autograd engine ",
         " hooks have fired for this particular parameter during this iteration."
@@ -692,7 +682,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
   }
 }
 
-void Reducer::mark_variable_ready(VariableIndex index) {
+void Reducer::mark_variable_ready(size_t variable_index) {
   // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
   // static_graph_ is true or find_unused_parameters_ is false,
   // 3) this backward pass needs to run allreduce.
@@ -702,18 +692,17 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
   // will be broadcasted and initialized. Also we only need to dump tensors
   // and parameter indices of one replica.
-  const auto replica_index = index.replica_index;
-  const auto variable_index = index.variable_index;
-  TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
+  if (should_rebuild_buckets()) {
+    push_rebuilt_params(variable_index);
+  }
+
   TORCH_CHECK(
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
 
-  if (replica_index == 0) {
     checkAndRaiseMarkedTwiceError(variable_index);
     perIterationReadyParams_.insert(variable_index);
-  }
-  backward_stats_[replica_index][variable_index] =
+  backward_stats_[0][variable_index] =
       current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
 
   // Any time we mark a variable ready (be it in line due to unused parameters,
@@ -724,15 +713,15 @@ void Reducer::mark_variable_ready(VariableIndex index) {
 
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[replica_index];
+  auto& replica = bucket.replicas[0];
 
 
   set_divide_factor();
 
   if (bucket.expect_sparse_gradient) {
-    mark_variable_ready_sparse(index);
+    mark_variable_ready_sparse(variable_index);
   } else {
-    mark_variable_ready_dense(index);
+    mark_variable_ready_dense(variable_index);
   }
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
@@ -890,10 +879,8 @@ void Reducer::initialize_buckets(
     }
 
     // Iterate over model replicas.
-    for (size_t replica_index = 0; replica_index < replica_count;
-         replica_index++) {
       BucketReplica replica;
-
+      size_t replica_index = 0;
       if (bucket.expect_sparse_gradient) {
         const auto variable_index = bucket_indices[bucket_index].front();
         const auto& variable = replicas_[replica_index][variable_index];
@@ -987,7 +974,6 @@ void Reducer::initialize_buckets(
 
       // Add bucket replica to enclosing bucket.
       bucket.replicas.push_back(std::move(replica));
-    }
 
     // Map participating variables to this bucket.
     // This is identical across replicas so we only need to do this once.
@@ -1246,8 +1232,7 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  for (size_t replica_index = 0; replica_index < bucket.replicas.size();
-       replica_index++) {
+  size_t replica_index = 0;
     auto& replica = bucket.replicas[replica_index];
     for (size_t intra_bucket_index = 0;
          intra_bucket_index < replica.variables.size();
@@ -1335,7 +1320,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         });
       }
     }
-  }
 }
 
 void Reducer::save_thread_local_state() {
