@@ -145,6 +145,8 @@ jobs:
           zip -r artifacts.zip dist/ build/
       # Upload to github so that people can click and download artifacts
       - uses: actions/upload-artifact@v2
+        # Don't fail on upload to GH since it's only for user convenience
+        continue-on-error: true
         name: Store PyTorch Build Artifacts on Github
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -152,7 +154,7 @@ jobs:
           if-no-files-found: error
           path:
             artifacts.zip
-      - uses: seemethere/upload-artifact-s3@450db1e33375dc01e2904de1cf5ed5b883487de2
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -204,7 +206,7 @@ jobs:
               ;;
           esac
           echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - uses: seemethere/download-artifact-s3@5a1313076ccf40533f94918e2225fe02bd3a96a2
+      - uses: seemethere/download-artifact-s3@34aa167be51a438e1ebad01fe0015efadbd618bc
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -334,7 +336,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@5a1313076ccf40533f94918e2225fe02bd3a96a2
+      - uses: seemethere/download-artifact-s3@34aa167be51a438e1ebad01fe0015efadbd618bc
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}

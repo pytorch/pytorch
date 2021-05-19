@@ -55,7 +55,7 @@ jobs:
           path: C:\w\build-results
       - name: Upload artifacts to s3
         if: always()
-        uses: seemethere/upload-artifact-s3@450db1e33375dc01e2904de1cf5ed5b883487de2
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         with:
           retention-days: 30
           if-no-files-found: error
@@ -79,7 +79,7 @@ jobs:
         shell: powershell
         run: |
           .\.github\scripts\install_windows_sdk.ps1
-      - uses: seemethere/download-artifact-s3@5a1313076ccf40533f94918e2225fe02bd3a96a2
+      - uses: seemethere/download-artifact-s3@34aa167be51a438e1ebad01fe0015efadbd618bc
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
