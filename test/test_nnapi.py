@@ -150,7 +150,6 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 1))
 
-
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
@@ -259,6 +258,17 @@ class TestNNAPI(TestCase):
                 return torch.nn.functional.relu(y)
 
         self.check(ToCPU(), torch.randn(1, 2, 3, 3))
+
+    def test_detach(self):
+        class DetachModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return torch.nn.functional.relu(y)
+
+        self.check(DetachModule(), torch.randn(1, 2, 3, 3))
 
     def test_mean(self):
         class MeanModule(torch.nn.Module):

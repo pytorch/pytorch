@@ -739,6 +739,8 @@ class _NnapiSerializer(object):
             self.add_unsqueeze(node),
         "aten::to": lambda self, node:
             self.add_to(node),
+        "aten::detach": lambda self, node:
+            self._identity(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
         "aten::flatten": lambda self, node:
