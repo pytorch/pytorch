@@ -90,7 +90,9 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, (torch.rand(2, 3),))
 
-        FileCheck().check("Any[]").run(fn)
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Any[]").run(graph)
 
     def test_list_value_type_refinement_defaults_to_Any_list_comprehension(self):
         def fn(x):
@@ -109,10 +111,12 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, (torch.rand(2, 3),))
 
-        FileCheck().check("Any[]").run(fn)
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Any[]").run(graph)
 
     # TODO: @gmagogsfm: Should we allow this?
-    #def test_list_value_type_refinement_defaults_to_Any_list_append(self):
+    # def test_list_value_type_refinement_defaults_to_Any_list_append(self):
     #    def fn(x):
     #        tup1 = ("foo", torch.tensor(2))
     #        tup2 = ("bar", {"23": torch.tensor(3)})
@@ -128,7 +132,7 @@ class TestTyping(JitTestCase):
     def test_dict_value_type_refinement_defaults_to_Any_dict_creation(self):
         def fn(x):
             d = dict(foo=torch.tensor(2),
-                 bar={"23": torch.tensor(3)})
+                bar={"23": torch.tensor(3)})
             d["baz"] = x
             t = d["foo"]
             if isinstance(t, torch.Tensor):
@@ -137,7 +141,9 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, (torch.rand(2, 3),))
 
-        FileCheck().check("Dict(str, Any)").run(fn)
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Dict(str, Any)").run(graph)
 
     def test_dict_value_type_refinement_defaults_to_Any_dict_comprehension(self):
         def fn(x):
@@ -151,10 +157,12 @@ class TestTyping(JitTestCase):
 
         self.checkScript(fn, (torch.rand(2, 3),))
 
-        FileCheck().check("Dict(str, Any)").run(fn)
+        graph = torch.jit.script(fn).graph
+
+        FileCheck().check("Dict(str, Any)").run(graph)
 
     # TODO: @gmagogsfm: Should we allow this?
-    #def test_dict_value_type_refinement_defaults_to_Any_dict_append(self):
+    # def test_dict_value_type_refinement_defaults_to_Any_dict_append(self):
     #    def fn(x):
     #        d = {"foo": torch.tensor(2)}
     #        d["bar"] = {"23": torch.tensor(3)}

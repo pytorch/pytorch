@@ -13,6 +13,7 @@
   - [Local linting](#local-linting)
   - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -34,6 +35,7 @@
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
 - [Running clang-tidy](#running-clang-tidy)
 - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
@@ -75,11 +77,17 @@ https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing PyTorch installs:
+1. Uninstall all existing PyTorch installs. You may need to run `pip
+uninstall torch` multiple times. You'll know `torch` is fully
+uninstalled when you see `WARNING: Skipping torch as it is not
+installed`. (You should only have to `pip uninstall` a few times, but
+you can always `uninstall` with `timeout` or in a loop if you're feeling
+lazy.)
+
+
 ```bash
-conda uninstall pytorch
-pip uninstall torch
-pip uninstall torch # run this command twice
+conda -y uninstall pytorch
+yes | pip uninstall torch
 ```
 
 2. Clone a copy of PyTorch from source:
@@ -132,8 +140,10 @@ For example:
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
-In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `develop` mode again.
+In case you want to reinstall, make sure that you uninstall PyTorch
+first by running `pip uninstall torch` until you see `WARNING: Skipping
+torch as it is not installed`; next run `python setup.py clean`. After
+that, you can install in `develop` mode again.
 
 ### Tips and Debugging
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
@@ -424,6 +434,26 @@ is part of the test suite `ContainerAliasingTest` in the file
 ```bash
 ./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
 ```
+
+
+### Run Specific CI Jobs
+
+You can generate a commit that limits the CI to only run a specific job by using
+`tools/explicit_ci_jobs.py` like so:
+
+```bash
+# --job: specify one or more times to filter to a specific job + its dependencies
+# --make-commit: commit CI changes to git with a message explaining the change
+python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+
+# Make your changes
+
+ghstack submit
+```
+
+**NB**: It is not recommended to use this workflow unless you are also using
+[`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
+of very low signal to reviewers.
 
 ## Writing documentation
 
@@ -1062,6 +1092,18 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   any occurrences of the PURE token in code with an empty string. This is why
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
+
+### Building on legacy code and CUDA
+
+CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
+| CUDA version | Newest supported VS version                             | PyTorch version |
+| ------------ | ------------------------------------------------------- | --------------- |
+| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
+| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
+| 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
+| 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
+
+Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ## Running clang-tidy
 

@@ -1499,6 +1499,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
+  } else if (typ->kind() == NumberType::Kind) {
+    return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }

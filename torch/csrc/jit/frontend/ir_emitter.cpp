@@ -1324,9 +1324,11 @@ struct to_ir {
 
       // Make sure that any element types are subtypes of the annotated
       // type
-      if (type_hint && !out->type()->isSubtypeOf(out->type())) {
-        throw ErrorReport(loc) << "List type annotation did not match "
-                               << "the types of the actual list items";
+      std::stringstream ss;
+      if (type_hint && !out->type()->isSubtypeOfExt(type_hint, &ss)) {
+        throw ErrorReport(loc) << ss.str() << "List type annotation did"
+                               << " not match the types of the actual "
+                               << "list items";
       }
 
       // If we didn't have a type annotation, let the type begin as the
@@ -1337,21 +1339,9 @@ struct to_ir {
       }
 
       ListTypePtr lt = list_value->type()->expect<ListType>();
-
-      // Is the current element type the same type or a supertype of the
-      // old element type?
-      bool use_new = lt->getElementType()->isSubtypeOf(out->type());
-      // Is the old element type the same type or a supertype of the
-      // current element type?
-      bool use_old = out->type()->isSubtypeOf(lt->getElementType());
-
-      // If we have `use_old && use_new`, we just keep the old element
-      // type. Otherwise...
-      if (!use_old && use_new) {
-        list_value->setType(ListType::create(out->type()));
-      } else if (!use_old && !use_new) {
-        list_value->setType(ListType::create(AnyType::get()));
-      }
+      auto unified = unifyTypes(
+          lt->getElementType(), out->type(), /*default_to_any=*/true);
+      list_value->setType(*unified);
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
@@ -3596,10 +3586,10 @@ struct to_ir {
   Value* emitListLiteral(ListLiteral ll, TypePtr type_hint) {
     auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
-    // determine the element type of the list
-    // if we have a type hint of List[T], use T
-    // if the list is non-empty use type_of(list[0])
-    // otherwise assume it is List[Tensor]
+    // Determine the element type of the list. If we have a type hint
+    // of `List[T]`, use `T`. If the list is non-empty, find the
+    // greatest common supertype of all the list elements (defaulting to
+    // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
     TypePtr elem_type = TensorType::get();
     if (type_hint) {
       if (type_hint->kind() == TypeKind::ListType) {
@@ -3753,7 +3743,7 @@ struct to_ir {
 
         for (size_t i = 0, N = values.size(); i < N; ++i) {
           std::stringstream ss;
-          if (!unifyTypes(keys[i]->type(), key_type, /*default_to_any=*/false)) {
+          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
             throw ErrorReport(key_trees[i])
                 << "Dict keys must contain "
                 << "only a single type, expected: " << key_type->repr_str()
@@ -3764,7 +3754,10 @@ struct to_ir {
 
         if (!values.empty()) {
           value_type = std::accumulate(
-              values.begin(), values.end(), value_type, [&](TypePtr a, Value* b) {
+              values.begin(),
+              values.end(),
+              value_type,
+              [&](TypePtr a, Value* b) {
                 return *(unifyTypes(a, b->type(), /*default_to_any=*/true));
               });
         }
@@ -3819,7 +3812,7 @@ struct to_ir {
       Value* end,
       Value* step) {
     std::vector<NamedValue> args;
-    args.reserve(4);
+    args.reserve(5);
     args.emplace_back(loc, "self", sliceable);
 
     // XXX: If list slicing becomes more complicated or stops using
@@ -3831,11 +3824,10 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
-    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
-    // string, and tuple slicing should be same (tugsbayasgalan)
+
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
-      // since we are only dealing with tuple slicing for now, we try to keep
+      // since we are only dealing with tuple slicing, we try to keep
       // tuple args seperate for now
       tuple_args.reserve(3);
 
@@ -3849,22 +3841,15 @@ struct to_ir {
       return emitTupleSlice(loc, args[0], tuple_args);
     }
 
-    // TODO this needs to be cleaned for list slicing
-    // Default value for start is 0.
-    if (!start) {
-      start = graph->insertConstant(0, loc);
-    }
-    args.emplace_back(loc, "start", start);
-
-    if (end) {
-      args.emplace_back(loc, "end", end);
-    }
-
+    // handling cases like x[0:2]. x[0:2:] is already handled from python
     if (!step) {
       step = graph->insertConstant(1, loc);
     }
-    NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+
+    args.emplace_back(loc, "start", start);
+    args.emplace_back(loc, "end", end);
+    args.emplace_back(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
