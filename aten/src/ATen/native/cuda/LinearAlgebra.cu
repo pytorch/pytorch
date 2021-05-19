@@ -78,7 +78,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
-  checkAllSameGPU("addmm", args);
+  checkAllSameGPU(__func__, args);
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
@@ -178,7 +178,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {batch1, "batch1", 2}, {batch2, "batch2", 3}};
-  checkAllSameGPU("baddbmm", args);
+  checkAllSameGPU(__func__, args);
 
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
