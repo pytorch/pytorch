@@ -111,11 +111,6 @@ class RegisterDispatchKey:
         sig = self.wrapper_kernel_sig(f)
         name = sig.name()
 
-        # See Note [External Backends Follow Dispatcher convention]
-        jit_args = dispatcher.jit_arguments(f.func)
-        tensors = [a for a in jit_args if isinstance(a, Argument) and a.type == BaseType(BaseTy.Tensor)]
-        print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
-
         func_res = f'{name}_tmp'
         return_names = cpp.return_names(f)
         if len(return_names) > 1:
@@ -132,8 +127,6 @@ class RegisterDispatchKey:
 
         return f"""\
 {sig.defn()} {{
-  XLA_FN_TRACK(3);
-  TF_VLOG(3) << "XLA {name} :"{print_args_str};
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -235,11 +228,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                # TODO: remove this difference and merge the two cases when we remove xla-specific logic
-                if self.backend_index.external:
-                    impl_name = f"{self.cpp_namespace}::AtenXlaType::{metadata.kernel}"
-                else:
-                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
