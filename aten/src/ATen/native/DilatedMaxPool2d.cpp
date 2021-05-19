@@ -38,8 +38,16 @@ bool ceil_mode) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
+  const auto memory_format = input.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input.ndimension() == 4,
+      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else if (memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+  } else {
+    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
+  }
 
   /* sizes */
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
@@ -50,7 +58,6 @@ bool ceil_mode) {
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  const auto memory_format = input.suggest_memory_format();
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
@@ -69,59 +76,16 @@ bool ceil_mode) {
     set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), input.names());
   }
 }
-} // namespace meta
 
-namespace native {
-
-TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cpu)
-(const Tensor& input,
+TORCH_META_FUNC(max_pool2d_with_indices_backward)
+(const Tensor& gradOutput,
+const Tensor& input,
 IntArrayRef kernel_size,
 IntArrayRef stride,
 IntArrayRef padding,
 IntArrayRef dilation,
 bool ceil_mode,
-const Tensor& output,
 const Tensor& indices) {
-  NoNamesGuard guard;
-
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(input.dtype() == output.dtype(),
-    "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
-
-  max_pool2d_kernel(
-      kCPU, output, indices, input,
-      kW, kH,
-      dW, dH,
-      padW, padH,
-      dilationW, dilationH);
-}
-
-Tensor& max_pool2d_with_indices_backward_out_cpu_template(
-          Tensor& gradInput,
-          const Tensor& gradOutput,
-          const Tensor& input,
-          const Tensor& indices,
-          IntArrayRef kernel_size,
-          IntArrayRef stride,
-          IntArrayRef padding,
-          IntArrayRef dilation,
-          bool ceil_mode)
-{
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
@@ -151,12 +115,17 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
 
   TORCH_CHECK(input.dtype() == gradOutput.dtype(),
     "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
-  TORCH_CHECK(input.dtype() == gradInput.dtype(),
-    "expected dtype ", input.dtype(), " for `gradInput` but got dtype ", gradInput.dtype());
 
-  /* resize */
-  gradInput.resize_(input.sizes(), input.suggest_memory_format());
-  gradInput.zero_();
+  const auto memory_format = input.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input.ndimension() == 4,
+      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else if (memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+  } else {
+    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
+  }
 
   /* sizes */
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
@@ -181,59 +150,62 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
     nInputPlane,
     inputHeight, inputWidth,
     outputHeight_for_shape_check, outputWidth_for_shape_check,
-    input.suggest_memory_format());
+    memory_format);
 
-  max_pool2d_backward_kernel(kCPU, gradInput, gradOutput, indices);
+  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format), input.names());
+}
+} // namespace meta
 
-  return gradInput;
+namespace native {
+
+TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cpu)
+(const Tensor& input,
+IntArrayRef kernel_size,
+IntArrayRef stride,
+IntArrayRef padding,
+IntArrayRef dilation,
+bool ceil_mode,
+const Tensor& output,
+const Tensor& indices) {
+  NoNamesGuard guard;
+
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
+  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  max_pool2d_kernel(
+      kCPU, output, indices, input,
+      kW, kH,
+      dW, dH,
+      padW, padH,
+      dilationW, dilationH);
 }
 
-Tensor& max_pool2d_with_indices_backward_out_cpu(
-  const Tensor& gradOutput,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  max_pool2d_with_indices_backward_out_cpu_template(
-    gradInput,
-    gradOutput,
-    input,
-    indices,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_cpu)
+(const Tensor& gradOutput,
+const Tensor& input,
+IntArrayRef kernel_size,
+IntArrayRef stride,
+IntArrayRef padding,
+IntArrayRef dilation,
+bool ceil_mode,
+const Tensor& indices,
+const Tensor& gradInput) {
+  NoNamesGuard guard;
 
-Tensor max_pool2d_with_indices_backward_cpu(
-  const Tensor& gradOutput,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode,
-  const Tensor& indices)
-{
-  auto gradInput = at::empty({0}, input.options());
-  max_pool2d_with_indices_backward_out_cpu_template(
-    gradInput,
-    gradOutput,
-    input,
-    indices,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-  return gradInput;
+  gradInput.zero_();
+  max_pool2d_backward_kernel(
+      kCPU, const_cast<Tensor&>(gradInput),
+      gradOutput, indices);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
