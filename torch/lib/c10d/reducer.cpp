@@ -692,10 +692,6 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
   // will be broadcasted and initialized. Also we only need to dump tensors
   // and parameter indices of one replica.
-  if (should_rebuild_buckets()) {
-    push_rebuilt_params(variable_index);
-  }
-
   TORCH_CHECK(
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
