@@ -61,7 +61,7 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
         self.assertEqual(len(inflated), len(samples))
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)
@@ -135,7 +135,7 @@ class TestBundledInputs(TestCase):
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(inflated, samples)
-        self.assertTrue(loaded.run_on_bundled_input(0) == "first 1")
+        self.assertTrue(loaded(*inflated[0]) == "first 1")
 
     def test_multiple_methods_with_inputs(self):
         class MultipleMethodModel(torch.nn.Module):
@@ -187,7 +187,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_foo())
 
         # Check running and size helpers
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
         # Check helper that work on all functions
@@ -204,7 +204,7 @@ class TestBundledInputs(TestCase):
             func_to_run = getattr(loaded, input_func_name)
             self.assertEqual(func_to_run(), samples)
 
-    def test_multiple_methods_with_inputs_failures(self):
+    def test_multiple_methods_with_inputs_both_defined_failure(self):
         class MultipleMethodModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
@@ -215,25 +215,37 @@ class TestBundledInputs(TestCase):
 
         samples = [(torch.tensor([1]),)]
 
-        # Test Failure Case both defined
+        # inputs defined 2 ways so should fail
         with self.assertRaises(Exception):
-            nn = torch.jit.script(MultipleMethodModel())
+            mm = torch.jit.script(MultipleMethodModel())
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_forward(self):
                     return []
                 """)
-            nn.define(definition)
+            mm.define(definition)
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
-                nn,
+                mm,
                 inputs={
-                    nn.forward : samples,
-                    nn.foo : samples,
+                    mm.forward : samples,
+                    mm.foo : samples,
                 },
             )
 
-        # Test Failure Case neither defined
+    def test_multiple_methods_with_inputs_neither_defined_failure(self):
+        class MultipleMethodModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+            @torch.jit.export
+            def foo(self, arg):
+                return arg
+
+        samples = [(torch.tensor([1]),)]
+
+        # inputs not defined so should fail
         with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
+            mm._generate_bundled_inputs_for_forward()
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
                 inputs={
@@ -263,7 +275,7 @@ class TestBundledInputs(TestCase):
                 inputs=[torch.ones(1, 2), ]  # type: ignore[list-item]
             )
 
-    def test_double_augment(self):
+    def test_double_augment_fail(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
@@ -278,6 +290,39 @@ class TestBundledInputs(TestCase):
                 m,
                 inputs=[(torch.ones(1),)]
             )
+
+    def test_double_augment_non_mutator(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs=[(torch.ones(1),)]
+        )
+        with self.assertRaises(AttributeError):
+            m.get_all_bundled_inputs()
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+        self.assertEqual(bundled_model.forward(torch.ones(1)), torch.ones(1))
+
+    def test_double_augment_success(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            m,
+            inputs={m.forward : [(torch.ones(1),)]}
+        )
+        self.assertEqual(bundled_model.get_all_bundled_inputs(), [(torch.ones(1),)])
+
+        bundled_model2 = torch.utils.bundled_inputs.bundle_inputs(
+            bundled_model,
+            inputs=[(torch.ones(2),)]
+        )
+        self.assertEqual(bundled_model2.get_all_bundled_inputs(), [(torch.ones(2),)])
 
 if __name__ == '__main__':
     run_tests()
