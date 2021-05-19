@@ -91,12 +91,12 @@ static DynamicLayer popDynamicLayer() {
   return result;
 }
 
-static int64_t pushDynamicLayer(DispatchKey key) {
+static int64_t pushDynamicLayer(DispatchKey key, optional<int64_t> batch_size = nullopt) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Batched);
   auto layerId = 1 + dynamicLayerStack.size();
-  dynamicLayerStack.emplace_back(key, layerId);
+  dynamicLayerStack.emplace_back(key, layerId, batch_size);
 
   if (layerId == 2) {
     // std::cout << "DynamicLayer on" << std::endl;
@@ -107,8 +107,8 @@ static int64_t pushDynamicLayer(DispatchKey key) {
   return layerId;
 }
 
-int64_t initAndPushDynamicLayer(DispatchKey key) {
-  auto layerId = pushDynamicLayer(key);
+int64_t initAndPushDynamicLayer(DispatchKey key, optional<int64_t> batch_size) {
+  auto layerId = pushDynamicLayer(key, batch_size);
   auto& data = getGlobalDynmetaData();
   TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   data[layerId] = std::make_shared<bool>(true);
@@ -247,6 +247,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 
   DispatchKeySet exclude = all_dynlayer_keyset;
   exclude = exclude.remove(kDynamicLayerBackModeKey);
+  DispatchKeySet include;
   if (layer.key() == DispatchKey::Autograd) {
     exclude = exclude - autograd_dispatch_keyset;
     exclude = exclude.remove(DispatchKey::ADInplaceOrView);
@@ -254,10 +255,12 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   //   exclude = exclude.remove(DispatchKey::Batched);
   } else if (layer.key() == kBatchedKey) {
     exclude = exclude.remove(kBatchedKey);
+    include = include.add(kVmapModeKey);
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
-  c10::impl::ExcludeDispatchKeyGuard guard(exclude);
+  c10::impl::ExcludeDispatchKeyGuard exclude_guard(exclude);
+  c10::impl::IncludeDispatchKeyGuard include_guard(include);
 
   // Re-dispatch
   op.callBoxed(stack);
