@@ -150,7 +150,7 @@ if sys.version_info >= (3, 8):
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
                 await actions_local_runner.run_shellcheck(self.test_sh_files, True)
-            
+
             self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
             self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
 
