@@ -56,6 +56,7 @@ def extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     return TensorMetadata(
         shape, dtype, stride, memory_format, is_quantized, qscheme, q_scale, q_zero_point)
 
+
 class ShapeProp(torch.fx.Interpreter):
     """
     Execute an FX graph Node-by-Node and
