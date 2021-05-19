@@ -23,8 +23,8 @@ namespace impl {
 //      set_output(sizes, options);
 //    }
 //
-#define TORCH_META_FUNC(name) void name::meta
-#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
+#define TORCH_META_FUNC(name) void structured_##name::meta
+#define TORCH_META_FUNC2(name, overload) void structured_##name##_##overload::meta
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're

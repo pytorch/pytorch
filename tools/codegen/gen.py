@@ -358,7 +358,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct TORCH_API {name} : public {parent_class} {{
+struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
@@ -908,6 +908,7 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.Meta,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
@@ -982,7 +983,7 @@ def main() -> None:
             list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
     })
 
-    cpu_fm.write('MetaFunctions.h', lambda: {
+    cpu_fm.write('NativeMetaFunctions.h', lambda: {
         'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 

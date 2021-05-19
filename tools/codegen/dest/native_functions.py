@@ -28,7 +28,7 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List
         return []
     prefix = '' if backend_index.external else 'TORCH_API '
     return [f"""\
-struct {prefix}structured_{metadata.kernel} : public at::meta::{meta_name} {{
+struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
 void impl({', '.join(a.decl() for a in out_args)});
 }};
 """]
