@@ -606,11 +606,6 @@ class BackendIndex:
     # Other backend-specific information that is on a per-operator basis
     index: Dict['OperatorName', BackendMetadata]
 
-    # Logging macros that are inserted into wrappers. Only really used by external backends.
-    per_op_log: Optional[str] = None
-    per_argument_log: Optional[str] = None
-    cpu_fallback_counter: Optional[str] = None
-
     @staticmethod
     def grow_index(
             parent_index: Dict[DispatchKey, Dict['OperatorName', BackendMetadata]],
