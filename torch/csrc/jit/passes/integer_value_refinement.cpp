@@ -59,10 +59,11 @@ struct IntegerValueRefiner {
       IntegerRefinement& false_block_refinements) {
     // we are looking for cases where we can replace both block outputs with the
     // same value, which opens up further optimization opportunities. The pass
-    // will already handle if both are refined to the same constant. Here, we
-    // other block, and where the existing block output in the other block is
-    // the same constant.
-    // graph(%y.1 : int):
+    // will already handle if both outputs are refined to the same constant.
+    // Here, we look for cases where one block output has been refined in the
+    // other block to be equal to the same constant value as the other other
+    // block output:
+    //  graph(%y.1 : int):
     //   %one_constant : int = prim::Constant[value=1]()
     //   %3 : bool = aten::eq(%y.1, %one_constant)
     //   %15 : int = prim::If(%3)
@@ -71,7 +72,7 @@ struct IntegerValueRefiner {
     //     block1():
     //       -> (%y.1)
     //   return (%15)
-    // Here, %15 can always be safely replaced with %y.1
+    // %15 can always be safely replaced with %y.1
     // this is an important case for symbolic shape analysis
     for (size_t block_index : {0, 1}) {
       Block* if_block = if_node->blocks().at(block_index);
