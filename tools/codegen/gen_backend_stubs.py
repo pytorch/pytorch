@@ -205,6 +205,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                 'extra_cuda_headers': '',
                 'legacy_th_headers': '',
                 'external_backend_headers': external_backend_headers,
+                'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_definitions': list(concatMap(

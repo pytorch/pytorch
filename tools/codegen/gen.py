@@ -926,6 +926,7 @@ def main() -> None:
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'external_backend_headers': '',
+            'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
