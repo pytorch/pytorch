@@ -63,7 +63,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
           tracer::addInputs(node, args[i].name().c_str(), iter->toBool());
         } else if (type->kind() == TypeKind::StringType) {
           AT_ASSERT(iter->isString());
-          tracer::addInputs(node, args[i].name().c_str(), iter->toStringRef());
+          tracer::addInputs(node, args[i].name().c_str(), iter->toStringView());
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {

@@ -630,15 +630,6 @@ void addInputs(
     const c10::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const std::string& value) {
-  detail::genericAddInput(n, value);
-}
-void addInputs(
-    Node* n,
-    const char* name,
-    const c10::optional<std::string>& value) {
-  detail::genericAddOptionalInput(n, name, value);
-}
 void addInputs(Node* n, const char* name, const c10::string_view& value) {
   detail::genericAddInput(n, std::string(value));
 }
@@ -646,10 +637,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<c10::string_view>& value) {
-  c10::optional<std::string> value_str = value.has_value()
-      ? c10::optional<std::string>(std::string(value.value()))
-      : c10::nullopt;
-  detail::genericAddOptionalInput(n, name, value_str);
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));

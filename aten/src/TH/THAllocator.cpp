@@ -40,8 +40,8 @@ const char * unknown_filename = "filename not specified";
 const char * unknown_eventname = "eventname not specified";
 #endif
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
-  : filename_(filename ? filename : unknown_filename)
+THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
+  : filename_(std::move(filename))
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -338,8 +338,8 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
-  : THMapAllocator(WITH_FD, filename, -1, flags, size)
+THMapAllocator::THMapAllocator(std::string filename, int flags, size_t size)
+  : THMapAllocator(WITH_FD, std::move(filename), -1, flags, size)
 {}
 
 #ifdef _WIN32
@@ -554,8 +554,8 @@ THRefcountedMapAllocator* THRefcountedMapAllocator::fromDataPtr(const at::DataPt
   return dptr.cast_context<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
 }
 
-at::DataPtr THMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new THMapAllocator(filename, flags, size);
+at::DataPtr THMapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(std::move(filename), flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteTHMapAllocator, at::DeviceType::CPU};
 }

@@ -1385,7 +1385,7 @@ Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::opt
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
         THMapAllocator::makeDataPtr(
-            std::string(filename).c_str(), flags, size_bytes, nullptr),
+            std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(

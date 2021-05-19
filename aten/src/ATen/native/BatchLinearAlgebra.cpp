@@ -1938,7 +1938,7 @@ std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
     "should be replaced with\n",
     "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
   );
-  c10::string_view mode = some ? "reduced" : "complete";
+  const char* mode = some ? "reduced" : "complete";
   return at::linalg_qr(self, mode);
 }
 
@@ -1950,7 +1950,7 @@ std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Ten
     "should be replaced with\n",
     "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
   );
-  c10::string_view mode = some ? "reduced" : "complete";
+  const char* mode = some ? "reduced" : "complete";
   return at::linalg_qr_out(Q, R, self, mode);
 }
 
