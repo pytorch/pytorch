@@ -474,7 +474,7 @@ Debugging the Generated Code
 
 Because FX generates the ``forward()`` function on :class:`GraphModule`\s, using
 traditional debugging techniques like ``print`` statements or ``pdb`` is
-not as straightfoward. Luckily, we have several techniques we can use
+not as straightforward. Luckily, we have several techniques we can use
 for debugging the generated code.
 
 Use ``pdb``
