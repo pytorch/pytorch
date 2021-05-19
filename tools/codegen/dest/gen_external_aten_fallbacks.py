@@ -186,6 +186,7 @@ class GenExternalAtenFallback:
             annotated_tensor_indices: List[int] = [
                 i for i, a in enumerate(tensors) if a.annotation is not None and a.annotation.is_write]
 
+            print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensor_args.keys()])
 
             tensorlist_intermediates_str = ''
             if len(tensorlist_args) > 0:
@@ -263,20 +264,11 @@ class GenExternalAtenFallback:
             if returns != '':
                 return_str = f'\n  return {returns};'
 
-            logging_str = ''
-            if self.backend_index.per_op_log is not None:
-                logging_str += f'{self.backend_index.per_op_log};\n'
-            if self.backend_index.cpu_fallback_counter is not None:
-                fallback_counter = self.backend_index.cpu_fallback_counter.replace("{name}", name)
-                logging_str += f'{fallback_counter};\n'
-            if self.backend_index.per_argument_log is not None:
-                argument_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensor_args.keys()])
-                print_str = f'{self.backend_index.per_argument_log} << "{self.backend_index.dispatch_key} {name} :"{argument_str}'
-                logging_str += f'{print_str};\n'
-
             return f"""\
 {dispatcher_sig.defn(name=func_name)} {{
-  {logging_str}
+  XLA_FN_TRACK(3);
+  XLA_COUNTER("aten::{name}", 1);
+  TF_VLOG(3) << "XLA {name} :"{print_args_str};
 {intermediates}
   {at_call}{collect_mutated_tensors}{update_tensors}{avoid_warning}{return_str}
 }}
