@@ -3,9 +3,16 @@
 
 import collections
 import numbers
-from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
-                    TypeVar, Union, get_type_hints)
-from typing import _tp_cache, _type_check, _type_repr  # type: ignore
+import sys
+from typing import (Any, Dict, Iterator, List, Set, Tuple, TypeVar, Union,
+                    get_type_hints)
+from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
+
+try:  # Python > 3.6
+    from typing import ForwardRef  # type: ignore[attr-defined]
+except ImportError:  # Python 3.6
+    from typing import _ForwardRef as ForwardRef  # type: ignore[attr-defined]
+
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 try:
@@ -14,9 +21,9 @@ except ImportError:  # Python > 3.6
     # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
     # For Python 3.9, only Protocol in typing uses metaclass
     from abc import ABCMeta
-    from typing import _ProtocolMeta  # type: ignore
+    from typing import _ProtocolMeta  # type: ignore[attr-defined]
 
-    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore
+    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
         pass
 
 
@@ -81,7 +88,7 @@ def issubtype(left, right, recursive=True):
 
 
 def _decompose_type(t, to_list=True):
-    if isinstance(t, TypeVar):  # type: ignore
+    if isinstance(t, TypeVar):
         if t.__bound__ is not None:
             ts = [t.__bound__]
         else:
@@ -129,7 +136,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # Variant is not TypeVar or Union
     if hasattr(variant, '__origin__') and variant.__origin__ is not None:
         v_origin = variant.__origin__
-        v_args = variant.__args__
+        # In Python-3.9 typing library untyped generics do not have args
+        v_args = getattr(variant, "__args__", None)
     else:
         v_origin = variant
         v_args = None
@@ -150,7 +158,8 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                 if v_origin == c_origin:
                     if not recursive:
                         return True
-                    c_args = constraint.__args__
+                    # In Python-3.9 typing library untyped generics do not have args
+                    c_args = getattr(constraint, "__args__", None)
                     if c_args is None or len(c_args) == 0:
                         return True
                     if v_args is not None and len(v_args) == len(c_args) and \
@@ -168,21 +177,23 @@ def issubinstance(data, data_type):
     if not issubtype(type(data), data_type, recursive=False):
         return False
 
+    # In Python-3.9 typing library __args__ attribute is not defined for untyped generics
+    dt_args = getattr(data_type, "__args__", None)
     if isinstance(data, tuple):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        if len(data_type.__args__) != len(data):
+        if len(dt_args) != len(data):
             return False
-        return all(issubinstance(d, t) for d, t in zip(data, data_type.__args__))
+        return all(issubinstance(d, t) for d, t in zip(data, dt_args))
     elif isinstance(data, (list, set)):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        t = data_type.__args__[0]
+        t = dt_args[0]
         return all(issubinstance(d, t) for d in data)
     elif isinstance(data, dict):
-        if data_type.__args__ is None or len(data_type.__args__) == 0:
+        if dt_args is None or len(dt_args) == 0:
             return True
-        kt, vt = data_type.__args__
+        kt, vt = dt_args
         return all(issubinstance(k, kt) and issubinstance(v, vt) for k, v in data.items())
 
     return True
@@ -246,19 +257,23 @@ class _DataPipeMeta(GenericMeta):
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace)
 
+        namespace['__type_class__'] = False
         # For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
                 return super().__new__(cls, name, bases, namespace)
 
-        namespace.update({'type': _DEFAULT_TYPE, '__init_subclass__': _dp_init_subclass})
+        namespace.update({'type': _DEFAULT_TYPE,
+                          '__init_subclass__': _dp_init_subclass})
         return super().__new__(cls, name, bases, namespace)
 
     @_tp_cache
     def __getitem__(self, param):
         if param is None:
             raise TypeError('{}[t]: t can not be None'.format(self.__name__))
-        if isinstance(param, Sequence):
+        if isinstance(param, str):
+            param = ForwardRef(param)
+        if isinstance(param, tuple):
             param = Tuple[param]
         _type_check(param, msg="{}[t]: t must be a type".format(self.__name__))
         t = _DataPipeType(param)
@@ -277,6 +292,7 @@ class _DataPipeMeta(GenericMeta):
 
         return self.__class__(name, bases,
                               {'__init_subclass__': _dp_init_subclass,
+                               '__type_class__': True,
                                'type': t})
 
     def __eq__(self, other):
@@ -304,7 +320,7 @@ def _mro_subclass_init(obj):
             if b.__init_subclass__ == _dp_init_subclass:
                 return True
             if hasattr(b.__init_subclass__, '__func__') and \
-                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore
+                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore[attr-defined]
                 return True
     return False
 
@@ -312,6 +328,21 @@ def _mro_subclass_init(obj):
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # TODO:
     # - add global switch for type checking at compile-time
+
+    # Ignore internal type class
+    if getattr(sub_cls, '__type_class__', False):
+        return
+
+    # Check if the string type is valid
+    if isinstance(sub_cls.type.param, ForwardRef):
+        base_globals = sys.modules[sub_cls.__module__].__dict__
+        try:
+            param = _eval_type(sub_cls.type.param, base_globals, locals())
+            sub_cls.type.param = param
+        except TypeError as e:
+            raise TypeError("{} is not supported by Python typing"
+                            .format(sub_cls.type.param.__forward_arg__)) from e
+
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
         hints = get_type_hints(iter_fn)

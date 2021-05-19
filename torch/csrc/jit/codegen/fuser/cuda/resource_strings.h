@@ -15,7 +15,7 @@ cases*/
 
 #ifdef __HIP_PLATFORM_HCC__
 static auto type_declarations_template = CodeTemplate(R"(
-#include <hip/hip_runtime.h>
+${RuntimeHeader}
 ${HalfHeader}
 ${RandHeader}
 
@@ -35,6 +35,7 @@ struct TensorInfo<T, 0> {
 };
 )");
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
@@ -167,6 +168,7 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
@@ -213,8 +215,6 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 #ifdef __HIP_PLATFORM_HCC__
 constexpr auto half_support_literal =
     R"(
-#include <hip/hip_fp16.h>
-
 typedef __half half;
 )";
 #else

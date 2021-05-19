@@ -1,8 +1,8 @@
 import sys
 
 import torch
-from torch._C import _add_docstr, _special  # type: ignore
-from torch._torch_docs import common_args  # type: ignore
+from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
+from torch._torch_docs import common_args
 
 Tensor = torch.Tensor
 
@@ -228,4 +228,65 @@ Example::
 
     >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
+""".format(**common_args))
+
+xlog1py = _add_docstr(_special.special_xlog1py,
+                      r"""
+xlog1py(input, other, *, out=None) -> Tensor
+
+Computes ``input * log1p(other)`` with the following cases.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{input}_{i} = 0.0 \text{ and } \text{other}_{i} != \text{NaN} \\
+        \text{input}_{i} * \text{log1p}(\text{other}_{i})& \text{otherwise}
+    \end{cases}
+
+Similar to SciPy's `scipy.special.xlog1py`.
+
+""" + r"""
+
+Args:
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
+
+.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.zeros(5,)
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.special.xlog1py(x, y)
+    tensor([0., 0., 0., 0., nan])
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.special.xlog1py(x, y)
+    tensor([1.3863, 2.1972, 2.0794])
+    >>> torch.special.xlog1py(x, 4)
+    tensor([1.6094, 3.2189, 4.8283])
+    >>> torch.special.xlog1py(2, y)
+    tensor([2.7726, 2.1972, 1.3863])
+""".format(**common_args))
+
+i0e = _add_docstr(_special.special_i0e,
+                  r"""
+i0e(input, *, out=None) -> Tensor
+Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i0(x) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
+    tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))

@@ -10,7 +10,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 from pathlib import Path
 
@@ -19,18 +19,6 @@ packaging_directory = Path(__file__).parent
 
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
-
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
-    def test_saving_source(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
-            he.save_source_file("foo", str(packaging_directory / "module_a.py"))
-            he.save_source_file("foodir", str(packaging_directory / "package_a"))
-        hi = PackageImporter(filename)
-        foo = hi.import_module("foo")
-        s = hi.import_module("foodir.subpackage")
-        self.assertEqual(foo.result, "module_a")
-        self.assertEqual(s.result, "package_a.subpackage")
 
     @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
     def test_saving_string(self):
@@ -68,6 +56,36 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
+    def test_dunder_imports(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            import package_b
+            obj = package_b.PackageBObject
+            he.intern("**")
+            he.save_pickle("res", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        loaded_obj = hi.load_pickle("res", "obj.pkl")
+
+        package_b = hi.import_module("package_b")
+        self.assertEqual(package_b.result, "package_b")
+
+        math = hi.import_module("math")
+        self.assertEqual(math.__name__, "math")
+
+        xml_sub_sub_package = hi.import_module("xml.sax.xmlreader")
+        self.assertEqual(xml_sub_sub_package.__name__, "xml.sax.xmlreader")
+
+        subpackage_1 = hi.import_module("package_b.subpackage_1")
+        self.assertEqual(subpackage_1.result, "subpackage_1")
+
+        subpackage_2 = hi.import_module("package_b.subpackage_2")
+        self.assertEqual(subpackage_2.result, "subpackage_2")
+
+        subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
+        self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f, verbose=False) as he:
@@ -94,6 +112,7 @@ class TestSaveLoad(PackageTestCase):
 
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
+            he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
         hi = PackageImporter(filename)
 
@@ -121,6 +140,7 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         importer1 = PackageImporter(f1)
@@ -128,8 +148,6 @@ class TestSaveLoad(PackageTestCase):
 
         f2 = self.temp()
         pe = PackageExporter(f2, verbose=False, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.require_module(loaded1.__module__)
         with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
             pe.save_module(loaded1.__module__)
 
@@ -146,6 +164,7 @@ class TestSaveLoad(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
 
         importer1 = PackageImporter(f1)

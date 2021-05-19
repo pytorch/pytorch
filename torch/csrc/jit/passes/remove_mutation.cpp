@@ -21,13 +21,14 @@ bool MutationRemover::newMemoryLocation(Value* v) {
   // if the output isn't contained or alias by the inputs to its node, it's
   // unique
   return !unhandled_node &&
-      !aliasDb_->mayContainAlias(v->node()->inputs(), v) &&
+      !getOrCreateAliasDb()->mayContainAlias(v->node()->inputs(), v) &&
       !(v->node()->kind() == prim::Param);
 }
 
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
   WithInsertPoint guard(n);
   auto inputs = n->inputs();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* new_node;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
@@ -86,7 +87,7 @@ bool MutationRemover::tryMakeCreationAndMutationAtomic(
 
   // In order to safely remove a mutation, the creation of a tensor and its
   // subsequent mutation need to be one atomic operation
-  return aliasDb_->moveBeforeTopologicallyValid(
+  return getOrCreateAliasDb()->moveBeforeTopologicallyValid(
       mutated_value->node(), mutating_op);
 }
 
@@ -119,7 +120,8 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
     return false;
   }
 
-  return aliasDb_->moveBeforeTopologicallyValid(if_node, mutating_op);
+  return getOrCreateAliasDb()->moveBeforeTopologicallyValid(
+      if_node, mutating_op);
 }
 
 bool MutationRemover::RemoveListMutation(Block* block) {
@@ -175,14 +177,13 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     bool has_output = (node->outputs().size() > 0);
     if (has_output) {
       node->output()->replaceAllUsesWith(mutated_value);
-      aliasDb_->writeIndex_->erase(node);
+      getOrCreateAliasDb()->writeIndex_->erase(node);
     }
 
     node->destroy();
 
     // TODO: don't strictly need to reset write cache, evaluate on models
-    aliasDb_->writtenToLocationsIndex_ =
-        aliasDb_->buildWrittenToLocationsIndex();
+    getOrCreateAliasDb()->buildWrittenToLocationsIndex();
   }
 
   return changed;
@@ -216,6 +217,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
       continue;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* new_node;
     if (isSpecialMappedOp(node)) {
       new_node = createSpecialMappedOp(node);
@@ -254,24 +256,65 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     // same aliasing relationships as the original x.
     // To avoid rebuilding the entire alias db, we can replace
     // the memory dag element of x with x0.
-    aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
+    getOrCreateAliasDb()->replaceWithNewValue(
+        mutated_value, new_node->output());
 
     // it is an invariant that all mutable types have an element in the memory
     // dag so we must regive x an alias db element. We have already verified
     // that the mutated value is a fresh alias with a single use.
-    aliasDb_->createValue(mutated_value);
+    getOrCreateAliasDb()->createValue(mutated_value);
 
     // We must erase the destroyed node from the AliasDb lists of writes
-    aliasDb_->writeIndex_->erase(node);
+    getOrCreateAliasDb()->writeIndex_->erase(node);
     node->destroy();
 
     // now that we have removed a mutating op, the write cache is stale
     // TODO: don't strictly need to reset write cache, evaluate on models
-    aliasDb_->writtenToLocationsIndex_ =
-        aliasDb_->buildWrittenToLocationsIndex();
+    getOrCreateAliasDb()->buildWrittenToLocationsIndex();
   }
 
   return changed;
+}
+
+bool MutationRemover::inplaceOpVariant(Node* n) {
+  if (!n->kind().is_aten()) {
+    return false;
+  }
+
+  if (isSpecialMappedOp(n)) {
+    return true;
+  }
+
+  auto name = n->schema().name();
+  bool inplace_op = name.at(name.size() - 1) == '_';
+  if (!inplace_op) {
+    return false;
+  }
+
+  // needs to have alias analysis by schema
+  auto op = n->maybeOperator();
+  if (!op) {
+    return false;
+  }
+  if (op->aliasAnalysisKind() != AliasAnalysisKind::FROM_SCHEMA) {
+    return false;
+  }
+
+  // all inplace ops at time of writing have a single input that is mutated
+  // and returned. check that this is true, anything else could have strange
+  // semantics,
+  if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+    return false;
+  }
+  auto inputs = n->inputs();
+  if (!getOrCreateAliasDb()->writesToAlias(n, {inputs.at(0)}) ||
+      getOrCreateAliasDb()->writesToAlias(
+          n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
+    return false;
+  }
+
+  auto new_schema = name.substr(0, name.size() - 1);
+  return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
 }
 
 bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {

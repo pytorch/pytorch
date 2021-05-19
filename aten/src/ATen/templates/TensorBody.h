@@ -477,8 +477,13 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s dimension names data structure
-  const NamedTensorMeta* get_named_tensor_meta() const;
-  NamedTensorMeta* get_named_tensor_meta();
+  const NamedTensorMeta* get_named_tensor_meta() const {
+    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+  }
+
+  NamedTensorMeta* get_named_tensor_meta() {
+    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+  }
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -680,7 +685,7 @@ class TORCH_API Tensor {
   ///
   /// Enables .grad() for non-leaf Tensors.
 
-  Tensor& set_requires_grad(bool requires_grad) {
+  const Tensor& set_requires_grad(bool requires_grad) const {
     impl_->set_requires_grad(requires_grad);
     return *this;
   }
@@ -692,7 +697,7 @@ class TORCH_API Tensor {
   /// used as `t.grad() = x` to set a gradient to a completely new tensor.
   /// Note that this function work with a non-const Tensor and is not
   /// thread safe.
-  Tensor& mutable_grad() {
+  Tensor& mutable_grad() const {
     return impl_->mutable_grad();
   }
 
@@ -716,7 +721,7 @@ class TORCH_API Tensor {
   /// Note that the given new_grad might not be used directly if it has different
   /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
   /// new_grad content will be copied into a new Tensor
-  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) const {
     impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
@@ -860,7 +865,7 @@ public:
 
   void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 
-  Tensor& requires_grad_(bool _requires_grad=true) const;
+  const Tensor& requires_grad_(bool _requires_grad=true) const;
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -974,6 +979,14 @@ struct MaybeOwnedTraits<at::Tensor> {
 } // namespace c10
 
 namespace at {
+
+inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
+    const c10::optional<Tensor>& opt) {
+  return opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+}
+
 inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_format) const & {
   if (is_contiguous(memory_format)) {
     return c10::MaybeOwned<Tensor>::borrowed(*this);

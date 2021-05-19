@@ -175,6 +175,7 @@ void unfold_backward_cpu_kernel(
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cpu_kernel);
 
 }} // namespace at::native

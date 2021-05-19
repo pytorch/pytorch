@@ -1,4 +1,5 @@
 #include <torch/csrc/python_headers.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdarg.h>
 #include <string>
 #include <torch/csrc/cuda/THCP.h>
@@ -40,6 +41,7 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
     } else if (stream == Py_None) {
       streams.emplace_back();
     } else {
+      // NOLINTNEXTLINE(bugprone-throw-keyword-missing)
       std::runtime_error("Unknown data type found in stream list. Need torch.cuda.Stream or None");
     }
   }

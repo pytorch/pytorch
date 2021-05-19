@@ -43,8 +43,8 @@ DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
   return infer_size_impl<DimVector>(a, b);
 }
 
-template <typename Container>
-std::tuple<Container, Container> inferExpandGeometryImpl(
+template<typename Container>
+C10_ALWAYS_INLINE InferExpandGeometryResult<Container> inferExpandGeometryImpl(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {
@@ -52,13 +52,12 @@ std::tuple<Container, Container> inferExpandGeometryImpl(
   int64_t tensor_dim = tensor_sizes.size();
 
   if (tensor_dim == 0) {
-    return std::make_tuple(
-        Container(sizes.begin(), sizes.end()), Container(ndim, 0));
+    return InferExpandGeometryResult<Container>(sizes, ndim);
   }
 
-  std::tuple<Container, Container> result{Container(ndim), Container(ndim)};
-  auto& expandedSizes = std::get<0>(result);
-  auto& expandedStrides = std::get<1>(result);
+  InferExpandGeometryResult<Container> result(ndim);
+  auto& expandedSizes = result.sizes;
+  auto& expandedStrides = result.strides;
 
   // create a new geometry for the tensors
   for (int64_t i = ndim - 1; i >= 0; --i) {
@@ -103,11 +102,12 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {
-  return inferExpandGeometryImpl<std::vector<int64_t>>(
+  auto result = inferExpandGeometryImpl<std::vector<int64_t>>(
       tensor_sizes, tensor_strides, sizes);
+  return std::make_tuple(std::move(result.sizes), std::move(result.strides));
 }
 
-std::tuple<DimVector, DimVector> inferExpandGeometry_dimvector(
+InferExpandGeometryResult<DimVector> inferExpandGeometry_dimvector(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {

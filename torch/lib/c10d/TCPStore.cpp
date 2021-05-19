@@ -25,7 +25,7 @@ enum class QueryType : uint8_t {
   WAIT,
   GETNUMKEYS,
   WATCH_KEY,
-  DELETE_KEY
+  DELETE_KEY,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
@@ -109,17 +109,21 @@ TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket)
   daemonThread_ = std::thread(&TCPStoreWorkerDaemon::run, this);
 }
 
-void TCPStoreWorkerDaemon::addCallback(
+void TCPStoreWorkerDaemon::setCallback(
     std::string key,
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-        callback) {
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
-  keyToCallbacks[key] = callback;
+    WatchKeyCallback callback) {
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
+  keyToCallbacks_[key] = callback;
 }
 
 // Runs all the callbacks that the worker has registered
 void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
+  if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
+    // Notify the waiting "watchKey" operation to return
+    setCallbackRegistered();
+    return;
+  }
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
@@ -137,8 +141,8 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
-  keyToCallbacks.at(key)(currentValue, newValue);
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
+  keyToCallbacks_.at(key)(currentValue, newValue);
 }
 
 #ifdef _WIN32
@@ -480,8 +484,12 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
 void TCPStoreMasterDaemon::watchHandler(int socket) {
   std::string key = tcputil::recvString(socket);
 
-  // record the socket to respond to when the key is updated
+  // Record the socket to respond to when the key is updated
   watchedSockets_[key].push_back(socket);
+
+  // Send update to TCPStoreWorkerDaemon on client
+  tcputil::sendValue<WatchResponseType>(
+      socket, WatchResponseType::KEY_CALLBACK_REGISTERED);
 }
 
 bool TCPStoreMasterDaemon::checkKeys(
@@ -682,13 +690,13 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_SET);
   tcputil::sendString(storeSocket_, regKey, true);
-  tcputil::sendVector<uint8_t>(storeSocket_, currentValue);
-  tcputil::sendVector<uint8_t>(storeSocket_, newValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, expectedValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, desiredValue);
   return tcputil::recvVector<uint8_t>(storeSocket_);
 }
 
@@ -717,16 +725,19 @@ bool TCPStore::deleteKey(const std::string& key) {
   return (numDeleted == 1);
 }
 
-void TCPStore::watchKey(
-    const std::string& key,
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-        callback) {
+void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
+  // Only allow one thread to perform watchKey() at a time
+  const std::lock_guard<std::mutex> watchKeyLock(watchKeyMutex_);
+
+  // Register callback with TCPStoreMasterDaemon to call TCPStoreWorkerDaemon on
+  // key change
   std::string regKey = regularPrefix_ + key;
-
-  tcpStoreWorkerDaemon_->addCallback(regKey, callback);
-
+  tcpStoreWorkerDaemon_->setCallback(regKey, callback);
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
+
+  // Block until callback has been registered successfully
+  tcpStoreWorkerDaemon_->waitForCallbackRegistration();
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {

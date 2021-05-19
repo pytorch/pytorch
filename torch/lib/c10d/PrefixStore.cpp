@@ -29,9 +29,9 @@ void PrefixStore::set(
 
 std::vector<uint8_t> PrefixStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
-  return store_->compareSet(joinKey(key), currentValue, newValue);
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
+  return store_->compareSet(joinKey(key), expectedValue, desiredValue);
 }
 
 std::vector<uint8_t> PrefixStore::get(const std::string& key) {
@@ -46,11 +46,8 @@ bool PrefixStore::deleteKey(const std::string& key) {
   return store_->deleteKey(joinKey(key));
 }
 
-void PrefixStore::watchKey(
-    const std::string& key,
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-        callback) {
-  return store_->watchKey(joinKey(key), callback);
+void PrefixStore::watchKey(const std::string& key, WatchKeyCallback callback) {
+  return store_->watchKey(joinKey(key), std::move(callback));
 }
 
 int64_t PrefixStore::getNumKeys() {

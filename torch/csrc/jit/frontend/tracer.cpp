@@ -62,6 +62,7 @@ void badArgType(const T& v) {
       ". File a bug report.");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
@@ -868,7 +869,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   Variable size_var;
   {
     // Make sure this scalar to tensor isn't traced!
-    at::AutoNonVariableTypeMode guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
@@ -913,6 +914,7 @@ void ensureUniqueIfOutOfPlaced(
 ////////////////////////////////////////////////////////////////////////////////
 // Argument stash
 ////////////////////////////////////////////////////////////////////////////////
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local ArgumentStash ArgumentStash::stash;
 
 void ArgumentStash::stashIntArrayRefElem(
@@ -963,6 +965,7 @@ void ArgumentStash::stashValue(
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
 void defaultRecordSourceLocation(Node* n) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -975,6 +978,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
     defaultPythonCallstack);
 std::vector<StackEntry> pythonCallstack() {
@@ -987,21 +991,26 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
 void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_PYTHON_DATAFLOW =
     " might cause the trace to be incorrect. We can't record the data flow of "
     "Python values, so this value will be treated as a constant in the future. "
     "This means that the trace might not generalize to other inputs!";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_CONSTRUCTOR =
     " results are registered as constants in the trace. You can safely ignore this "
     "warning if you use this function to create tensors out of constant variables "
     "that would be the same every time you call this function. In any other case, "
     "this might cause the trace to be incorrect.";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* STRICT_TRACER_MSG =
     " might cause the trace to be incorrect, this is only valid if the container "
     "structure does not change based on the module's inputs. Consider using a constant "

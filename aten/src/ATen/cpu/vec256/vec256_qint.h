@@ -220,7 +220,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
 template<>
 struct Vec256<c10::qint32> : public Vec256qi {
-    static constexpr int size() {
+    using size_type = int;
+    static constexpr size_type size() {
         return 8;
     }
 
@@ -526,6 +527,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
 
     // This is needed because the compiler emits awful code for the default
     // constructor for moving the enum
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
     Vec256(const Vec256<c10::qint8>& other) : Vec256qi(other.vals) { }
 
     void store(void* ptr, int count = size()) const {
@@ -798,6 +800,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
         vals = _mm256_set1_epi8(uw);
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
     Vec256(const Vec256<c10::quint8>& other) : Vec256qi(other.vals) { }
 
     void store(void* ptr, int count = size()) const {

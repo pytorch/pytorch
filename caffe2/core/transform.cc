@@ -10,6 +10,7 @@ namespace caffe2 {
 
 using transform::Graph;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TransformRegistry, Transform);
 
 std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
@@ -205,6 +206,7 @@ double average_net_run_duration(
     CAFFE_ENFORCE(init_net->Run(), "Init run has failed!");
   } else {
     // If a proper init_net is not provided, then this is the best we can do.
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto inp : netdef.external_input()) {
       ws.CreateBlob(inp);
     }

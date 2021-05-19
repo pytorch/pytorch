@@ -75,7 +75,7 @@ class Formatter(logging.Formatter):
         else:
             # I'm not sure why, but formatMessage doesn't show up
             # even though it's in the typeshed for Python >3
-            return super().formatMessage(record)  # type: ignore
+            return super().formatMessage(record)
 
     def format(self, record: logging.LogRecord) -> str:
         return self._filter(super().format(record))

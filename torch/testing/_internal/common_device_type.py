@@ -312,7 +312,11 @@ class DeviceTypeTestBase(TestCase):
                 # Acquires dtypes, using the op data if unspecified
                 dtypes = cls._get_dtypes(test)
                 if dtypes is None:
-                    if test.opinfo_dtypes == OpDTypes.unsupported:
+                    if test.opinfo_dtypes == OpDTypes.unsupported_backward:
+                        dtypes = set(get_all_dtypes()).difference(op.supported_backward_dtypes(cls.device_type))
+                    elif test.opinfo_dtypes == OpDTypes.supported_backward:
+                        dtypes = op.supported_backward_dtypes(cls.device_type)
+                    elif test.opinfo_dtypes == OpDTypes.unsupported:
                         dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(cls.device_type))
                     elif test.opinfo_dtypes == OpDTypes.supported:
                         dtypes = op.supported_dtypes(cls.device_type)
@@ -471,6 +475,9 @@ if _TORCH_TEST_DEVICES:
 
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
+PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
+PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
@@ -506,8 +513,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Usage:
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
-    env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
-    env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
+    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
+    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
 
     desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
                                                                  env_except_for, env_only_for)
@@ -563,6 +570,8 @@ class OpDTypes(Enum):
     basic = 0  # Test the basic set of dtypes (default)
     supported = 1  # Test all supported dtypes
     unsupported = 2  # Test only unsupported dtypes
+    supported_backward = 3  # Test all supported backward dtypes
+    unsupported_backward = 4  # Test only unsupported backward dtypes
 
 
 # Decorator that defines the ops a test should be run with
@@ -862,8 +871,10 @@ class expectedAlertNondeterministic:
     def __call__(self, fn):
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
-                with DeterministicGuard(True):
+            with DeterministicGuard(True):
+                # If a nondeterministic error is expected for this case,
+                # check that it is raised
+                if self.device_type is None or self.device_type == slf.device_type:
                     try:
                         if self.fn_has_device_arg:
                             fn(slf, device, *args, **kwargs)
@@ -879,10 +890,20 @@ class expectedAlertNondeterministic:
                     else:
                         slf.fail('expected a non-deterministic error, but it was not raised')
 
-            if self.fn_has_device_arg:
-                return fn(slf, device, *args, **kwargs)
-            else:
-                return fn(slf, *args, **kwargs)
+                # If a nondeterministic error is not expected for this case,
+                # make sure that it is not raised
+                try:
+                    if self.fn_has_device_arg:
+                        return fn(slf, device, *args, **kwargs)
+                    else:
+                        return fn(slf, *args, **kwargs)
+                except RuntimeError as e:
+                    if 'does not have a deterministic implementation' in str(e):
+                        slf.fail(
+                            'did not expect non-deterministic error message, '
+                            + 'but got this: "' + str(e) + '"')
+                    # Reraise exceptions unrelated to nondeterminism
+                    raise
 
         @wraps(fn)
         def efail_fn_no_device(slf, *args, **kwargs):

@@ -49,7 +49,8 @@ struct Vec256<c10::quint8> {
 
  public:
   Vec256() {}
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 32;
   }
 

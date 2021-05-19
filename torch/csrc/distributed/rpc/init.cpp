@@ -145,6 +145,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_device_map",
+              &RpcAgent::getDeviceMap,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
@@ -170,6 +174,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
               JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
               lead to errors.
+
+          Args:
+              value (object): The value to be wrapped by this RRef.
+              type_hint (Type, optional): Python type that should be passed to
+                  ``TorchScript`` compiler as type hint for ``value``.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -547,13 +556,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
-        return std::make_unique<ProcessGroupAgent>(
-            store,
-            std::move(workerName),
-            pg,
-            numSendRecvThreads,
-            rpcTimeout,
-            std::make_unique<RequestCallbackImpl>());
+        return std::shared_ptr<ProcessGroupAgent>(
+            new ProcessGroupAgent(
+                store,
+                std::move(workerName),
+                pg,
+                numSendRecvThreads,
+                rpcTimeout,
+                std::make_unique<RequestCallbackImpl>()),
+            impl::destroy_without_gil<ProcessGroupAgent>);
       }))
       .def(
           "get_worker_info",
@@ -574,6 +585,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
               ProcessGroupAgent::getWorkerInfos,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_device_map",
+          (DeviceMap(ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
+              ProcessGroupAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "join",
@@ -601,14 +617,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               optional<std::vector<std::string>>,
               float,
               std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
+              std::unordered_map<std::string, DeviceMap>,
+              std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
-          py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>())
+          py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
+          py::arg("devices") = std::vector<c10::Device>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -621,7 +638,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "device_maps",
           &TensorPipeRpcBackendOptions::deviceMaps,
           R"(The device map locations.)")
-      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
+      .def_readwrite(
+          "devices",
+          &TensorPipeRpcBackendOptions::devices,
+          R"(All devices used by the local agent.)")
+      .def("_set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
@@ -634,14 +655,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       int worldSize,
                       c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
-            return std::make_shared<TensorPipeAgent>(
-                store,
-                std::move(selfName),
-                selfId,
-                worldSize,
-                std::move(processGroup),
-                std::move(opts),
-                std::make_unique<RequestCallbackImpl>());
+            return std::shared_ptr<TensorPipeAgent>(
+                new TensorPipeAgent(
+                    store,
+                    std::move(selfName),
+                    selfId,
+                    worldSize,
+                    std::move(processGroup),
+                    std::move(opts),
+                    std::make_unique<RequestCallbackImpl>()),
+                impl::destroy_without_gil<TensorPipeAgent>);
           }),
           py::arg("store"),
           py::arg("name"),
@@ -677,6 +700,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_device_map",
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
+              TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_reverse_device_maps",

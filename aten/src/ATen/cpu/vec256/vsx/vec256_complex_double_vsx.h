@@ -28,7 +28,8 @@ class Vec256<ComplexDbl> {
   using value_type = ComplexDbl;
   using vec_internal_type = vfloat64;
   using vec_internal_mask_type = vbool64;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 2;
   }
   Vec256() {}
