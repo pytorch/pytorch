@@ -263,6 +263,7 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_module(nni.BNReLU2d),
             ns.call_module(nni.BNReLU3d),
         ]
+        self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
 
     def test_fuse_custom_config_dict_validity(self):
         r"""
