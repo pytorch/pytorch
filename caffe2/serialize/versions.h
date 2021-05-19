@@ -65,9 +65,13 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x1L: Initial version
 //  0x2L: (Comment missing)
 //  0x3L: (Comment missing)
-//  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
-constexpr uint64_t kProducedBytecodeVersion = 0x4L;
+//  0x5L: (update) Update bytecode is sharing constant tensor files from torchscript, and only serialize
+//  extra tensors that are not in the torchscript constant table. Also update tensor storage schema adapting
+//  to the unify format, the root key of tensor storage is updated from {index} to
+//  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
+//  Forward-compatibility change.
+constexpr uint64_t kProducedBytecodeVersion = 0x5L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
