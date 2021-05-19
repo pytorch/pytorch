@@ -757,6 +757,8 @@ class _NnapiSerializer(object):
             self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
         "aten::mul": lambda self, node:
             self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
+        "aten::div": lambda self, node:
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.DIV, NNAPI_FuseCode.FUSED_NONE),
         "aten::relu": lambda self, node:
             self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
         "aten::sigmoid": lambda self, node:

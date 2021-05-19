@@ -186,7 +186,7 @@ class TestNNAPI(TestCase):
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
 
     def test_pointwise_binary(self):
-        for op in ["add", "sub", "mul"]:
+        for op in ["add", "sub", "mul", "div"]:
             with self.subTest(op):
                 class BinaryModule(torch.nn.Module):
                     def forward(self, lhs, rhs):
@@ -196,6 +196,8 @@ class TestNNAPI(TestCase):
                             return lhs - rhs
                         if op == "mul":
                             return lhs * rhs
+                        if op == "div":
+                            return lhs / rhs
                         raise Exception("Bad op")
 
                 self.check(
