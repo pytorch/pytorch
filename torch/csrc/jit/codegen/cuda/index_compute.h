@@ -102,6 +102,10 @@ class IndexCompute : public BackwardVisitor {
   // if there's an option
   std::unordered_set<kir::IterDomain*> preferred_paths_;
 
+  // Map from IterDomains to halo-extended extents in corresponding
+  // reference tensor
+  std::unordered_map<kir::IterDomain*, kir::Val*> reference_halo_extent_map_;
+
  public:
   const std::unordered_map<kir::IterDomain*, kir::Val*>& indexMap() const {
     return index_map_;
@@ -122,14 +126,18 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_map<kir::IterDomain*, kir::Val*> _extent_map,
       std::unordered_set<kir::IterDomain*> _zero_merged_in,
       const std::vector<bool>& _root_contiguity,
-      std::unordered_set<kir::IterDomain*> preferred_paths = {});
+      std::unordered_set<kir::IterDomain*> preferred_paths = {},
+      std::unordered_map<kir::IterDomain*, kir::Val*>
+          reference_halo_extent_map = {});
 
   // Updates index_map, extent_map, and zero_merged_in based on id_map and
   // returns a new IndexCompute ready to be used.
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-      const std::vector<bool>& _root_contiguity);
+      const std::vector<bool>& _root_contiguity,
+      const std::unordered_map<kir::IterDomain*, kir::Val*>&
+          reference_halo_extent_map = {});
 
   virtual void run();
 

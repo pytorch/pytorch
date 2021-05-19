@@ -486,7 +486,8 @@ IterDomain* ComputeAtMap::toFusion(kir::IterDomain* kir) const {
   auto kir_2_fusion_it = kir_2_fusion_.find(kir);
   TORCH_INTERNAL_ASSERT(
       kir_2_fusion_it != kir_2_fusion_.end(),
-      "Kernel ir is not guarneteed to be reversible into fusion ir, could not find fusion entry.");
+      "Kernel ir is not guarneteed to be reversible into fusion ir, could not find fusion entry. ",
+      kir::toString(kir, false));
   return kir_2_fusion_it->second;
 }
 

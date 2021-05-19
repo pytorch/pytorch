@@ -98,7 +98,8 @@ bool isTVOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
-       expr->getExprType().value() == ExprType::TransposeOp)) {
+       expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ShiftOp)) {
     return true;
   }
   if (expr->getExprType().value() == ExprType::WelfordOp) {

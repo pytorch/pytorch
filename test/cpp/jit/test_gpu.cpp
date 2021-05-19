@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -15168,6 +15169,7 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
       "",
       lparams);
 }
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

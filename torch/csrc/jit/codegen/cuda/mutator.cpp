@@ -197,6 +197,17 @@ Statement* OptOutMutator::mutate(TransposeOp* top) {
   return top;
 }
 
+Statement* OptOutMutator::mutate(ShiftOp* sop) {
+  Val* out = mutateAsVal(sop->out())->asVal();
+  Val* in = mutateAsVal(sop->in())->asVal();
+
+  if (out->sameAs(sop->out()) && in->sameAs(sop->in()))
+    return sop;
+  auto offsets = sop->offsets();
+  FusionGuard::getCurFusion()->removeExpr(sop);
+  return new ShiftOp(out, in, offsets);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

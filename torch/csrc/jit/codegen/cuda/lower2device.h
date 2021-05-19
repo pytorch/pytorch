@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
@@ -59,6 +60,14 @@ class TORCH_CUDA_CU_API GpuLower {
     return trivial_reduction_info_;
   }
 
+  const HaloInfo& haloInfo() const {
+    return halo_info_;
+  }
+
+  HaloInfo& haloInfo() {
+    return halo_info_;
+  }
+
  private:
   void lower();
 
@@ -84,6 +93,7 @@ class TORCH_CUDA_CU_API GpuLower {
   ComputeAtMap ca_index_map_;
   ComputeAtMap ca_parallel_map_;
   TrivialReductionInfo trivial_reduction_info_;
+  HaloInfo halo_info_;
 
   Fusion* fusion_ = nullptr;
 };

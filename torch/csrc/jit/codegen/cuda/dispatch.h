@@ -75,6 +75,7 @@ class ReductionOp;
 class WelfordOp;
 class BroadcastOp;
 class TransposeOp;
+class ShiftOp;
 
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
@@ -104,6 +105,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const WelfordOp*) {}
   virtual void handle(const BroadcastOp*) {}
   virtual void handle(const TransposeOp*) {}
+  virtual void handle(const ShiftOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -132,6 +134,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(WelfordOp*) {}
   virtual void handle(BroadcastOp*) {}
   virtual void handle(TransposeOp*) {}
+  virtual void handle(ShiftOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
@@ -191,6 +194,9 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
   }
   virtual void handle(const TransposeOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
+  }
+  virtual void handle(const ShiftOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
   }
 };
 
@@ -252,6 +258,9 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
   virtual void handle(TransposeOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
   }
+  virtual void handle(ShiftOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
+  }
 };
 
 class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
@@ -301,6 +310,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(WelfordOp*);
   virtual Statement* mutate(BroadcastOp*);
   virtual Statement* mutate(TransposeOp*);
+  virtual Statement* mutate(ShiftOp*);
 };
 
 class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
@@ -368,6 +378,9 @@ class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
   }
   virtual Statement* mutate(TransposeOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TransposeOp.");
+  }
+  virtual Statement* mutate(ShiftOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ShiftOp.");
   }
 };
 

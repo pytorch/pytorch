@@ -487,6 +487,54 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
+ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets)
+    : Expr(ExprType::ShiftOp),
+      out_(out),
+      in_(in),
+      offsets_(std::move(offsets)) {
+  // clang-tidy complains about out_ that it may be null.
+  TORCH_INTERNAL_ASSERT(out_ != nullptr);
+  TORCH_INTERNAL_ASSERT(in_ != nullptr);
+
+  auto out_type = out->getValType().value();
+  auto in_type = in->getValType().value();
+
+  TORCH_INTERNAL_ASSERT(
+      out_type == ValType::TensorView && in_type == ValType::TensorView,
+      "Cannot shift a non-tensor object.");
+
+  TORCH_INTERNAL_ASSERT(
+      offsets_.size() ==
+          TensorDomain::noReductions(in_->as<TensorView>()->getRootDomain())
+              .size(),
+      "Invalid offset vector: ",
+      offsets_);
+
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      offsets_(src->offsets_) {}
+
+bool ShiftOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ShiftOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ShiftOp>();
+  if (offsets() != other_op->offsets()) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 IterDomain::IterDomain(
     Val* start,
     Val* extent,

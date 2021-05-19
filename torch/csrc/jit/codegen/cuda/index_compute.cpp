@@ -217,6 +217,149 @@ class ContigIDs : public OptInDispatch {
   }
 };
 
+// Update the HaloInfo mappings for a reference tensor by propagating
+// the halo information from the consumer tensor.
+void updateHaloInfoForReference(
+    const ReferenceTensor& reference,
+    const TensorView* consumer_tv) {
+  const auto gpu_lower = GpuLower::current();
+
+  auto& halo_info = gpu_lower->haloInfo();
+
+  auto* reference_domain = reference.domain;
+  const auto& reference_concrete_map = reference.concrete_to_id;
+
+  for (auto reference_root_axis : reference_domain->getRootDomain()) {
+    // Set default
+    halo_info.setRootAxisInfo(reference_root_axis, AxisHaloInfo());
+    auto consumer_it = std::find_if(
+        consumer_tv->getRootDomain().begin(),
+        consumer_tv->getRootDomain().end(),
+        [&](IterDomain* consumer_root) {
+          auto concrete_id =
+              gpu_lower->caIndexMap().getConcreteMappedID(consumer_root);
+          auto it = reference_concrete_map.find(concrete_id);
+          return it != reference_concrete_map.end() &&
+              it->second == reference_root_axis;
+        });
+    // When no corresponding ID of the consumer exists, the reference
+    // axis can be ignored
+    if (consumer_it == consumer_tv->getRootDomain().end()) {
+      continue;
+    }
+    auto consumer_root_axis = *consumer_it;
+    auto root_axis_info =
+        gpu_lower->haloInfo().getRootAxisInfo(consumer_root_axis);
+    if (root_axis_info.width() == 0) {
+      continue;
+    }
+    halo_info.setRootAxisInfo(reference_root_axis, root_axis_info);
+  }
+
+  halo_info.build(reference_domain);
+
+  return;
+}
+
+// Get a map of IterDomains to halo-extended extents of corresponding
+// reference IterDomains.
+//
+// ref_map: ref-to-consumer in consumer indexing; ref-to-producer in
+// producer indexing
+std::unordered_map<kir::IterDomain*, kir::Val*> getReferenceHaloExtentMap(
+    const ReferenceTensor& reference,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& ref_map,
+    const std::unordered_map<kir::IterDomain*, kir::Val*>& extent_map) {
+  const auto gpu_lower = GpuLower::current();
+
+  // First, update HaloInfo with the reference tensor, which reflects
+  // the halo extents of the consumer tensor.
+  updateHaloInfoForReference(reference, consumer_tv);
+
+  const auto& halo_info = gpu_lower->haloInfo();
+
+  std::unordered_map<kir::IterDomain*, kir::Val*> reference_halo_extent_map;
+
+  // Propagate halo extents of the reference to the consumer or
+  // producer tensor
+  for (auto kv : ref_map) {
+    auto ref_id = gpu_lower->lowerValue(kv.first)->as<kir::IterDomain>();
+    auto producer_or_consumer_id =
+        gpu_lower->lowerValue(kv.second)->as<kir::IterDomain>();
+    auto extent = halo_info.getExtent(ref_id);
+    if (extent == nullptr) {
+      auto extent_it = extent_map.find(ref_id);
+      if (extent_it != extent_map.end()) {
+        extent = extent_it->second;
+      } else {
+        extent = ref_id->extent();
+      }
+    }
+    reference_halo_extent_map[producer_or_consumer_id] = extent;
+  }
+
+  return reference_halo_extent_map;
+}
+
+//! Offset of an index of a producer axis with respect to its
+//! corresponding consumer index
+int getProducerHaloOffset(
+    const TensorView* producer_tv,
+    size_t producer_axis,
+    const TensorView* consumer_tv) {
+  auto p2c =
+      PairwiseRootDomainMap(producer_tv, consumer_tv)
+          .mapProducerToConsumer(producer_tv->domain(), consumer_tv->domain());
+
+  auto producer_id = producer_tv->getMaybeRFactorDomain()[producer_axis];
+
+  auto it = p2c.find(producer_id);
+  // p2c should always have a mapping for producer_id. The only case
+  // where no mapping exists for a producer axis is when it is a
+  // reduction axis. Since this function is only used for indexing
+  // producer tensors, where reduction axes are skipped, producer_id
+  // should never be a reduction axis.
+  TORCH_INTERNAL_ASSERT(it != p2c.end());
+  IterDomain* consumer_id = it->second;
+
+  const auto& halo_map = GpuLower::current()->haloInfo();
+  const int p_pad = int(halo_map.getRootAxisInfo(producer_id).width(0));
+  const int c_pad = int(halo_map.getRootAxisInfo(consumer_id).width(0));
+
+  int offset = p_pad - c_pad;
+
+  // If the consumer is a result of shifting the producer, adjust the
+  // producer index per the offsets argument of the shift op.
+  if (auto shift_op = dynamic_cast<const ShiftOp*>(consumer_tv->definition())) {
+    offset -= shift_op->offset(producer_axis);
+  }
+
+  return offset;
+}
+
+//! Offset producer index when necessary
+kir::Val* getProducerIndexWithHalo(
+    const TensorView* producer_tv,
+    size_t producer_axis,
+    kir::Val* producer_index,
+    const TensorView* consumer_tv) {
+  const int offset =
+      getProducerHaloOffset(producer_tv, producer_axis, consumer_tv);
+
+  if (offset == 0) {
+    return producer_index;
+  }
+
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  producer_index =
+      ir_builder.addExpr(producer_index, ir_builder.create<kir::Int>(offset));
+
+  return producer_index;
+}
+
 } // namespace
 
 void IndexCompute::handle(Split* split) {
@@ -328,7 +471,15 @@ void IndexCompute::handle(Merge* merge) {
     return;
   }
 
-  const auto inner_extent = getExtent(inner_id);
+  kir::Val* inner_extent = getExtent(inner_id);
+
+  // When the reference has halo extent for inner_id, that extent needs to
+  // be used to un-merge
+  if (reference_halo_extent_map_.find(inner_id) !=
+      reference_halo_extent_map_.end()) {
+    inner_extent = reference_halo_extent_map_[inner_id];
+  }
+
   const auto outer_extent = getExtent(outer_id);
 
   if (inner_id->isBroadcast() && inner_extent->isOneInt()) {
@@ -406,12 +557,14 @@ IndexCompute::IndexCompute(
     std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
     std::unordered_set<kir::IterDomain*> zero_merged_in,
     const std::vector<bool>& root_contiguity,
-    std::unordered_set<kir::IterDomain*> preferred_paths)
+    std::unordered_set<kir::IterDomain*> preferred_paths,
+    std::unordered_map<kir::IterDomain*, kir::Val*> reference_halo_extent_map)
     : td_(_td),
       index_map_(std::move(initial_index_map)),
       extent_map_(std::move(extent_map)),
       zero_merged_in_(std::move(zero_merged_in)),
-      preferred_paths_(std::move(preferred_paths)) {
+      preferred_paths_(std::move(preferred_paths)),
+      reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
   FUSER_PERF_SCOPE("IndexCompute::IndexCompute");
 
   // Make sure we recompute any indices we can that map to a contiguous access
@@ -457,7 +610,9 @@ bool IndexCompute::hasZeroMerged(kir::IterDomain* id) {
 IndexCompute IndexCompute::updateIndexCompute(
     const TensorDomain* new_td,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-    const std::vector<bool>& root_contiguity) {
+    const std::vector<bool>& root_contiguity,
+    const std::unordered_map<kir::IterDomain*, kir::Val*>&
+        reference_halo_extent_map) {
   FUSER_PERF_SCOPE("updateIndexCompute");
 
   const auto gpu_lower = GpuLower::current();
@@ -488,7 +643,9 @@ IndexCompute IndexCompute::updateIndexCompute(
       updated_index_map,
       updated_extent_map,
       updated_zero_merged_in,
-      root_contiguity);
+      root_contiguity,
+      {},
+      reference_halo_extent_map);
   updated_index_compute.run();
 
   return updated_index_compute;
@@ -654,6 +811,28 @@ class UpdateLeafIndices : public IterVisitor {
   std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_;
 };
 
+// Returns halo-extended extent if id has halo. Otherwise, just
+// returns id->extent.
+kir::Val* getHaloExtentOfRootAxis(
+    IterDomain* id,
+    kir::Val* normal_extent = nullptr) {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  if (normal_extent == nullptr) {
+    normal_extent = gpu_lower->lowerValue(id->extent());
+  }
+
+  const auto& halo = gpu_lower->haloInfo().getRootAxisInfo(id);
+  if (halo.width() > 0) {
+    auto halo_extent = ir_builder.addExpr(
+        normal_extent, ir_builder.create<kir::Int>(halo.width()));
+    return halo_extent;
+  } else {
+    return normal_extent;
+  }
+}
+
 } // namespace
 
 IndexSwizzle::IndexSwizzle(
@@ -791,11 +970,15 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference, consumer_tv, ref_2_producer, ref_compute.extentMap());
+
   // Index into producer using reference indexing
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
       ref_2_producer,
-      producer_tv->domain()->contiguity());
+      producer_tv->domain()->contiguity(),
+      reference_halo_extent_map);
 
   // Revert p_ids
   for (auto entry : p_id_backup) {
@@ -862,13 +1045,14 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
         strides[dim] = cur_contig_stride;
         // Prepare for the next dimension which may also be contiguous, multiply
         // by extent of this dimension
-        cur_contig_stride = ir_builder.mulExpr(
-            cur_contig_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
+        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+        cur_contig_stride =
+            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
       } else {
         // If non contiguous dimension, keep local stride information, set cur
         // stride to local stride * local raw extent
-        cur_contig_stride = ir_builder.mulExpr(
-            strides[dim], gpu_lower->lowerValue(root_dom[dim]->extent()));
+        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+        cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
       }
     }
   }
@@ -901,6 +1085,9 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
         kir::toString(kir_root_dom_i));
 
     auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
+
+    root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
+
     if (root_ind->isZeroInt()) {
       continue;
     } else {
@@ -1094,10 +1281,15 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   }
 
   // Index into producer using reference indexing
+
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference, consumer_tv, ref_2_producer, ref_compute.extentMap());
+
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
       ref_2_producer,
-      producer_tv->domain()->contiguity());
+      producer_tv->domain()->contiguity(),
+      reference_halo_extent_map);
 
   // Revert p_ids
   for (auto entry : p_id_backup) {
@@ -1161,7 +1353,10 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
         " id: ",
         kir::toString(kir_root_dom_i));
 
-    const auto root_ind_i = index_map.at(kir_root_dom_i);
+    auto root_ind_i = index_map.at(kir_root_dom_i);
+
+    root_ind_i =
+        getProducerIndexWithHalo(producer_tv, i, root_ind_i, consumer_tv);
 
     if (root_ind_i->isZeroInt()) {
       continue;
@@ -1190,6 +1385,8 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
       auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
           ? kir_root_dom_j->extent()
           : extent_map.at(kir_root_dom_j);
+
+      root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
 
       if (!root_ind_j->isZeroInt()) {
         if (stride == nullptr) {
@@ -1244,17 +1441,22 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   auto ref_compute = getReferenceIndexing(loops, reference_domain);
 
   // Index into consumer using reference indexing
+
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
+
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
       ref_2_consumer,
-      consumer_tv->domain()->contiguity());
+      consumer_tv->domain()->contiguity(),
+      reference_halo_extent_map);
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   // TODO: Abstract stride logic to reuse with producer indexing
-  auto zero = ir_builder.create<kir::Int>(0);
+  auto zero = ir_builder.zero();
   std::vector<kir::Val*> strides(root_dom.size(), zero);
   {
     int stride_i = 0;
@@ -1270,7 +1472,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     }
   }
 
-  kir::Val* cur_contig_stride = ir_builder.create<kir::Int>(1);
+  kir::Val* cur_contig_stride = ir_builder.one();
   // if we have rfactor we can't simplify the indexing like this, we would need
   // to fix contiguity size to be rfactor size not root size
   if (root_dom.size() == consumer_tv->domain()->contiguity().size()) {
@@ -1309,13 +1511,14 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
         strides[dim] = cur_contig_stride;
         // Prepare for the next dimension which may also be contiguous, multiply
         // by extent of this dimension
-        cur_contig_stride = ir_builder.mulExpr(
-            cur_contig_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
+        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+        cur_contig_stride =
+            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
       } else {
         // If non contiguous dimension, keep local stride information, set cur
         // stride to local stride * local raw extent
         cur_contig_stride = ir_builder.mulExpr(
-            strides[dim], gpu_lower->lowerValue(root_dom[dim]->extent()));
+            strides[dim], getHaloExtentOfRootAxis(root_dom[dim]));
       }
     }
   }
@@ -1428,11 +1631,15 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
 
   const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
 
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
+
   // Index into consumer using reference indexing
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
       ref_2_consumer,
-      consumer_tv->domain()->contiguity());
+      consumer_tv->domain()->contiguity(),
+      reference_halo_extent_map);
 
   IndexSwizzle index_swizzle(
       consumer_tv,
@@ -1496,6 +1703,9 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
       auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
           ? kir_root_dom_j->extent()
           : extent_map.at(kir_root_dom_j);
+
+      root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
+
       if (!root_ind_j->isZeroInt()) {
         if (stride == nullptr) {
           stride = root_ext_j;
@@ -1672,9 +1882,15 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   auto ref_compute =
       getReferenceIndexing(loops, reference_domain, ref_id_to_ind_map, {});
 
+  const auto reference_halo_extent_map = getReferenceHaloExtentMap(
+      reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
+
   // Index into consumer using reference indexing
   auto consumer_indexing = ref_compute.updateIndexCompute(
-      consumer_tv->domain(), ref_2_consumer, root_contiguity);
+      consumer_tv->domain(),
+      ref_2_consumer,
+      root_contiguity,
+      reference_halo_extent_map);
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.

@@ -111,6 +111,10 @@ void IrCloner::handle(const TransposeOp* op) {
   clone_ = new TransposeOp(op, this);
 }
 
+void IrCloner::handle(const ShiftOp* op) {
+  clone_ = new ShiftOp(op, this);
+}
+
 void IrCloner::handle(const Split* split) {
   clone_ = new Split(split, this);
 }

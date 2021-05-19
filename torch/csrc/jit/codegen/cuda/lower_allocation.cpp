@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
@@ -145,7 +146,146 @@ class AllocationInserter : public kir::MutableIrVisitor {
           id->iterType() == IterType::BroadcastWithoutStride) {
         continue;
       }
-      alloc_dims.push_back(id->extent());
+      auto extent = id->extent();
+      // Use halo-extended extent if found
+      auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
+      if (halo_extent.width() != 0) {
+        extent = ir_builder.addExpr(
+            extent, ir_builder.create<kir::Int>(halo_extent.width()));
+      }
+      alloc_dims.push_back(extent);
+    }
+
+    return alloc_dims;
+  }
+
+  // Get allocation extents of root axes with halo
+  //
+  // Allocation can be done with leaf IDs with halo as well, but
+  // allocation size could be larger than necessary.
+  //
+  // For example, suppose the shift offset of an axis is 1. When it is
+  // split by N, the halo size of the inner output is N+1. When the
+  // allocation only has the inner split output, the allocation size
+  // would be N+1. Suppose that ID is further split by M, the output
+  // extents would be N/M and M+1. The allocation size based on the
+  // leaves would be N/M*(M+1) or N+N/M, which is larger than N+1.
+  //
+  // This function tries to propagate back halo informatin to root
+  // axes to avoid inflating allocations. It fails when merged domains
+  // are split and only one of the split outputs is used for
+  // allocations since in such a case we can't un-merge and properly
+  // determine the extents of the merge inputs. Currently, that
+  // results in an exception, but it may be more reasonable to simply
+  // fall back to the leaf-based allocation.
+  //
+  // See the FusionShiftDoubleSplit test for an example case.
+  std::vector<kir::Val*> getNonGlobalAllocExprWithHalo(
+      TensorView* tv,
+      const std::vector<IterDomain*>& alloc_domains) {
+    std::vector<Val*> start_vals;
+    std::transform(
+        alloc_domains.begin(),
+        alloc_domains.end(),
+        std::back_inserter(start_vals),
+        [](IterDomain* dom) { return dom->as<Val>(); });
+
+    // Get all exprs involved in generating the allocation IDs
+    auto exprs = ExprSort::getExprs(tv->fusion(), start_vals);
+
+    // Get the halo extent if found
+    auto getExtent = [this](IterDomain* id) {
+      auto extent = gpu_lower->haloInfo().getExtent(id);
+      if (extent == nullptr) {
+        extent = id->extent();
+      }
+      return gpu_lower->lowerValue(extent);
+    };
+
+    std::unordered_map<IterDomain*, kir::Val*> known_extents;
+
+    // IterDomains that are allocated fully. For example, if an ID is
+    // split and only one of them is used for allocation, that's not
+    // considered full. Only full domains can be unmerged, which is
+    // needed to propagate back the halo information to root domains.
+    std::unordered_set<IterDomain*> full_domains;
+
+    for (auto alloc_domain : alloc_domains) {
+      known_extents.insert({alloc_domain, getExtent(alloc_domain)});
+      full_domains.insert(alloc_domain);
+    }
+
+    for (auto it = exprs.rbegin(); it != exprs.rend(); ++it) {
+      auto expr = *it;
+      if (auto merge = dynamic_cast<Merge*>(expr)) {
+        auto out_it = known_extents.find(merge->out());
+        // If nothing is know about the out id, no propagation can be
+        // done. Note that's not necessarily an error.
+        if (out_it == known_extents.end()) {
+          continue;
+        }
+        // Similarly, if the extent of the out id is not full extent,
+        // we can't un-merge it.
+        if (full_domains.find(merge->out()) == full_domains.end()) {
+          continue;
+        }
+        // Since the extent of the out id is full, the extent of each
+        // of the input axes is also full
+        known_extents.insert({merge->inner(), getExtent(merge->inner())});
+        full_domains.insert(merge->inner());
+        known_extents.insert({merge->outer(), getExtent(merge->outer())});
+        full_domains.insert(merge->outer());
+        known_extents.erase(out_it);
+      } else if (auto split = dynamic_cast<Split*>(expr)) {
+        auto inner = split->inner();
+        const auto inner_it = known_extents.find(inner);
+        auto outer = split->outer();
+        const auto outer_it = known_extents.find(outer);
+        if (inner_it != known_extents.end() &&
+            outer_it != known_extents.end()) {
+          if (full_domains.find(inner) != full_domains.end() &&
+              full_domains.find(outer) != full_domains.end()) {
+            known_extents.insert({split->in(), getExtent(split->in())});
+            full_domains.insert(split->in());
+          } else {
+            known_extents.insert(
+                {split->in(),
+                 ir_builder.mulExpr(outer_it->second, inner_it->second)});
+          }
+          known_extents.erase(inner_it);
+          known_extents.erase(outer_it);
+        } else if (inner_it != known_extents.end()) {
+          known_extents.insert({split->in(), inner_it->second});
+          known_extents.erase(inner_it);
+        } else if (outer_it != known_extents.end()) {
+          known_extents.insert({split->in(), outer_it->second});
+          known_extents.erase(outer_it);
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unexpected expr: ", expr);
+      }
+    }
+
+    std::vector<kir::Val*> alloc_dims;
+
+    for (auto root_axis : tv->getRootDomain()) {
+      auto it = known_extents.find(root_axis);
+      if (it == known_extents.end()) {
+        continue;
+      }
+      alloc_dims.push_back(it->second);
+      known_extents.erase(it);
+    }
+
+    // known_extents should have only mappings for root axes, so
+    // if anything remains in the map, it's an error
+    if (!known_extents.empty()) {
+      std::stringstream ss;
+      for (auto kv : known_extents) {
+        ss << kv.first << " ";
+      }
+      TORCH_INTERNAL_ASSERT(
+          false, "Non-root axes found for TV", tv->name(), ": ", ss.str());
     }
 
     return alloc_dims;
@@ -160,6 +300,9 @@ class AllocationInserter : public kir::MutableIrVisitor {
         memory_type);
 
     std::vector<kir::Val*> alloc_dims;
+
+    bool has_halo = false;
+    std::vector<IterDomain*> alloc_domains;
 
     for (size_t axis_i = 0; axis_i < fuser_tv->nDims(); axis_i++) {
       const auto local_id =
@@ -197,6 +340,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
               (memory_type == MemoryType::Global && is_thread))) {
           continue;
         }
+        alloc_domains.push_back(fuser_tv->axis(axis_i));
       } else {
         if (
             // If shared memory, don't use any IDs bound to a grid dimension
@@ -206,8 +350,22 @@ class AllocationInserter : public kir::MutableIrVisitor {
             (memory_type == MemoryType::Local && is_thread)) {
           continue;
         }
+        alloc_domains.push_back(fuser_tv->axis(axis_i));
       }
-      alloc_dims.push_back(concrete_id->extent());
+
+      auto extent = concrete_id->extent();
+
+      if (gpu_lower->haloInfo().getExtent(fuser_tv->axis(axis_i)) != nullptr) {
+        has_halo = true;
+      }
+
+      alloc_dims.push_back(extent);
+    }
+
+    // When an axis with halo extension is detected, propagate back
+    // the halo extents from leaf IDs to root IDs
+    if (has_halo) {
+      return getNonGlobalAllocExprWithHalo(fuser_tv, alloc_domains);
     }
 
     return alloc_dims;

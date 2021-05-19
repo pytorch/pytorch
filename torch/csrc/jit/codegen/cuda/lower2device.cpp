@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
+#include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
@@ -136,6 +137,10 @@ void GpuLower::lower() {
   ca_loop_map_.build(fusion_, current());
 
   validateParallelize(fusion_);
+
+  // Scan the whole fusion and build mappings about halo extensions of
+  // all IterDomains
+  haloInfo().build(fusion_);
 
   // Compute thread predicates
   thread_pred_map_.build(fusion_);
@@ -356,6 +361,12 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const TransposeOp* node) final {
+    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+        UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
+    TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
+  }
+
+  void handle(const ShiftOp* node) final {
     const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);

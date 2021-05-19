@@ -145,6 +145,8 @@ static const char* expr_type2string(ExprType t) {
       return "ReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::ShiftOp:
+      return "ShiftOp";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:

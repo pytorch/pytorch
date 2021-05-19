@@ -271,7 +271,7 @@ ExpressionEvaluator bindInputsAndLaunchParams(
 // on adding two tensors then summing them. This of course has an assumption
 // that we're always summing values between -2 and 2. If we start summing values
 // larger than that this approach might not hold.
-void testValidate(
+inline void testValidate(
     Fusion* fusion,
     const std::vector<at::Tensor>& fusion_outputs,
     const at::ArrayRef<IValue>& aten_inputs,

@@ -95,6 +95,13 @@ void UnrollPass::handle(kir::Expr* expr) {
         ? ir_builder.create<kir::Bool>(true)
         : getThreadPredicate(out_tv);
 
+    // When a predicate needs to account for ShiftOp, it is currently
+    // taken care by its own function.
+    if (GpuLower::current()->haloInfo().needsShiftPredicate(expr)) {
+      ShiftPredicateInserter::insert(expr, for_loops_, thread_pred);
+      return;
+    }
+
     // Vectorized expressions should never use inline predicates
     kir::Bool* vectorized_pred = nullptr;
     if (std::any_of(

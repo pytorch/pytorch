@@ -204,6 +204,15 @@ struct SubstituteInExpr : public OptInDispatch {
     expr_ = new TransposeOp(out, in, transpose_expr->new2old());
   }
 
+  void handle(ShiftOp* shift_expr) final {
+    auto out =
+        reference_->sameAs(shift_expr->out()) ? substitute_ : shift_expr->out();
+    auto in =
+        reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
+
+    expr_ = new ShiftOp(out, in, shift_expr->offsets());
+  }
+
  private:
   Val* reference_ = nullptr;
   Val* substitute_ = nullptr;

@@ -37,7 +37,27 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
   const auto kir_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-  kir::ForLoop* new_scope = ir_builder.create<kir::ForLoop>(kir_id);
+  auto extent_with_halo = gpu_lower->haloInfo().getExtent(kir_id);
+  kir::ForLoop* new_scope = nullptr;
+  if (extent_with_halo) {
+    // When an axis is extended with halo, unrolling and vectorization
+    // are assumed to not be used for now.
+    TORCH_INTERNAL_ASSERT(
+        id->getParallelType() != ParallelType::Unroll &&
+        !isParallelTypeVectorize(id->getParallelType()));
+    // Use the extent that's extended by halo
+    new_scope = ir_builder.create<kir::ForLoop>(
+        kir_id,
+        ir_builder.create<kir::Int>(c10::nullopt),
+        nullptr,
+        extent_with_halo,
+        nullptr,
+        false,
+        false,
+        nullptr);
+  } else {
+    new_scope = ir_builder.create<kir::ForLoop>(kir_id);
+  }
   if (scope != nullptr) {
     scope->body().insert(0, new_scope);
   }

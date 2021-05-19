@@ -271,6 +271,19 @@ TORCH_CUDA_CU_API TensorView* sum_to(
     TensorView* v1,
     const std::vector<int64_t>& sum_to_size);
 
+//! Shift a tensor to a direction specified by offsets.
+//!
+//! Example:
+//!   t0: 2D tensor of size N by M
+//!   t1 = shift(t0, {1, -1});
+//!
+//!   then:
+//!     t1[i, j] = t0[i-1, j+1] for 1 <= i < N and 0 <= j < M-1.
+//!     t1[i, j] = 0, otherwise
+TORCH_CUDA_CU_API TensorView* shift(
+    TensorView* inp,
+    const std::vector<int>& offsets);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

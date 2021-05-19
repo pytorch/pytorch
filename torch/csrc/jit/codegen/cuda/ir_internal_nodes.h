@@ -309,6 +309,42 @@ class TORCH_CUDA_CU_API TernaryOp : public Expr {
   Val* const in3_ = nullptr;
 };
 
+//! Shift
+class TORCH_CUDA_CU_API ShiftOp : public Expr {
+ public:
+  //! \param out
+  //! \param in
+  //! \param offsets
+  ShiftOp(Val* out, Val* in, std::vector<int> offsets);
+
+  ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+  Val* in() const {
+    return in_;
+  }
+
+  int offset(size_t dim) const {
+    return offsets_.at(dim);
+  }
+
+  const std::vector<int>& offsets() const {
+    return offsets_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+  //! Each of the root axes is shifted by the corresponding value of
+  //! offsets_. The sign of each value indicates the direction of
+  //! shifting.
+  const std::vector<int> offsets_;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;

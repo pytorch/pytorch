@@ -48,7 +48,7 @@ std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs);
 
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
-void parallelizeAllLike(
+TORCH_CUDA_CU_API void parallelizeAllLike(
     TensorView* reference_tv,
     const std::vector<TensorView*>& all_tvs);
 
