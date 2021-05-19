@@ -8409,6 +8409,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         del t1
         del t2
 
+        # this hits a special setter, it's not just a __dict__ entry
         x._backward_hooks = y
         y._backward_hooks = x
 
