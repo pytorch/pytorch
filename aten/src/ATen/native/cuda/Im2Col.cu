@@ -53,7 +53,7 @@ static void im2col_out_cuda_template(
 
   TensorArg input_arg{input_, "input", 1};
   TensorArg output_arg{output, "output", 2};
-  checkAllSameGPU("im2col_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   im2col_shape_check(
       input_,
