@@ -35,32 +35,73 @@ def _check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
                 '\' instead.')
 
 
-def _check_is_valid_custom_config_dict(prepare_custom_config_dict: Any) -> None:
+def _check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[str, Any] = None) -> None:
     r""" Checks if the given prepare_custom_config_dict has the correct keys
 
     Args:
       `prepare_custom_config_dict`: customization configuration dictionary for
       quantization tool
     """
-    custom_config_dict_allowed_keys = {"standalone_module_name",
-                                       "standalone_module_class",
-                                       "float_to_observed_custom_module_class",
-                                       "non_traceable_module_name",
-                                       "non_traceable_module_class",
-                                       "additional_fuser_method_mapping",
-                                       "additional_qat__module_mapping",
-                                       "additional_fusion_pattern",
-                                       "additional_quant_pattern",
-                                       "input_quantized_idxs",
-                                       "output_quantized_idxs",
-                                       "preserved_attributes"}
+    prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
+                                               "standalone_module_class",
+                                               "float_to_observed_custom_module_class",
+                                               "non_traceable_module_name",
+                                               "non_traceable_module_class",
+                                               "additional_fuser_method_mapping",
+                                               "additional_qat__module_mapping",
+                                               "additional_fusion_pattern",
+                                               "additional_quant_pattern",
+                                               "input_quantized_idxs",
+                                               "output_quantized_idxs",
+                                               "preserved_attributes"}
 
     for k in prepare_custom_config_dict.keys():
-        if k not in custom_config_dict_allowed_keys:
+        if k not in prepare_custom_config_dict_allowed_keys:
             raise ValueError(
                 'Expected prepare_custom_config_dict to have the ' +
-                'following keys: ' + str(custom_config_dict_allowed_keys) +
+                'following keys: ' + str(prepare_custom_config_dict_allowed_keys) +
                 '. But found \'' + k + '\' instead.')
+
+
+def _check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[str, Any] = None) -> None:
+    r""" Checks if the given convert_custom_config_dict has the correct keys
+
+    Args:
+      `convert_custom_config_dict`: dictionary for custom configurations for
+      convert function
+    """
+
+    convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
+                                               "observed_to_quantized_custom_module_class",
+                                               "preserved_attributes"}
+
+    for k in convert_custom_config_dict.keys():
+        if k not in convert_custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected convert_custom_config_dict to have the following keys: ' +
+                str(convert_custom_config_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
+
+def _check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Dict[str, Any] = None) -> None:
+    r""" Checks if the given fuse_custom_config_dict has the correct keys
+
+    Args:
+      `fuse_custom_config_dict`: dictionary for custom configurations for fuse_fx
+    """
+    if not fuse_custom_config_dict:
+        return
+
+    fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
+                                            "preserved_attributes"}
+
+    for k in fuse_custom_config_dict.keys():
+        if k not in fuse_custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected fuse_custom_config_dict to have the following keys: ' +
+                str(fuse_custom_config_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
 
 def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     r""" Swap FloatFunctional with FXFloatFunctional
@@ -196,7 +237,7 @@ forward graph of the parent module,
         prepare_custom_config_dict = {}
 
     _check_is_valid_qconfig_dict(qconfig_dict)
-    _check_is_valid_custom_config_dict(prepare_custom_config_dict)
+    _check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
 
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
@@ -289,6 +330,7 @@ def fuse_fx(model: torch.nn.Module,
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
+    _check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict)
     graph_module = torch.fx.symbolic_trace(model)
     preserved_attributes: Set[str] = set()
     if fuse_custom_config_dict:
@@ -487,6 +529,7 @@ def _convert_fx(
         convert_custom_config_dict = {}
 
     _check_is_graph_module(graph_module)
+    _check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
 
     quantizer = Quantizer()
     quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,
