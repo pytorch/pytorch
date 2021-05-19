@@ -141,6 +141,7 @@ def mk_dispatch_arg(arg: Expr) -> str:
         ConstRefCType,
         MutRefCType,
     )
+
     def dontmove(type: CType) -> bool:
         return isinstance(type, free_copy_types) or type.cpp_type() in basic_types
 
