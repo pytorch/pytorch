@@ -306,6 +306,7 @@ struct EnumHolder;
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
+ private:
   // Keep this private in order to force users to go through make_intrusive and
   // thus prevent creating a Future that's not held by an intrusive_ptr.
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
