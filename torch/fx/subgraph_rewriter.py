@@ -1,7 +1,7 @@
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
-from .symbolic_trace import symbolic_trace
+from ._symbolic_trace import symbolic_trace
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
