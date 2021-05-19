@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorMathMagma.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathMagma.cpp"
 #else
 
 #include <c10/cuda/CUDAException.h>
