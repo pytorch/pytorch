@@ -384,7 +384,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
 
   // The number of `1` elements present in the mask must be <= the
   // number of elements available in `src`
-  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");  
+  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
