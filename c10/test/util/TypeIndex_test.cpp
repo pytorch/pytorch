@@ -120,7 +120,6 @@ struct Class final {};
 #if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
     "");
 #endif
