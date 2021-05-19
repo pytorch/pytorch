@@ -17,6 +17,16 @@ def _check_is_graph_module(model: torch.nn.Module) -> None:
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
 
+
+def _check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
+    for k in qconfig_dict.keys():
+        if not (k == "" or k == "object_type" or
+                k == "module_name_regex" or k == "module_name"):
+            raise ValueError(
+                'Expected qconfig_dict to have global, object_type, ' +
+                'module_name_regex, or module_name as keys but found \'' +
+                k + '\' instead.')
+
 def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     r""" Swap FloatFunctional with FXFloatFunctional
     """
@@ -389,6 +399,7 @@ def prepare_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
+    _check_is_valid_qconfig_dict(qconfig_dict)
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
 def prepare_qat_fx(
