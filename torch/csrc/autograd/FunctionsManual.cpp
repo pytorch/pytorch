@@ -2698,8 +2698,11 @@ Tensor _det_lu_based_helper_backward(
   const Tensor& l,
   const Tensor& u
 ) {
-  if (!self.numel() || !det_grad.defined()) {
+  if (!self.numel()) {
     return at::zeros_like(self, at::MemoryFormat::Contiguous);
+  }
+  if (!det_grad.defined()) {
+    return Tensor();
   }
 
   // run det_backward only if backward is run on _det_lu_based_helper_backward.
