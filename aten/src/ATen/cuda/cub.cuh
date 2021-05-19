@@ -206,10 +206,11 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       at::cuda::getCurrentCUDAStream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   using input_t = std::remove_reference_t<decltype(*input)>;
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
-  c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
-  auto first_elem_ptr = reinterpret_cast<input_t *>(first_elem.get());
   for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
+    auto allocator = c10::cuda::CUDACachingAllocator::get();
+    c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
+    auto first_elem_ptr = reinterpret_cast<input_t *>(first_elem.get());
+
     size_cub = std::min<int64_t>(num_items - i, max_cub_size);
     impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         output + i - 1,
@@ -252,10 +253,11 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       size_cub,
       at::cuda::getCurrentCUDAStream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
-  c10::DataPtr first_elem = allocator->allocate(sizeof(InitValueT));
-  auto first_elem_ptr = reinterpret_cast<InitValueT *>(first_elem.get());
   for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
+    auto allocator = c10::cuda::CUDACachingAllocator::get();
+    c10::DataPtr first_elem = allocator->allocate(sizeof(InitValueT));
+    auto first_elem_ptr = reinterpret_cast<InitValueT *>(first_elem.get());
+
     size_cub = std::min<int64_t>(num_items - i, max_cub_size);
     impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         output + i - 1,
