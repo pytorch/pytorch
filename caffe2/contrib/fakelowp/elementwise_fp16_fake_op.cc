@@ -68,7 +68,7 @@ OPERATOR_SCHEMA(SumFakeFp16).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX);
 REGISTER_CPU_OPERATOR(
     AddFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float, int>,
+        TensorTypes<float, int, long>,
         CPUContext,
         FP16PairWiseCPUFunctor<AddFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
