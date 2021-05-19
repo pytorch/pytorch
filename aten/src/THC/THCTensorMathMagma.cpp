@@ -1,7 +1,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorMath.h>
 #include <THC/THCTensorCopy.h>
-#include <THC/THCTensorMathMagma.cuh>
+#include <THC/THCTensorMathMagma.h>
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 #include <algorithm>
@@ -32,5 +32,5 @@ struct Initializer {
 } initializer;
 } // anonymous namespace
 
-#include <THC/generic/THCTensorMathMagma.cu>
+#include <THC/generic/THCTensorMathMagma.cpp>
 #include <THC/THCGenerateAllTypes.h>

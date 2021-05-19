@@ -111,17 +111,6 @@ class RegisterDispatchKey:
         sig = self.wrapper_kernel_sig(f)
         name = sig.name()
 
-        logging_str = ''
-        if self.backend_index.per_op_log is not None:
-            logging_str += f'  {self.backend_index.per_op_log};\n'
-        if self.backend_index.per_argument_log is not None:
-            # See Note [External Backends Follow Dispatcher convention]
-            jit_args = dispatcher.jit_arguments(f.func)
-            tensors = [a for a in jit_args if isinstance(a, Argument) and a.type == BaseType(BaseTy.Tensor)]
-            argument_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
-            print_args_str = f'{self.backend_index.per_argument_log} << "{self.backend_index.dispatch_key} {name} :"{argument_str}'
-            logging_str += f'  {print_args_str};\n'
-
         func_res = f'{name}_tmp'
         return_names = cpp.return_names(f)
         if len(return_names) > 1:
@@ -138,7 +127,6 @@ class RegisterDispatchKey:
 
         return f"""\
 {sig.defn()} {{
-{logging_str}
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
