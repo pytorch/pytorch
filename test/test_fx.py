@@ -327,6 +327,18 @@ class TestFX(JitTestCase):
         ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
         self.assertEqual(ref_batchnorm1d(input), m(input))
 
+    def test_wrapped_retrace(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+
+        retraced = symbolic_trace(m)
+        self.assertIn('wrapped_via_decorator', retraced.code)
+        self.assertEqual(retraced(0), 1)
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -2547,7 +2559,7 @@ class TestFX(JitTestCase):
 
 
 def run_getitem_target():
-    from torch.fx.symbolic_trace import _wrapped_methods_to_patch
+    from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
     try:
         TestFX().getitem_inner()
