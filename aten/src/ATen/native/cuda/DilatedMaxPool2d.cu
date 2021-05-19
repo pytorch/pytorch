@@ -300,8 +300,7 @@ const Tensor& indices) {
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
 
-  checkAllSameGPU("max_pool2d_with_indices_out_cuda",
-                  {output_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -423,7 +422,7 @@ const Tensor& gradInput) {
   TensorArg input_arg{ input_, "input_", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
-  checkAllSameGPU("max_pool2d_with_indices_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
