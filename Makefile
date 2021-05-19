@@ -28,7 +28,7 @@ shellcheck-gha:
 	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
 generate-gha-workflows:
-	./.github/scripts/generate_linux_ci_workflows.py
+	.github/scripts/generate_ci_workflows.py
 	$(MAKE) shellcheck-gha
 
 setup_lint:
@@ -39,9 +39,16 @@ setup_lint:
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
 
-# TODO: This is broken on MacOS (it downloads a Linux binary)
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'quick-checks' --step 'Install ShellCheck' --no-quiet
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		if [ -z "$$(which brew)" ]; then \
+			echo "'brew' is required to install ShellCheck, get it here: https://brew.sh "; \
+			exit 1; \
+		fi; \
+		brew install shellcheck; \
+	else \
+		python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'quick-checks' --step 'Install ShellCheck' --no-quiet; \
+	fi
 	pip install jinja2
 
 quick_checks:
@@ -59,6 +66,7 @@ quick_checks:
 		--step 'Ensure no tabs' \
 		--step 'Ensure no non-breaking spaces' \
 		--step 'Ensure canonical include' \
+		--step 'Ensure no versionless Python shebangs' \
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
@@ -67,30 +75,15 @@ quick_checks:
 
 flake8:
 	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
 		--file-filter '.py' \
 		$(CHANGED_ONLY) \
-		--job 'flake8-py3' \
-		--step 'Run flake8'
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--file-filter '.py' \
-		$(CHANGED_ONLY) \
-		--job 'flake8-py3' \
-		--step 'Fail if there were any warnings'
+		--job 'flake8-py3'
 
 mypy:
-	@if [ -z "$(CHANGED_ONLY)" ]; then \
-		python tools/actions_local_runner.py --file .github/workflows/lint.yml --job 'mypy' --step 'Run autogen'; \
-    else \
-        echo "mypy: Skipping typestub generation"; \
-    fi
 	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
 		--file-filter '.py' \
 		$(CHANGED_ONLY) \
-		--job 'mypy' \
-		--step 'Run mypy'
+		--job 'mypy'
 
 cmakelint:
 	@python tools/actions_local_runner.py \

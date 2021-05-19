@@ -152,7 +152,9 @@ static void nll_loss2d_forward_out_frame(
   const int64_t numiter = batch_size * map_size;
 
   constexpr int64_t cascade_sum_num_levels = 8;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   const int64_t level_power =
       std::max(int64_t(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);

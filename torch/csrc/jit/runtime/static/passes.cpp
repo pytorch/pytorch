@@ -25,6 +25,7 @@ bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
   return false;
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -78,6 +79,7 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -108,6 +110,7 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -127,6 +130,7 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesLengthsToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -145,6 +149,7 @@ void ClipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   // fuse without lengths-to-offsets
@@ -162,6 +167,7 @@ void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern_1 = R"IR(
@@ -191,6 +197,7 @@ void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern_1 = R"IR(
@@ -223,6 +230,7 @@ void ClipRangesGatherRangesSigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
@@ -241,6 +249,7 @@ void PrecomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesX2SigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
@@ -282,6 +291,7 @@ void ClipRangesGatherRangesX2SigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
@@ -323,6 +333,7 @@ void ClipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
@@ -477,19 +488,20 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
-void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-    Node* sigrid_node = *it;
-    auto kind = sigrid_node->kind();
-    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0 ||
-        strcmp(kind.toQualString(), "fb::sigrid_transforms_torch_bind") == 0) {
-      const Value* sigrid_out = sigrid_node->outputs()[0];
-      if (sigrid_out->uses().size() > 1) {
+    Node* node = *it;
+    const char* node_qual_string = node->kind().toQualString();
+    if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
+        strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
+        strcmp(node_qual_string, "fb::equally_split") == 0) {
+      const Value* value_out = node->outputs()[0];
+      if (value_out->uses().size() > 1) {
         continue;
       }
 
-      Node* list_unpack_node = sigrid_out->uses()[0].user;
+      Node* list_unpack_node = value_out->uses()[0].user;
       if (list_unpack_node->kind() != prim::ListUnpack) {
         continue;
       }
@@ -501,7 +513,7 @@ void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
       // handle outputs
       for (Value* out : list_unpack_outputs) {
-        Value* new_out = sigrid_node->addOutput();
+        Value* new_out = node->addOutput();
         new_out->copyMetadata(out);
         out->replaceAllUsesWith(new_out);
       }
@@ -510,7 +522,7 @@ void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       ++it_next; // it_next points to list_unpack
       it_next.destroyCurrent(); // remove list_unpack
 
-      sigrid_node->eraseOutput(0);
+      node->eraseOutput(0);
     }
   }
 }

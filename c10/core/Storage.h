@@ -9,7 +9,8 @@ struct C10_API Storage {
   struct use_byte_size_t {};
 
   Storage() {}
-  Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
+  Storage(c10::intrusive_ptr<StorageImpl> ptr)
+      : storage_impl_(std::move(ptr)) {}
 
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
@@ -53,10 +54,14 @@ struct C10_API Storage {
   }
 
   template <typename T>
-  T* data() const { return storage_impl_->data<T>(); }
+  T* data() const {
+    return storage_impl_->data<T>();
+  }
 
   template <typename T>
-  T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
+  T* unsafe_data() const {
+    return storage_impl_->unsafe_data<T>();
+  }
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) const {
@@ -134,7 +139,8 @@ struct C10_API Storage {
       size_t capacity,
       DeleterFnPtr d = nullptr) {
     if (!storage_impl_.unique()) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(src, capacity, d);
@@ -144,7 +150,8 @@ struct C10_API Storage {
       at::DataPtr&& data_ptr,
       size_t capacity) {
     if (!storage_impl_.unique()) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(

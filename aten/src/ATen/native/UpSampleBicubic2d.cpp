@@ -97,7 +97,9 @@ static void upsample_bicubic2d_backward_out_frame(
       int64_t input_y = floorf(real_y);
       scalar_t t_y = real_y - input_y;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       scalar_t x_coeffs[4];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       scalar_t y_coeffs[4];
 
       get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
@@ -217,6 +219,7 @@ Tensor upsample_bicubic2d_backward(
   return at::upsample_bicubic2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_bicubic2d_kernel);
 
 } // namespace native

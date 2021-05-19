@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
+#include <algorithm>
 #include <stdexcept>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -961,6 +963,208 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+namespace {
+
+class IfThenElseReplacer : public IRMutator {
+ public:
+  IfThenElseReplacer(const IfThenElse* to_replace, const Expr* new_expr)
+      : to_replace_(to_replace), new_expr_(new_expr) {}
+
+  const Expr* mutate(const IfThenElse* i) override {
+    if (i == to_replace_) {
+      return new_expr_;
+    }
+    return i;
+  }
+
+ private:
+  const IfThenElse* to_replace_;
+  const Expr* new_expr_;
+};
+
+// Check if the given condition is optimizable.
+// Specifically, this function looks for the following pattern:
+//    "var < expr"
+//
+// If this pattern is found, then this function:
+//   * sets `cond_var` to `var`,
+//   * sets `compared_value` to `expr`, and
+//   * returns true.
+bool isConditionOptimizable(
+    const Expr* condition,
+    const Var** cond_var,
+    const Expr** compared_value) {
+  auto cs = dynamic_cast<const CompareSelect*>(condition);
+  if (cs && cs->compare_select_op() == kLT) {
+    auto var = dynamic_cast<const Var*>(cs->lhs());
+    if (var) {
+      *cond_var = var;
+      *compared_value = cs->rhs();
+      return true;
+    }
+  }
+  return false;
+}
+
+// Checks if the given if-then-else expression is a conditional that is
+// generated from `aten::cat`.
+//
+// The expected format of conditionals is:
+//     IfThenElse(var < val1? 1 : 0,
+//       IfThenElse (var < val2? 1 : 0,
+//         IfThenElse (var < val3? 1 : 0,
+//           sub-expr1,
+//           sub-expr2),
+//         sub-expr3),
+//       sub-expr4)
+//
+// If such a conditional is found, this function also sets:
+//   * cond_var to the condition variable found in this expression.
+//   * comp_values to the list of compared values in the condition expressions.
+//   * sub_exprs to the list of sub-expressions that are the result of this
+//     if-then-else expression.
+bool isConditionalFromCat(
+    const IfThenElse* ite,
+    const Var** cond_var,
+    std::vector<const Expr*>* comp_values,
+    std::vector<const Expr*>* sub_exprs) {
+  const Var* var = nullptr;
+  const Expr* comp_value;
+  if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
+    if (*cond_var == nullptr) {
+      *cond_var = var;
+    } else if (*cond_var != var) {
+      // Different condition variables found in nested if-then-else
+      // expressions. Can not optimize such cases.
+      return false;
+    }
+    auto true_ite = dynamic_cast<const IfThenElse*>(ite->true_value());
+    if (true_ite) {
+      if (!isConditionalFromCat(true_ite, cond_var, comp_values, sub_exprs)) {
+        return false;
+      }
+    } else {
+      sub_exprs->push_back(ite->true_value());
+    }
+    auto false_ite = dynamic_cast<const IfThenElse*>(ite->false_value());
+    if (false_ite) {
+      return false;
+    }
+    comp_values->push_back(comp_value);
+    sub_exprs->push_back(ite->false_value());
+    return true;
+  }
+  return false;
+}
+
+bool areConstantsAndSorted(const std::vector<const Expr*>& comp_values) {
+  std::vector<int> comp_consts;
+  comp_consts.reserve(comp_values.size());
+  for (auto c : comp_values) {
+    if (!c->isConstant()) {
+      return false;
+    }
+    comp_consts.push_back(immediateAs<int>(c));
+  }
+  return std::is_sorted(comp_consts.begin(), comp_consts.end());
+}
+
+} // namespace
+
+bool LoopNest::optimizeConditionals() {
+  // Consider every store in the root_stmt_ and try to optimize the
+  // conditionals in that store.
+  auto stores = NodeFinder<Store>::find(root_stmt_);
+  std::unordered_set<For*> split_fors;
+  for (auto store : stores) {
+    const Var* cond_var = nullptr;
+    // `comp_values` represent the list of compared values that will be
+    // collected as we check for the expected pattern. Since that will
+    // only include the RHS of the conditions in the if-then-else expressions
+    // we need to start with `0` which is the initial bound, given that we
+    // only handle normalized loops (check for this is done below).
+    std::vector<const Expr*> comp_values = {new IntImm(0)};
+    std::vector<const Expr*> sub_exprs;
+    auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
+    if (ifthenelse_exprs.empty()) {
+      continue;
+    }
+    // We only check if the first if-then-else expression in this store
+    // corresponds to a conditional of the required format. If there are more
+    // than one such conditional, optimizing them requires checking if the
+    // conditions are exactly the same across them and handling all of them
+    // together. Currently, this is not handled.
+    if (!isConditionalFromCat(
+            ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
+      continue;
+    }
+
+    auto fors = getLoopStmtsFor(store);
+    if (cond_var != fors.back()->var()) {
+      // Currently, we only handle the case where the condition variable
+      // is the same as the inner-most loop variable.
+      // TODO: Handle all other cases here.
+      //
+      // In order to handle all other cases, the method `clone_and_replace`
+      // called below to clone the body of the loop with a new store needs
+      // to recursively handle cloning of the loops and other blocks it
+      // contains.
+      continue;
+    }
+
+    auto for_to_split = fors.back();
+    if (!LoopNest::isNormalized(for_to_split)) {
+      // Do not optimize this conditional since the condition variable
+      // refers to a loop that is not normalized.
+      continue;
+    }
+    if (split_fors.count(for_to_split)) {
+      // This loop has already been split while optimizing conditionals
+      // earlier.
+      //
+      // Optimizing multiple conditionals that require splitting the same loop
+      // is tricky. It requires checking if the conditions are exactly the same
+      // across them and handling all of them together by splitting the loop
+      // exactly once.
+      //
+      // Currently, this case is not supported.
+      continue;
+    }
+    split_fors.insert(for_to_split);
+
+    // `comp_values` needs to include the end bound, which is `for_to_split`
+    // stop value.
+    comp_values.push_back(for_to_split->stop());
+
+    // Check if all `comp_values` are constants and they are sorted.
+    if (!areConstantsAndSorted(comp_values)) {
+      continue;
+    }
+
+    // Remove all the if-then-else expressions from this store and create
+    // one loop per sub-expression.
+    std::vector<Stmt*> split_loops;
+    auto cond_to_replace = ifthenelse_exprs.front();
+    for (size_t i = 0; i < sub_exprs.size(); ++i) {
+      IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
+      auto new_store = store->accept_mutator(&ifthenelseReplacer);
+      auto new_for_body =
+          for_to_split->body()->clone_and_replace(store, new_store);
+      auto new_for = new For(
+          for_to_split->var(),
+          comp_values[i],
+          comp_values[i + 1],
+          new_for_body);
+      LoopNest::normalize(new_for);
+      split_loops.push_back(new_for);
+    }
+    auto par = dynamic_cast<Block*>(for_to_split->get_parent());
+    par->replace_stmt(for_to_split, new Block(split_loops));
+  }
+  root_stmt_ = IRSimplifier::simplify(root_stmt_);
+  return true;
+}
+
 void LoopNest::vectorizeInnerLoops() {
   std::vector<For*> innerLoops;
   std::vector<For*> worklist;
@@ -1274,7 +1478,8 @@ std::vector<For*> LoopNest::distributeLoop(
   // Extract bodies for all the loops after distribution.
   std::vector<Block*> new_loop_bodies;
   auto new_loop_body = new Block({});
-  while (auto s = loop->body()->front()) {
+  while (!loop->body()->empty()) {
+    auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
     if (pivots.count(s)) {
@@ -1768,17 +1973,21 @@ void LoopNest::unroll(For* f) {
   unroll(f, &unrolled);
 }
 
+bool LoopNest::isNormalized(For* f) {
+  if (f->start()->isConstant()) {
+    return immediateAs<int>(f->start()) == 0;
+  }
+  return false;
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
   }
 
-  if (f->start()->isConstant()) {
-    int start_idx = immediateAs<int>(f->start());
-    if (start_idx == 0) {
-      // No need to normalize in this case.
-      return false;
-    }
+  if (isNormalized(f)) {
+    // No need to normalize anymore here.
+    return false;
   }
 
   auto for_body_normalized = Substitute(
@@ -1827,7 +2036,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   for (size_t i = 0; i < loops.size() - 1; ++i) {
     if ((loops[i]->body()->nstmts() != 1) ||
         (loops[i]->body()->front() != loops[i + 1])) {
-      *flattened = loops[0];
       return false;
     }
   }
@@ -1862,15 +2070,13 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
     stop = new Mul(curr_loop->stop(), stop);
   }
   auto flattened_body =
-      Substitute(Stmt::clone(normalized_loops.back()->body()), var_mapping);
+      Substitute(normalized_loops.back()->removeBody(), var_mapping);
 
-  *flattened = new For(
-      flat_var,
-      new IntImm(0),
-      stop,
-      flattened_body,
-      normalized_loops[0]->loop_options());
-  p->replace_stmt(normalized_loops[0], *flattened);
+  normalized_loops.front()->setVar(flat_var);
+  normalized_loops.front()->setStart(new IntImm(0));
+  normalized_loops.front()->setStop(stop);
+  normalized_loops.front()->setBody(flattened_body);
+  *flattened = normalized_loops.front();
   return true;
 }
 

@@ -463,9 +463,14 @@ static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_
 static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
   auto mn = std::min(m, n);
   auto mx = std::max(m, n);
-  // These settings are valid for on LAPACK 3.6+
   if (jobz == 'N') {
+#ifdef __APPLE__
+    // According to `vecLib.framework/Headers/clapack.h` Accelerate.framework is based on LAPACK 3.2.1
+    return 7 * mn;
+#else
+    // These setting is valid for on LAPACK 3.6+
     return 5 * mn;
+#endif
   }
   if (mx > 10 * mn) {
     return 5 * mn * mn + 5 * mn;

@@ -49,6 +49,7 @@ void _compute_linear_combination_cpu_kernel(
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cpu_kernel);
 
 }} // namespace at::native

@@ -107,9 +107,9 @@ class FxGraphDrawer:
 
         tensor_meta = node.meta.get('tensor_meta')
         if tensor_meta:
-            dtype_ = tensor_meta.dtype
-            shape_ = tensor_meta.shape
-            stride_ = tensor_meta.stride
+            dtype_ = tensor_meta.dtype if hasattr(tensor_meta, "dtype") else "none"
+            shape_ = tensor_meta.shape if hasattr(tensor_meta, "shape") else "none"
+            stride_ = tensor_meta.stride if hasattr(tensor_meta, "stride") else "none"
             if dtype_:
                 label += "|" + "dtype" + "=" + str(dtype_) + r"\l"
             if shape_:
