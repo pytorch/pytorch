@@ -227,6 +227,17 @@ class TestNNAPI(TestCase):
         with self.assertRaisesRegex(Exception, "hardtanh with args"):
             self.check(torch.nn.Hardtanh(0.0, 5.0), inp)
 
+    def test_softmax(self):
+        inp = torch.tensor([[-2.0, -0.5], [0.5, 2.0]])
+        self.check(torch.nn.Softmax(), inp)
+        self.check(torch.nn.Softmax(dim=0), inp)
+        # Test flexible size
+        self.check(
+            torch.nn.Softmax(),
+            inp,
+            convert_args=[torch.zeros(0, 0)],
+        )
+
     def test_mean(self):
         class MeanModule(torch.nn.Module):
             def __init__(self, dim, keep=False):
