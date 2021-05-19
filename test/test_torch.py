@@ -5680,11 +5680,14 @@ else:
                         dest.masked_scatter_(mask, src)
 
 
-        # self.assertEqual(len(w), 3)
+        if self.device_type != 'cuda':
+            self.assertEqual(len(w), 3)
+        else:
+            self.assertEqual(len(w), 2)
 
-        # warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
-        # for wi in w:
-        #     self.assertEqual(str(wi.message)[0:55], str(warn))
+        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
+        for wi in w:
+            self.assertEqual(str(wi.message)[0:55], str(warn))
 
     def test_masked_scatter_bool_tensor(self, device):
         src = torch.tensor([True, True, True], device=device)
