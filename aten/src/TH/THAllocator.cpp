@@ -404,11 +404,11 @@ void THMapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
+THMapAllocator::THMapAllocator(std::string filename, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
+THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
