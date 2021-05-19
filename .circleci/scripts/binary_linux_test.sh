@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Move debug wheels out of the the package dir so they don't get installed
+mkdir -p /tmp/debug_final_pkgs
+mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs
+
 source /home/circleci/project/env
 cat >/home/circleci/project/ci_test_script.sh <<EOL
 # =================== The following code will be executed inside Docker container ===================
