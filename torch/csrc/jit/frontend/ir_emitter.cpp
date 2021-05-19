@@ -3758,7 +3758,7 @@ struct to_ir {
       Value* end,
       Value* step) {
     std::vector<NamedValue> args;
-    args.reserve(5);
+    args.reserve(4);
     args.emplace_back(loc, "self", sliceable);
 
     // XXX: If list slicing becomes more complicated or stops using
@@ -3770,10 +3770,11 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
-
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
-      // since we are only dealing with tuple slicing, we try to keep
+      // since we are only dealing with tuple slicing for now, we try to keep
       // tuple args seperate for now
       tuple_args.reserve(3);
 
@@ -3787,15 +3788,22 @@ struct to_ir {
       return emitTupleSlice(loc, args[0], tuple_args);
     }
 
-    // handling cases like x[0:2]. x[0:2:] is already handled from python
+    // TODO this needs to be cleaned for list slicing
+    // Default value for start is 0.
+    if (!start) {
+      start = graph->insertConstant(0, loc);
+    }
+    args.emplace_back(loc, "start", start);
+
+    if (end) {
+      args.emplace_back(loc, "end", end);
+    }
+
     if (!step) {
       step = graph->insertConstant(1, loc);
     }
-
-    args.emplace_back(loc, "start", start);
-    args.emplace_back(loc, "end", end);
-    args.emplace_back(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {});
+    NamedValue step_nv = NamedValue(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
