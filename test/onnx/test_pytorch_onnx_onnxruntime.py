@@ -3176,6 +3176,54 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
 
+    def test_instancenorm1d_runningstats(self):
+        x = torch.randn(10, 5, 128)
+        model = torch.nn.InstanceNorm1d(5, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm1d(5, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm1d_norunningstats(self):
+        x = torch.randn(10, 5, 128)
+        model = torch.nn.InstanceNorm1d(5, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm1d(5, affine=False, track_running_stats=False)
+        self.run_test(model, x)
+
+    def test_instancenorm2d_runningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.InstanceNorm2d(3, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm2d(3, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm2d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.InstanceNorm2d(3, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm2d(3, affine=False, track_running_stats=False)
+        self.run_test(model, x)
+
+    def test_instancenorm3d_runningstats(self):
+        x = torch.randn(10, 3, 128, 128, 128)
+        model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm3d(3, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm3d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128, 128)
+        model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm3d(3, affine=False, track_running_stats=False)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter_with_scalar(self):
         class ScatterModel(torch.nn.Module):
