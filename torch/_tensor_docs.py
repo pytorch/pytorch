@@ -4418,6 +4418,13 @@ unsafe_chunk(chunks, dim=0) -> List of Tensors
 See :func:`torch.unsafe_chunk`
 """)
 
+add_docstr_all('split_with_sizes',
+               r"""
+split_with_sizes(input, split_sizes, dim=0) -> List of Tensors
+
+See :func:`torch.split_with_sizes`
+""")
+
 add_docstr_all('unsafe_split',
                r"""
 unsafe_split(split_size, dim=0) -> List of Tensors

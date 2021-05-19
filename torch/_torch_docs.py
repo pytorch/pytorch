@@ -1374,6 +1374,38 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.split_with_sizes,
+           r"""
+split_with_sizes(input, split_sizes, dim=0) -> List of Tensors
+
+Splits :attr:`input` tensor with one or more dimensions into chunks of tensors.
+
+Equivalent to :func:`torch.tensor_split()`, when :attr:`split_size_or_sections` is a list of
+chunks size, with :code:`sum(split_sizes)` equals to dimension size.
+
+Args:
+    input(Tensor): the tensor to split.
+    split_sizes(list or tuple of ints): list of sizes of each chunk.
+    dim(int, optional): dimension along which to split the tensor. Default: ``0``
+
+Example::
+    >>> t = torch.arange(12)
+    >>> torch.split_with_sizes(t, (3, 4, 5))
+    (tensor([0, 1, 2]), tensor([3, 4, 5, 6]), tensor([ 7,  8,  9, 10, 11]))
+    >>> t = torch.arange(12).reshape(3, 4)
+    >>> torch.split_with_sizes(t, (2, 1), dim = 0)
+    (tensor([[0, 1, 2, 3],
+             [4, 5, 6, 7]]),
+     tensor([[ 8,  9, 10, 11]]))
+    >>> torch.split_with_sizes(t, (3, 1), dim = 1)
+    (tensor([[ 0,  1,  2],
+             [ 4,  5,  6],
+             [ 8,  9, 10]]),
+     tensor([[ 3],
+             [ 7],
+             [11]]))
+""")
+
 add_docstr(torch.tensor_split,
            r"""
 tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
