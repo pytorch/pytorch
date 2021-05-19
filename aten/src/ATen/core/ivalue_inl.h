@@ -526,13 +526,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         guts::if_constexpr<std::is_convertible<
             typename std::result_of<T && (Future&)>::type,
             IValueWithDataPtrs>::value>(
-            [&](auto _) {
+            [&](auto identity) {
               IValue value;
               std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
-              std::tie(value, dataPtrs) = _(cb)(parentFut);
+              std::tie(value, dataPtrs) = identity(cb)(parentFut);
               childFut->markCompleted(std::move(value), std::move(dataPtrs));
             },
-            [&](auto _) { childFut->markCompleted(_(cb)(parentFut)); });
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
       } catch (std::exception&) {
         childFut->setError(std::current_exception());
       }
