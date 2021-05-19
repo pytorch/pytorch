@@ -10,6 +10,10 @@ from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
+# from torch.utils.data.datapipes.iter.dataframes import DFIterDataPipe as DFIterDataPipe
+
+
+
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
@@ -167,12 +171,19 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         IterableDataset.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
+    def register_datapipe_as_function(cls, function_name, cls_to_register, is_df = False):
         if function_name in IterableDataset.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
         def class_function(cls, source_dp, *args, **kwargs):
-            return cls(source_dp, *args, **kwargs)
+            # print('runtime call of ', function_name)
+            result_pipe = cls(source_dp, *args, **kwargs)
+            if is_df or isinstance(source_dp, DFIterDataPipe):
+                if function_name != 'trace_as_dataframe':
+                    result_pipe = result_pipe.trace_as_dataframe()
+            # else:
+                # print(function_name, 'will not return DF')
+            return result_pipe
         function = functools.partial(class_function, cls_to_register)
         IterableDataset.functions[function_name] = function
 
@@ -190,6 +201,8 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterableDataset.reduce_ex_hook = hook_fn
 
+class DFIterDataPipe(IterableDataset):
+    pass
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.

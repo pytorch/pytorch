@@ -2,6 +2,7 @@ import inspect
 from functools import wraps
 from typing import Any, Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data import IterDataPipe
+
 from torch.utils.data._typing import _DataPipeMeta
 
 
@@ -11,8 +12,9 @@ from torch.utils.data._typing import _DataPipeMeta
 class functional_datapipe(object):
     name: str
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, is_df = False) -> None:
         self.name = name
+        self.is_df = is_df
 
     def __call__(self, cls):
         if isinstance(cls, Type):  # type: ignore[arg-type]
@@ -24,7 +26,8 @@ class functional_datapipe(object):
                 not (hasattr(cls, '__self__') and
                      isinstance(cls.__self__, non_deterministic)):
                 raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
-        IterDataPipe.register_datapipe_as_function(self.name, cls)
+        # is_dataframes = isinstance(cls, DFIterDataPipe)
+        IterDataPipe.register_datapipe_as_function(self.name, cls, is_df = self.is_df)
         return cls
 
 

@@ -3,6 +3,8 @@ from torch.utils.data.datapipes.iter.loadfilesfromdisk import LoadFilesFromDiskI
 from torch.utils.data.datapipes.iter.readfilesfromtar import ReadFilesFromTarIterDataPipe as ReadFilesFromTar
 from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIterDataPipe as ReadFilesFromZip
 from torch.utils.data.datapipes.iter.routeddecoder import RoutedDecoderIterDataPipe as RoutedDecoder
+from torch.utils.data.datapipes.iter.dataframes import DFIterDataPipe as DFIterDataPipe
+
 
 # Functional DataPipe
 from torch.utils.data.datapipes.iter.callable import \
@@ -18,5 +20,5 @@ from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
+__all__ = ['DFIterDataPipe', 'ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
            'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'Map', 'Sampler', 'Shuffle', 'Transforms', 'Zip']
