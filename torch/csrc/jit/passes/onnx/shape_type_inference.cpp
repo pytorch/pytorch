@@ -1152,18 +1152,88 @@ void SpecialPostProcess(Node* n) {
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
       auto list_node = n->input(0)->node();
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      auto t_node = n->input(1)->node();
-      if (!list_node || list_node->kind() != prim::ListConstruct ||
-          list_node->inputs().size() != 0) {
-        break;
-      }
+      auto seq_node = n->input(0)->node();
+      auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      if (TensorTypePtr t_type = n->input(1)->type()->cast<TensorType>()) {
-        if (t_type->scalarType()) {
+      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
+        TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
+        TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
+        auto scalar_type = t_type->scalarType().value();
+        auto onnx_type = ATenTypeToOnnxType(scalar_type);
+        n->i_(attr::dtype, onnx_type);
+        n->output()->setType(ListType::create(t_type));
+      };
+
+      auto find_sequence_empty = [](Value* input,
+                                    TensorTypePtr t_type) -> Node* {
+        auto find_sequence_empty_impl =
+            [](Value* input,
+               TensorTypePtr t_type,
+               auto& find_sequence_empty_ref) -> Node* {
+          auto input_node = input->node();
+          TORCH_INTERNAL_ASSERT(input_node);
+
+          // 1. Input is from SequenceEmpty.
+          if (input_node->kind() == ::c10::onnx::SequenceEmpty) {
+            return input_node;
+          }
+
+          // 2. Input is subblock input of a Loop node, which takes outer block
+          // SequenceEmpty as input.
+          if (input_node->kind() == prim::Param) {
+            auto loop_n = input_node->owningBlock()->owningNode();
+            if (nullptr == loop_n || loop_n->kind() != ::c10::onnx::Loop) {
+              return nullptr;
+            }
+
+            auto it = std::find(
+                input_node->outputs().begin(),
+                input_node->outputs().end(),
+                input);
+            auto idx = std::distance(input_node->outputs().begin(), it);
+
+            auto outer_block_node = loop_n->input(idx)->node();
+            if (outer_block_node &&
+                outer_block_node->kind() == ::c10::onnx::SequenceEmpty) {
+              // Found SequenceEmpty
+              input->setType(ListType::create(t_type));
+              return outer_block_node;
+            } else {
+              // Outer block node still not SequenceEmpty, call recursively in
+              // case of nested loop.
+              auto found_n = find_sequence_empty_ref(
+                  loop_n->input(idx), t_type, find_sequence_empty_ref);
+              if (found_n) {
+                input->setType(ListType::create(t_type));
+              }
+              return found_n;
+            }
+          }
+
+          // Could not find source SequenceEmpty node.
+          return nullptr;
+        };
+        return find_sequence_empty_impl(
+            input, t_type, find_sequence_empty_impl);
+      };
+
+      if (seq_node && t_type && t_type->scalarType()) {
+        if (seq_node->kind() == prim::ListConstruct &&
+            seq_node->inputs().size() != 0) {
+          // When prim::ListConstruct is not yet converted to
+          // onnx::SequenceEmpty
           n->output()->setType(ListType::create(t_type));
+        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+          update_sequence_empty_dtype(seq_node, t_type);
+        } else if (seq_node->kind() == prim::Param) {
+          // Try to find original onnx::SequenceEmpty node in outer block.
+          auto seq_empty_n = find_sequence_empty(n->input(0), t_type);
+          if (seq_empty_n) {
+            update_sequence_empty_dtype(seq_empty_n, t_type);
+          }
         }
       }
+
       break;
     }
     case ::c10::onnx::Cast: {
