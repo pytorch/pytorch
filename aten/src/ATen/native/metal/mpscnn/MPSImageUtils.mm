@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-MPSImage* createStaticImage(const std::vector<int64_t>& sizes) {
+MPSImage* createStaticImage(IntArrayRef sizes) {
   MPSImageDescriptor* desc = [MPSImageDescriptor
       imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
                                  width:sizes[3]
@@ -24,9 +24,7 @@ MPSImage* createStaticImage(const std::vector<int64_t>& sizes) {
                           imageDescriptor:desc];
 }
 
-MPSImage* createStaticImage(
-    const fp16_t* src,
-    const std::vector<int64_t>& sizes) {
+MPSImage* createStaticImage(const fp16_t* src, IntArrayRef sizes) {
   int64_t N = sizes[0];
   int64_t C = sizes[1];
   int64_t H = sizes[2];
@@ -59,9 +57,7 @@ MPSImage* createStaticImage(
   return image;
 }
 
-MPSImage* createStaticImage(
-    const float* src,
-    const std::vector<int64_t>& sizes) {
+MPSImage* createStaticImage(const float* src, IntArrayRef sizes) {
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
       newBufferWithLength:size_bytes
@@ -148,9 +144,7 @@ MPSImage* createStaticImage(
   return Y;
 }
 
-MPSTemporaryImage* createTemporaryImage(
-    MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes) {
+MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef sizes) {
   TORCH_CHECK(buffer);
   MPSImageDescriptor* desc = [MPSImageDescriptor
       imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
@@ -168,10 +162,7 @@ MPSTemporaryImage* createTemporaryImage(
   return image;
 }
 
-MPSTemporaryImage* createTemporaryImage(
-    MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes,
-    const float* src) {
+MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef sizes, const float* src) {
   TORCH_CHECK(buffer);
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
