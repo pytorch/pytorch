@@ -129,7 +129,7 @@ int main(int argc, char* argv[]) {
     // First, let's specify the sizes:
     std::vector<const Expr*> dims = {
         new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+    // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
@@ -254,6 +254,7 @@ int main(int argc, char* argv[]) {
 
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
@@ -311,8 +312,11 @@ int main(int argc, char* argv[]) {
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_outer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
     int split_factor = 9;
     loopnest.splitWithTail(

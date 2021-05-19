@@ -3,8 +3,9 @@ import operator
 import unittest
 import sys
 import math
-from typing import Callable, Dict, Union, List
-from torch.fx.symbolic_trace import symbolic_trace
+import numbers
+from typing import Callable, Dict, Union, List, Optional
+from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation
@@ -29,7 +30,13 @@ from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module
+from torch.fx.operator_schemas import (
+    _torchscript_type_to_python_type,
+    normalize_function,
+    normalize_module,
+    type_matches,
+    create_type_hint
+)
 from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
 
 try:
@@ -122,12 +129,13 @@ class TestFXExperimental(JitTestCase):
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
-        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
+        result, _ = graph_manipulation.serialize_tensor_quantization(q_tensor, weights={}, pcq_prefix="foo")
+        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(q_tensor_channel, weights={}, pcq_prefix="bar")
         assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["qscheme"] == "torch.per_channel_affine"
-        assert len(result2["q_per_channel_scales"]) == 2
+        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
+        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
 
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
@@ -1199,8 +1207,44 @@ class {test_classname}(torch.nn.Module):
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
 
+    def test_type_matches(self):
+        should_be_equal = [
+            (int, type(5)),
+            (numbers.Number, type(5)),
+            (numbers.Number, type(5.0)),
+            (int, type(torch.float)),
+            (Union[int, float], type(5)),
+            (Union[int, float], type(5.0)),
+            (List[int], type(5)),
+            (List[int], create_type_hint([int, int])),
+            (List[int], create_type_hint((int, int))),
+            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.nn.Parameter])),
+            (torch.Tensor, torch.nn.Parameter),
+            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.nn.Parameter))),
+            (torch.Tensor, torch.nn.Parameter),
+            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[List[torch.Tensor]], List[torch.Tensor]),
+            (Optional[List[int]], List[int]),
+        ]
+        for sig_type, arg_type in should_be_equal:
+            self.assertTrue(type_matches(sig_type, arg_type))
+
+        should_fail = [
+            (int, float),
+            (Union[int, float], str),
+            (List[torch.Tensor], List[int])
+        ]
+
+        for sig_type, arg_type in should_fail:
+            self.assertFalse(type_matches(sig_type, arg_type))
+
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu(self):
+    def test_optimize_for_inference_cpu(self):
         import torch.nn as nn
 
         class Foo(nn.Module):
@@ -1227,12 +1271,17 @@ class {test_classname}(torch.nn.Module):
         inp = torch.randn(N, C, H, W)
         with torch.no_grad():
             model = Foo().eval()
-            optimized_model = optimization.prepare_for_inference(model)
+            optimized_model = optimization.optimize_for_inference(model)
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+            optimized_model2 = \
+                optimization.optimize_for_inference(model, pass_config={"remove_dropout": False})
+            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu_torchvision(self):
+    def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
             torchvision.models.resnet50,
@@ -1252,7 +1301,7 @@ class {test_classname}(torch.nn.Module):
                 model.eval()
                 inp = torch.randn(1, C, H, W)
                 heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
-                optimized_model = optimization.prepare_for_inference(model)
+                optimized_model = optimization.optimize_for_inference(model)
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
@@ -1263,13 +1312,32 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
+        # Sorted and one entry on each line to minimize merge conflicts.
+        op_skip = {'einsum',
+                   'expand',
+                   'expand_as',
+                   'gradient',
+                   'index_put',
+                   'polygamma',
+                   'repeat',
+                   'reshape_as',
+                   'view',
+                   'view_as',
+                   'unfold',
+                   '__getitem__',
+                   '__radd__',
+                   '__rsub__',
+                   '__rmul__',
+                   '__rdiv__',
+                   '__rpow__'}
+
         # Unsupported input types
-        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+        if op.name in op_skip:
             return
+
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
                    'linalg.multi_dot'}
-        print(op.name)
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
@@ -1307,6 +1375,13 @@ class TestNormalizeOperators(JitTestCase):
             # Test normalize_function by itself
             ref_out = op.op(*arg_values, **kwarg_values)
             norm_args_and_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
+            if norm_args_and_kwargs is None:
+                raise RuntimeError(
+                    """
+                    FX failed to normalize op - add the op to the op_skip list.
+                    A common reason is if your OpInfo was implemented with a lambda
+                    - otherwise, file an issue
+                    """)
             test_out = op.op(*norm_args_and_kwargs.args, **norm_args_and_kwargs.kwargs)
             self.assertEqual(test_out, ref_out)
 

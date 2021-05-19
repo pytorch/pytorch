@@ -141,6 +141,7 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       std::move(wrappedRpc),
       wrappedMsgType,
       std::move(wrappedMessage.tensors()),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(cfg),
       profilerId);
 }

@@ -225,6 +225,9 @@ static void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  // this kernel will not be called when torch.use_deterministic_algorithms(True)
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_copy_cuda", [&] {
@@ -405,10 +408,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self)
-      .add_input(self)
-      .add_input(mask_cont)
-      .add_input(maskPrefixSum)
+      .add_borrowed_output(self)
+      .add_borrowed_input(self)
+      .add_borrowed_input(mask_cont)
+      .add_borrowed_input(maskPrefixSum)
       .build();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -444,7 +447,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   TensorArg self_arg{self, "self", 1};
   TensorArg mask_arg{mask, "mask", 2};
   TensorArg source_arg{source, "source", 3};
-  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
+  checkAllSameGPU(__func__, {self_arg, mask_arg, source_arg});
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 

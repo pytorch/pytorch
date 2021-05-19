@@ -2,8 +2,10 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8ChannelShuffle, int8::Int8ChannelShuffleOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8ChannelShuffle)
     .IdenticalTypeAndShape()
     .Arg("Y_scale", "Output tensor quantization scale")

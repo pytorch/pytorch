@@ -50,6 +50,7 @@ public:
   template <int64_t mask>
   static Vec256<c10::complex<float>> blend(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& b) {
      // convert c10::complex<V> index mask to V index mask: xy -> xxyy
+    // NOLINTNEXTLINE(clang-diagnostic-warning)
     switch (mask) {
       case 0:
         return a;

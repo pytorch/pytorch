@@ -8,9 +8,9 @@
 namespace at {
 namespace native {
 
-using max_pool2d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
+using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
-using max_pool2d_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
 
 DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);

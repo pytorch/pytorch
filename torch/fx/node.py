@@ -9,7 +9,7 @@ from torch.fx.operator_schemas import normalize_function, normalize_module, Args
 if TYPE_CHECKING:
     from .graph import Graph
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
