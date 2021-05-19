@@ -62,9 +62,9 @@ class TestUtilityFuns(TestCase):
         import warnings
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            utils._validate_dynamic_axes({'input1': {}, 'output': {},
-                                         'invalid_name1': {}, 'invalid_name2': {}},
-                                         None, ['input1', 'input2'], ['output'])
+            utils._validate_dynamic_axes({"input1": {}, "output": {},
+                                         "invalid_name1": {}, "invalid_name2": {}},
+                                         None, ["input1", "input2"], ["output"])
             messages = [str(warning.message) for warning in w]
         assert "Provided key invalid_name1 for dynamic axes is not a valid input/output name" in messages
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
@@ -361,7 +361,7 @@ class TestUtilityFuns(TestCase):
         if self.opset_version <= 12:
             assert len(list(graph.nodes())) == 3
         else:
-            # Unsqueeze op parameter 'axes' as an input instead of as an attribute when opset version >= 13
+            # Unsqueeze op parameter "axes" as an input instead of as an attribute when opset version >= 13
             assert len(list(graph.nodes())) == 4
 
     def test_constant_fold_transpose_matmul(self):
@@ -554,9 +554,9 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(1, 2, 3, 4)
         f = io.BytesIO()
         with self.assertRaisesRegex(ValueError,
-                                    'torch.nn.DataParallel is not supported by ONNX '
-                                    'exporter, please use \'attribute\' module to '
-                                    'unwrap model from torch.nn.DataParallel. Try '):
+                                    "torch.nn.DataParallel is not supported by ONNX "
+                                    "exporter, please use 'attribute' module to "
+                                    "unwrap model from torch.nn.DataParallel. Try "):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
     def test_export_mode(self):
@@ -602,7 +602,7 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "prim::Constant"
         assert next(iter).kind() == "aten::cumsum"
         assert len(unsupported_ops) == 1
-        assert unsupported_ops == ['aten::cumsum']
+        assert unsupported_ops == ["aten::cumsum"]
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -722,7 +722,7 @@ class TestUtilityFuns(TestCase):
         class CustomFunction(torch.autograd.Function):
             @staticmethod
             def symbolic(g, input):
-                return g.op('CustomNamespace::Custom', input, outputs=2)
+                return g.op("CustomNamespace::Custom", input, outputs=2)
 
             @staticmethod
             def forward(ctx, input):
@@ -890,5 +890,5 @@ TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_
                                            dict(TestUtilityFuns.__dict__, opset_version=13))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
