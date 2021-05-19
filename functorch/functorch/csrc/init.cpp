@@ -9,6 +9,7 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
+
 namespace at {
 namespace functorch {
 
@@ -161,8 +162,8 @@ int64_t _grad_decrement_nesting() {
   return layer.layerId();
 }
 
-int64_t _vmap_increment_nesting() {
-  return initAndPushDynamicLayer(kBatchedKey);
+int64_t _vmap_increment_nesting(int64_t batch_size) {
+  return initAndPushDynamicLayer(kBatchedKey, batch_size);
 }
 
 int64_t _vmap_decrement_nesting() {

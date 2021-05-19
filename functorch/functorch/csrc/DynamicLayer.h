@@ -11,16 +11,21 @@ namespace at {
 namespace functorch {
 
 struct TORCH_API DynamicLayer {
-  DynamicLayer(DispatchKey key, int64_t layerId): key_(key), layerId_(layerId) {}
+  DynamicLayer(DispatchKey key, int64_t layerId, optional<int64_t> batchSize = nullopt): key_(key), layerId_(layerId), batchSize_(batchSize) {}
 
   DispatchKey key() const { return key_; }
   int64_t layerId() const { return layerId_; }
+  int64_t batchSize() const {
+    TORCH_INTERNAL_ASSERT(batchSize_);
+    return *batchSize_;
+  }
  private:
   DispatchKey key_;
   int64_t layerId_;
+  optional<int64_t> batchSize_;
 };
 
-TORCH_API int64_t initAndPushDynamicLayer(DispatchKey key);
+TORCH_API int64_t initAndPushDynamicLayer(DispatchKey key, optional<int64_t> batch_size = nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
 TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
