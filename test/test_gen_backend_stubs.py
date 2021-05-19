@@ -73,18 +73,6 @@ autograd:
         # so there's no reason to parse the backend
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
-    def test_valid_with_external_headers_multline(self):
-        yaml_str = '''\
-backend: XLA
-cpp_namespace: torch_xla
-external_headers: >
-    #include header1
-    #include header2
-supported:
-- abs'''
-        # External headers are optional.
-        self.assert_success_from_gen_backend_stubs(yaml_str)
-
     def test_missing_backend(self):
         yaml_str = '''\
 cpp_namespace: torch_xla
@@ -173,7 +161,7 @@ supported:
 autograd:
 - add.out'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".''')  # noqa: B950
+        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".''')  # noqa: B950
 
     # in an operator group, currently all operators must either be registered to the backend or autograd kernel.
     # Here, functional and inplace mismatch
@@ -186,7 +174,7 @@ supported:
 autograd:
 - add_.Tensor'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".''')  # noqa: B950
+        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".''')  # noqa: B950
 
     # Currently, the same operator can't be listed under both 'supported' and 'autograd', which would
     # involve registering the same kernel to both the XLA and AutogradXLA keys.
@@ -200,20 +188,7 @@ supported:
 autograd:
 - add.Tensor'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".''')  # noqa: B950
-
-    def test_external_headers_invalid(self):
-        yaml_str = '''\
-backend: XLA
-cpp_namespace: torch_xla
-external_headers:
-    #include header1
-    #include header2
-supported:
-- abs'''
-        # You need the '>' if you want a multiline yaml string
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, ''' contains unexpected keys: external_headers. Only the following keys are supported: backend, cpp_namespace, extra_headers, supported, autograd''')  # noqa: B950
+        self.assertExpectedInline(output_error, '''Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".''')  # noqa: B950
 
     # unrecognized extra yaml key
     def test_unrecognized_key(self):
