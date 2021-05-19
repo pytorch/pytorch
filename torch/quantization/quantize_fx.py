@@ -19,13 +19,48 @@ def _check_is_graph_module(model: torch.nn.Module) -> None:
 
 
 def _check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
+    r""" Checks if the given qconfig_dict has the correct keys
+
+    Args:
+      `qconfig_dict`: dictionary whose keys we want to check
+    """
+
+    qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
+
     for k in qconfig_dict.keys():
-        if not (k == "" or k == "object_type" or
-                k == "module_name_regex" or k == "module_name"):
+        if k not in qconfig_dict_allowed_keys:
             raise ValueError(
-                'Expected qconfig_dict to have global, object_type, ' +
-                'module_name_regex, or module_name as keys but found \'' +
-                k + '\' instead.')
+                'Expected qconfig_dict to have the following keys: ' +
+                str(qconfig_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
+
+def _check_is_valid_custom_config_dict(prepare_custom_config_dict: Any) -> None:
+    r""" Checks if the given prepare_custom_config_dict has the correct keys
+
+    Args:
+      `prepare_custom_config_dict`: customization configuration dictionary for
+      quantization tool
+    """
+    custom_config_dict_allowed_keys = {"standalone_module_name",
+                                       "standalone_module_class",
+                                       "float_to_observed_custom_module_class",
+                                       "non_traceable_module_name",
+                                       "non_traceable_module_class",
+                                       "additional_fuser_method_mapping",
+                                       "additional_qat__module_mapping",
+                                       "additional_fusion_pattern",
+                                       "additional_quant_pattern",
+                                       "input_quantized_idxs",
+                                       "output_quantized_idxs",
+                                       "preserved_attributes"}
+
+    for k in prepare_custom_config_dict.keys():
+        if k not in custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected prepare_custom_config_dict to have the ' +
+                'following keys: ' + str(custom_config_dict_allowed_keys) +
+                '. But found \'' + k + '\' instead.')
 
 def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     r""" Swap FloatFunctional with FXFloatFunctional
@@ -159,6 +194,9 @@ forward graph of the parent module,
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+
+    _check_is_valid_qconfig_dict(qconfig_dict)
+    _check_is_valid_custom_config_dict(prepare_custom_config_dict)
 
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
@@ -399,7 +437,6 @@ def prepare_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
-    _check_is_valid_qconfig_dict(qconfig_dict)
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
 def prepare_qat_fx(
