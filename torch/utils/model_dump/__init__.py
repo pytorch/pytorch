@@ -210,7 +210,7 @@ def get_model_info(
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
         with zf.open(path_prefix + "/data.pkl") as handle:
-            raw_model_data = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
+            raw_model_data = torch.utils.show_pickle.DumpUnpickler(handle).load()
             model_data = hierarchical_pickle(raw_model_data)
 
         # Intern strings that are likely to be re-used.
@@ -288,7 +288,7 @@ def get_model_info(
                 # TODO: handle errors here and just ignore the file?
                 # NOTE: For a lot of these files (like bytecode),
                 # we could get away with just unpickling, but this should be safer.
-                obj = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
+                obj = torch.utils.show_pickle.DumpUnpickler(handle).load()
             buf = io.StringIO()
             pprint.pprint(obj, buf)
             contents = buf.getvalue()
