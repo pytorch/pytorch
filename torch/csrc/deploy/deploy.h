@@ -111,9 +111,7 @@ class TORCH_API Interpreter {
         handle_(rhs.handle_),
         pImpl_(std::move(rhs.pImpl_)),
         manager_(rhs.manager_) {
-    TORCH_DEPLOY_TRY
     rhs.handle_ = nullptr;
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
   Interpreter(const Interpreter&) = delete;

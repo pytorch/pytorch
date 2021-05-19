@@ -46,11 +46,9 @@ InterpreterSession ReplicatedObj::acquire_session(
 }
 
 InterpreterSession::~InterpreterSession() {
-  TORCH_DEPLOY_TRY
   if (manager_ && notify_idx_ >= 0) {
     manager_->resources_.free(notify_idx_);
   }
-  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
@@ -69,9 +67,7 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
 }
 
 ReplicatedObjImpl::~ReplicatedObjImpl() {
-  TORCH_DEPLOY_TRY
   unload(nullptr);
-  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void ReplicatedObj::unload(const Interpreter* on_this_interpreter) {
@@ -93,7 +89,6 @@ ReplicatedObj InterpreterSession::create_movable(Obj obj) {
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
-  TORCH_DEPLOY_TRY
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char library_name[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(library_name);
@@ -122,17 +117,14 @@ Interpreter::Interpreter(InterpreterManager* manager)
   pImpl_ = std::unique_ptr<InterpreterImpl>(
       // NOLINTNEXTLINE(modernize-redundant-void-arg)
       ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
-  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Interpreter::~Interpreter() {
-  TORCH_DEPLOY_TRY
   if (handle_) {
     // ensure python uninitialization runs before we dlclose the library
     pImpl_.reset();
     dlclose(handle_);
   }
-  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 int LoadBalancer::acquire() {
