@@ -577,6 +577,74 @@ TEST_F(Kernel, CatWoConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getCatWoConditionals() = false;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(Kernel, OptimizeConditionals) {
+  bool old_cat_wo_conditionals = getCatWoConditionals();
+  bool old_opt_conditionals = getOptConditionals();
+  getCatWoConditionals() = false;
+  getOptConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, strides=[3, 1], device=cpu),
+            %b : Float(5, 7, strides=[7, 1], device=cpu),
+            %c : Float(5, 9, strides=[9, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(5, 19, strides=[19, 1]) = aten::cat(%inputs, %dim)
+        %t : Float(5, 19, strides=[19, 1]) = aten::relu(%r)
+        return (%t))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK-NOT: Allocate
+# CHECK-NOT: Free)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto b = at::rand({5, 7}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto c = at::rand({5, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::relu(at::cat({a, b, c}, 1));
+
+  std::vector<at::Tensor> inputs = {a, b, c};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+
+  // Check sizes
+  CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  CHECK_EQ(o.dtype(), ref.dtype());
+  size_t num_el = 1;
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    num_el *= ref.sizes()[idx];
+  }
+
+  // Check the contents
+  for (size_t i = 0; i < num_el; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+  getOptConditionals() = old_opt_conditionals;
+  getCatWoConditionals() = old_cat_wo_conditionals;
 }
 
 namespace {
