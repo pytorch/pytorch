@@ -137,6 +137,8 @@ genrule(
         "aten/src/ATen/RegisterSchema.cpp",
         "aten/src/ATen/CPUFunctions.h",
         "aten/src/ATen/CUDAFunctions.h",
+        "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+        "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
