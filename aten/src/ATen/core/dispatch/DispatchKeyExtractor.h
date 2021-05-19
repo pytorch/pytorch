@@ -139,10 +139,10 @@ public:
   }
 
   template<class... Args>
-  DispatchKeySet getDispatchKeySetUnboxed(DispatchKeySet eligibleKeys, const Args&... args) const {
+  DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_ & eligibleKeys);
+    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
