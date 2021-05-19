@@ -393,7 +393,11 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   // Our response is satisfied when the rpcs come back.
   return execFuture->then(
       [](JitFuture& execFuture) {
-        return withDataPtrs(PropagateGradientsResp().toMessage());
+        if (execFuture.hasError()) {
+          std::rethrow_exception(execFuture.exception_ptr());
+        } else {
+          return withDataPtrs(PropagateGradientsResp().toMessage());
+        }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
