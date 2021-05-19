@@ -48,12 +48,10 @@ TEST(Tarjans, Cycle) {
 TEST(Tarjans, Random) {
   nom::Graph<TestClass> g;
   std::vector<nom::Graph<TestClass>::NodeRef> nodes;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     TestClass t;
     nodes.emplace_back(g.createNode(std::move(t)));
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 30; ++i) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,clang-analyzer-security.insecureAPI.rand)
     int ri1 = rand() % nodes.size();

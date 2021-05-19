@@ -202,11 +202,9 @@ TEST(ModuleAPITest, DeepCopy) {
   cls->addAttribute(tensor_attr, TensorType::get());
   cls->addAttribute(tensor_list_attr, ListType::ofTensors());
   Module m(cu, cls);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::List<at::Tensor> list({at::rand(5), at::rand(5)});
   m.setattr(int_attr, IValue(2));
   m.setattr(str_attr, IValue("str"));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.setattr(tensor_attr, at::randn(5));
   m.setattr(tensor_list_attr, list);
 
@@ -282,13 +280,9 @@ TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   cls->addAttribute(attr3, TensorType::get());
   cls->addAttribute(attr4, TensorType::get());
   Module m(cu, cls);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t1 = at::rand(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t2 = at::rand(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t3 = at::rand(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t4 = at::rand({5, 2});
   c10::List<at::Tensor> list1({t1, t2});
   c10::List<at::Tensor> list2({t1, t3});
@@ -371,7 +365,10 @@ TEST(ModuleAPITest, Freezing) {
   auto frozen_mod = torch::jit::freeze(m);
   auto forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
-  ;
+
+  auto frozen_mod2 = torch::jit::optimize_for_inference(m);
+  forward_g = frozen_mod.get_method("forward").graph();
+  testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

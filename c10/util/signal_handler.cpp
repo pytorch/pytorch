@@ -1,5 +1,6 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/signal_handler.h>
+#include <fmt/format.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
@@ -162,10 +163,14 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
     pthread_mutex_lock(&writingMutex);
   }
   pid_t tid = syscall(SYS_gettid);
-  std::cerr << fatalSignalName << "(" << fatalSignum << "), PID: " << ::getpid()
-            << ", Thread " << tid << ": " << std::endl;
-  std::cerr << c10::get_backtrace();
-  std::cerr << std::endl;
+  std::string backtrace = fmt::format(
+      "{}({}), PID: {}, Thread {}: \n {}",
+      fatalSignalName,
+      fatalSignum,
+      ::getpid(),
+      tid,
+      c10::get_backtrace());
+  std::cerr << backtrace << std::endl;
   if (needsLock) {
     pthread_mutex_unlock(&writingMutex);
     pthread_cond_signal(&writingCond);
