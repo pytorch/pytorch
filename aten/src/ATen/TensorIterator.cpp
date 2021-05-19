@@ -18,7 +18,7 @@ using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
 
 /// Construction
-TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
+TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const Tensor& output) {
   TORCH_INTERNAL_ASSERT(
       num_inputs_ == 0,
       "Keep in mind that you have to add all outputs first before adding any input. "
@@ -28,7 +28,7 @@ TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input) {
+TensorIteratorConfig& TensorIteratorConfig::add_owned_input(const Tensor& input) {
   tensors_.push_back(c10::MaybeOwned<Tensor>::owned(c10::in_place, input));
   num_inputs_++;
   return *this;
@@ -783,9 +783,9 @@ void TensorIteratorBase::build_binary_float_op(const Tensor& out, const Tensor& 
 
 void TensorIteratorBase::build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(BINARY_FLOAT_OP_CONFIG()
-        .add_borrowed_output(out)
-        .add_borrowed_input(a)
-        .add_borrowed_input(b));
+        .add_output(out)
+        .add_input(a)
+        .add_input(b));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -807,9 +807,9 @@ void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, con
 
 void TensorIteratorBase::build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(BINARY_OP_CONFIG()
-      .add_borrowed_output(out)
-      .add_borrowed_input(a)
-      .add_borrowed_input(b));
+      .add_output(out)
+      .add_input(a)
+      .add_input(b));
 }
 
 void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
@@ -909,7 +909,7 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
 
 TensorIterator TensorIterator::borrowing_nullary_op(const Tensor& out) {
   return NULLARY_OP_CONFIG()
-    .add_borrowed_output(out)
+    .add_output(out)
     .build();
 }
 

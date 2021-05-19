@@ -46,9 +46,9 @@ static inline void compare_base_kernel_core(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
-    .add_borrowed_output(result1)
-    .add_borrowed_output(result2)
-    .add_borrowed_input(self)
+    .add_output(result1)
+    .add_output(result2)
+    .add_input(self)
     .build();
 
   iter.for_each(loop, /* grain_size */ 1);

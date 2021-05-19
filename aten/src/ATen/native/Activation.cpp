@@ -21,9 +21,9 @@ TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Sc
   const Tensor& result = maybe_get_output();
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_borrowed_output(result)
-    .add_borrowed_input(self)
-    .add_borrowed_input(self) // other
+    .add_output(result)
+    .add_input(self)
+    .add_input(self) // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -35,9 +35,9 @@ TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, cons
   const Tensor& gradInput = maybe_get_output();
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_borrowed_output(gradInput)
-    .add_borrowed_input(self)
-    .add_borrowed_input(grad)  // other
+    .add_output(gradInput)
+    .add_input(self)
+    .add_input(grad)  // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -813,10 +813,10 @@ Tensor log_sigmoid(const Tensor & self) {
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(grad_input)
-    .add_borrowed_input(input)
-    .add_borrowed_input(buffer)
-    .add_borrowed_input(grad_output)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
     .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return iter.output();
@@ -827,10 +827,10 @@ Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
     const Tensor& buffer,
     Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(grad_input)
-    .add_borrowed_input(input)
-    .add_borrowed_input(buffer)
-    .add_borrowed_input(grad_output)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
     .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return grad_input;

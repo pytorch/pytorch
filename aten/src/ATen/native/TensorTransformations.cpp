@@ -60,10 +60,10 @@ static TensorIterator make_index_iterator(const Tensor& input, const std::vector
   config.set_check_mem_overlap(false)
         .check_all_same_dtype(false)
         .declare_static_dtype_and_device(input.scalar_type(), input.device())
-        .add_borrowed_output(output_tensor)
-        .add_borrowed_input(input);
+        .add_output(output_tensor)
+        .add_input(input);
   for (auto& index : indices) {
-    config.add_borrowed_input(index);
+    config.add_input(index);
   }
   return config.build();
 }

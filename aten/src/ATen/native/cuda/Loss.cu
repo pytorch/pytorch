@@ -13,10 +13,10 @@ using namespace at;
 
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
   at::TensorIterator iter = TensorIteratorConfig()
-      .add_borrowed_output(grad_input)
-      .add_borrowed_input(grad)
-      .add_borrowed_input(input)
-      .add_borrowed_input(target)
+      .add_output(grad_input)
+      .add_input(grad)
+      .add_input(input)
+      .add_input(target)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
     at::native::gpu_kernel(iter, [] GPU_LAMBDA (
@@ -46,9 +46,9 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   auto grad_input = at::empty_like(input);
   if (!log_target) {
     TensorIterator iter = TensorIteratorConfig()
-        .add_borrowed_output(grad_input)
-        .add_borrowed_input(target)
-        .add_borrowed_input(grad)
+        .add_output(grad_input)
+        .add_input(target)
+        .add_input(grad)
         .build();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
       scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
@@ -86,7 +86,7 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
   Tensor loss_squeezed = at::squeeze(loss);
 
   TensorIterator iter = TensorIteratorConfig()
-      .add_borrowed_output(loss_squeezed)
+      .add_output(loss_squeezed)
       .add_owned_input(at::squeeze(input))
       .add_owned_input(at::squeeze(target))
       .build();

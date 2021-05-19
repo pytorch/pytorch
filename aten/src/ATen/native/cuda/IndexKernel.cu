@@ -408,10 +408,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(self)
-      .add_borrowed_input(self)
-      .add_borrowed_input(mask_cont)
-      .add_borrowed_input(maskPrefixSum)
+      .add_output(self)
+      .add_input(self)
+      .add_input(mask_cont)
+      .add_input(maskPrefixSum)
       .build();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(

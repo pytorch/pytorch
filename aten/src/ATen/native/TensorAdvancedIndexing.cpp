@@ -255,10 +255,10 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   config.set_check_mem_overlap(false);
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
-  config.add_borrowed_output(info.src);
-  config.add_borrowed_input(value);
+  config.add_output(info.src);
+  config.add_input(value);
   for (auto& index : info.indices) {
-    config.add_borrowed_input(index);
+    config.add_input(index);
   }
   return config.build();
 }
@@ -269,9 +269,9 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
         .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
         .add_owned_output(Tensor())
-        .add_borrowed_input(info.src);
+        .add_input(info.src);
   for (auto& index : info.indices) {
-    config.add_borrowed_input(index);
+    config.add_input(index);
   }
   return config.build();
 }
@@ -281,10 +281,10 @@ static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor&
   // info.src is a restrided view of result
   config.set_check_mem_overlap(false)
         .check_all_same_dtype(false)
-        .add_borrowed_output(result)
-        .add_borrowed_input(info.src);
+        .add_output(result)
+        .add_input(info.src);
   for (auto& index : info.indices) {
-    config.add_borrowed_input(index);
+    config.add_input(index);
   }
   return config.build();
 }
@@ -369,8 +369,8 @@ Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const b
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
-    .add_borrowed_input(source)
-    .add_borrowed_input(index_reshaped)
+    .add_input(source)
+    .add_input(index_reshaped)
     .build();
 
   put_stub(iter.device_type(), iter, self, accumulate);
@@ -435,8 +435,8 @@ Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
-    .add_borrowed_output(out)
-    .add_borrowed_input(index)
+    .add_output(out)
+    .add_input(index)
     .build();
 
   // Early return after out has been resized
@@ -556,9 +556,9 @@ Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, con
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(self_restrided)
-    .add_borrowed_input(index_restrided)
-    .add_borrowed_input(source_nonzero)
+    .add_output(self_restrided)
+    .add_input(index_restrided)
+    .add_input(source_nonzero)
     .build();
 
   auto self_dim_size = self_nonzero.size(dim);
@@ -795,8 +795,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(resultSlice)
-      .add_borrowed_input(selfSlice)
+      .add_output(resultSlice)
+      .add_input(selfSlice)
       .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
@@ -945,8 +945,8 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(self_restrided)
-    .add_borrowed_input(index_restrided)
+    .add_output(self_restrided)
+    .add_input(index_restrided)
     .build();
 
   auto self_dim_size = (self_nonzero_dim.sizes())[dim];
@@ -1116,8 +1116,8 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const S
     .set_check_mem_overlap(false)  // deprecated, but not a hard error
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(self)
-    .add_borrowed_input(mask)
+    .add_output(self)
+    .add_input(mask)
     .build();
 
   masked_fill_stub(iter.device_type(), iter, value);
@@ -1214,9 +1214,9 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(result_strided)
-      .add_borrowed_input(*_self)
-      .add_borrowed_input(*_mask)
+      .add_output(result_strided)
+      .add_input(*_self)
+      .add_input(*_mask)
       .build();
 
     masked_select_serial_stub(iter.device_type(), iter, orig_stride);
@@ -1238,10 +1238,10 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .set_check_mem_overlap(false)  // result is intenionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(result_strided)
-    .add_borrowed_input(*_self)
-    .add_borrowed_input(*_mask)
-    .add_borrowed_input(mask_prefix_sum)
+    .add_output(result_strided)
+    .add_input(*_self)
+    .add_input(*_mask)
+    .add_input(mask_prefix_sum)
     .build();
 
   masked_select_stub(iter.device_type(), iter, orig_stride);
@@ -1407,8 +1407,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(self)
-      .add_borrowed_input(*b_mask)
+      .add_output(self)
+      .add_input(*b_mask)
       .build();
 
   masked_scatter_stub(iter.device_type(), iter, src_cont);

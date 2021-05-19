@@ -41,8 +41,8 @@ void _dim_apply(
     .resize_outputs(false)
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
-    .add_borrowed_output(values)
-    .add_borrowed_output(indices)
+    .add_output(values)
+    .add_output(indices)
     .build();
 
   auto values_dim_stride = values.stride(dim);
