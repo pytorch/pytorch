@@ -27,9 +27,34 @@ shellcheck-gha:
 	tools/extract_scripts.py --out=$(SHELLCHECK_GHA_GENERATED_FOLDER)
 	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
+# generate-gha-workflows:
+# 	.github/scripts/generate_ci_workflows.py
+# 	$(MAKE) shellcheck-gha
+
 generate-gha-workflows:
-	.github/scripts/generate_ci_workflows.py
-	$(MAKE) shellcheck-gha
+	@python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	 	--job 'shellcheck'
+	@python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	 	--job 'templates' --step "Assert that regenerating the workflows didn't change them"
+
+shellcheck:
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+	 	--job 'shellcheck' \
+		 --step "Regenerate workflows"
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+	 	--job 'shellcheck' \
+		 --step "Assert that regenerating the workflows didn't change them"
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'shellcheck' \
+		--step 'Extract scripts from GitHub Actions workflows'
+	@python tools/actions_local_runner.py \
+		--file-filter '.sh' \
+		$(CHANGED_ONLY) \
+		--job 'shellcheck'
+
 
 setup_lint:
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
@@ -38,6 +63,8 @@ setup_lint:
 	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
+	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	 	--job 'templates' --step 'Install Jinja2' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		if [ -z "$$(which brew)" ]; then \
@@ -52,11 +79,6 @@ setup_lint:
 	pip install jinja2
 
 quick_checks:
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'quick-checks' \
-		--step 'Extract scripts from GitHub Actions workflows'
-
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the
 # lints will descend into third_party submodules
 	@python tools/actions_local_runner.py \
@@ -70,7 +92,6 @@ quick_checks:
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
-		--step 'Run ShellCheck' \
 		--step 'Ensure correct trailing newlines'
 
 flake8:
@@ -101,7 +122,7 @@ toc:
 		--job 'toc' \
 		--step "Regenerate ToCs and check that they didn't change"
 
-lint: flake8 mypy quick_checks cmakelint generate-gha-workflows
+lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 mypy quick_checks cmakelint generate-gha-workflows
+quicklint: mypy flake8 mypy quick_checks cmakelint shellcheck

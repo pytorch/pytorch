@@ -223,6 +223,37 @@ async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
     return passed
 
 
+
+async def run_shellcheck(files: Optional[List[str]], quiet: bool) -> bool:
+    if files is not None:
+        passed, stdout, stderr = await shell_cmd(
+            ["tools/run_shellcheck.sh"] + [
+                os.path.join(REPO_ROOT, f) for f in files
+            ],
+        )
+        print_results("shellcheck: Run Shellcheck", passed, [
+            stdout + "\n",
+            stderr + "\n",
+        ])
+        return passed
+
+    # Not running quicklint, so use lint.yml
+    passed, _, _ = await shell_cmd(
+        [
+            sys.executable,
+            "tools/actions_local_runner.py",
+            "--job",
+            "shellcheck",
+            "--file",
+            ".github/workflows/lint.yml",
+            "--step",
+            "Run ShellCheck",
+        ],
+        redirect=False,
+    )
+    return passed
+
+
 async def run_step(
     step: Dict[str, Any], job_name: str, files: Optional[List[str]], quiet: bool
 ) -> bool:
@@ -238,7 +269,10 @@ async def run_step(
     name = f'{job_name}: {step["name"]}'
 
     passed, stderr, stdout = await shell_cmd(script, env=env)
-    print_results(name, passed, [stdout, stderr])
+    if not passed:
+        print_results(name, passed, [stdout, stderr])
+    else:
+        print_results(name, passed, [])
 
     return passed
 
@@ -285,7 +319,7 @@ def grab_specific_steps(
                 break
 
     if len(relevant_steps) != len(steps_to_grab):
-        raise RuntimeError("Missing steps")
+        raise RuntimeError(f"Missing steps:\n{relevant_steps}\n{steps_to_grab}")
 
     return relevant_steps
 
@@ -358,6 +392,7 @@ def main() -> None:
 ad_hoc_steps = {
     "mypy": run_mypy,
     "flake8-py3": run_flake8,
+    "shellcheck": run_shellcheck,
 }
 
 if __name__ == "__main__":

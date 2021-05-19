@@ -35,27 +35,6 @@ jobs:
         run: |
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
-      - name: Extract scripts from GitHub Actions workflows
-        if: always() && steps.requirements.outcome == 'success'
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
-          rm -r "shellcheck-${scversion}"
-          shellcheck --version
-      - name: Run ShellCheck
-        if: always() && steps.install_shellcheck.outcome == 'success'
-        run: |
-          tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
         if: always() && steps.requirements.outcome == 'success'
         run: |
@@ -129,7 +108,7 @@ jobs:
         run: |
           python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 
-  templates:
+  shellcheck:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -144,7 +123,28 @@ jobs:
       - name: Regenerate workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
-        run: .github/scripts/report_git_status.sh
+        run: .github/scripts/report_git_status.sh .github/workflows
+      - name: Install ShellCheck
+        id: install_shellcheck
+        if: always()
+        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
+        run: |
+          set -x
+          scversion="v0.7.2"
+          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
+          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
+          rm -r "shellcheck-${scversion}"
+          shellcheck --version
+      - name: Extract scripts from GitHub Actions workflows
+        if: always() && steps.install_shellcheck.outcome == 'success'
+        run: |
+          # For local lints, remove the .extracted_scripts folder if it was already there
+          rm -rf .extracted_scripts
+          tools/extract_scripts.py --out=.extracted_scripts
+      - name: Run ShellCheck
+        if: always() && steps.install_shellcheck.outcome == 'success'
+        run: |
+          tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
 
   toc:
     runs-on: ubuntu-18.04
