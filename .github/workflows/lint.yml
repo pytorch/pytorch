@@ -116,8 +116,13 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      - name: Install requirements
+        id: requirements
+        run: |
+          pip install -r requirements.txt
       - name: Install Jinja2
-        run: pip install Jinja2
+        run: |
+          pip install Jinja2==3.0.1
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows

@@ -57,7 +57,7 @@ setup_lint:
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'templates' --step 'Install Jinja2' --no-quiet
+	 	--job 'shellcheck' --step 'Install Jinja2' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		if [ -z "$$(which brew)" ]; then \
@@ -67,7 +67,7 @@ setup_lint:
 		brew install shellcheck; \
 	else \
 		python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'quick-checks' --step 'Install ShellCheck' --no-quiet; \
+		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
 	pip install jinja2
 
