@@ -54,21 +54,14 @@ class Hider extends Component {
     this.setState({ shown: this.props.shown === "true" });
   }
 
-  render(_, {shown}) {
-    return html`<h2>
-      <span class=caret onClick=${() => this.click()} >${caret(shown)} </span>
-      ${this.props.name}</h2>`;
+  render({name, children}, {shown}) {
+    let my_caret = html`<span class=caret onClick=${() => this.click()} >${caret(shown)}</span>`;
+    return html`<h2>${my_caret} ${name}</h2>
+      ${shown ? this.props.children : []}`;
   }
 
   click() {
-    const shown = !this.state.shown;
-    this.setState({shown: shown});
-    const elt = document.getElementById(this.props.elt);
-    if (shown) {
-      elt.style.display = "block";
-    } else {
-      elt.style.display = "none";
-    }
+    this.setState({shown: !this.state.shown});
   }
 }
 
@@ -86,19 +79,21 @@ function ModelSizeSection({model: {file_size, zip_files}}) {
   let zip_overhead = file_size - store_size - compr_size;
   // TODO: Better formatting.  Right-align this.
   return html`
-    <${Hider} name="Model Size" elt=model_size shown=true />
-    <pre id=model_size>.
+    <${Hider} name="Model Size" shown=true>
+    <pre>.
       Model size: ${file_size} (${humanFileSize(file_size)})
       Stored files: ${store_size} (${humanFileSize(store_size)})
       Compressed files: ${compr_size} (${humanFileSize(compr_size)})
       Zip overhead: ${zip_overhead} (${humanFileSize(zip_overhead)})
-    </pre>`;
+    </pre><//>`;
 }
 
 function ModelStructureSection({model: {model_data}}) {
   return html`
-    <${Hider} name="Model Structure" elt=model_structure shown=true />
-    <div id=model_structure style="font-family:monospace;"><${ModelData} data=${model_data} indent="" prefix=""/></pre>`;
+    <${Hider} name="Model Structure" shown=true>
+    <div style="font-family:monospace;">
+      <${ModelData} data=${model_data} indent="" prefix=""/>
+    </div><//>`;
 }
 
 class ModelData extends Component {
@@ -111,8 +106,7 @@ class ModelData extends Component {
   }
 
   click() {
-    const shown = !this.state.shown;
-    this.setState({shown: shown});
+    this.setState({shown: !this.state.shown});
   }
 
   expando(data) {
@@ -290,8 +284,8 @@ function ZipContentsSection({model: {zip_files}}) {
   // TODO: Add sorting options?
   // TODO: Add hierarchical collapsible tree?
   return html`
-    <${Hider} name="Zip Contents" elt=zipfiles shown=false />
-    <table id=zipfiles style="display:none;">
+    <${Hider} name="Zip Contents" shown=false>
+    <table>
       <thead>
         <tr>
           <th>Mode</th>
@@ -308,18 +302,16 @@ function ZipContentsSection({model: {zip_files}}) {
           <td>${zf.filename}</td>
         </tr>`)}
       </tbody>
-    </table>
-    `;
+    </table><//>`;
 }
 
 function CodeSection({model: {code_files}}) {
   return html`
-    <${Hider} name="Code" elt=code_section shown=false />
-    <div id=code_section style="display:none;">
+    <${Hider} name="Code" shown=false>
+    <div>
       ${Object.entries(code_files).map(([fn, code]) => html`<${OneCodeSection}
           filename=${fn} code=${code} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OneCodeSection extends Component {
@@ -357,13 +349,12 @@ class OneCodeSection extends Component {
 
 function ExtraJsonSection({files}) {
   return html`
-    <${Hider} name="Extra files (JSON)" elt=json_section shown=false />
-    <div id=json_section style="display:none;">
+    <${Hider} name="Extra files (JSON)" shown=false>
+    <div>
       <p>Use "Log Raw Model Info" for hierarchical view in browser console.</p>
       ${Object.entries(files).map(([fn, json]) => html`<${OneJsonSection}
           filename=${fn} json=${json} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OneJsonSection extends Component {
@@ -395,12 +386,11 @@ class OneJsonSection extends Component {
 
 function ExtraPicklesSection({files}) {
   return html`
-    <${Hider} name="Extra Pickles" elt=pickle_section shown=false />
-    <div id=pickle_section style="display:none;">
+    <${Hider} name="Extra Pickles" shown=false>
+    <div>
       ${Object.entries(files).map(([fn, content]) => html`<${OnePickleSection}
           filename=${fn} content=${content} />`)}
-    </div>
-    `;
+    </div><//>`;
 }
 
 class OnePickleSection extends Component {
