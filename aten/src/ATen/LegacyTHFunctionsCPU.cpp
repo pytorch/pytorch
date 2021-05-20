@@ -18,6 +18,7 @@ namespace {
   ScalarType infer_scalar_type(const Tensor & t) {
     return t.scalar_type();
   }
+  // NOLINTNEXTLINE(clang-diagnostic-unused-function)
   ScalarType infer_scalar_type(const TensorList & tl) {
     TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
     return tl[0].scalar_type();
@@ -99,6 +100,18 @@ Tensor & _th_nonzero_out(const Tensor & self, Tensor & result) {
             THBFloat16Tensor_nonzero(result_, self_);
             break;
         }
+        case ScalarType::ComplexDouble: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
         default:
             AT_ERROR("_th_nonzero_out not supported on CPUType for ", dispatch_scalar_type);
     }
@@ -160,47 +173,38 @@ Tensor _th_nonzero(const Tensor & self) {
             THBFloat16Tensor_nonzero(result_, self_);
             break;
         }
+        case ScalarType::ComplexDouble: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
         default:
             AT_ERROR("_th_nonzero not supported on CPUType for ", dispatch_scalar_type);
     }
     return result;
 }
-Tensor _th_var(const Tensor & self, bool unbiased) {
+Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THDoubleTensor_var_all(self_, unbiased)), options(ScalarType::Double));
+            return convert<double>(THDoubleTensor_std_var_all(self_, correction, take_sqrt));
             break;
         }
         case ScalarType::Float: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THFloatTensor_var_all(self_, unbiased)), options(ScalarType::Float));
+            return convert<float>(THFloatTensor_std_var_all(self_, correction, take_sqrt));
             break;
         }
         default:
             AT_ERROR("_th_var not supported on CPUType for ", dispatch_scalar_type);
-    }
-}
-Tensor _th_std(const Tensor & self, bool unbiased) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THDoubleTensor_std_all(self_, unbiased)), options(ScalarType::Double));
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CPU, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THFloatTensor_std_all(self_, unbiased)), options(ScalarType::Float));
-            break;
-        }
-        default:
-            AT_ERROR("_th_std not supported on CPUType for ", dispatch_scalar_type);
     }
 }
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result) {
@@ -331,6 +335,19 @@ Tensor _th_histc(const Tensor & self, int64_t bins, const Scalar& min, const Sca
 }
 
 std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2) {
+    TORCH_WARN_ONCE(
+      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
+      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
+      "The unpacking of the solution, as in\n",
+      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
+      "should be replaced with\n",
+      "X = torch.linalg.lstsq(A, B).solution"
+    );
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -357,6 +374,19 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A
     return std::tuple<Tensor &, Tensor &>(res1, res2);
 }
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
+    TORCH_WARN_ONCE(
+      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
+      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
+      "The unpacking of the solution, as in\n",
+      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
+      "should be replaced with\n",
+      "X = torch.linalg.lstsq(A, B).solution"
+    );
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto res1_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -380,57 +410,6 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
             AT_ERROR("_th_gels not supported on CPUType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
-}
-Tensor & _th_ormqr_out(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose, Tensor & result) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input2_ = checked_dense_tensor_unwrap(input2, "input2", 2, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input3_ = checked_dense_tensor_unwrap(input3, "input3", 3, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_ormqr(result_, self_, input2_, input3_, left, transpose);
-            break;
-        }
-        case ScalarType::Float: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input2_ = checked_dense_tensor_unwrap(input2, "input2", 2, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input3_ = checked_dense_tensor_unwrap(input3, "input3", 3, "_th_ormqr_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_ormqr(result_, self_, input2_, input3_, left, transpose);
-            break;
-        }
-        default:
-            AT_ERROR("_th_ormqr_out not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return result;
-}
-Tensor _th_ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto result = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(result_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input2_ = checked_dense_tensor_unwrap(input2, "input2", 2, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input3_ = checked_dense_tensor_unwrap(input3, "input3", 3, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_ormqr(result_, self_, input2_, input3_, left, transpose);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input2_ = checked_dense_tensor_unwrap(input2, "input2", 2, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            auto input3_ = checked_dense_tensor_unwrap(input3, "input3", 3, "_th_ormqr", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_ormqr(result_, self_, input2_, input3_, left, transpose);
-            break;
-        }
-        default:
-            AT_ERROR("_th_ormqr not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return result;
 }
 
 } // namespace th

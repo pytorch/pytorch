@@ -48,6 +48,9 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(col_indices, dtype=index_dtype), sparse.col_indices())
             self.assertEqual(torch.tensor(values, dtype=dtype), sparse.values())
 
+        with self.assertRaises(RuntimeError):
+            torch.sparse_csr_tensor(crow_indices, torch.tensor(col_indices), values, size=(2, 10))
+
     @onlyCPU
     @dtypes(torch.double)
     def test_factory_size_check(self, device, dtype):

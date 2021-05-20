@@ -41,6 +41,7 @@ std::string ShowNode(NodeRef node) {
 
 
 struct VisitorContext {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
       : predicate(func) {}
 

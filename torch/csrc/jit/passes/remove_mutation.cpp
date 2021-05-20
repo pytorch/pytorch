@@ -28,6 +28,7 @@ bool MutationRemover::newMemoryLocation(Value* v) {
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
   WithInsertPoint guard(n);
   auto inputs = n->inputs();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* new_node;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
@@ -216,6 +217,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
       continue;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* new_node;
     if (isSpecialMappedOp(node)) {
       new_node = createSpecialMappedOp(node);

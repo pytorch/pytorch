@@ -49,6 +49,7 @@ inline Tensor kl_div(
     const Tensor& target,
     KLDivFuncOptions::reduction_t reduction,
     bool log_target = false) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {

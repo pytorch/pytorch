@@ -212,7 +212,7 @@ if (prop) {
 """
 
 GETTER_BODY_STRING = """\
-return PyUnicode_FromString(prop.c_str());
+return PyUnicode_FromStringAndSize(prop.data(), prop.size());
 """
 
 GETTER_BODY_SCALAR = """\
@@ -241,6 +241,7 @@ MISC_GETTER_DEFS = {
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
     BaseCType(stringT): (GETTER_DEFINITION, GETTER_BODY_STRING),
+    OptionalCType(BaseCType(stringT)): (GETTER_DEFINITION_OPT, GETTER_BODY_STRING),
     BaseCType(scalarT): (GETTER_DEFINITION, GETTER_BODY_SCALAR),
     OptionalCType(BaseCType(scalarT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }
@@ -420,7 +421,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 if len(matching_args) == 1:
                     # We can add undefined grad support if the input variable is a Tensor
                     arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(arg.argument.type) == 'Tensor':
+                    if isinstance(arg.argument, Argument) and str(arg.argument.type) in ('Tensor', 'Tensor?'):
                         formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
                         checks_any_grad_defined = True
             return (checks_any_grad_defined,

@@ -80,6 +80,7 @@ QTensorProto wrapShapeInfoIntoQTensorProto(
   // precision and is_signed is not used in onnxifi workflow, but it is required
   // field
   t.set_precision(0);
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
   t.set_is_signed(0);
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);

@@ -206,6 +206,7 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
@@ -232,6 +233,7 @@ struct ReadyQueue {
   // Shutdown tasks are first and then empty NodeTask are next.
   struct CompareNodeTaskTime {
     bool operator()(NodeTask const & t1, NodeTask const & t2) {
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (t2.isShutdownTask_) {
         return true;
       } else if (!t1.fn_ || t1.isShutdownTask_) {
@@ -358,15 +360,20 @@ struct TORCH_API Engine {
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 
   // Ensures device_ready_queues_ are initialized only once
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after initialization
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex post_callbacks_lock_;
 
   // How many nested reentrant calls are allowed until a new thread is used
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int max_recursion_depth_;
 
   struct ThreadPoolShared {
@@ -390,6 +397,7 @@ struct TORCH_API Engine {
  // We need shared ownership of all these objects because the threads are leaked
  // when Engine shuts down, so there may be threads waiting on work_
  // for the graphtasks_queue_ to be nonempty.
+ // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:

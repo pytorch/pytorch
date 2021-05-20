@@ -3,6 +3,7 @@ import inspect
 import numbers
 import typing
 import enum
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
 from torch._jit_internal import boolean_dispatched
 
@@ -143,8 +144,9 @@ def type_matches(signature_type : Any, argument_type : Any):
     if getattr(signature_type, '__origin__', None) in {list, List}:
         sig_el_type = signature_type.__args__[0]
         if not inspect.isclass(sig_el_type):
-            raise RuntimeError(
-                f"Does not support nested parametric types, got {sig_el_type}. Please file a bug.")
+            warnings.warn(
+                f"Does not support nested parametric types, got {signature_type}. Please file a bug.")
+            return False
         if getattr(argument_type, '__origin__', None) in {list, List}:
             return issubclass(argument_type.__args__[0], sig_el_type)
 

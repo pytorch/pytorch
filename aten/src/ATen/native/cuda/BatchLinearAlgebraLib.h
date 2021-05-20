@@ -12,13 +12,23 @@
 #define USE_CUSOLVER
 #endif
 
+// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
+// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
+// if cuda version is >= 11.3
+#if CUSOLVER_VERSION >= 11101
+  constexpr bool use_cusolver_potrf_batched_ = true;
+#else
+  constexpr bool use_cusolver_potrf_batched_ = false;
+#endif
+
 namespace at {
 namespace native {
 
-void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n);
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
 
 void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 
 #ifdef USE_CUSOLVER
 
@@ -30,12 +40,13 @@ Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Ten
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv);
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
-Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper);
+void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info);
 Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper);
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper);
 
-void geqrf_cusolver(const Tensor& input, const Tensor& tau, int64_t m, int64_t n);
-Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau, int64_t n_columns);
+void geqrf_cusolver(const Tensor& input, const Tensor& tau);
+void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);
+Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
 

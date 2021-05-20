@@ -116,6 +116,10 @@ void Logger::set_uneven_input_join() {
   ddp_logging_data_->ints_map["join_uneven_inputs"] = true;
 }
 
+void Logger::set_static_graph() {
+  ddp_logging_data_->ints_map["static_graph"] = reducer_->static_graph_;
+}
+
 // Data that can be got during DistributedDataParallel construction time
 void Logger::set_construction_data_and_log(
     const std::string& module_name,
