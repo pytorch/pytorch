@@ -226,7 +226,7 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
   });
 }
 
-void elu_backward_kernel(TensorIterator& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
+void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
