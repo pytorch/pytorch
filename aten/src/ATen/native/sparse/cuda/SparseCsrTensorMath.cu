@@ -37,95 +37,78 @@ using namespace at::sparse;
 
 Tensor& addmm_out_sparse_csr_dense_cuda(
   const Tensor& self,
-  const SparseCsrTensor& op1,
-  const Tensor& op2,
+  const SparseCsrTensor& sparse,
+  const Tensor& dense,
   const Scalar& beta,
   const Scalar& alpha,
-  Tensor& out)
+  Tensor& r)
 {
 
-  TORCH_INTERNAL_ASSERT(op1.is_sparse_csr());
-  Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
+  TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
+  Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
 
-  TORCH_INTERNAL_ASSERT(expand_self.device().type() == kCUDA);
+  TORCH_INTERNAL_ASSERT(t.device().type() == kCUDA);
   TORCH_CHECK(
-      out.device().type() == kCUDA,
+      r.device().type() == kCUDA,
       "addmm: expected 'out' to be CUDA tensor, but got CUDA tensor");
   TORCH_CHECK(
-      op1.device().type() == kCUDA,
+      sparse.device().type() == kCUDA,
       "addmm: expected 'mat1' to be a CUDA tensor, but got a CUDA tensor");
   TORCH_CHECK(
-      op2.device().type() == kCUDA,
+      dense.device().type() == kCUDA,
       "addmm: expected 'mat2' to be a CUDA tensor, but got a CUDA tensor");
 
   TORCH_CHECK(
-      op1.dim() == 2,
+      sparse.dim() == 2,
       "addmm: 2-D matrices expected, got ",
-      op1.dim(),
+      sparse.dim(),
       "D tensor");
   TORCH_CHECK(
-      op2.dim() == 2,
+      dense.dim() == 2,
       "addmm: 2-D matrices expected, got ",
-      op2.dim(),
+      dense.dim(),
       "D tensor");
 
   TORCH_CHECK(
-      out.is_contiguous(),
+      r.is_contiguous(),
       "out argument must be contiguous, but got: ",
-      out.suggest_memory_format());
+      r.suggest_memory_format());
 
-  // ixk * kxj = ixj
-  int64_t dim_i = op1.size(0);
-  int64_t dim_j = op2.size(1);
-  int64_t dim_k = op1.size(1);
+  // mxk * kxn = mxn
+  int64_t m = sparse.size(0);
+  int64_t k = sparse.size(1);
+  int64_t n = dense.size(1);
 
   TORCH_CHECK(
-      op2.size(0) == dim_k,
-      "addmm: Expected dense matrix (op2) size(0)=",
-      dim_k,
+      dense.size(0) == k,
+      "addmm: Expected dense matrix (dense) size(0)=",
+      k,
       ", got ",
-      op2.size(0));
+      dense.size(0));
   TORCH_CHECK(
-      op1.size(1) == dim_k,
-      "addmm: Expected sparse matrix (op1) size(1)=",
-      dim_k,
+      sparse.size(1) == k,
+      "addmm: Expected sparse matrix (sparse) size(1)=",
+      k,
       ", got ",
-      op1.size(1));
-  resize_output(out, {dim_i, dim_j});
+      sparse.size(1));
+  resize_output(r, {m, n});
 
-  auto values = op1.values();
-
-  AT_DISPATCH_FLOATING_TYPES(
-    values.scalar_type(), "addmm_sparse_csr_dense", [&] {
-      scalar_t cast_beta = beta.to<scalar_t>();
-      if (!is_same_tensor(out, expand_self)) {
-        out.copy_(expand_self);
-      }
-      if (cast_beta == 0) {
-        out.zero_();
-      } else {
-        at::mul_out(out, expand_self, scalar_to_tensor(beta));
-      }
-    });
-
-  if (op1.crow_indices().scalar_type() != kInt) {
+  if (sparse.crow_indices().scalar_type() != kInt) {
     TORCH_WARN(
         "Pytorch is compiled with MKL LP64 and will convert crow_indices to int32.");
   }
-  if (op1.col_indices().scalar_type() != kInt) {
+  if (sparse.col_indices().scalar_type() != kInt) {
     TORCH_WARN(
         "Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
   }
+  auto col_indices = sparse.col_indices().to(at::kInt);
+  auto crow_indices = sparse.crow_indices().to(at::kInt);
 
-  int64_t nnz = op1._nnz();
-  auto col_indices = op1.col_indices().to(at::kInt);
-  auto crow_indices = op1.crow_indices().to(at::kInt);
-  int64_t m = op1.size(0);
-  int64_t k = op1.size(1);
-  int64_t n = op2.size(1);
+  int64_t nnz = sparse._nnz();
+  auto values = sparse.values();
 
-  s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, out, beta, out, alpha, crow_indices, col_indices, values, op2);
-  return out;
+  s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
+  return r;
 }
 
 Tensor& add_out_dense_sparse_csr_cuda(
@@ -157,7 +140,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
       dense.sizes(),
       " while other has size ",
       src.sizes(),
-      " (FYI: op2-sparse addition does not currently support broadcasting)");
+      " (FYI: dense-sparse addition does not currently support broadcasting)");
 
   auto commonDtype = promoteTypes(dense.scalar_type(), src.scalar_type());
   TORCH_CHECK(
