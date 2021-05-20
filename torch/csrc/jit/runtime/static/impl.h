@@ -205,10 +205,13 @@ class TORCH_API StaticRuntime {
     float memory_dealloc_time{0.0};
     float output_dealloc_time{0.0};
     float total_time{0.0};
+    size_t out_nodes_count{0};
+    size_t total_nodes_count{0};
     std::vector<float> time_per_node;
     std::unordered_map<std::string, float> time_per_node_type;
     std::unordered_map<std::string, float> percent_per_node_type;
     std::unordered_map<std::string, int> instances_per_node_type;
+    std::unordered_set<std::string> out_nodes;
   };
 
   IndividualMetrics benchmark_individual_ops(
