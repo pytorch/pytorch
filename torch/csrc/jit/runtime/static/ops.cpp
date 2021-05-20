@@ -6,6 +6,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
+#include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -1591,6 +1592,33 @@ REGISTER_OPERATOR_FUNCTOR(
           packed_weight_tmp->apply_out(
               input, output_scale, output_zero_point, out_t);
         }
+      };
+    });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    aten::full_like,
+    aten_full_like,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 7) {
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto in1_s = p_node->Input(1).toScalar();
+        if (p_node->Output(0).isNone()) {
+          const auto& in0_t = p_node->Input(0).toTensor();
+          const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+          const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+          const auto device = p_node->Input(4).toOptional<c10::Device>();
+          const auto pin_memory = p_node->Input(5).toOptional<bool>();
+          const auto memory_format =
+              p_node->Input(6).toOptional<c10::MemoryFormat>();
+
+          p_node->Output(0) = at::native::empty_like(
+              in0_t, dtype, layout, device, pin_memory, memory_format);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        at::native::fill_out(out_t, in1_s);
       };
     });
 
