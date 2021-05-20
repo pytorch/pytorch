@@ -338,6 +338,15 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
         }
       }
     } else {
+      // Gradient is undefined. When find_unused_parameters=True, ensure it is
+      // not marked as locally used, otherwise we will be allreducing zero's
+      // instead of not touching .grad field of parameter.
+      if (this->dynamic_graph_find_unused() || this->static_graph_first_iteration()) {
+        TORCH_CHECK(
+            local_used_maps_[index.replica_index][index.variable_index]
+                    .item<int>() == 0,
+            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+      }
       bucket_view.zero_();
     }
     // The grad is not modified and doesn't need to be written back.
@@ -524,7 +533,18 @@ void Reducer::autograd_hook(VariableIndex index) {
     // to mark it in local_used_maps_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
-    local_used_maps_[index.replica_index][index.variable_index] = 1;
+    // Only set it as locally used if the grad is defined. Otherwise, hooks
+    // could sometimes be triggered with undefined grads, and if this happens
+    // globally, we don't want to touch the .grad field of the param.
+
+    auto& variable = get_param_from_index(index);
+    runGradCallbackForVariable(variable, [&](auto& grad) {
+      if (grad.defined()) {
+        local_used_maps_[index.replica_index][index.variable_index] = 1;
+      }
+      // The gradient is never modified.
+      return false;
+    });
   }
 
   if (static_graph_first_iteration()) {
@@ -617,6 +637,18 @@ void Reducer::all_reduce_local_used_map() {
       }
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+}
+
+at::Tensor& Reducer::get_param_from_index(VariableIndex index) {
+  const auto replica_index = index.replica_index;
+  const auto variable_index = index.variable_index;
+  const auto& bucket_index = variable_locators_[variable_index];
+  auto& bucket = buckets_[bucket_index.bucket_index];
+  auto& replica = bucket.replicas[replica_index];
+  // Cannot simply access variable via replicas_[replica_index][variable_index]
+  // as the callback does not accept const tensors.
+  auto& variable = replica.variables[bucket_index.intra_bucket_index];
+  return variable;
 }
 
 void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {

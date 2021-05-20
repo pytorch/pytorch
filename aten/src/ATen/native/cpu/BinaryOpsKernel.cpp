@@ -600,7 +600,7 @@ void minimum_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void fmax_kernel(TensorIterator& iter) {
+void fmax_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
       cpu_kernel(iter,
@@ -613,7 +613,7 @@ void fmax_kernel(TensorIterator& iter) {
   }
 }
 
-void fmin_kernel(TensorIterator& iter) {
+void fmin_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
       cpu_kernel(iter,
