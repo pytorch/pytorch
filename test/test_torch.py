@@ -5536,7 +5536,8 @@ else:
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
     def scatter_allow_reduce(self, device, dtype, reduceop):
-        return device == 'cpu' or (device == 'cuda' and reduceop == 'multiply' and not dtype.is_floating_point)
+        device_type = torch.device(device).type
+        return device_type != 'cuda' or (reduceop == 'multiply' and not dtype.is_floating_point)
 
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
