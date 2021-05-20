@@ -309,7 +309,7 @@ void SiLUImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 Tensor MishImpl::forward(const Tensor& input) {
-  return F::Mish(input);
+  return F::mish(input);
 }
 
 void MishImpl::reset() {}

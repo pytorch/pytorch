@@ -5391,7 +5391,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.mish = torch.nn.Mish()
 
             def forward(self, x):
-                return self.Mish(x)
+                return self.mish(x)
 
         x = torch.randn(2, 3, 4)
         self.run_test(MishModel(), (x))

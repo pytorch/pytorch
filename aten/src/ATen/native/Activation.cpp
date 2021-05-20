@@ -1,8 +1,5 @@
 #include <ATen/native/Activation.h>
 
-#include <cmath>
-#include <functional>
-
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
@@ -339,6 +336,7 @@ Tensor math_mish_backward(
   auto input_sigmoid = at::sigmoid(input);
   return grad_output * (input_tanh_softplus + (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus));
 }
+
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,
