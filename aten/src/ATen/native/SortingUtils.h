@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Parallel.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
