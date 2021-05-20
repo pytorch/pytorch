@@ -429,6 +429,20 @@ class UnaryUfuncInfo(OpInfo):
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
+def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = ((1, 2),
+             (),
+             (3),
+             1.5)
+
+    def generator():
+        for shape in cases:
+            yield(SampleInput(make_arg(shape)))
+
+    return list(generator())
+
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
@@ -5059,6 +5073,9 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    OpInfo('t',
+           dtypes=all_types(),
+           sample_inputs_func=sample_inputs_t),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -6424,7 +6441,6 @@ def method_tests():
         ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
         ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
-        ('t', (1, 2), NO_ARGS, '', (False,)),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
