@@ -403,6 +403,15 @@ class PackageScriptModuleTest(PackageTestCase):
 
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_0.tensor.storage()._cdata,
+        )
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_1.tensor.storage()._cdata,
+        )
+
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as e:
             e.intern("**")
@@ -412,13 +421,13 @@ class PackageScriptModuleTest(PackageTestCase):
         importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
-            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
 
         loaded_mod_1.tensor.add_(torch.ones(3, 3))

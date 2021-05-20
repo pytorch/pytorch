@@ -10338,7 +10338,7 @@ dedent """
                 m_orig = M(type)
                 m_import = self.getExportImportCopy(m_orig)
                 # check to make sure the storage wasn't resized
-                self.assertTrue(m_orig.param.storage().size() == 25)
+                self.assertTrue(m_orig.param.storage().nbytes() == 25 * m_orig.param.element_size())
                 self.assertEqual(m_orig.foo(), m_import.foo())
                 self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -10357,7 +10357,7 @@ dedent """
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
         # check to make sure the storage wasn't resized
-        self.assertTrue(m_orig.param.storage().size() == 25)
+        self.assertTrue(m_orig.param.storage().nbytes() == 25 * m_orig.param.element_size())
         self.assertTrue(m_import.foo().device == torch.device('cuda:0'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)

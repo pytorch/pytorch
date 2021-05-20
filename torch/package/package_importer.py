@@ -175,9 +175,8 @@ class PackageImporter(Importer):
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
 
-        def load_tensor(data_type, size, key, location, restore_location):
-            name = f"{int(key)}.storage"
-            dtype = data_type(0).dtype
+        def load_tensor(dtype, size, key, location, restore_location):
+            name = f"{key}.storage"
 
             if storage_context.has_storage(name):
                 storage = storage_context.get_storage(name, dtype).storage()
@@ -196,17 +195,21 @@ class PackageImporter(Importer):
             data = saved_id[1:]
 
             if typename == "storage":
-                data_type, key, location, size = data
+                storage_type, key, location, size = data
+                dtype = torch.storage._get_dtype_from_pickle_storage_type(storage_type.__name__)
+
                 if key not in loaded_storages:
                     load_tensor(
-                        data_type,
+                        dtype,
                         size,
                         key,
                         _maybe_decode_ascii(location),
                         restore_location,
                     )
                 storage = loaded_storages[key]
-                return storage
+                # TODO: Once we decide to break serialization FC, we can
+                # stop wrapping with TypedStorage
+                return torch.storage.TypedStorage(storage, dtype)
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously

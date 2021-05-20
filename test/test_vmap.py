@@ -1770,20 +1770,20 @@ class TestVmapOperators(Namespace.TestVmapBase):
         def _test_single_vmap(size, stride, B0):
             x = torch.randn(B0)
             result = vmap(lambda x: x.new_empty_strided(size, stride))(x)
-            S = torch.empty_strided(size, stride).storage().size()
+            S = torch.empty_strided(size, stride).storage().nbytes() // x.element_size()
             self.assertEqual(result.shape, [B0] + size)
             self.assertEqual(result.stride(), [S] + stride)
 
         def _test_double_vmap(size, stride, B0, B1):
             x = torch.randn(B0, B1)
             result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)))(x)
-            S = torch.empty_strided(size, stride).storage().size()
+            S = torch.empty_strided(size, stride).storage().nbytes() // x.element_size()
             self.assertEqual(result.shape, [B0, B1] + size)
             self.assertEqual(result.stride(), [B1 * S, S] + stride)
 
             x = torch.randn(B1, B0)
             result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)), in_dims=1)(x)
-            S = x.new_empty_strided(size, stride).storage().size()
+            S = x.new_empty_strided(size, stride).storage().nbytes() // x.element_size()
             self.assertEqual(result.shape, [B0, B1] + size)
             self.assertEqual(result.stride(), [B1 * S, S] + stride)
 

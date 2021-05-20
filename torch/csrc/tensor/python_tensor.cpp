@@ -215,10 +215,10 @@ static THPObjectPtr get_storage_obj(PyTensorType* type) {
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj) throw python_error();
 
-  auto storage_name = std::string(toString(type->get_scalar_type())) + "Storage";
-  THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
+  auto storage_name = "ByteStorage";
+  THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name));
   if (!storage.get()) {
-    throw TypeError("couldn't find storage object %s", storage_name.c_str());
+    throw TypeError("couldn't find storage object %s", storage_name);
   }
   return storage;
 }

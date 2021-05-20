@@ -67,7 +67,7 @@ PyTypeObject* getPyTypeObject(
   if (storage.device_type() == at::DeviceType::Meta) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
   }
-  at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
+  at::ScalarType scalarType = at::ScalarType::Byte;
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
       scalarType);

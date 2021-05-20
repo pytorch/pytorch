@@ -548,14 +548,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
 
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_storage_base_hints = []
-    dt = ('Double', 'Float', 'Long', 'Int',
-          'Short', 'Char', 'Byte', 'Bool',
-          'Half', 'BFloat16', 'ComplexDouble',
-          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
-    for c in dt:
-        legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
-    for c in dt:
-        legacy_storage_base_hints.append('class Cuda{}StorageBase(object): ...'.format(c))
+
+    legacy_storage_base_hints.append('class ByteStorageBase(object): ...')
+    legacy_storage_base_hints.append('class CudaByteStorageBase(object): ...')
 
     legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',

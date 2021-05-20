@@ -91,12 +91,16 @@ Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, c
   return other.alias();
 }
 
-std::vector<int64_t> compute_sizes(PyObject* seq) {
+std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
+  bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0) throw python_error();
+    if (is_storage) {
+      length /= elementSize(scalar_type);
+    }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
       throw ValueError("too many dimensions '%s'", Py_TYPE(seq)->tp_name);
@@ -207,6 +211,7 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
+  // NOTE: in gdb, torch::utils::(anonymous namespace)::internal_new_from_data
 
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
@@ -250,7 +255,7 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  auto sizes = compute_sizes(data);
+  auto sizes = compute_sizes(data, scalar_type);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
@@ -259,10 +264,17 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-    recursive_store(
-        (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-        inferred_scalar_type, tensor.dtype().itemsize(), data);
+    if (isStorage(data)) {
+      Storage storage = createStorage(data);
+      tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
+      tensor.set_(storage);
+    } else {
+      tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
+
+      recursive_store(
+          (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+          inferred_scalar_type, tensor.dtype().itemsize(), data);
+    }
   }
   auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
@@ -483,17 +495,6 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
-    if (!dtype_attr) throw python_error();
-    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-    TORCH_CHECK(
-        storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
-        " for argument 1 'storage'");
     return new_with_storage(options, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
@@ -546,17 +547,6 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
-    if (!dtype_attr) throw python_error();
-    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-    TORCH_CHECK(
-        storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
-        " for argument 1 'storage'");
     return new_with_storage(options, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
