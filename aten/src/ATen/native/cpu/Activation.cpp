@@ -393,7 +393,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   });
 }
 
-void shrink_backward_kernel(TensorIterator& iter, const Scalar& lambd) {
+void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(

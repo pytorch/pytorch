@@ -123,6 +123,13 @@ TORCH_META_FUNC(hardsigmoid_backward) (const Tensor& grad_output, const Tensor& 
   build_binary_op(maybe_get_output(), grad_output, self);
 }
 
+TORCH_META_FUNC(hardshrink_backward) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd
+) {
+  set_output(0, self.sizes(), {}, self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT), {});
+  build_binary_op(maybe_get_output(), grad, self);
+}
+
 static inline void softshrink_check(const Scalar& lambd) {
   double lamb = lambd.to<double>();
   TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
@@ -133,6 +140,12 @@ TORCH_META_FUNC(softshrink) (
 ) {
   softshrink_check(lambd);
   build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(softshrink_backward) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd
+) {
+  build_binary_op(maybe_get_output(), grad, self);
 }
 
 } // namespace meta
@@ -262,10 +275,22 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out) (
   hardsigmoid_backward_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(hardshrink_backward_out) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd, const Tensor& grad_input
+) {
+  shrink_backward_stub(device_type(), *this, lambd);
+}
+
 TORCH_IMPL_FUNC(softshrink_out) (
   const Tensor & self, const Scalar& lambd, const Tensor& result
 ) {
   softshrink_stub(device_type(), *this, lambd);
+}
+
+TORCH_IMPL_FUNC(softshrink_backward_out) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd, const Tensor& grad_input
+) {
+  shrink_backward_stub(device_type(), *this, lambd);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -745,27 +770,6 @@ Tensor hardshrink(const Tensor & self, const Scalar& lambd) {
   auto iter = TensorIterator::unary_op(out_tensor, self);
   hardshrink_stub(iter.device_type(), iter, lambd);
   return out_tensor;
-}
-
-Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
-  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto iter = TensorIterator::binary_op(out_tensor, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return out_tensor;
-}
-
-
-Tensor& softshrink_backward_out(const Tensor & grad, const Tensor & self, const Scalar& lambd, Tensor& grad_input) {
-  auto iter = TensorIterator::binary_op(grad_input, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return grad_input;
-}
-
-Tensor softshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return iter.output();
 }
 
 Tensor gelu_cpu(const Tensor& self) {
