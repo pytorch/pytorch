@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <exception>
@@ -55,7 +55,7 @@ template<typename T>
 using Complex = typename c10::complex<T>;
 
 template <typename T>
-using VecType = typename at::vec256::Vec256<T>;
+using VecType = typename at::vec::Vectorized<T>;
 
 using vfloat = VecType<float>;
 using vdouble = VecType<double>;
@@ -796,25 +796,25 @@ correctEpsilon(const Complex<T>& eps)
 }
 
 template <typename T>
-class AssertVec256
+class AssertVectorized
 {
 public:
-    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0)
+    AssertVectorized(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), argSize(1)
     {
     }
-    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1)
+    AssertVectorized(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), argSize(2)
     {
     }
-    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1, const T& input2)
+    AssertVectorized(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1, const T& input2)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), arg2(input2), argSize(3)
     {
     }
-    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual) : additionalInfo(info), testSeed(seed), exp(expected), act(actual)
+    AssertVectorized(const std::string& info, TestSeed seed, const T& expected, const T& actual) : additionalInfo(info), testSeed(seed), exp(expected), act(actual)
     {
     }
-    AssertVec256(const std::string& info, const T& expected, const T& actual) : additionalInfo(info), exp(expected), act(actual), hasSeed(false)
+    AssertVectorized(const std::string& info, const T& expected, const T& actual) : additionalInfo(info), exp(expected), act(actual), hasSeed(false)
     {
     }
 
@@ -954,7 +954,7 @@ void test_unary(
             auto input = vec_type::loadu(vals);
             auto actual = actualFunction(input);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
+            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
             if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
 
         }// trial
@@ -967,7 +967,7 @@ void test_unary(
             auto input = vec_type{ args[0] };
             auto actual = actualFunction(input);
             auto vec_expected = vec_type{ custom.expectedResult };
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
+            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
             if (vecAssert.check()) return;
         }
     }
@@ -1015,7 +1015,7 @@ void test_binary(
             auto input1 = vec_type::loadu(vals1);
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
+            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
             if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
         }// trial
         changeSeedBy += 1;
@@ -1027,7 +1027,7 @@ void test_binary(
             auto input1 = args.size() > 1 ? vec_type{ args[1] } : vec_type{ args[0] };
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type(custom.expectedResult);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
+            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
             if (vecAssert.check()) return;
         }
     }
@@ -1082,7 +1082,7 @@ void test_ternary(
             auto input2 = vec_type::loadu(vals2);
             auto actual = actualFunction(input0, input1, input2);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
+            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
             if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
         }// trial
         changeSeedBy += 1;
