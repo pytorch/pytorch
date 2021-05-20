@@ -217,3 +217,23 @@ class TestPeephole(JitTestCase):
             self.run_pass("inline", conv_dim.graph)
             self.run_pass("peephole", conv_dim.graph)
             FileCheck().check("conv").check("dim").run(conv_dim.graph)
+
+    def test_normalized_is_op(self):
+        def convertible_is_op(x: bool, y: bool):
+            return x is True, False is x, x is y
+
+        self.checkScript(convertible_is_op, (True, False))
+
+        op_graph = torch.jit.script(convertible_is_op).graph
+        FileCheck().check_count("aten::eq", 3, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::__is__", 0, exactly=True).run(op_graph)
+
+    def test_normalized_isnot_op(self):
+        def convertible_isnot_op(x: bool, y: bool):
+            return x is not True, False is not x, x is not y
+
+        self.checkScript(convertible_isnot_op, (True, False))
+
+        op_graph = torch.jit.script(convertible_isnot_op).graph
+        FileCheck().check_count("aten::ne", 3, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::__isnot__", 0, exactly=True).run(op_graph)

@@ -11,22 +11,24 @@ from torch.distributed._sharding_spec._internals import is_valid_device
 from torch.distributed.utils import _parse_remote_device
 
 
-class ShardWithMetadata(object):
+class Shard(object):
     """
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
     """
-    def __init__(self, shard: torch.Tensor, shard_metadata: ShardMetadata):
-        self._shard = shard
-        self._shard_metadata = shard_metadata
+    __slots__ = ['tensor', 'metadata']
+
+    def __init__(self, tensor: torch.Tensor, metadata: ShardMetadata):
+        self._tensor = tensor
+        self._metadata = metadata
 
     @property
-    def shard(self) -> torch.Tensor:
-        return self._shard
+    def tensor(self) -> torch.Tensor:
+        return self._tensor
 
     @property
-    def shard_metadata(self) -> ShardMetadata:
-        return self._shard_metadata
+    def metadata(self) -> ShardMetadata:
+        return self._metadata
 
 
 class ShardedTensor(object):
@@ -54,10 +56,14 @@ class ShardedTensor(object):
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
             returned tensor. Default: ``False``.
         pin_memory (bool, optional): If set, returned tensor would be allocated in
             the pinned memory. Works only for CPU tensors. Default: ``False``.
+        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+            returned Tensor. Default: ``torch.contiguous_format``.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. If specified the ShardedTensor is only
             built on ranks that are part of this process group and the provided ``sharding_spec``
@@ -69,10 +75,18 @@ class ShardedTensor(object):
         sharding_spec: ShardingSpec,
         *size,
         dtype=None,
+        layout=torch.strided,
         requires_grad=False,
         pin_memory=False,
+        memory_format=torch.contiguous_format,
         process_group=None,
     ):
+        if layout != torch.strided:
+            raise ValueError('Only torch.strided layout is currently supported')
+
+        if memory_format != torch.contiguous_format:
+            raise ValueError('Only torch.contiguous_format memory_format is currently supported')
+
         self._sharding_spec = sharding_spec
         self._dims = list(size)
         self._process_group = (
@@ -84,15 +98,17 @@ class ShardedTensor(object):
         if torch.distributed.distributed_c10d._rank_not_in_group(self._process_group):
             raise ValueError(f'Global rank: {dist.get_rank()} not part of process group')
 
-        self._local_shards = []
-        self._sharding_metadata = []
+        self._local_shards: List[Shard] = []
+        self._sharding_metadata: List[ShardMetadata] = []
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
                 self._sharding_spec,
                 self._dims,
                 dtype,
+                layout,
                 requires_grad,
                 pin_memory,
+                memory_format,
                 process_group,
             )
 
@@ -101,8 +117,10 @@ class ShardedTensor(object):
         sharding_spec: ChunkShardingSpec,
         dims,
         dtype,
+        layout,
         requires_grad,
         pin_memory,
+        memory_format,
         process_group,
     ):
         current_rank = dist.get_rank(process_group)
@@ -117,7 +135,7 @@ class ShardedTensor(object):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
         dim_size = dims[sharding_dim]
-        devices = sharding_spec.placement
+        devices = sharding_spec.placements
         chunks = len(devices)
         # split_size computed similar to 'torch.chunk'
         split_size = (dim_size + chunks - 1) // chunks
@@ -126,7 +144,7 @@ class ShardedTensor(object):
             if not is_valid_device(device):
                 raise ValueError(f"{device} is not a valid device")
 
-            rank, local_device = _parse_remote_device(device)
+            rank, local_device = _parse_remote_device(device)  # type: ignore[arg-type]
 
             # Validate rank.
             if not isinstance(rank, int) or (rank < 0 or rank >= dist.get_world_size(process_group)):
@@ -154,12 +172,14 @@ class ShardedTensor(object):
                     local_shard = torch.empty(
                         *rank_dims,
                         dtype=dtype,
+                        layout=layout,
                         device=local_device,
                         requires_grad=requires_grad,
+                        memory_format=memory_format,
                         pin_memory=pin_memory,
                     )
 
-                    self._local_shards.append(ShardWithMetadata(local_shard, shard_metadata))
+                    self._local_shards.append(Shard(local_shard, shard_metadata))
 
     def sharding_spec(self) -> ShardingSpec:
         """
@@ -177,9 +197,9 @@ class ShardedTensor(object):
         """
         return self._sharding_metadata
 
-    def local_shards(self) -> torch.Tensor:
+    def local_shards(self) -> List[Shard]:
         """
-        Returns a list of :class:`ShardWithMetadata' corresponding to the
+        Returns a list of :class:`Shard' corresponding to the
         local shards for this rank. Returns an empty list if the current rank
         does not host any shards for this Tensor.
         """

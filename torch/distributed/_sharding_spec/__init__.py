@@ -1,7 +1,7 @@
 from .api import (
     ChunkShardingSpec,
     DevicePlacementSpec,
-    GenericShardingSpec,
+    EnumerableShardingSpec,
     PlacementSpec,
     ShardMetadata,
     ShardingSpec,

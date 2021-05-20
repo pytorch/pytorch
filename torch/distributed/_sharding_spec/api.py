@@ -8,7 +8,9 @@ Device = Union[torch.device, int, str]
 
 class PlacementSpec(ABC):
     """
-    Base class representing the placement of an entity.
+    Base class representing the placement of an entity. Subclasses of this
+    class can be used to specify customized placements which might not be
+    covered by existing APIs.
     """
     pass
 
@@ -52,6 +54,11 @@ class ChunkShardingSpec(ShardingSpec):
     across multiple devices. In particular, it represents sharding a Tensor
     along a single dimension into equal chunks (similar to :meth:`torch.chunk`).
 
+    The semantics of how a tensor is partitioned is inline with
+    :meth:`torch.chunk`, where ``dim`` in torch.chunk corresponds to the
+    specified ``dim`` and ``chunks`` in torch.chunk is the number of elements
+    in the placement specified.
+
     Args:
         dim (int or str):
             The dimension to shard on, could be an integer representing the
@@ -72,20 +79,20 @@ class ChunkShardingSpec(ShardingSpec):
     """
 
     ShardingDim = Union[int, str]
-    ShardPlacement = Union[List[Device], List[PlacementSpec]]
+    ShardPlacements = List[Union[Device, PlacementSpec]]
 
-    def __init__(self, dim: ShardingDim, placement: ShardPlacement):
+    def __init__(self, dim: ShardingDim, placements: ShardPlacements):
         super(ChunkShardingSpec, self).__init__()
         self._verify_dim(dim)
-        self._verify_devices(placement)
+        self._verify_devices(placements)
         self._dim = dim
-        self._placement = placement
+        self._placements = placements
 
     @staticmethod
-    def _verify_devices(placement):
-        if placement is None or len(placement) == 0:
+    def _verify_devices(placements):
+        if placements is None or len(placements) == 0:
             raise ValueError(f'None/Empty placement provided: {placement}')
-        for dev in placement:
+        for dev in placements:
             if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')
 
@@ -102,11 +109,11 @@ class ChunkShardingSpec(ShardingSpec):
         return self._dim
 
     @property
-    def placement(self) -> ShardPlacement:
+    def placements(self) -> ShardPlacements:
         """
-        Retrieves the shard placement.
+        Retrieves the shard placements.
         """
-        return self._placement
+        return self._placements
 
 class ShardMetadata(object):
     """
@@ -120,7 +127,7 @@ class ShardMetadata(object):
         shard_lengths(List[int]): Lengths indicating the length of each
             dimension for this shard. Should have the same rank as the
             original tensor.
-        placement(List[Device] or List[PlacementSpec]):
+        placement(List[Device or PlacementSpec]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This
             parameter can be a list of devices
@@ -135,6 +142,8 @@ class ShardMetadata(object):
     """
 
     ShardPlacement = Union[Device, PlacementSpec]
+
+    __slots__ = ['_shard_offsets', '_shard_lengths', '_placement']
 
     def __init__(
             self,
@@ -180,18 +189,18 @@ class ShardMetadata(object):
         return self._placement
 
 
-class GenericShardingSpec(ShardingSpec):
+class EnumerableShardingSpec(ShardingSpec):
 
     def __init__(self, shards: List[ShardMetadata]):
         """
         This is a type of PlacementSpec that allows users to specify a generic
-        sharding scheme by specifying exactly how each shard is laid out.
+        sharding scheme by enumerating exactly how each shard is laid out.
 
         Args:
             shards(List[ShardMetadata]): List of :class:`ShardMetadata` objects representing
                 each shard.
         """
-        super(GenericShardingSpec, self).__init__()
+        super(EnumerableShardingSpec, self).__init__()
         if len(shards) == 0:
             raise ValueError(f'Empty shard list provided: {shards}')
 
@@ -211,9 +220,10 @@ class GenericShardingSpec(ShardingSpec):
         """
         Ensures none of the shards overlap with each other.
         """
+        # TODO: evaluate optimizing this if needed.
         for i in range(len(shards)):
             for j in range(i + 1, len(shards)):
-                if GenericShardingSpec._check_shard_pair_overlap(shards[i], shards[j]):
+                if EnumerableShardingSpec._check_shard_pair_overlap(shards[i], shards[j]):
                     raise ValueError(f'Shards {shards[i]} and {shards[j]} overlap')
 
     @staticmethod
@@ -275,6 +285,8 @@ class GenericShardingSpec(ShardingSpec):
             tensor_volume *= size
 
         if total_shard_volume != tensor_volume:
+            # TODO: Can we improve this error message to point out the gaps?
             raise ValueError(
                 f'Total volume of shards: {total_shard_volume}'
-                f'does not match tensor volume: {tensor_volume}')
+                f'does not match tensor volume: {tensor_volume}, in other words'
+                f' all the individual shards do not cover the entire tensor')

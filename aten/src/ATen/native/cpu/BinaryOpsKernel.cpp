@@ -925,7 +925,7 @@ void nextafter_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void heaviside_kernel(TensorIterator& iter) {
+void heaviside_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "heaviside_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         return a == 0 ? b : static_cast<scalar_t>(a > 0);

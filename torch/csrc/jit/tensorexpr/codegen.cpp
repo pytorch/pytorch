@@ -57,6 +57,25 @@ const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
   return IRMutator::mutate(v);
 }
 
+void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
+  if (!bufferArg.isVar()) {
+    return callArg.data();
+  }
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+      throw unsupported_dtype();
+  }
+  return nullptr;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
