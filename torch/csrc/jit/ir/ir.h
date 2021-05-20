@@ -149,6 +149,8 @@ using topo_position_t = int64_t;
 using ValueSet = std::unordered_set<const Value*>;
 
 struct OperatorSet;
+template <typename T>
+struct OperatorMap;
 
 // This is a wrapper to allow invalidating the Python object
 // safely when the C++ object for a Node/Value/Block is deleted
@@ -739,6 +741,19 @@ struct TORCH_API Node {
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
   bool isMemberOf(const OperatorSet& os) const;
+  template <typename T>
+  bool isMemberOf(const OperatorMap<T>& om) const {
+    auto it = om.map.find(kind());
+    if (it == om.map.end()) {
+      return false;
+    }
+    for (auto& op : it->second) {
+      if (matches(op.first->schema())) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   const FunctionSchema& schema() const;
   const FunctionSchema* maybeSchema() const;
@@ -1534,6 +1549,80 @@ struct OperatorSet {
  private:
   friend struct Node;
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
+};
+
+template <typename T>
+struct OperatorMap {
+  // Type aliasing
+  using OpMapType = typename std::pair<std::shared_ptr<Operator>, T>;
+  using ValueType = std::vector<OpMapType>;
+  using MapType = std::unordered_map<Symbol, ValueType>;
+
+  OperatorMap() = default;
+  explicit OperatorMap(
+      std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
+    insert(init);
+  }
+
+  void insert(const std::shared_ptr<Operator>& op, T val) {
+    // Remove if exists before insert
+    erase(op);
+    map[Symbol::fromQualString(op->schema().name())].emplace_back(
+        std::make_pair(op, val));
+  }
+
+  void insert(
+      std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> v) {
+    for (auto& el : v) {
+      insert(el.first, el.second);
+    }
+  }
+
+  void erase(const std::shared_ptr<Operator>& op) {
+    auto it = map.find(Symbol::fromQualString(op->schema().name()));
+    if (it == map.end()) {
+      return;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first->schema() == op->schema()) {
+        it->second.erase(vit);
+        break;
+      }
+    }
+    if (it->second.size() == 0) {
+      map.erase(Symbol::fromQualString(op->schema().name()));
+    }
+  }
+
+  bool contains(const Operator& op) const {
+    const auto it = map.find(Symbol::fromQualString(op.schema().name()));
+    if (it == map.end()) {
+      return false;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first->schema() == op.schema()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  c10::optional<T> find(const Operator& op) {
+    const auto it = map.find(Symbol::fromQualString(op.schema().name()));
+    if (it == map.end()) {
+      return c10::nullopt;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first->schema() == op.schema()) {
+        return vit->second;
+      }
+    }
+    return c10::nullopt;
+  }
+
+ private:
+  friend struct Node;
+  MapType map;
 };
 
 } // namespace jit
