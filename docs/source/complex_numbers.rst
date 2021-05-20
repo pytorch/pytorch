@@ -94,7 +94,7 @@ Angle and abs
 -------------
 
 The angle and absolute values of a complex tensor can be computed using :func:`torch.angle` and
-`torch.abs`.
+:func:`torch.abs`.
 
 ::
 

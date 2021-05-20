@@ -91,6 +91,7 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+
   build:
     runs-on: linux.2xlarge
     needs: calculate-docker-image
@@ -155,6 +156,7 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
+
   test:
     runs-on: linux.2xlarge
     needs:
@@ -249,6 +251,12 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+
+  # this is a separate step from test because the log files from test are too
+  # long: basically, GitHub tries to render all of the log files when you click
+  # through an action causing extreme slowdown on actions that contain too many
+  # logs (like test); we can always move it back to the other one, but it
+  # doesn't create the best experience
   render_test_results:
     if: always()
     needs:
@@ -295,6 +303,7 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
     needs:
