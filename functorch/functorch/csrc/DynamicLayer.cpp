@@ -185,6 +185,23 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
   TORCH_INTERNAL_ASSERT(begin <= end);
   for (int64_t idx = begin; idx < end; idx++) {
     auto ivalue = args[idx];
+    // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
+    if (ivalue.isList()) {
+      bool modified = false;
+      // TODO: might be more efficient if we scan first then not copy? Depends.
+      auto list = ivalue.toList().copy();
+      for (int64_t list_idx = 0; list_idx < list.size(); list_idx++) {
+        const auto& elt = list.get(list_idx);
+        if (elt.isTensor()) {
+          list.set(list_idx, func(elt.toTensor()));
+          modified = true;
+        }
+      }
+      if (modified) {
+        args[idx] = list;
+      }
+      continue;
+    }
     if (ivalue.isTensorList()) {
       auto list = ivalue.toTensorList();
       for (int64_t list_idx = 0; list_idx < list.size(); list_idx++) {

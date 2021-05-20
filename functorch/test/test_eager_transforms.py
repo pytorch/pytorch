@@ -422,6 +422,25 @@ class TestGradTransform(TestCase):
         inputs = torch.randn(B, 7, 2)
         vmap(fn)(weights, buffers, (inputs,))
 
+    def test_advanced_indexing(self, device):
+        def f(value):
+            log_prob = torch.ones((), device=device)
+            val = (torch.zeros(()) > 0)
+            log_prob[val] = 0
+            return value
+
+        result = grad(f)(torch.randn((), device=device))
+        self.assertEqual(result, torch.ones_like(result))
+
+        def f2(value):
+            value = value.clone()
+            value[value > 0] = 0
+            return value.sum()
+
+        x = torch.randn(100, device=device)
+        result = grad(f2)(x)
+        self.assertEqual(result, (x <= 0).type_as(x))
+
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
