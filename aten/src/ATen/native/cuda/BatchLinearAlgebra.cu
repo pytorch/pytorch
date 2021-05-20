@@ -1425,10 +1425,6 @@ AT_ERROR("inverse: MAGMA library not found in "
   magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
 
-  // magmaLu and magmaGetri requires infos tensor to live on CPU
-  infos_lu = infos_lu.to(at::kCPU);
-  infos_getri = infos_getri.to(at::kCPU);
-
   Tensor ipiv = at::empty({lda}, at::kInt);
   Tensor dwork = at::empty({lwork}, self.options());
   magmaLu<scalar_t>(n, n, self_data, lda, ipiv.data_ptr<magma_int_t>(), infos_lu.data_ptr<magma_int_t>());
