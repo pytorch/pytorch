@@ -182,9 +182,8 @@ void initJitBackendBindings(PyObject* module) {
       });
 
   m.def(
-      "_jit_backend_generate_debug_handles",
-      [](std::shared_ptr<Graph>& graph) {
-         return generate_debug_handles(graph);
+      "_jit_backend_generate_debug_handles", [](std::shared_ptr<Graph>& graph) {
+        return generate_debug_handles(graph);
       });
 }
 } // namespace jit
