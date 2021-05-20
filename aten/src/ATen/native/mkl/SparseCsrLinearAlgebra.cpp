@@ -63,7 +63,6 @@ class SparseCsrMKLInterface {
       MKL_INT nrows,
       MKL_INT ncols) {
     desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-
     int retval = mkl_sparse_d_create_csr(
         &A,
         SPARSE_INDEX_BASE_ZERO,
@@ -101,7 +100,6 @@ class SparseCsrMKLInterface {
         retval);
   }
 
-  // res(M, N) = (sparse(M * K) @ dense(K x N))
   inline void sparse_mm(
       float* res,
       float* dense,
