@@ -53,7 +53,7 @@ struct TORCH_API InferenceMode {
       : prev_mode(InferenceMode::is_enabled()),
         prev_keyset(c10::impl::tls_local_dispatch_key_set()),
         grad_mode(at::AutoGradMode(!enabled)) {
-    set_enabled(enabled);
+    _set_enabled(enabled);
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
@@ -67,13 +67,13 @@ struct TORCH_API InferenceMode {
   }
 
   ~InferenceMode() {
-    this->set_enabled(prev_mode);
+    _set_enabled(prev_mode);
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
   static bool is_enabled();
-  // set_enabled() is not user facing and should be only used in
+  // _set_enabled() is not user facing and should be only used in
   // ThreadLocalState.cpp.
-  static void set_enabled(bool enabled);
+  static void _set_enabled(bool enabled);
 
  private:
   bool prev_mode;

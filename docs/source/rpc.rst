@@ -12,6 +12,13 @@ machines.
      APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
+.. warning ::
+    CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
+    Not all features of the RPC package are yet compatible with CUDA support and
+    thus their use is discouraged. These unsupported features include: RRefs,
+    JIT compatibility, dist autograd and dist optimizier, and profiling. These
+    shortcomings will be addressed in future releases.
+
 .. note ::
     Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
     for a brief introduction to all features related to distributed training.
@@ -235,6 +242,9 @@ Example::
 RRef
 ----
 
+.. warning ::
+    RRefs are not currently supported when using CUDA tensors
+
 An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
 (e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
 value alive on the owner, but there is no implication that the value will be
@@ -259,6 +269,9 @@ details.
 RemoteModule
 ------------
 
+.. warning ::
+    RemoteModule is not currently supported when using CUDA tensors
+
 ``RemoteModule`` is an easy way to create an nn.Module remotely on a different
 process. The actual module resides on a remote host, but the local host has a
 handle to this module and invoke this module similar to a regular nn.Module.
@@ -271,6 +284,9 @@ asynchronously if needed via additional APIs supported by RemoteModule.
 
 Distributed Autograd Framework
 ------------------------------
+
+.. warning ::
+    Distributed autograd is not currently supported when using CUDA tensors
 
 This module provides an RPC-based distributed autograd framework that can be
 used for applications such as model parallel training. In short, applications
@@ -290,6 +306,9 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 
 Distributed Optimizer
 ---------------------
+
+.. warning ::
+    Distributed optimizer is not currently supported when using CUDA tensors
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
@@ -312,7 +331,7 @@ to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
--  `Combining Distributed DataParallel with Distributed RPC Framework (covers **RemoteModule** as well) <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__ (covers **RemoteModule** as well)
 -  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
 -  `Implementing batch RPC processing <https://pytorch.org/tutorials/intermediate/rpc_async_execution.html>`__
 -  `Distributed Pipeline Parallel <https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html>`__

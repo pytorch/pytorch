@@ -26,6 +26,28 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
+// Locates a specific variable by replica index and variable index.
+struct VariableIndex {
+  size_t replica_index;
+  size_t variable_index;
+
+  VariableIndex() = default;
+
+  VariableIndex(size_t replica_index_, size_t variable_index_) {
+    replica_index = replica_index_;
+    variable_index = variable_index_;
+  }
+
+  static size_t hash(const VariableIndex& key) {
+    return c10::get_hash(key.replica_index, key.variable_index);
+  }
+};
+
+inline bool operator==(const VariableIndex& lhs, const VariableIndex& rhs) {
+  return lhs.replica_index == rhs.replica_index
+    && lhs.variable_index == rhs.variable_index;
+}
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -99,7 +121,7 @@ class Reducer {
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return !find_unused_parameters_ && !has_rebuilt_bucket_;
+    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -128,21 +150,12 @@ class Reducer {
   // Specify the training graph is static.
   void set_static_graph();
 
+  // Delay all reduce to be after all gradients' calculation is complete.
+  void delay_all_reduce();
+
  protected:
   // Forward declaration.
   struct Bucket;
-  // Locates a specific variable by replica index and variable index.
-  struct VariableIndex {
-    size_t replica_index;
-    size_t variable_index;
-
-    VariableIndex() = default;
-
-    VariableIndex(size_t replica_index_, size_t variable_index_) {
-      replica_index = replica_index_;
-      variable_index = variable_index_;
-    }
-  };
 
   void push_rebuilt_params(const VariableIndex& index);
 
@@ -424,6 +437,15 @@ class Reducer {
 
   bool static_graph_;
 
+  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  // should be triggered before marking this variable's grad as ready for communication.
+  // Map will not change after 1st iteration.
+  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMap_;
+  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  // are left to be triggered before marking this variable's grad as ready for communication.
+  // Map will change after 1st iteration to track a grad is ready for communication or not.
+  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMapPerIteration_;
+
  private:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
@@ -435,6 +457,13 @@ class Reducer {
   void all_reduce_bucket(Bucket& bucket);
   // kick off all reduce to local used map, it can help find global unused parameters
   void all_reduce_local_used_map();
+  // initialize locally used parameter maps
+  void initialize_local_used_map();
+  // get current cuda stream
+  const c10::Stream get_current_stream();
+  bool dynamic_graph_find_unused();
+  bool static_graph_first_iteration();
+  bool static_graph_after_first_iteration();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
@@ -457,6 +486,7 @@ class Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+
   friend class Logger;
 };
 

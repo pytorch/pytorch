@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#include <string>
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 // TODO[T79947194]: Convert this class to C++
@@ -11,8 +12,8 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 
 + (instancetype)sharedInstance;
 - (BOOL)available;
-- (id<MTLComputePipelineState>)pipelineState:(NSString*)kernel;
-- (id<MTLComputePipelineState>)specializedPipelineState:(NSString*)kernel
+- (id<MTLComputePipelineState>)pipelineState:(const std::string&)kernel;
+- (id<MTLComputePipelineState>)specializedPipelineState:(const std::string&)kernel
                                               Constants:(NSArray<NSNumber*>*)
                                                             constants;
 
