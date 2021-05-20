@@ -6450,7 +6450,10 @@ class DistributedTest:
 
             # SyncBN allgathers stats across all ranks, so verify call to
             # all_gather in profiler.
-            all_gather_calls = get_profiling_event("all_gather", prof)
+            if BACKEND == 'nccl':
+                all_gather_calls = get_profiling_event("_all_gather_base", prof)
+            else:
+                all_gather_calls = get_profiling_event("all_gather", prof)
             self.assertNotEqual([], all_gather_calls)
 
             # Only do inference on one rank. If SyncBN did collective stats sync,
@@ -6466,7 +6469,10 @@ class DistributedTest:
                         loss.backward()
 
                 # Ensure sync does not occur in eval() mode.
-                all_gather_calls = get_profiling_event("all_gather", prof)
+                if BACKEND == 'nccl':
+                    all_gather_calls = get_profiling_event("_all_gather_base", prof)
+                else:
+                    all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
 
         @skip_if_lt_x_gpu(2)
