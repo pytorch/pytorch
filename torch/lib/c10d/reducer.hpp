@@ -464,6 +464,8 @@ class Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+  // Retrieves parameter corresponding to the given VariableIndex.
+  at::Tensor& get_param_from_index(size_t index);
 
   friend class Logger;
 };
