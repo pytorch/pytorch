@@ -307,8 +307,6 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
-  const auto offset = replica.offsets[bucket_index.intra_bucket_index];
-  const auto length = replica.lengths[bucket_index.intra_bucket_index];
   auto& bucket_view = replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   // Copy contents of gradient tensor to bucket tensor.
@@ -340,6 +338,15 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
         }
       }
     } else {
+      // Gradient is undefined. When find_unused_parameters=True, ensure it is
+      // not marked as locally used, otherwise we will be allreducing zero's
+      // instead of not touching .grad field of parameter.
+      if (this->dynamic_graph_find_unused() || this->static_graph_first_iteration()) {
+        TORCH_CHECK(
+            local_used_maps_[index.replica_index][index.variable_index]
+                    .item<int>() == 0,
+            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+      }
       bucket_view.zero_();
     }
     // The grad is not modified and doesn't need to be written back.
@@ -526,7 +533,18 @@ void Reducer::autograd_hook(VariableIndex index) {
     // to mark it in local_used_maps_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
-    local_used_maps_[index.replica_index][index.variable_index] = 1;
+    // Only set it as locally used if the grad is defined. Otherwise, hooks
+    // could sometimes be triggered with undefined grads, and if this happens
+    // globally, we don't want to touch the .grad field of the param.
+
+    auto& variable = get_param_from_index(index);
+    runGradCallbackForVariable(variable, [&](auto& grad) {
+      if (grad.defined()) {
+        local_used_maps_[index.replica_index][index.variable_index] = 1;
+      }
+      // The gradient is never modified.
+      return false;
+    });
   }
 
   if (static_graph_first_iteration()) {
@@ -556,10 +574,16 @@ void Reducer::autograd_hook(VariableIndex index) {
         "then got used in the second iteration. this is not ",
         "compatible with static_graph set to True.");
     if (--numGradHooksTriggeredMapPerIteration_[index] == 0) {
+      if (should_rebuild_buckets()) {
+        push_rebuilt_params(index);
+      }
       // Finally mark variable for which this function was originally called.
       mark_variable_ready(index);
     }
   } else {
+    if (should_rebuild_buckets()) {
+      push_rebuilt_params(index);
+    }
     // Finally mark variable for which this function was originally called.
     mark_variable_ready(index);
   }
@@ -613,6 +637,18 @@ void Reducer::all_reduce_local_used_map() {
       }
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+}
+
+at::Tensor& Reducer::get_param_from_index(VariableIndex index) {
+  const auto replica_index = index.replica_index;
+  const auto variable_index = index.variable_index;
+  const auto& bucket_index = variable_locators_[variable_index];
+  auto& bucket = buckets_[bucket_index.bucket_index];
+  auto& replica = bucket.replicas[replica_index];
+  // Cannot simply access variable via replicas_[replica_index][variable_index]
+  // as the callback does not accept const tensors.
+  auto& variable = replica.variables[bucket_index.intra_bucket_index];
+  return variable;
 }
 
 void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
@@ -696,10 +732,6 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
   // will be broadcasted and initialized. Also we only need to dump tensors
   // and parameter indices of one replica.
-  if (should_rebuild_buckets()) {
-    push_rebuilt_params(index);
-  }
-
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
   TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
@@ -767,6 +799,11 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
+      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+        for (const auto& unused_index : unused_parameters_) {
+          push_rebuilt_params(unused_index);
+        }
+      }
       this->finalize_backward();
     });
   }
