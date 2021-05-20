@@ -610,6 +610,13 @@ static void i0e_kernel(TensorIteratorBase& iter) {
       });
 }
 
+static void ndtri_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cpu", [&]() {
+        cpu_kernel(iter, [](scalar_t x) { return ndtri(x); });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -749,7 +756,8 @@ REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
-
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

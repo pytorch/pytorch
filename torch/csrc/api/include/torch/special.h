@@ -85,6 +85,14 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
 }
 
+inline Tensor ndtri(const Tensor& self) {
+  return torch::special_ndtri(self);
+}
+
+inline Tensor& ndtri_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtri_out(result, self);
+}
+
 /// Computes the logit of input, elementwise.
 /// See https://pytorch.org/docs/master/special.html#torch.special.logit.
 ///

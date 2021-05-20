@@ -1000,6 +1000,9 @@
 - name: special_entr(Tensor self) -> Tensor
   self: grad * (-(1 + self.log()))
 
+- name: special_ndtri(Tensor self) -> Tensor
+  self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
+
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
