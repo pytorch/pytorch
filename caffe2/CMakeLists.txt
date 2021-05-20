@@ -1621,13 +1621,13 @@ endif()
 # ---[ Test binaries.
 if(BUILD_TEST)
 
-  foreach(test_src ${ATen_VEC256_TEST_SRCS})
+  foreach(test_src ${ATen_VEC_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
         list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
-        # Build vec256 with minimal dependencies on all platforms but Windows
+        # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
