@@ -1302,9 +1302,8 @@ class Quantizer:
                 quantized = node_arg_is_quantized(node.args[0])
 
             # the output is unquantized if the node is not a CopyNode
-            # and activation is fp16 (since we will output fp32 currently for fp16
-            # converter
-            if not activation_is_int8_quantized(qconfig) or \
+            # or the activation is not statically quantized
+            if not activation_is_statically_quantized(qconfig) or \
                not obj.input_output_observed():
                 quantized = False
             if node_return_type_is_int(node):
