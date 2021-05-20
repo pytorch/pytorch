@@ -2078,6 +2078,10 @@ template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
+  if (std::isnan(x)) {
+    return x;
+  }
+
   if (x >= 0) {
     if (x > 50) { // continued-fraction expansion is faster
       const T ispi = 0.56418958354775628694807945156; // 1 / sqrt(pi)
