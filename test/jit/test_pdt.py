@@ -288,6 +288,8 @@ class TestPDT(JitTestCase):
             ans = 0.0
             for tup in inp:
                 for val in tup:
+                    if isinstance(val, bool):
+                        val = int(val)
                     if val > 0:
                         ans *= val
             return ans
@@ -301,7 +303,7 @@ class TestPDT(JitTestCase):
 
         list_inp = ([1, 2, 3, ], [5, 6, 7, ])
         scripted_fn = torch.jit._script_pdt(test_nested_list, example_inputs=[(list_inp, ), ])
-        inp = ([0, 4, 7, ], [8, 11, ], [6, -1, -20, ])
+        inp = ([0, 4, 7, ], [8, 11, ])
         self.assertEqual(scripted_fn(inp, ), test_nested_list(inp, ))
 
         tup_inp = [(1.0, 2.6, 3.7, ), (5.7, 6.1, 1.7, )]
@@ -405,3 +407,32 @@ class TestPDT(JitTestCase):
         user_class = ClassWithArgs(False)
         scripted_fn = torch.jit._script_pdt(test_model_with_args, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
         self.assertEqual(scripted_fn(100, ClassWithArgs(True), ), test_model_with_args(100, ClassWithArgs(True)))
+
+
+    def test_function_scripted_many_times(self):
+        def fn(x, y):
+            return x + y
+
+        make_global(fn)
+
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1,2), ])
+        self.assertEqual(scripted_fn(10, 20), fn(10, 20))
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1.6,2.9), ])
+        self.assertEqual(scripted_fn(-1.8, 20.14), fn(-1.8, 20.14))
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(89,27), ])
+        self.assertEqual(scripted_fn(88, 100), fn(88, 100))
+
+        def test_script_list(a):
+            ans = 0.0
+            for val in a:
+                ans += val
+            return ans
+
+        make_global(test_script_list)
+        inp = [1, 2, 3, ]
+        scripted_fn = torch.jit._script_pdt(test_script_list, example_inputs=[(inp, ), ])
+        self.assertEqual(scripted_fn([10, 20, ]), test_script_list([10, 20, ]))
+
+        inp = [1.2, 3.4, 5.6, ]
+        scripted_fn = torch.jit._script_pdt(test_script_list, example_inputs=[(inp, ), ])
+        self.assertEqual(scripted_fn([-1.8, 20.14, ]), test_script_list([-1.8, 20.14, ]))
