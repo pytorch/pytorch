@@ -169,7 +169,7 @@ Traceback of TorchScript (most recent call last):
       return x + y
              ~~~~~ <--- HERE
   )";
-  ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
+  ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 } // namespace mobile
 } // namespace jit
