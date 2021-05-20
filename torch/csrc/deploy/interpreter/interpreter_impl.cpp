@@ -230,12 +230,11 @@ using torch::deploy::PickledObject;
 // for these objects together makes it easier to see what is happening.
 struct ScopedAcquire {
   ScopedAcquire() {
-    gstate = PyGILState_Ensure();
+    PyGILState_Ensure();
   }
   ~ScopedAcquire() {
-    PyGILState_Release(gstate);
+    PyEval_SaveThread();
   }
-  PyGILState_STATE gstate;
 };
 
 struct InitLockAcquire {
@@ -244,12 +243,11 @@ struct InitLockAcquire {
     // init_lock -> GIL. Otherwise, the GIL can be released by the python
     // interpreter during initalization tasks, and then re-acquired. If another
     // thread grabs the GIL to do non-initialization tasks, then it might start
-    // initializing (GIL -> init_lock). To avoid this, release the GIL before
+    // initializing (GIL -> init_lock). To avoid this, releasethe GIL before
     // trying to get the init_lock and then reacquire it afterward.
-    PyThreadState* _save;
-    _save = PyEval_SaveThread();
+    PyEval_SaveThread();
     init_lock.lock();
-    PyEval_RestoreThread(_save);
+    PyGILState_Ensure();
   }
   ~InitLockAcquire() {
     init_lock_.unlock();
