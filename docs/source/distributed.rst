@@ -428,6 +428,22 @@ Collective functions
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
+Profiling Collective Communication
+-----------------------------------------
+
+Note that you can use ``torch.profiler`` (recommended, only available after 1.8.1)  or ``torch.autograd.profiler`` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (``gloo``,
+``nccl``, ``mpi``) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
+
+::
+
+    import torch
+    import torch.distributed as dist
+    with torch.profiler():
+        tensor = torch.randn(20, 10)
+        dist.all_reduce(tensor)
+
+Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
+
 Autograd-enabled communication primitives
 -----------------------------------------
 
