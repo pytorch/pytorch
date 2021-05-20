@@ -1852,6 +1852,21 @@ Tensor* tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::leaky_relu: {
+      return computeTwoOperand(
+          "aten_leaky_relu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& negative_slope) {
+            auto neg_slope = Cast::make(a.dtype(), negative_slope);
+            auto zero = Cast::make(a.dtype(), 0);
+            auto one = Cast::make(a.dtype(), 1);
+            auto cs = CompareSelect::make(a, zero, one, neg_slope, kGT);
+            return a * cs;
+          });
+    } break;
+
     case aten::gelu: {
       return computeOneOperand(
           "aten_gelu",
@@ -2561,6 +2576,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::leaky_relu:
     case aten::hardswish:
     case aten::gelu:
     case aten::batch_norm:
