@@ -1,7 +1,7 @@
 #include <cmath>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
 #include <ATen/native/cpu/Loops.h>
@@ -15,7 +15,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(dtype) || isComplexType(dtype)) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, dtype, "pow", [&]() {
 
-      using Vec = Vec256<scalar_t>;
+      using Vec = Vectorized<scalar_t>;
       cpu_kernel_vec(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
           return std::pow(base, exp);
@@ -47,7 +47,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 // sqrt & rsqrt doesn't currently exist for it.
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
   // in pow_tensor_scalar_kernel
   if (exp == 2.0) {
@@ -120,7 +120,7 @@ void pow_tensor_scalar_kernel(
       using scalar_t =
           decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
       const auto exp = exp_scalar.to<scalar_t>();
-      using Vec = Vec256<scalar_t>;
+      using Vec = Vectorized<scalar_t>;
       cpu_kernel_vec(iter,
           [=](scalar_t base) -> scalar_t {
             return std::pow(base, exp);

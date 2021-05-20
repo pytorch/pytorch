@@ -47,7 +47,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMath.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
@@ -101,7 +101,7 @@ install(FILES
           THCTensorInfo.cuh
           THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
-          THCTensorMathMagma.cuh
+          THCTensorMathMagma.h
           THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -124,7 +124,7 @@ install(FILES
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
           generic/THCTensorMathMagma.h
-          generic/THCTensorMathMagma.cu
+          generic/THCTensorMathMagma.cpp
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
           generic/THCTensorMathPointwise.h
