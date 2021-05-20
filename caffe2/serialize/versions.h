@@ -67,7 +67,7 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x3L: (Comment missing)
 //  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
-constexpr uint64_t kProducedBytecodeVersion = 0x4L;
+constexpr uint64_t kProducedBytecodeVersion = 0x6L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");

@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
 
@@ -22,6 +24,7 @@ using caffe2::serialize::ReadAdapterInterface;
 namespace {
 constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
+constexpr int64_t kBytecodeVersionV6 = 0x6L;
 } // namespace
 
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
@@ -185,6 +188,30 @@ bool backport_v5_to_v4(
   return true;
 }
 
+bool backport_v6_to_v5(
+    PyTorchStreamReader& reader,
+    PyTorchStreamWriter& writer) {
+  std::ostringstream out;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  PyTorchStreamWriter intermediate_writer(writer_func);
+  selective_copy(reader,
+                 intermediate_writer,
+                 std::unordered_set<std::string>{"version"},
+                 std::unordered_set<std::string>());
+  intermediate_writer.finalized();
+
+  ExtraFilesMap empty_map;
+  c10::optional<at::Device> device;
+  Module torch_script = torch::jit::load(out.str(), c10::nullopt);
+  BytecodeWriteVersion = 5;
+  ScriptModuleSerializer scriptModuleSerializer(writer);
+  scriptModuleSerializer.serialize(torch_script, empty_map, true, false);
+  BytecodeWriteVersion = 6;
+  return true;
+}
 } // namespace
 
 // A generic contract for backport logic to the previous bytecode version.
@@ -198,6 +225,7 @@ using BytecodeBackportFunction = std::function<bool(
 
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
+  registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
 }
 
 std::unordered_map<

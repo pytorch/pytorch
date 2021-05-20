@@ -188,5 +188,10 @@ TORCH_API void SetExportModuleMobileInfoConverter(
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
+// The thread local flag to control bytecode serialization. It's set optional,
+// so by default it should not take effect, unless necessary in some backport
+// function. For example, in backport_v6_to_v5, TODO: finish the comment.
+static thread_local c10::optional<int64_t> BytecodeWriteVersion;
+
 } // namespace jit
 } // namespace torch
