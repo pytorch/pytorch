@@ -113,7 +113,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           c10::intrusive_ptr<Message> message =
               future.value().toCustomClass<Message>();
           message->setId(id);
-          return message;
+          return withDataPtrs(message);
         },
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 

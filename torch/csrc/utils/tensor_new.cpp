@@ -612,8 +612,18 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   const int NUM_ARGS = 9, CROW_INDICES_ARG = 0, COL_INDICES_ARG = 1, VALUES_ARG = 2;
   ParsedArgs<NUM_ARGS> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(CROW_INDICES_ARG), "dtype"));
-  THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(COL_INDICES_ARG), "dtype"));
+  auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
+    // Clear error indicator if attribute does not exists.
+    // Otherwise subsequent Python C API calls might return bogus values.
+    // See https://github.com/pytorch/pytorch/issues/58520 for more details
+    auto rc = PyObject_GetAttrString(o, attr_name);
+    if (!rc) {
+      PyErr_Clear();
+    }
+    return rc;
+  };
+  THPObjectPtr crow_indices_dtype_attr(safe_get_attr_string(r.pyobject(CROW_INDICES_ARG), "dtype"));
+  THPObjectPtr col_indices_dtype_attr(safe_get_attr_string(r.pyobject(COL_INDICES_ARG), "dtype"));
   at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
     crow_indices_dtype_attr.get())->scalar_type : kInt;
   at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
