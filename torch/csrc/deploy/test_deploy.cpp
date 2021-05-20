@@ -146,23 +146,3 @@ TEST(TorchpyTest, ThrowsSafely) {
   auto model = p.load_pickle("model", "model.pkl");
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
-
-TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
-  torch::deploy::InterpreterManager m(1);
-
-  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
-  auto I = p.acquire_session();
-
-  auto I1 = p.acquire_session();
-}
-
-TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
-  torch::deploy::InterpreterManager m(1);
-
-  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
-  auto I = p.acquire_session();
-
-  torch::deploy::Package p1 = m.load_package(
-      path("RESNET", "torch/csrc/deploy/example/generated/resnet"));
-  auto I1 = p1.acquire_session();
-}

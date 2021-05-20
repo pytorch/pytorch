@@ -1,6 +1,4 @@
-#include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
-#include <torch/cuda.h>
 
 #include <dlfcn.h>
 #include <libgen.h>
@@ -11,20 +9,8 @@
 // it into a symbol that is then linked into libtorch_deploy.so. This enables us
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
-extern "C" __attribute__((
-    __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
-extern "C"
-    __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
-#ifdef FBCODE_CAFFE2
-// in fbcode, we build the interpreter version with cuda bindings explicitly and
-// side-by-side with the one without.  In OSS builds, we just build one
-// libinterpreter and it either has or doesn't have cuda depending on top-level
-// CMAKE flags
-extern "C" __attribute__((
-    __weak__)) char _binary_libtorch_deployinterpreter_cuda_so_start[];
-extern "C" __attribute__((
-    __weak__)) char _binary_libtorch_deployinterpreter_cuda_so_end[];
-#endif
+extern "C" char _binary_libtorch_deployinterpreter_so_start[];
+extern "C" char _binary_libtorch_deployinterpreter_so_end[];
 
 namespace torch {
 namespace deploy {
@@ -101,12 +87,6 @@ ReplicatedObj InterpreterSession::create_movable(Obj obj) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
-void write_tmp_lib(FILE* dst, char* lib_start, char* lib_end) {
-  TORCH_INTERNAL_ASSERT(dst);
-  size_t size = lib_end - lib_start;
-  TORCH_INTERNAL_ASSERT(size == fwrite(lib_start, 1, size, dst));
-}
-
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -115,31 +95,12 @@ Interpreter::Interpreter(InterpreterManager* manager)
   TORCH_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
   library_name_ = library_name;
   FILE* dst = fdopen(fd, "wb");
-
-  // See comment above for fbcode vs oss behavior
-  char* lib_start = nullptr;
-  char* lib_end = nullptr;
-#ifdef FBCODE_CAFFE2
-  if (torch::cuda::is_available() &&
-      &_binary_libtorch_deployinterpreter_cuda_so_start &&
-      &_binary_libtorch_deployinterpreter_cuda_so_end) {
-    lib_start = _binary_libtorch_deployinterpreter_cuda_so_start;
-    lib_end = _binary_libtorch_deployinterpreter_cuda_so_end;
-  } else if (
-      &_binary_libtorch_deployinterpreter_so_start &&
-      &_binary_libtorch_deployinterpreter_so_end) {
-    lib_start = _binary_libtorch_deployinterpreter_so_start;
-    lib_end = _binary_libtorch_deployinterpreter_so_end;
-  }
-#else // FBCODE_CAFFE2
-  lib_start = _binary_libtorch_deployinterpreter_so_start;
-  lib_end = _binary_libtorch_deployinterpreter_so_end;
-#endif // FBCODE_CAFFE2
-  TORCH_CHECK(
-      lib_start != nullptr && lib_end != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.");
-
-  write_tmp_lib(dst, lib_start, lib_end);
+  TORCH_INTERNAL_ASSERT(dst);
+  size_t size = _binary_libtorch_deployinterpreter_so_end -
+      _binary_libtorch_deployinterpreter_so_start;
+  TORCH_INTERNAL_ASSERT(
+      size ==
+      fwrite(_binary_libtorch_deployinterpreter_so_start, 1, size, dst));
   fclose(dst);
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {
