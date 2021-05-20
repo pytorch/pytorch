@@ -8857,6 +8857,22 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1]})
 
+    def test_roll(self):
+        class M(torch.nn.Module):
+            def __init__(self, shifts, dims):
+                super(M, self).__init__()
+                self.shifts = shifts
+                self.dims = dims
+
+            def forward(self, x):
+                return torch.roll(x, self.shifts, self.dims)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(M([1, 1], [1, 0]), (x,))
+        self.run_test(M([0, 1, 2], [1, 0, 2]), (x,))
+        self.run_test(M(2, 1), (x,))
+        self.run_test(M([-1, 3], [-2, -1]), (x,))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
