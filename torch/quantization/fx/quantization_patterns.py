@@ -84,7 +84,7 @@ class QuantizeHandler(ABC):
         """
         for maybe_obs_node, _ in self.last_node.users.items():
             if maybe_obs_node.op == 'call_module':
-                maybe_obs = quantizer.modules[maybe_obs_node.name]
+                maybe_obs = quantizer.modules[maybe_obs_node.target]
                 if is_activation_post_process(maybe_obs):
                     return maybe_obs
         return None
@@ -315,11 +315,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     scale = float(scale)
                     zero_point = int(zero_point)
                     scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-                    if self.relu_node is not None:
-                        op = torch.ops.quantized.add_relu
-                    else:
-                        op = torch.ops.quantized.add
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
                     op = quantizer.quantized_graph.create_node(
@@ -333,10 +328,13 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     relu_args = [op_out]
                     relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
                     relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
-                    return quantizer.quantized_graph.create_node(
+                    op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                 else:
-                    return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                    op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantizer.quantized_graph.create_node(
+                    "call_method", "to", (op_out, torch.float16,), {}
+                )
         else:
             # leave the op unquantized if the dtype,reference combination is not supported
             warnings.warn(
@@ -609,6 +607,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
         weight_dtype = dtypes[1]
         # TODO: reference_model option for linear module
         if self.linear_node.op == 'call_module':
@@ -661,7 +660,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
-                if activation_int8_quantized:
+                if activation_statically_quantized:
                     # quantize output for statically quantized linear op
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
@@ -748,10 +747,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         relu_args = [op_out]
                         relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
                         relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
-                        return quantizer.quantized_graph.create_node(
+                        op_out = quantizer.quantized_graph.create_node(
                             "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                     else:
-                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                        op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                    return quantizer.quantized_graph.create_node(
+                        "call_method", "to", (op_out, torch.float16), {})
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
@@ -1011,7 +1012,9 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 warnings.warn(
                     "Only reference patterns are currently supported for {dtype} dtype with {op} op"
                     "".format(dtype=dtypes, op=self.op))
-                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantizer.quantized_graph.create_node(
+                    "call_method", "to", (op_out, torch.float16), {})
         else:
             assert is_reference
             if dtypes in [(torch.quint8, torch.qint8, None)]:
@@ -1027,7 +1030,9 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     node, is_input=False)
             else:
                 assert dtypes in [(torch.float16, torch.float16, None)]
-                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantizer.quantized_graph.create_node(
+                    "call_method", "to", (op_out, torch.float16), {})
 
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
@@ -1100,7 +1105,10 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes == (torch.float16, torch.float16, None):
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+            op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+            return quantizer.quantized_graph.create_node(
+                "call_method", "to", (op_out, torch.float16,), {}
+            )
         else:
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 

@@ -90,7 +90,7 @@ nn_functional_tests = [
     ('selu', (S, S, S), (True), 'inplace'),
     ('celu', (S, S, S), (0.9,),),
     ('celu', (S, S, S), (0.9, True), 'inplace'),
-    ('leaky_relu', (S, S, S), (0.02,),),
+    ('leaky_relu', (S, S, S), (0.02,), '', (True,)),
     ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
     ('rrelu', (S, S), (0.1, 0.3, False),),
     ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
@@ -357,7 +357,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 
     # jit doesn't support sparse tensors.
-    'test_to_sparse'
+    'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
 # generates a script function and set of example inputs
