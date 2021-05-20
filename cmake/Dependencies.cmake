@@ -1189,6 +1189,12 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ cuDNN
+if(USE_CUDNN)
+  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+endif()
+
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
@@ -1308,7 +1314,13 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    if(MSVC)
+      # Don't install gloo on Windows
+      # It is already handled in builder scripts
+      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    else()
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    endif()
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks

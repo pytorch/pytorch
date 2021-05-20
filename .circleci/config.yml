@@ -297,7 +297,7 @@ pytorch_android_params: &pytorch_android_params
       default: ""
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
     DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -324,7 +324,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: "0"
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -461,7 +461,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -539,7 +539,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -882,7 +882,7 @@ jobs:
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -945,7 +945,7 @@ jobs:
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1232,7 +1232,7 @@ jobs:
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters:
       branch:
         type: string
@@ -1261,7 +1261,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1306,7 +1306,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1478,7 +1478,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1567,7 +1567,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1603,7 +1603,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1642,7 +1642,7 @@ jobs:
     <<: *pytorch_android_params
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1759,8 +1759,8 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
+            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
+              echo "Run Build Test is not for full jit, skipping."
               exit 0
             fi
             PROJ_ROOT=/Users/distiller/project
@@ -1788,8 +1788,8 @@ jobs:
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
+            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
+              echo "Run Simulator Tests is not for full jit, skipping."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
@@ -1806,7 +1806,7 @@ jobs:
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1844,7 +1844,7 @@ jobs:
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1887,7 +1887,7 @@ jobs:
 
   pytorch_windows_test_multigpu:
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
       - checkout
       - run:
@@ -1904,7 +1904,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1949,7 +1949,7 @@ jobs:
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     resource_class: medium
     steps:
     - checkout
@@ -2012,7 +2012,7 @@ jobs:
           type: string
           default: ""
       machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
@@ -2028,7 +2028,10 @@ jobs:
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+              export AWS_REGION=us-east-1
+              aws ecr get-login-password --region $AWS_REGION|docker login --username AWS \
+                       --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
               set -x
               # Check if image already exists, if it does then skip building it
               if docker manifest inspect "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}"; then
@@ -2061,7 +2064,7 @@ jobs:
               cd .circleci/docker && ./build_docker.sh
   docker_for_ecr_gc_build_job:
       machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
       steps:
         - checkout
         - run:
@@ -2073,9 +2076,12 @@ jobs:
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+              export AWS_REGION=us-east-1
+              aws ecr get-login-password --region $AWS_REGION|docker login --username AWS \
+                       --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
               set -x
-              docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+              docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/gc/ecr
   ecr_gc_job:
       parameters:
         project:
@@ -6528,8 +6534,8 @@ workflows:
               only:
                 - /gh\/.*\/head/
                 - /pull\/.*/
-          lite_interpreter: "1"
-          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single_lite_interpreter
+          lite_interpreter: "0"
+          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_android_gradle_build:
@@ -6549,38 +6555,42 @@ workflows:
           build_environment: pytorch-ios-12.0.0-x86_64_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_x86_64_build
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-x86_64_lite_interpreter_build
+          build_environment: pytorch-ios-12.0.0-x86_64_full_jit_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_x86_64_lite_interpreter_build
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_x86_64_full_jit_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_metal_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
-          build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
+          build_environment: pytorch-ios-12.0.0-arm64_full_jit_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_0_0_arm64_lite_interpreter_build
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_arm64_full_jit_build
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_custom_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_custom_build
           op_list: mobilenetv2.yaml
       - pytorch_linux_build:
@@ -6987,6 +6997,9 @@ workflows:
           filters:
             branches:
               only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
                 - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -8137,6 +8150,21 @@ workflows:
     when: << pipeline.parameters.run_build >>
   master_build:
     jobs:
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+          image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3.6-gcc5.4"
+          image_name: "pytorch-linux-xenial-py3.6-gcc5.4"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3.6-gcc7"
+          image_name: "pytorch-linux-xenial-py3.6-gcc7"
       - pytorch_linux_build:
           name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -8247,6 +8275,12 @@ workflows:
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - pytorch_linux_build:
+          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+          requires:
+            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
@@ -8287,6 +8321,11 @@ workflows:
           docker_image: pytorch/manylinux-cuda102
           libtorch_variant: shared-with-deps
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_build:
+          build_environment: libtorch 3.7m cpu gcc5.4_cxx11-abi
+          docker_image: pytorch/pytorch-binary-docker-image-ubuntu16.04:latest
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - binary_mac_build:
           build_environment: wheel 3.7 cpu
           name: binary_macos_wheel_3_7_cpu_build
@@ -8370,6 +8409,15 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
+      - pytorch_windows_build:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.1"
+          name: pytorch_windows_vs2019_py36_cuda11.1_build
+          python_version: "3.6"
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: ""
+          vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.1"
@@ -8396,6 +8444,10 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
+      - pytorch_windows_test_multigpu:
+          name: pytorch_windows_vs2019_py36_cuda11.1_test_azure_multi_gpu
+          requires:
+            - pytorch_windows_vs2019_py36_cuda11.1_build
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
