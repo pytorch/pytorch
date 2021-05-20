@@ -124,7 +124,7 @@ void quick_select_template(
 }
 
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
-    const c10::string_view& interpolation) {
+    const c10::string_view interpolation) {
   if (interpolation == "linear") {
     return QUANTILE_INTERPOLATION_MODE::LINEAR;
   } else if (interpolation == "lower") {

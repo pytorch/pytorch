@@ -283,7 +283,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const c10::string_view& value);
+    const c10::string_view value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

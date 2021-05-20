@@ -2105,7 +2105,7 @@ static std::vector<int64_t> make_dim_list(int64_t ndim) {
 }
 
 // Checks for valid arguments to linalg_norm when type(ord) == str
-static void check_str_ord_valid(const c10::string_view& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim) {
+static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArrayRef> opt_dim, int64_t ndim) {
   TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
   bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
   TORCH_CHECK(dims_valid, "order \"", str_ord,

@@ -1029,7 +1029,7 @@ Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, const S
   return self;
 }
 
-SCATTER_GATHER_OP get_operator_enum(const c10::string_view& reduce) {
+SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }

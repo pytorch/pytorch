@@ -630,7 +630,7 @@ void addInputs(
     const c10::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const c10::string_view& value) {
+void addInputs(Node* n, const char* name, const c10::string_view value) {
   detail::genericAddInput(n, std::string(value));
 }
 void addInputs(

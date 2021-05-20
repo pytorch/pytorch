@@ -2260,7 +2260,7 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
     Tensor& vectors,
     Tensor& infos,
     bool compute_eigenvectors,
-    const c10::string_view& uplo_str) {
+    const c10::string_view uplo_str) {
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls

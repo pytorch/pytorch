@@ -480,7 +480,7 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 
 // This function checks whether the uplo argument input is valid
 // Allowed strings are "u", "U", "l", "L"
-static inline void checkUplo(const c10::string_view& uplo) {
+static inline void checkUplo(const c10::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
