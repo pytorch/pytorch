@@ -332,7 +332,7 @@ def check_submodules():
             print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
-        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.txt"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
                                  'asmjit'), ['CMakeLists.txt'])
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
@@ -916,7 +916,8 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'include/ATen/*.h',
                 'include/ATen/cpu/*.h',
-                'include/ATen/cpu/vec256/*.h',
+                'include/ATen/cpu/vec/vec256/*.h',
+                'include/ATen/cpu/vec/*.h',
                 'include/ATen/core/*.h',
                 'include/ATen/cuda/*.cuh',
                 'include/ATen/cuda/*.h',
