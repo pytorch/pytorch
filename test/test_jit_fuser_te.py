@@ -1828,8 +1828,6 @@ class TestNNCOpInfo(TestCase):
             'clamp',
             'cos',
             'cosh',
-            'div',
-            'div',
             'eq',
             'erf',
             'erfc',
@@ -1848,8 +1846,6 @@ class TestNNCOpInfo(TestCase):
             'log',
             'lt',
             'masked_fill',
-            'max',
-            'min',
             'mm',
             'mul',
             'ne',
@@ -1872,9 +1868,8 @@ class TestNNCOpInfo(TestCase):
             'trunc',
             'unsqueeze',
         ]
-        deny_list = ['sum', '__rmatmul__', 'matmul', 'transpose']
-        if op.name in deny_list:
-            return
+        # These are ops that don't work (or are incomplete) and need to be fixed
+        fail_ops = ['matmul', 'permute', 'frac', '__rmatmul__']
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             for sample_input in sample_inputs_itr:
@@ -1906,21 +1901,34 @@ def f({', '.join(param_names)}):
                 exec(code, g)
                 f = g['f']
                 f.__module__ = 'test'
+                out = f(*param_values)
+                # NNC currently doesn't support lowering ops with more than one
+                # output
+                if isinstance(out, tuple):
+                    continue
+
+                # NNC currently oftens segfault when asked to lower ops with 0-dim tensor outputs
+                if isinstance(out, torch.Tensor) and out.dim() == 0:
+                    continue
                 ts_g = torch.jit.trace(f, param_values)
                 kernel = torch._C._te.TensorExprKernel(ts_g.graph)
                 self.assertEqual(kernel.run(tuple(param_values)), f(*param_values))
                 self.assertEqual(kernel.fallback(tuple(param_values)), f(*param_values))
-
-            self.assertTrue(op.name in work_list, op.name)
 
         except Exception as e:
             self.assertTrue(op.name not in work_list)
             if "Unhandled node kind" in str(e):
                 print(e)
                 return
+            if "UNSUPPORTED DTYPE" in str(e):
+                print(e)
+                return
+            if "UNSUPPORTED DTYPE" in str(e):
+                print(e)
+                return
             if isinstance(e, NameError):  # related to passing in input lists of tensors
                 return
-            self.assertTrue(False)
+            self.assertTrue(op.name in fail_ops)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)

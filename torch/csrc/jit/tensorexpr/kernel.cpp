@@ -1466,6 +1466,8 @@ Tensor* computeMatmul(
 
   auto size_a = a.dims();
   auto size_b = b.dims();
+  // We currently only support rank 2 matmuls
+  TORCH_INTERNAL_ASSERT(size_a.size() == 2 && size_b.size() == 2);
   auto total_size = dynamic_cast<LongImm*>(
       IRSimplifier::simplify(
           cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
@@ -3006,8 +3008,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     default: {
-      std::cout << t->repr_str() << std::endl;
-      throw unsupported_dtype();
+      throw unsupported_dtype(t->repr_str());
       break;
     }
   }
