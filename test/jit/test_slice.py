@@ -147,10 +147,14 @@ class TestSlice(JitTestCase):
                 self.test = torch.nn.ModuleList([m1, m2, m3])
 
             def forward(self):
-                return self.test[::-2]
+                return self.test[::-2], self.test[1:2:]
 
         scripted_foo = torch.jit.script(Foo())
-        result = scripted_foo()
-        self.assertEqual(len(result), 2)
-        self.assertEqual(str(result[0]._type()), "__torch__.torch.nn.modules.rnn.GRU")
-        self.assertEqual(str(result[1]._type()), "__torch__.torch.nn.modules.linear.Linear")
+        result1, result2 = scripted_foo()
+
+        self.assertEqual(len(result1), 2)
+        self.assertEqual(str(result1[0]._type()), "__torch__.torch.nn.modules.rnn.GRU")
+        self.assertEqual(str(result1[1]._type()), "__torch__.torch.nn.modules.linear.Linear")
+
+        self.assertEqual(len(result2), 1)
+        self.assertEqual(str(result2[0]._type()), "__torch__.torch.nn.modules.activation.ReLU")

@@ -6997,6 +6997,9 @@ workflows:
           filters:
             branches:
               only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
                 - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -8441,6 +8444,10 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
+      - pytorch_windows_test_multigpu:
+          name: pytorch_windows_vs2019_py36_cuda11.1_test_azure_multi_gpu
+          requires:
+            - pytorch_windows_vs2019_py36_cuda11.1_build
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
