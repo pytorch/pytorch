@@ -428,8 +428,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
-          "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -619,7 +620,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This method should be called before this future's value is used, as it
   // ensures that the CUDA streams that are "current" at the callsite properly
-  // synchonize with the value.
+  // synchronize with the value.
   void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
