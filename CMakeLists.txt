@@ -194,6 +194,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
+cmake_dependent_option(
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
@@ -266,6 +269,9 @@ option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
   "CPU_INTEL OR CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
+  "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
