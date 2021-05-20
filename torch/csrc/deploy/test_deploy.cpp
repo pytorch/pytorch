@@ -134,3 +134,35 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+
+TEST(TorchpyTest, ThrowsSafely) {
+  // See explanation in deploy.h
+  torch::deploy::InterpreterManager manager(3);
+  EXPECT_THROW(manager.load_package("some garbage path"), c10::Error);
+
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
+  EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
+
+  auto model = p.load_pickle("model", "model.pkl");
+  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
+}
+
+TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
+  torch::deploy::InterpreterManager m(1);
+
+  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
+  auto I = p.acquire_session();
+
+  auto I1 = p.acquire_session();
+}
+
+TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
+  torch::deploy::InterpreterManager m(1);
+
+  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
+  auto I = p.acquire_session();
+
+  torch::deploy::Package p1 = m.load_package(
+      path("RESNET", "torch/csrc/deploy/example/generated/resnet"));
+  auto I1 = p1.acquire_session();
+}
