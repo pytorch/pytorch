@@ -415,11 +415,11 @@ class TestPDT(JitTestCase):
 
         make_global(fn)
 
-        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1, 2), ])
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1,2), ])
         self.assertEqual(scripted_fn(10, 20), fn(10, 20))
-        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1.6, 2.9), ])
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1.6,2.9), ])
         self.assertEqual(scripted_fn(-1.8, 20.14), fn(-1.8, 20.14))
-        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(89, 27), ])
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(89,27), ])
         self.assertEqual(scripted_fn(88, 100), fn(88, 100))
 
         def test_script_list(a):
