@@ -190,6 +190,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dump_tensor", &at::functorch::dump_tensor, "add batch dim");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
+  m.def("are_transforms_active", &at::functorch::areTransformsActive);
 
   m.def(
       "addPythonKey",

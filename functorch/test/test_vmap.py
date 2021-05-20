@@ -828,7 +828,7 @@ class TestVmapAPI(TestCase):
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(5)
         grad = torch.randn_like(x)
-        err_msg = r'backward\(\) called inside torch.vmap'
+        err_msg = r'backward\(\) called inside a functorch transform'
 
         def backward_on_vmapped_tensor(x):
             x.sum().backward()
@@ -844,6 +844,7 @@ class TestVmapAPI(TestCase):
 
         def completely_unrelated_backward(y):
             x.sum().backward()
+            return y
 
         with self.assertRaisesRegex(RuntimeError, err_msg):
             vmap(completely_unrelated_backward)(y)
