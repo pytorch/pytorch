@@ -32,7 +32,7 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
         pipelineState:mpscnn::kernelFor(
-                          X, @"copy_offset", @"copy_offset_nonarray")];
+                          X, "copy_offset", "copy_offset_nonarray")];
     id<MTLBuffer> offsetBuffer = [[MPSCNNContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
@@ -71,17 +71,17 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     auto kernelString = metal::mpscnn::kernelFor(
-        X, @"append_features_off0", @"append_features_off0_nonarray");
+        X, "append_features_off0", "append_features_off0_nonarray");
     ushort tex_offset = channel_offset % 4;
     if (tex_offset == 1) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off1", @"append_features_off1_nonarray");
+          X, "append_features_off1", "append_features_off1_nonarray");
     } else if (tex_offset == 2) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off2", @"append_features_off2_nonarray");
+          X, "append_features_off2", "append_features_off2_nonarray");
     } else if (tex_offset == 3) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off3", @"append_features_off3_nonarray");
+          X, "append_features_off3", "append_features_off3_nonarray");
     }
 
     id<MTLComputePipelineState> state =

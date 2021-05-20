@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 
 #include <mutex>
+#include <unordered_map>
 
 #if C10_IOS
 #import <UIKit/UIKit.h>
@@ -16,7 +17,7 @@ using namespace at::native::metal;
 @implementation MPSCNNContext {
   std::mutex _pipelineCacheMutex;
   MetalDeviceInfo _deviceInfo;
-  NSMutableDictionary<NSString*, id<MTLComputePipelineState>>* _pipelineCache;
+  std::unordered_map<std::string, id<MTLComputePipelineState>> _pipelineCache;
 }
 
 + (instancetype)sharedInstance {
@@ -29,8 +30,6 @@ using namespace at::native::metal;
     instance->_deviceInfo = createDeviceInfo(device);
     instance->_library = nil;
     instance->_commandQueue = [instance.device newCommandQueue];
-    instance->_pipelineCache =
-        [NSMutableDictionary<NSString*, id<MTLComputePipelineState>> new];
   });
   return instance;
 }
@@ -75,14 +74,14 @@ using namespace at::native::metal;
   return _device && _library && _commandQueue;
 }
 
-- (id<MTLComputePipelineState>)pipelineState:(NSString*)kernel {
+- (id<MTLComputePipelineState>)pipelineState:(const std::string&)kernel {
   TORCH_CHECK(_library, "Failed to load Metal shaders");
   std::lock_guard<std::mutex> g(_pipelineCacheMutex);
   id<MTLComputePipelineState> state = _pipelineCache[kernel];
   if (state) {
     return state;
   }
-  id<MTLFunction> func = [_library newFunctionWithName:kernel];
+  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
   TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
   NSError* errors;
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
@@ -91,28 +90,28 @@ using namespace at::native::metal;
   return state;
 }
 
-- (id<MTLComputePipelineState>)specializedPipelineState:(NSString*)kernel
+- (id<MTLComputePipelineState>)specializedPipelineState:(const std::string&)kernel
                                               Constants:(NSArray<NSNumber*>*)
                                                             constants {
   TORCH_CHECK(_library, "Failed to load Metal shaders");
-  std::string kernelStr = std::string([kernel UTF8String]);
+  std::string kernelStr = kernel;
   for (auto i = 0; i < constants.count; ++i) {
     kernelStr += "_" + std::string([constants[i] stringValue].UTF8String);
   }
   std::lock_guard<std::mutex> g(_pipelineCacheMutex);
-  id<MTLComputePipelineState> state = _pipelineCache[kernel];
+  id<MTLComputePipelineState> state = _pipelineCache[kernelStr];
   if (state) {
     return state;
   }
   MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
   NSUInteger ushortArgIndex = 0;
-  NSUInteger floatArgIndex = 10;
+  NSUInteger floatArgIndex = 12;
   for (auto i = 0; i < constants.count; ++i) {
     NSNumber* constant = constants[i];
     const char* type = constant.objCType;
     if (strcmp(type, @encode(NSUInteger)) == 0 ||
         strcmp(type, @encode(NSInteger)) == 0) {
-      TORCH_CHECK(ushortArgIndex <= 10);
+      TORCH_CHECK(ushortArgIndex <= 12);
       ushort value = ushort([constant unsignedIntegerValue]);
       [constantValues setConstantValue:&value
                                   type:MTLDataTypeUShort
@@ -121,7 +120,7 @@ using namespace at::native::metal;
     }
     if (strcmp(type, @encode(float)) == 0 ||
         strcmp(type, @encode(double)) == 0) {
-      TORCH_CHECK(floatArgIndex <= 2);
+      TORCH_CHECK(floatArgIndex <= 14);
       float value = [constant floatValue];
       [constantValues setConstantValue:&value
                                   type:MTLDataTypeFloat
@@ -130,15 +129,13 @@ using namespace at::native::metal;
     }
   }
   NSError* errors;
-  id<MTLFunction> func = [_library newFunctionWithName:kernel
+  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]
                                         constantValues:constantValues
                                                  error:&errors];
   TORCH_CHECK(func, errors.localizedDescription.UTF8String);
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
   TORCH_CHECK(state, errors.localizedDescription.UTF8String);
-  kernel = [NSString stringWithCString:kernelStr.c_str()
-                              encoding:NSUTF8StringEncoding];
-  _pipelineCache[kernel] = state;
+  _pipelineCache[kernelStr] = state;
   return state;
 }
 

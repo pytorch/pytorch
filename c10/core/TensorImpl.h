@@ -308,7 +308,7 @@ struct C10_API VariableVersion {
   // accessed.
   uint32_t current_version() const {
     TORCH_CHECK(
-        version_counter_, "Inference tensor do not track version counter.");
+        version_counter_, "Inference tensors do not track version counter.");
     return version_counter_->version_;
   }
 };
@@ -462,8 +462,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
  public:
   TensorImpl(const TensorImpl&) = delete;
   TensorImpl& operator=(const TensorImpl&) = delete;
-  TensorImpl(TensorImpl&&) = default;
-  TensorImpl& operator=(TensorImpl&&) = default;
+  TensorImpl(TensorImpl&&) = delete;
+  TensorImpl& operator=(TensorImpl&&) = delete;
 
   /**
    * Release (decref) storage, and any other external allocations.  This
