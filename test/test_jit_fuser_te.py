@@ -1810,6 +1810,7 @@ class TestTEFuser(JitTestCase):
 
 class TestNNCOpInfo(TestCase):
     @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_te_compile(self, device, dtype, op):
         work_list = [
