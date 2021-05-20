@@ -379,9 +379,12 @@ void HaloInfo::build(TensorDomain* td) {
     // when creating some TensorDomains, so a single IterDomain can
     // show up multiple times. That itself should be fixed, but for
     // now disable this assertion.
-    // TORCH_INTERNAL_ASSERT(
-    // halo_width_map_.find(root_axis) == halo_width_map_.end(),
-    // "Invalid domain: ", root_axis, " of ", td->getRootDomain());
+    TORCH_INTERNAL_ASSERT(
+        halo_width_map_.find(root_axis) == halo_width_map_.end(),
+        "Invalid domain: ",
+        root_axis,
+        " of ",
+        td->getRootDomain());
 
     if (halo_width == 0) {
       halo_width_map_.insert({root_axis, 0});

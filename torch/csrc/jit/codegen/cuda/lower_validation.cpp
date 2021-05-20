@@ -76,6 +76,49 @@ class ValidateParallelType : public IterVisitor {
   }
 };
 
+// Make sure all IterDomains are only used for a unique
+// TensorView. Several mappings from IterDomains are
+// created during lowering, which relies on the unique usage of
+// IterDomains.
+void validateIterDomainUsage(Fusion* fusion) {
+  FUSER_PERF_SCOPE("validateIterDomainUse");
+  FusionGuard fg(fusion);
+
+  auto used_vals = fusion->usedMathVals();
+  std::unordered_map<IterDomain*, TensorView*> domain_use_map;
+
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    std::unordered_set<Val*> root_domains;
+    std::copy(
+        tv->getRootDomain().begin(),
+        tv->getRootDomain().end(),
+        std::inserter(root_domains, root_domains.begin()));
+
+    std::vector<Val*> leaf_domains;
+    std::copy(
+        tv->domain()->domain().begin(),
+        tv->domain()->domain().end(),
+        std::back_inserter(leaf_domains));
+
+    auto all_domain_vals =
+        DependencyCheck::getAllValsBetween(root_domains, leaf_domains);
+
+    for (auto id : ir_utils::filterByType<IterDomain>(all_domain_vals)) {
+      auto it = domain_use_map.find(id);
+      TORCH_INTERNAL_ASSERT(
+          it == domain_use_map.end(),
+          "Multiple use of ",
+          id,
+          " detected.",
+          " Used in both TV",
+          tv->name(),
+          " and TV",
+          it->second->name());
+      domain_use_map.insert({id, tv});
+    }
+  }
+}
+
 } // namespace
 
 void validateIr(Fusion* fusion) {
@@ -105,6 +148,8 @@ void validateIr(Fusion* fusion) {
 
   // Validate Parallelization
   ValidateParallelType::validate(fusion);
+
+  validateIterDomainUsage(fusion);
 }
 
 namespace {

@@ -601,6 +601,17 @@ bool IterDomain::sameAs(const Statement* other) const {
   return is_same;
 }
 
+std::vector<IterDomain*> IterDomain::clone(
+    const std::vector<IterDomain*>& domains) {
+  std::vector<IterDomain*> cloned_domains;
+  std::transform(
+      domains.begin(),
+      domains.end(),
+      std::back_inserter(cloned_domains),
+      [](auto id) { return id->clone(); });
+  return cloned_domains;
+}
+
 IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   TORCH_CHECK(
       outer->start()->isZeroInt() && inner->start()->isZeroInt(),
@@ -721,7 +732,7 @@ void IterDomain::parallelize(ParallelType t) {
 TensorDomain::TensorDomain(
     std::vector<IterDomain*> root_domain,
     std::vector<bool> contiguity)
-    : Val(ValType::TensorDomain),
+    : Val(ValType::TensorDomain, DataType::Null, false),
       root_domain_(std::move(root_domain)),
       contiguity_(
           contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)

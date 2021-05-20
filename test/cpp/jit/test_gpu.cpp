@@ -4966,8 +4966,9 @@ TEST(NVFuserTest, FusionSimpleBCast5_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 =
       new TensorView(new TensorDomain({M, K}, {true, true}), DataType::Float);
-  TensorView* tv1 =
-      new TensorView(new TensorDomain({K, N}, {true, true}), DataType::Float);
+  // Note: IterDomain must not be reused, so K needs to be cloned.
+  TensorView* tv1 = new TensorView(
+      new TensorDomain({K->clone(), N}, {true, true}), DataType::Float);
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);

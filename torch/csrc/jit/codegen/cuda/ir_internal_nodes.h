@@ -377,6 +377,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
         isRFactorProduct());
   }
 
+  //! Clone a vector domains
+  static std::vector<IterDomain*> clone(
+      const std::vector<IterDomain*>& domains);
+
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
 
   //! Run concretization pass and return the concretized domain of broadcast id

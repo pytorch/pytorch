@@ -682,7 +682,8 @@ TensorView* TensorView::cache_before() {
   auto root_domain = getRootDomain();
   TensorView* producer = new TensorView(
       new TensorDomain(
-          root_domain, std::vector<bool>(root_domain.size(), true)),
+          IterDomain::clone(root_domain),
+          std::vector<bool>(root_domain.size(), true)),
       getDataType().value());
 
   // Set domain of consumer
@@ -763,7 +764,8 @@ TensorView* TensorView::cache_fork() {
   auto root_domain = TensorDomain::noReductions(getRootDomain());
   TensorView* new_output = new TensorView(
       new TensorDomain(
-          root_domain, std::vector<bool>(root_domain.size(), true)),
+          IterDomain::clone(root_domain),
+          std::vector<bool>(root_domain.size(), true)),
       getDataType().value());
 
   // Create write operation from this TV to new output
