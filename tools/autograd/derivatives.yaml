@@ -713,6 +713,19 @@
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
   self: grad * log1p(other.toDouble())
 
+- name: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
+  self: grad * 1
+  a: not_implemented("special_betainc")
+  b: not_implemented("special_betainc")
+
+- name: special_betainc.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
+  self: grad * 1
+  b: not_implemented("special_betainc")
+
+- name: special_betainc.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
+  self: grad * 1
+  a: not_implemented("special_betainc")
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 

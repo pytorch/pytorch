@@ -29,3 +29,4 @@ Functions
 .. autofunction:: i0e
 .. autofunction:: logit
 .. autofunction:: xlog1py
+.. autofunction:: betainc

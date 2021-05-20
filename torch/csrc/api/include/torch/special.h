@@ -182,6 +182,32 @@ inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& oth
   return torch::special_xlog1py_out(result, self, other);
 }
 
+/// Computes betainc
+/// ```
+inline Tensor betainc(const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_xlog1py(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///

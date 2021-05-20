@@ -973,6 +973,20 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void betainc_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "betainc_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
+      if (at::_isnan(x)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * 2;
+    });
+  });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1066,6 +1080,7 @@ REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
+REGISTER_DISPATCH(betainc_stub, &betainc_kernel);
 
 } // namespace native
 } // namespace at

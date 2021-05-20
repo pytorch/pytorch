@@ -57,6 +57,10 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_betainc) (const Tensor& self, const Tensor& a, const Tensor& b) {
+  build_binary_float_op(maybe_get_output(), self, a, b);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -195,6 +199,7 @@ DEFINE_DISPATCH(copysign_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
+DEFINE_DISPATCH(betainc_stub);
 
 TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -236,6 +241,10 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
   xlog1py_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(special_betainc_out) (const Tensor& self, const Tensor& a, const Tensor& b, const Tensor& result) {
+  betainc_stub(device_type(), *this);
+}
+
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func)                                                    \
 TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
   func##_stub(device_type(), *this);                                                           \
@@ -266,6 +275,22 @@ Tensor& special_xlog1py_out(const Scalar& self, const Tensor& other, Tensor& res
 
 Tensor& special_xlog1py_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_xlog1py_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_betainc(const Tensor& self, const Scalar& a, const Scalar& b) {
+  return at::special_betainc(self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
+}
+
+Tensor special_betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
+  return at::special_betainc(self, wrapped_scalar_tensor(a), b);
+}
+
+Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
+  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
+}
+
+Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Tensor& b, Tensor& result) {
+  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), b);
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {

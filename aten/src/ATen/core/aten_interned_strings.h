@@ -443,6 +443,7 @@ _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
 _(aten, special_xlog1py) \
+_(aten, special_betainc) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
