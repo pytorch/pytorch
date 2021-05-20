@@ -189,9 +189,23 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   std::stringstream ss;
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
-  const std::string error_pattern(
-      ".*(self.__backend.execute).*(return x \\+ h).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
+  std::string error_pattern = R"(
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, h, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, h):
+        return x + h
+               ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
 TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
@@ -229,37 +243,29 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   std::stringstream ss;
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
-  /*
-   * Error stack throw will look like this:
-   * Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)
-   * Traceback of TorchScript (most recent call last):
-   * File "<string>", line 5, in FunctionName_UNKNOWN
-   *            typed_inputs: List[Any] = [x, y, ]
-   *            if self.__backend.is_available() :
-   *              _0, = self.__backend.execute(self.__handles["forward"],
-   * typed_inputs)
-   *                    ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-   *              assert isinstance(_0, Tensor)
-   *              return _0
-   * File "<string>", line 3, in FunctionName_UNKNOWN
-   *
-   * def forward(self, x, y):
-   *   return self.A0.forward(x, y) + self.B0.forward(x)
-   *          ~~~~~~~~~~~~~~~ <--- HERE
-   *
-   * File "<string>", line 3, in FunctionName_UNKNOWN
-   *
-   * def forward(self, x, y):
-   *   return x + y
-   *          ~~~~~ <--- HERE
-   *
-   */
-  const std::string error_pattern(
-      ".*(self.__backend.execute).*self.A0.forward.*(return x \\+ y).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
-  ASSERT_THROWS_WITH_MESSAGE(
-      mlm.forward(inputs),
-      "Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)");
+  std::string error_pattern = R"(
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, y, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.B0.forward(x)
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
 TEST(
@@ -330,12 +336,35 @@ TEST(
    *             ~~~~~ <--- HERE
    *
    */
-  const std::string error_pattern(
-      ".*(self.__backend.execute).*self.B0.forward.*self.A0.forward.*(return x \\+ y).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
-  ASSERT_THROWS_WITH_MESSAGE(
-      mlm.forward(inputs),
-      "Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A)");
+  std::string error_pattern = R"(
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, y, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.B0.forward(x, y) + 3
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + 2
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
 TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
@@ -394,12 +423,29 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   std::stringstream ss;
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
-  const std::string error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(return x \\+ y).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(c_loaded.forward(inputs), error_pattern);
-  ASSERT_THROWS_WITH_MESSAGE(
-      c_loaded.forward(inputs),
-      "Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule)");
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.B0.forward(x)
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, y, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
 }
 
 TEST(
@@ -498,12 +544,35 @@ TEST(
    *
    *
    *  */
-  const std::string error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(c_loaded.forward(inputs), error_pattern);
-  ASSERT_THROWS_WITH_MESSAGE(
-      c_loaded.forward(inputs),
-      "Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)");
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.B0.forward(x)
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, y, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.AA0.forward(x, y) + 3
+             ~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
 }
 
 } // namespace jit
