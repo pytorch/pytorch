@@ -75,6 +75,11 @@ void setDynamicLayerStack(const std::vector<DynamicLayer>& stack) {
   dynamicLayerStackAccessor() = stack;
 }
 
+bool areTransformsActive() {
+  const auto& data = getGlobalDynmetaData();
+  return !data.empty();
+}
+
 static DynamicLayer popDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
