@@ -355,7 +355,7 @@ void GeluCUDAKernelImpl(TensorIteratorBase& it) {
   });
 }
 
-void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
         using T_ACC = acc_type<scalar_t, true>;
@@ -504,17 +504,10 @@ TORCH_IMPL_FUNC(gelu_out_cuda) (
   GeluCUDAKernelImpl(*this);
 }
 
-Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(
-      self,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto it = TensorIterator::borrowing_binary_op(dX, grad, self);
-  GeluBackwardCUDAKernelImpl(it);
-  return dX;
+TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
+  const Tensor& self, const Tensor& result
+) {
+  GeluBackwardCUDAKernelImpl(*this);
 }
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);

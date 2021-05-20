@@ -40,7 +40,7 @@ DECLARE_DISPATCH(log_sigmoid_cpu_fn, log_sigmoid_cpu_stub);
 DECLARE_DISPATCH(activation_backward_fn, log_sigmoid_backward_cpu_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(structured_activation_fn, GeluKernel);
-DECLARE_DISPATCH(activation_backward_fn, GeluBackwardKernel);
+DECLARE_DISPATCH(structured_activation_backward_fn, GeluBackwardKernel);
 DECLARE_DISPATCH(hardtanh_backward_fn, hardtanh_backward_stub);
 DECLARE_DISPATCH(hardsigmoid_fn, hardsigmoid_stub);
 DECLARE_DISPATCH(hardsigmoid_backward_fn, hardsigmoid_backward_stub);
