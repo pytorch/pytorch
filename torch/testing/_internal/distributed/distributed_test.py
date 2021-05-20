@@ -662,7 +662,19 @@ class DistributedTest:
             # Only execute barrier on rank == 0, causing it to timeout
             if local_rank == 0:
                 expected_time = time.time() + timeout.total_seconds()
-                with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
+                # In debug mode, we execute a monitored_barrier before the
+                # collective, so assert on that.
+                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                    exception_ctx = self.assertRaisesRegex(
+                        Exception,
+                        "failed to pass monitoredBarrier"
+                    )
+                else:
+                    exception_ctx = self.assertRaisesRegex(
+                        Exception,
+                        " (Timed out|closed|timeout) "
+                    )
+                with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
             else:
@@ -5967,9 +5979,13 @@ class DistributedTest:
             # Kick off some allreduce work on all ranks
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
-            # Run monitored barrier
+            # Run monitored barrier and ensure it passees
             timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
+            # Check monitored_barrier success with wait_all_ranks=True
+            for _ in range(10):
+                dist.all_reduce(torch.cat(tensors))
+            dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1

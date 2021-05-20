@@ -204,14 +204,14 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def setUp(self):
         super(ProcessGroupGlooWrapperTest, self).setUp()
 
-    def opts(self, threads=2):
+    def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
-        opts._timeout = 5.0
+        opts._timeout = timeout
         opts._devices = [create_device(interface=LOOPBACK)]
         opts._threads = threads
         return opts
 
-    def _create_wrapper_pg(self, with_new_group=False):
+    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
@@ -226,8 +226,13 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
                 store,
                 self.rank,
                 self.world_size,
+                timeout=timeout,
             )
         return pg
+
+    def test_collective_hang(self):
+        pg = self._create_wrapper_pg(timeout=2.0)
+        self._test_collective_hang(pg)
 
     # NOTE: these tests are separated by debug level instead of combined into
     # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
