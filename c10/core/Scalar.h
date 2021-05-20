@@ -132,6 +132,20 @@ class C10_API Scalar {
     }
   }
 
+  bool equal(Scalar num) const {
+    switch (num.tag) {
+      case Tag::HAS_z:
+        return equal(num.v.z);
+      case Tag::HAS_d:
+        return equal(num.v.d);
+      case Tag::HAS_i:
+        return equal(num.v.i);
+      case Tag::HAS_b:
+        return equal(static_cast<bool>(num.v.i));
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
   ScalarType type() const {
     if (isComplex()) {
       return ScalarType::ComplexDouble;

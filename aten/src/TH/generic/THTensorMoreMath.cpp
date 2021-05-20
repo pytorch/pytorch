@@ -314,43 +314,6 @@ accreal THTensor_(std_var_all)(THTensor* tensor, int64_t correction, bool take_s
   }
 }
 
-void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
-{
-  if (nbins <= 0) {
-      THError("bins must be > 0");
-  }
-  scalar_t minval;
-  scalar_t maxval;
-  scalar_t *h_data;
-
-  THTensor_(resize1d)(hist, nbins);
-  THTensor_wrap(hist).zero_();
-  minval = minvalue;
-  maxval = maxvalue;
-  if (minval == maxval)
-  {
-    minval = THTensor_wrap(tensor).min().item<scalar_t>();
-    maxval = THTensor_wrap(tensor).max().item<scalar_t>();
-  }
-  if (minval == maxval)
-  {
-    minval = minval - 1;
-    maxval = maxval + 1;
-  }
-
-  TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
-  TORCH_CHECK(minval < maxval, "max must be larger than min");
-
-  h_data = hist->data<scalar_t>();
-
-  TH_TENSOR_APPLY(scalar_t, tensor,
-    if (*tensor_data >= minval && *tensor_data <= maxval) {
-      const int bin = (int)((*tensor_data-minval) / (maxval-minval) * nbins);
-      h_data[THMin(bin, nbins-1)] += 1;
-    }
-  );
-}
-
 #endif
 
 #undef TH_MATH_NAME

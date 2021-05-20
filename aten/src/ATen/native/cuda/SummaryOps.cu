@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
@@ -328,20 +329,12 @@ Tensor _bincount_cuda_template(
 
 ///////////////// histc /////////////////
 template <typename input_t>
-Tensor _histc_cuda_template(
+void _histc_cuda_template(
     const Tensor& self,
     int64_t nbins,
     input_t min,
-    input_t max) {
-  if (nbins <= 0) {
-    AT_ERROR("bins must be > 0");
-  }
-  Tensor output = native::zeros(
-      {nbins},
-      self.scalar_type(),
-      c10::nullopt /* layout */,
-      DeviceType::CUDA,
-      c10::nullopt /* pin_memory */);
+    input_t max,
+    const Tensor& result) {
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
@@ -374,11 +367,9 @@ Tensor _histc_cuda_template(
       maxvalue,
       "] is not finite");
 #endif
-  TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
-  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
-    output, self, Tensor(), nbins, minvalue, maxvalue);
-  return output;
+  cuda::CUDA_tensor_histogram<input_t, input_t, false>(
+      result, self, Tensor(), nbins, minvalue, maxvalue);
 }
 } // namespace
 
@@ -402,27 +393,17 @@ Tensor _bincount_cuda(
   });
 }
 
-Tensor _histc_cuda(
-    const Tensor& self,
-    int64_t nbins,
-    const Scalar& min,
-    const Scalar& max) {
-  if (self.scalar_type() == ScalarType::Half) {
-    AT_ERROR("HalfTensor is not supported");
-  }
+TORCH_IMPL_FUNC(histc_out_cuda)(const Tensor& self, int64_t bins, const Scalar& min,
+                                const Scalar& max, const Tensor& result) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histc_cuda");
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
-    return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
+  result.zero_();
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
+    _histc_cuda_template(
+        self, bins, min.to<scalar_t>(), max.to<scalar_t>(), result);
   });
 }
 
-Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
-  auto ret = _histc_cuda(self, bins, min, max);
-  result.resize_as_(ret);
-  result.copy_(ret);
-  return result;
-}
 } // namespace native
 } // namespace at

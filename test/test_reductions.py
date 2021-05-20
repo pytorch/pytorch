@@ -2263,7 +2263,7 @@ class TestReductions(TestCase):
 
     def test_histc(self, device):
         # negative nbins throws
-        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+        with self.assertRaisesRegex(RuntimeError, 'Expected bins to be a positive integer'):
             torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
         # empty tensor
         actual = torch.histc(torch.tensor([], device=device), min=0, max=3)
@@ -2342,7 +2342,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
-        with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
+        with self.assertRaisesRegex(RuntimeError, "Expected min <= max"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
                         bins=4, min=5, max=1)
 

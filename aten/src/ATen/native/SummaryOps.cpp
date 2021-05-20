@@ -1,11 +1,58 @@
 // Returns the frequency of elements of input non-negative integer tensor.
+#include <ATen/native/SummaryOps.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 
 #include <tuple>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(histc)(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max) {
+  TORCH_CHECK(!min.isComplex(),
+              "Expected min to be real but found complex value ", min.toComplexDouble());
+  TORCH_CHECK(!max.isComplex(),
+              "Expected max to be real but found complex value ", max.toComplexDouble());
+  auto min_v = min.toDouble();
+  auto max_v = max.toDouble();
+  TORCH_CHECK(min_v <= max_v, "Expected min <= max but found: ", min_v, " > ", max_v);
+  TORCH_CHECK(bins > 0, "Expected bins to be a positive integer, but found ", bins);
+  set_output(0, IntArrayRef(bins), {}, self.options(), {});
+}
+
+} // namespace meta
+
+namespace native {
+
+DEFINE_DISPATCH(histc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+TORCH_IMPL_FUNC(histc_out_cpu)(const Tensor& self, int64_t bins, const Scalar& min,
+                               const Scalar& max, const Tensor& result) {
+  Scalar minval(min), maxval(max);
+  if (minval.equal(maxval)) {
+    minval = self.min().item();
+    maxval = self.max().item();
+
+    if (minval.equal(maxval)) {
+      if (minval.isIntegral(/*includeBool=*/true)) {
+        minval = minval.to<int64_t>() - 1;
+        maxval = maxval.to<int64_t>() + 1;
+      } else {
+        minval = minval.to<double>() - 1.0;
+        maxval = maxval.to<double>() + 1.0;
+      }
+    }
+  }
+
+  auto iter = TensorIteratorConfig()
+    .add_input(self)
+    .build();
+  result.zero_();
+  histc_stub(kCPU, iter, minval, maxval, result);
+}
+
 
 ///////////////// bincount /////////////////
 namespace {

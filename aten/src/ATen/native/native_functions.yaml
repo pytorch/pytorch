@@ -6618,15 +6618,14 @@
     CUDA: lerp_cuda_tensor
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: legacy::cpu::_th_histc_out
-    CUDA: _histc_out_cuda
+    CPU: histc_out_cpu
+    CUDA: histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
+  structured_delegate: histc.out
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_histc
-    CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
