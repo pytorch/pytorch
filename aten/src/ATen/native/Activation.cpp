@@ -1,5 +1,8 @@
 #include <ATen/native/Activation.h>
 
+#include <cmath>
+#include <functional>
+
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
@@ -51,6 +54,10 @@ TORCH_META_FUNC(elu) (
 }
 
 TORCH_META_FUNC(silu) (const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(mish) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
@@ -127,6 +134,10 @@ DEFINE_DISPATCH(leaky_relu_backward_stub);
 DEFINE_DISPATCH(silu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(mish_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(mish_backward_stub);
 
 TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
@@ -138,6 +149,12 @@ TORCH_IMPL_FUNC(silu_out) (
   const Tensor& self, const Tensor& result
 ) {
   silu_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(mish_out) (
+  const Tensor& self, const Tensor& result
+) {
+  mish_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(softplus_out) (
@@ -306,6 +323,22 @@ Tensor math_silu_backward(
   return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
 }
 
+Tensor mish_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  Tensor grad_input = at::empty({0}, input.options());
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, input);
+  mish_backward_stub(iter.device_type(), iter);
+  return grad_input;
+}
+
+Tensor math_mish_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_tanh_softplus = at::tanh(at::softplus(input));
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_tanh_softplus + (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus));
+}
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,

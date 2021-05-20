@@ -722,6 +722,8 @@ def prelu(g, self, weight):
 def silu(g, input):
     return g.op('Mul', input, g.op('Sigmoid', input))
 
+def mish(g, input):
+    return g.op('Mul', input, g.op('Tanh', g.op('Softplus', input)))
 
 def relu(g, input):
     return g.op("Relu", input)

@@ -496,6 +496,45 @@ void silu_backward_kernel(TensorIterator& iter) {
       });
 }
 
+void mish_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "mish_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+          using T_ACC = acc_type<scalar_t, true>;
+          const T_ACC x_acc = static_cast<T_ACC>(x);
+          return x_acc * c10::cuda::compat::tanh(c10::cuda::compat::log1p(c10::cuda::compat::exp(x_acc)));
+      });
+      });
+}
+
+void mish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "mish_backward_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+          using T_ACC = acc_type<scalar_t, true>;
+          const T_ACC dy_acc = static_cast<T_ACC>(dy);
+          const T_ACC x_acc = static_cast<T_ACC>(x);
+          const T_ACC s_acc =
+          T_ACC(1) / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+          const T_ACC t_acc =
+          c10::cuda::compat::tanh(c10::cuda::compat::exp(x_acc));
+          return dy_acc * (t_acc + x_acc * s_acc * (T_ACC(1) - t_acc * t_acc));
+      });
+      });
+}
+
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
@@ -540,6 +579,8 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+REGISTER_DISPATCH(mish_stub, &mish_kernel);
+REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel_cuda);
 
 } // namespace native

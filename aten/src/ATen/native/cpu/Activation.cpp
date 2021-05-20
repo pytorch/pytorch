@@ -632,6 +632,45 @@ void silu_backward_kernel(TensorIterator& iter) {
       });
 }
 
+
+void mish_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "mish_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) {
+                return x * std::tanh(std::log1p(std::exp(x)));
+            },
+            [kOneVec](Vec256<scalar_t> x_vec) {
+              return x_vec * x_vec.exp().log1p().tanh();
+            });
+      });
+}
+
+void mish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "mish_backward_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              const scalar_t tanh_softplus =
+                  std::tanh(std::log1p(std::exp(x)));
+              return dy * (tanh_softplus + x * sigmoid * (scalar_t(1) - tanh_softplus * tanh_softplus));
+            },
+            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
+              const Vec256<scalar_t> sigmoid =
+                  kOneVec / (kOneVec + x_vec.neg().exp());
+              const Vec256<scalar_t> tanh_softplus =
+                  x_vec.exp().log1p().tanh();
+              return dy_vec * (tanh_softplus + x_vex * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
+            });
+      });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -680,6 +719,10 @@ REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_stub, &mish_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 
 } // namespace native
 } // namespace at

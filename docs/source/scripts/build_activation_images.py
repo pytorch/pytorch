@@ -37,6 +37,7 @@ functions = [
     'RReLU',
     'SELU',
     'SiLU',
+    'MISH',
     'CELU',
     'GELU',
     'Sigmoid',
