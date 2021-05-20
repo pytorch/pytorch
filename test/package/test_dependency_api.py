@@ -288,6 +288,25 @@ class TestDependencyAPI(PackageTestCase):
             ),
         )
 
+    def test_invalid_import(self):
+        """An incorrectly-formed import should raise a PackagingError."""
+        buffer = BytesIO()
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(buffer, verbose=False) as exporter:
+                # This import will fail to load.
+                exporter.save_source_string("foo", "from ........ import lol")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Dependency resolution failed.
+                    foo
+                      Context: attempted relative import beyond top-level package
+                """
+            ),
+        )
+
 
 if __name__ == "__main__":
     run_tests()
