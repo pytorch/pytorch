@@ -5,23 +5,49 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <regex>
-
-#define ASSERT_THROWS_WITH_REGEX_MESSAGE(statement, regex_pattern)   \
-  const std::regex error_regex(regex_pattern, std::regex::extended); \
-  try {                                                              \
-    (void)statement;                                                 \
-    FAIL();                                                          \
-  } catch (const std::exception& e) {                                \
-    ASSERT_TRUE(std::regex_match(e.what(), error_regex));            \
+namespace {
+static inline void trim(std::string& s) {
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+          }));
+  s.erase(
+      std::find_if(
+          s.rbegin(),
+          s.rend(),
+          [](unsigned char ch) { return !std::isspace(ch); })
+          .base(),
+      s.end());
+  for (int64_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\n') {
+      s.erase(i, 1);
+      i--;
+    }
   }
+  for (int64_t i = 0; i < s.size(); ++i) {
+    if (s[i] == ' ') {
+      for (int64_t j = i + 1; j < s.size(); j++) {
+        if (s[j] == ' ') {
+          s.erase(j, 1);
+          j--;
+        } else {
+          break;
+        }
+      }
+    }
+  }
+}
+} // namespace
 
-#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)                 \
-  try {                                                                  \
-    (void)statement;                                                     \
-    FAIL();                                                              \
-  } catch (const std::exception& e) {                                    \
-    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
+#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)              \
+  try {                                                               \
+    (void)statement;                                                  \
+    FAIL();                                                           \
+  } catch (const std::exception& e) {                                 \
+    std::string substring_s(substring);                               \
+    trim(substring_s);                                                \
+    auto exception_string = std::string(e.what());                    \
+    trim(exception_string);                                           \
+    ASSERT_NE(exception_string.find(substring_s), std::string::npos); \
   }
 
 namespace torch {
