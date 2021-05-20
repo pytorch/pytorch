@@ -634,39 +634,38 @@ void silu_backward_kernel(TensorIterator& iter) {
 
 
 void mish_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      kBFloat16, iter.dtype(), "mish_cpu", [&]() {
-        const Vec256<scalar_t> kOneVec(scalar_t(1));
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
+        using Vec = Vec256<scalar_t>;
         cpu_kernel_vec(
             iter,
-            [](scalar_t x) {
+            [](scalar_t x) -> scalar_t{
                 return static_cast<scalar_t>(x * std::tanh(std::log1p(std::exp(x))));
             },
-            [kOneVec](Vec256<scalar_t> x_vec) {
+            [](Vec256<scalar_t> x_vec) -> Vec {
               return Vec::blendv(x_vec * x_vec.exp().log1p().tanh());
             });
       });
 }
 
 void mish_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      kBFloat16, iter.dtype(), "mish_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
+        using Vec = Vec256<scalar_t>;
         const Vec256<scalar_t> kOneVec(scalar_t(1));
         cpu_kernel_vec(
             iter,
-            [](scalar_t dy, scalar_t x) {
+            [](scalar_t dy, scalar_t x) -> scalar_t {
               const scalar_t sigmoid =
                   scalar_t(1) / (scalar_t(1) + std::exp(-x));
               const scalar_t tanh_softplus =
                   std::tanh(std::log1p(std::exp(x)));
               return dy * (tanh_softplus + x * sigmoid * (scalar_t(1) - tanh_softplus * tanh_softplus));
             },
-            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
+            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) -> Vec {
               const Vec256<scalar_t> sigmoid =
                   kOneVec / (kOneVec + x_vec.neg().exp());
               const Vec256<scalar_t> tanh_softplus =
                   x_vec.exp().log1p().tanh();
-              return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
+              return Vec::blendv(dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus)));
             });
       });
 }
