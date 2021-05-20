@@ -4,7 +4,9 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -12,6 +14,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -21,6 +24,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -460,9 +464,17 @@ static TypePtr inferShapeAndTypeForInput(
   }
 }
 
-static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
+static void setInputTensorTypes(
+    Graph& g,
+    const Stack& stack,
+    bool complete,
+    const std::vector<int>& param_count_list = {}) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
+  size_t list_idx = 0;
+  if (!param_count_list.empty()) {
+    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+  }
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
     // Leave packed param types alone. This is needed for downstream passes
@@ -471,13 +483,19 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     if (auto named_type = v->type()->cast<c10::NamedType>()) {
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
-          s_iter++;
+          if (param_count_list.empty()) {
+            s_iter++;
+          } else {
+            s_iter += param_count_list[list_idx];
+          }
+          list_idx++;
           continue;
         }
       }
     }
     v->setType(
         inferShapeAndTypeForInput(v->type(), s_iter, stack.end(), complete));
+    list_idx++;
   }
 }
 
@@ -495,10 +513,12 @@ static std::shared_ptr<Graph> _propagate_shapes(
 static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     Graph& graph,
     const std::vector<at::Tensor>& inputs,
+    const std::vector<int>& param_count_list,
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
-  setInputTensorTypes(*retval, fmap<IValue>(inputs), /*complete=*/true);
+  setInputTensorTypes(
+      *retval, fmap<IValue>(inputs), /*complete=*/true, param_count_list);
   if (propagate) {
     PropagateInputShapes(retval);
   }
@@ -967,6 +987,15 @@ void initJitScriptBindings(PyObject* module) {
         return Object(
             pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
+
+  // Used by torch.Package to save TS objects in unified format
+  py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
+      .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
+      .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
+      .def(
+          "write_files",
+          &ScriptModuleSerializer::writeFiles,
+          py::arg("code_dir") = ".data/ts_code/code/");
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -1643,6 +1672,26 @@ void initJitScriptBindings(PyObject* module) {
         return ret;
       });
   m.def(
+      "_import_ir_module_from_package",
+      [](std::shared_ptr<CompilationUnit> cu,
+         std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+         std::shared_ptr<torch::jit::StorageContext> storage_context,
+         py::object map_location,
+         std::string ts_id) {
+        c10::optional<at::Device> optional_device;
+        if (!map_location.is(py::none())) {
+          AT_ASSERT(THPDevice_Check(map_location.ptr()));
+          optional_device =
+              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+        }
+        return import_ir_module(
+            std::move(cu),
+            std::move(reader),
+            std::move(storage_context),
+            optional_device,
+            std::move(ts_id));
+      });
+  m.def(
       "import_ir_module_from_buffer",
       [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
@@ -1683,6 +1732,45 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return _load_for_mobile(in, optional_device);
+      });
+  m.def(
+      "_backport_for_mobile",
+      [](const std::string& filename_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        return _backport_for_mobile(filename_input, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer",
+      [](const std::string& buffer_input,
+         const std::string& filename_output,
+         const int64_t version) {
+        std::istringstream in(buffer_input);
+        return _backport_for_mobile(in, filename_output, version);
+      });
+  m.def(
+      "_backport_for_mobile_to_buffer",
+      [](const std::string& filename_input, const int64_t version) {
+        std::ostringstream buffer_output;
+        bool success =
+            _backport_for_mobile(filename_input, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer_to_buffer",
+      [](const std::string& buffer_input, const int64_t version) {
+        std::istringstream in(buffer_input);
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(in, buffer_output, version);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def("_get_model_bytecode_version", [](const std::string& filename) {
+    return _get_model_bytecode_version(filename);
+  });
+  m.def(
+      "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
+        std::istringstream in(buffer);
+        return _get_model_bytecode_version(in);
       });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
@@ -1995,6 +2083,53 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  torch::class_<SourceRef>("profiling", "SourceRef")
+      .def(
+          "starting_lineno",
+          [](const c10::intrusive_ptr<SourceRef>& self) {
+            return static_cast<int64_t>((*self)->starting_line_no());
+          })
+      .def("text", [](const c10::intrusive_ptr<SourceRef>& self) {
+        return (*self)->text();
+      });
+
+  torch::class_<InstructionStats>("profiling", "InstructionStats")
+      .def(
+          "count",
+          [](const c10::intrusive_ptr<InstructionStats>& self) {
+            return self->count;
+          })
+      .def("duration_ns", [](const c10::intrusive_ptr<InstructionStats>& self) {
+        return self->duration.count();
+      });
+
+  torch::class_<SourceStats>("profiling", "SourceStats")
+      .def(
+          "source",
+          [](const c10::intrusive_ptr<SourceStats>& self) {
+            return c10::make_intrusive<SourceRef>(self->getSourceRef());
+          })
+      .def("line_map", &SourceStats::getLineMap);
+
+  torch::class_<ScriptProfile>("profiling", "_ScriptProfile")
+      .def(torch::init<>())
+      .def("enable", &ScriptProfile::enable)
+      .def("disable", &ScriptProfile::disable)
+      .def("_dump_stats", [](const c10::intrusive_ptr<ScriptProfile>& self) {
+        const auto& stats = self->dumpStats();
+        c10::List<c10::intrusive_ptr<SourceStats>> ret;
+        for (const auto& source : stats) {
+          SourceStats::LineMap lineMap;
+          for (const auto& line : source.second) {
+            lineMap.insert(
+                line.first, c10::make_intrusive<InstructionStats>(line.second));
+          }
+          ret.push_back(c10::make_intrusive<SourceStats>(
+              source.first, std::move(lineMap)));
+        }
+        return ret;
+      });
 }
 } // namespace jit
 } // namespace torch

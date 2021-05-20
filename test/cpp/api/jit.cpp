@@ -119,7 +119,6 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestPickle) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::IValue float_value(2.3);
 
   // TODO: when tensors are stored in the pickle, delete this
@@ -129,7 +128,6 @@ TEST(TorchScriptTest, TestPickle) {
   torch::IValue ivalue = torch::jit::unpickle(data.data(), data.size());
 
   double diff = ivalue.toDouble() - float_value.toDouble();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }

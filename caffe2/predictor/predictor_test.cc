@@ -168,7 +168,6 @@ class PredictorTest : public testing::Test {
  public:
   void SetUp() override {
     DeviceOption op;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     op.set_random_seed(1701);
     ctx_ = std::make_unique<CPUContext>(op);
     NetDef init, run;

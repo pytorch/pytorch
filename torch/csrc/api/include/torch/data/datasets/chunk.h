@@ -251,7 +251,6 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t cache_size = 2048,
       size_t cross_chunk_shuffle_count = 1)
       : preloader_count_(preloader_count),
@@ -283,7 +282,6 @@ struct ChunkDatasetOptions {
   TORCH_ARG(size_t, batch_size);
 
   /// The capacity of the queue for batch caching.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(size_t, cache_size) = 2048;
 
   // The number of chunks to perfrom cross-chunk shuffling. Default to 1 meaning

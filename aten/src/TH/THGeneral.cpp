@@ -44,13 +44,10 @@ void _THError(const char *file, const int line, const char *fmt, ...)
   /* vasprintf not standard */
   /* vsnprintf: how to handle if does not exists? */
   va_start(args, fmt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n = vsnprintf(msg, 2048, fmt, args);
   va_end(args);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if(n < 2048) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
   }
 
@@ -66,7 +63,6 @@ void _THAssertionFailed(const char *file, const int line, const char *exp, const
   char msg[1024];
   va_list args;
   va_start(args, fmt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vsnprintf(msg, 1024, fmt, args);
   va_end(args);
   _THError(file, line, "Assertion `%s' failed. %s", exp, msg);
@@ -114,13 +110,10 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
     /* vasprintf not standard */
     /* vsnprintf: how to handle if does not exists? */
     va_start(args, fmt);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int n = vsnprintf(msg, 2048, fmt, args);
     va_end(args);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if(n < 2048) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
     }
 
@@ -231,7 +224,6 @@ THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   if (n < L - 2) {
     snprintf(str+n, L-n, "]");
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     snprintf(str+L-5, 5, "...]");
   }
 

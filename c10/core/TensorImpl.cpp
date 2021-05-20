@@ -235,7 +235,6 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
   switch (sizes_and_strides_.size()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
@@ -273,7 +272,6 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.size_at_unchecked(0) < 2 ||
         sizes_and_strides_.stride_at_unchecked(0) == 1;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
   for (int64_t i = 0; i < dim(); i++) {

@@ -28,18 +28,14 @@ using namespace torch::jit::tensorexpr;
 TEST(Reductions, ReduceSum1D) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {10}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
   }
 
   std::vector<float> out(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* c = Reduce("sum", {}, Sum(), b, {{10, "m"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
@@ -80,7 +76,6 @@ TEST(Reductions, ReduceSum2D) {
 
   SimpleIREvaluator cg(s, {b, c, n, m});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 5, 7});
 
   float expected = 0;
@@ -114,7 +109,6 @@ TEST(Reductions, ReduceSum3D) {
   SimpleIREvaluator cg(s, {b, c, m});
 
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> cData(2 * 3, 6.0f);
   std::vector<float> dData(2, 1.0f);
   std::vector<float> eData(2, 1.0f);
@@ -250,18 +244,14 @@ TEST(Reductions, ReduceProduct) {
 TEST(Reductions, ReduceMax) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* dm1 = Reduce("max", {}, Maximum(kFloat), in_, {{10, "m"}});
 
   LoopNest loop({dm1});
@@ -274,11 +264,9 @@ TEST(Reductions, ReduceMax) {
 
   ASSERT_EQ(out[0], 9);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in2_(BufHandle("b", {2, 5}, kFloat));
   std::vector<float> out2(2, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
 
   LoopNest loop2({m2d});
@@ -299,15 +287,11 @@ TEST(Reductions, ReduceMinCustomInitializer) {
   KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     in[j] = 10 + j;
   }
 
@@ -316,7 +300,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
       {},
       Minimum(ExprHandle(minInit)),
       [&](ParameterList& v) { return in_.load(v); },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "m"}});
 
   LoopNest loop({min});
@@ -332,7 +315,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
   ASSERT_EQ(out[0], 10);
 
   // With an initalizer lower than the min, that's the min.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 5.f});
   ASSERT_EQ(out[0], 5);
 }
@@ -344,7 +326,6 @@ TEST(Reductions, ReduceAnyAll) {
   KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {4, 10}, kInt));
 
   Reducer anyEqSV(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
@@ -358,7 +339,6 @@ TEST(Reductions, ReduceAnyAll) {
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kEQ);
       },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "j"}});
 
   LoopNest loop({any});
@@ -368,12 +348,10 @@ TEST(Reductions, ReduceAnyAll) {
 
   SimpleIREvaluator cg(s, {b, any, searchValue});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> in(40, 0);
   std::vector<int> out(4, 0);
 
   // input has 0-39 in 4 rows.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 40; ++i) {
     in[i] = i;
   }
@@ -385,7 +363,6 @@ TEST(Reductions, ReduceAnyAll) {
   ASSERT_EQ(out[2], 0);
   ASSERT_EQ(out[3], 0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 15});
 
   // 15 in the 3rd row
@@ -405,7 +382,6 @@ TEST(Reductions, ReduceAnyAll) {
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kGT);
       },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "j"}});
 
   LoopNest loop2({allGreaterThan});
@@ -415,7 +391,6 @@ TEST(Reductions, ReduceAnyAll) {
 
   SimpleIREvaluator cg2(s, {b, allGreaterThan, searchValue});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg2.call({in, out, 11});
 
   // 11 is in row 2.
@@ -440,12 +415,9 @@ TEST(Reductions, ReduceMatmul2D) {
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
   Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> tA_(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> tB_(6);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(9, -1.f);
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 2; ++j) {
@@ -472,10 +444,8 @@ TEST(Reductions, ReduceMatmul2D) {
   cg.call({tA_, tB_, out});
 
   std::vector<float> expected(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1.f, 3.f, 5.f, 3.f, 13.f, 23.f, 5.f, 23.f, 41.f});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 9; ++i) {
     ASSERT_EQ(out[i], expected[i]);
   }
@@ -485,23 +455,17 @@ TEST(Reductions, ReduceMatmul2D) {
 TEST(Reductions, ReduceRfactorLike) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(100);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     in_[i] = i;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_rf_(10, -2.f);
   std::vector<float> out(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
   Placeholder in_rf(BufHandle(l1->buf()));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
 
   LoopNest loop({l1, l2});
@@ -541,11 +505,9 @@ TEST(Reductions, ReduceAsProducer) {
 
   std::vector<float> aData(2 * 3, 0);
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> dData(2 * 3, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     aData[i] = 6 - i;
     for (int j = 0; j < M; ++j) {
       bData[i * M + j] = j;
@@ -589,13 +551,11 @@ TEST(Reductions, ReduceAsConsumer) {
 
   std::vector<float> aData(2 * 3 * M, 0);
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> dData(2, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
     for (int j = 0; j < M; ++j) {
       bData[i * M + j] = j + 1;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       aData[i * M + j] = 6 - i;
     }
   }
@@ -621,23 +581,16 @@ TEST(Reductions, ReduceAsConsumer) {
 TEST(Reductions, SplitReduceAxis) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(16 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(16, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
@@ -651,7 +604,6 @@ TEST(Reductions, SplitReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out[i], i * 8);
   }
@@ -661,22 +613,15 @@ TEST(Reductions, SplitReduceAxis) {
 TEST(Reductions, SplitNonReduceAxis) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(16 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(16, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -704,7 +649,6 @@ TEST(Reductions, SplitNonReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out[i], i * 8);
   }
@@ -720,12 +664,9 @@ TEST(Reductions, ReorderedReductionInitializer) {
         SumOp(c(k, n), 0, a(k, m, n), {m})
   */
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {1, 12, 6}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(12 * 6, 1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
   LoopNest l_({tensor_});
 
@@ -733,7 +674,6 @@ TEST(Reductions, ReorderedReductionInitializer) {
   Stmt* s_ = Stmt::clone(l_.root_stmt());
   s_ = IRSimplifier::simplify(s_);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
   LoopNest l({tensor});
 
@@ -752,17 +692,14 @@ TEST(Reductions, ReorderedReductionInitializer) {
   s = l.root_stmt();
   s = IRSimplifier::simplify(s);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out1(16, -1.f);
   SimpleIREvaluator cg(s_, {in, tensor_});
   cg.call({in_, out1});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out2(16, -1.f);
   SimpleIREvaluator cg2(s, {in, tensor});
   cg2.call({in_, out2});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out1[i], out2[i]);
   }
@@ -880,7 +817,6 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
   const int InputSize = 2 * 3 * 4 * 5 * 6;
 
@@ -893,12 +829,10 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
       {},
       Sum(),
       in_,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{2, "a"}, {3, "b"}, {4, "c"}, {5, "d"}, {6, "e"}});
   LoopNest orig_loop({c});
 
   // Try rfactoring N outer loops
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int rfac_number = 1; rfac_number < 5; rfac_number++) {
     LoopNest refloop(orig_loop);
     LoopNest loop(orig_loop);
@@ -949,7 +883,6 @@ TEST(Reductions, ReduceSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
@@ -983,7 +916,6 @@ TEST(Reductions, ReduceSplitNoTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
@@ -1019,7 +951,6 @@ TEST(Reductions, ReduceOverSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
@@ -1054,7 +985,6 @@ TEST(Reductions, ReduceSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
@@ -1088,7 +1018,6 @@ TEST(Reductions, ReduceSplitNoMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
@@ -1123,7 +1052,6 @@ TEST(Reductions, ReduceOverSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
@@ -1326,7 +1254,6 @@ TEST(Reductions, ReduceInlineConsumer) {
 
   eval1(a_v, b_v, y_1);
   eval2(a_v, b_v, y_2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -1386,7 +1313,6 @@ TEST(Reductions, ReduceInlineReducerInternal) {
 
   eval1(a_v, b_v, y_1);
   eval2(a_v, b_v, y_2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -1498,22 +1424,17 @@ TEST(Reductions, ReductionCacheAccessesInner) {
 TEST(Reductions, ReductionCacheBodyAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1545,22 +1466,17 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 TEST(Reductions, ReductionCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1592,22 +1508,17 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1648,22 +1559,17 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1842,25 +1748,17 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 TEST(Reductions, ReductionVectorize) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(8 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out_before(8, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out_after(8, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l_before({tensor});
   LoopNest l(l_before);
@@ -1889,7 +1787,6 @@ TEST(Reductions, ReductionVectorize) {
   s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(s, {in, tensor});
   cg_after.call({in_, out_after});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
     ASSERT_EQ(out_before[i], out_after[i]);
   }
@@ -1899,10 +1796,8 @@ TEST(Reductions, ReductionVectorize) {
 TEST(Reductions, ReductionVectorizeInner) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
 
@@ -1914,23 +1809,17 @@ TEST(Reductions, ReductionVectorizeInner) {
 TEST(Reductions, ReductionVectorizeRfactor) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(8 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out_before(1, -1.f);
   std::vector<float> out_after(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
 
   LoopNest l_before({tensor});

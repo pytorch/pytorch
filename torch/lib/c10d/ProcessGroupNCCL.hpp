@@ -387,7 +387,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
@@ -395,7 +396,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int peer,
       OpType opType,
       PreProcess pre,
-      PostProcess post);
+      PostProcess post,
+      const char* profilingTitle);
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).

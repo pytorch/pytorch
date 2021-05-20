@@ -33,6 +33,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_class_parser.cpp
   ${JIT_TEST_ROOT}/test_class_type.cpp
   ${JIT_TEST_ROOT}/test_code_template.cpp
+  ${JIT_TEST_ROOT}/test_concat_opt.cpp
   ${JIT_TEST_ROOT}/test_constant_pooling.cpp
   ${JIT_TEST_ROOT}/test_cleanup_passes.cpp
   ${JIT_TEST_ROOT}/test_create_autodiff_subgraphs.cpp
@@ -43,6 +44,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
   ${JIT_TEST_ROOT}/test_graph_executor.cpp
+  ${JIT_TEST_ROOT}/test_cs_debug_info_serialization.cpp
   ${JIT_TEST_ROOT}/test_inliner.cpp
   ${JIT_TEST_ROOT}/test_interface.cpp
   ${JIT_TEST_ROOT}/test_interpreter.cpp
@@ -63,6 +65,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
+  ${JIT_TEST_ROOT}/test_script_profile.cpp
 )
 
 if(USE_CUDA)

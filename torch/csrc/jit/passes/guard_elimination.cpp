@@ -375,7 +375,6 @@ struct GuardElimination {
       case aten::conv1d:
       case aten::conv2d:
       case aten::conv3d:
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
         return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
@@ -400,7 +399,6 @@ struct GuardElimination {
             // check that the dilation is constant
             n->input(4)->node()->kind() == prim::Constant &&
             // check that the ceil_mode is constant
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             n->input(5)->node()->kind() == prim::Constant;
       case aten::unsqueeze:
         // check that the dimension argument is constant

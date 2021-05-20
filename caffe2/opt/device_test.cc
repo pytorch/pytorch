@@ -16,7 +16,6 @@ using namespace nom::repr;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeviceTest, InsertCopies) {
   caffe2::NetDef net;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 9; ++i) {
     if (i % 3 == 0) {
       caffe2::OperatorDef* def = net.add_op();

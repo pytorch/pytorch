@@ -61,8 +61,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   ~SimpleIREvaluatorImpl() override = default;
 
-  void bindBuf(const Var* var, void* ptr) {
-    buffer_mapping_[var] = ptr;
+  void bindBuf(const Buf* buf, void* ptr) {
+    buffer_mapping_[buf] = ptr;
   }
   void bindVar(const Var* var, const Value& val) {
     eval_context_[var] = val;
@@ -608,8 +608,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   TORCH_API void visit(const Load* v) override {
-    const Var* base_node = v->base_handle();
-    auto iter = buffer_mapping_.find(base_node);
+    auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
       throw malformed_input("could not find base node in Load", v);
     }
@@ -637,8 +636,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   TORCH_API void visit(const Store* v) override {
-    const Var* base_node = v->base_handle();
-    auto iter = buffer_mapping_.find(base_node);
+    auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
       throw malformed_input("could not find base node in Store", v);
     }
@@ -686,8 +684,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<int64_t> extra_args;
 
     for (const Buf* b : bufs) {
-      const Var* base_node = b->base_handle();
-      auto iter = buffer_mapping_.find(base_node);
+      auto iter = buffer_mapping_.find(b);
       if (iter == buffer_mapping_.end()) {
         throw malformed_input("could not find buf", v);
       }
@@ -788,9 +785,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit(const Allocate* v) override {
-    const Var* buffer_var = v->buffer_var();
-    std::vector<const Expr*> dims = v->dims();
-    int total_byte_size = v->dtype().byte_size();
+    const Buf* b = v->buf();
+    std::vector<const Expr*> dims = b->dims();
+    int total_byte_size = b->dtype().byte_size();
     for (auto& dim : dims) {
       dim->accept(this);
       total_byte_size *= value_.as<int>();
@@ -798,25 +795,25 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
-    auto iter = buffer_mapping_.find(buffer_var);
+    auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
       throw std::runtime_error(
           "Allocate a buffer that has already been allocated: " +
-          buffer_var->name_hint());
+          v->buffer_var()->name_hint());
     }
-    buffer_mapping_[buffer_var] = buffer->data();
-    internal_buffers_.insert(std::make_pair(buffer_var, std::move(buffer)));
+    buffer_mapping_[b] = buffer->data();
+    internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
   }
 
   void visit(const Free* v) override {
-    const Var* buffer_var = v->buffer_var();
-    int count = internal_buffers_.erase(buffer_var);
+    const Buf* b = v->buf();
+    int count = internal_buffers_.erase(b);
     if (count == 0) {
       throw std::runtime_error(
           "Free a buffer that is not currently bound: " +
-          buffer_var->name_hint());
+          v->buffer_var()->name_hint());
     }
-    buffer_mapping_.erase(buffer_var);
+    buffer_mapping_.erase(b);
   }
 
   void visit(const Let* v) override {
@@ -959,9 +956,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   const Block* scope_;
   std::unordered_map<const Expr*, Value> eval_context_;
   std::unordered_map<const Block*, std::vector<const Expr*>> var_by_scope_;
-  std::unordered_map<const Var*, void*>
-      buffer_mapping_; // TODO: change Var* to Buf*
-  std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
+  std::unordered_map<const Buf*, void*> buffer_mapping_;
+  std::unordered_map<const Buf*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
 };
 
@@ -978,6 +974,16 @@ SimpleIREvaluator::SimpleIREvaluator(
 SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
+  std::vector<void*> raw_args(args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    auto const& bufferArg = buffer_args()[i];
+    auto const& callArg = args[i];
+    raw_args[i] = argToPtr(bufferArg, callArg);
+  }
+  call_raw(raw_args);
+}
+
+void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("bad args in IREvaluator call");
   }
@@ -989,23 +995,27 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(simple_ir_eval_executed);
 }
 
-void SimpleIREvaluator::bindArg(const BufferArg& bufArg, const CallArg& data) {
+void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
   if (!bufArg.isVar()) {
-    impl_->bindBuf(bufArg.var(), data.data());
+    impl_->bindBuf(bufArg.buf(), data);
     return;
   }
 
   switch (bufArg.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                        \
-  case ScalarType::Name:                             \
-    impl_->bindVar(bufArg.var(), data.Name##Data()); \
-    break;
+#define TYPE_CASE(Type, Name)                 \
+  case ScalarType::Name: {                    \
+    Type typed_data;                          \
+    memcpy(&typed_data, data, sizeof(Type));  \
+    impl_->bindVar(bufArg.var(), typed_data); \
+    break;                                    \
+  }
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
   }
 }
+
 void SimpleIREvaluator::bindVar(const Var* v, const Expr* e) {
   impl_->bindVar(v, impl_->evaluateExpr(e));
 }

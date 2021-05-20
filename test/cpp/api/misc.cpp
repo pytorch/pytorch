@@ -51,9 +51,7 @@ TEST(UtilsTest, WarnOnce) {
 TEST(NoGradTest, SetsGradModeCorrectly) {
   torch::manual_seed(0);
   torch::NoGradGuard guard;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::nn::Linear model(5, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({10, 5}, torch::requires_grad());
   auto y = model->forward(x);
   torch::Tensor s = y.sum();
