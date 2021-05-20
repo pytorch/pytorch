@@ -1,0 +1,49 @@
+# Initiate 5 agentless-server waiting jobs to check on the
+# status of PR artifact builds, for a maximum wait time of
+# 5 * 60 min =300 minutes. These jobs will pass immediately
+# once targeted CircleCI build is ready.
+
+jobs:
+- job: checkjob1
+  pool: server
+  timeoutInMinutes: 60
+  continueOnError: true
+
+  steps:
+  - template: wheel-wait-job-template.yml
+
+- job: checkjob2
+  pool: server
+  timeoutInMinutes: 60
+  dependsOn: checkjob1
+  continueOnError: true
+
+  steps:
+  - template: wheel-wait-job-template.yml
+
+- job: checkjob3
+  pool: server
+  timeoutInMinutes: 60
+  dependsOn: checkjob2
+  continueOnError: true
+
+  steps:
+  - template: wheel-wait-job-template.yml
+
+- job: checkjob4
+  pool: server
+  timeoutInMinutes: 60
+  dependsOn: checkjob3
+  continueOnError: true
+
+  steps:
+  - template: wheel-wait-job-template.yml
+
+- job: checkjob5
+  pool: server
+  timeoutInMinutes: 60
+  dependsOn: checkjob4
+  continueOnError: true
+
+  steps:
+  - template: wheel-wait-job-template.yml
