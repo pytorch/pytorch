@@ -123,6 +123,11 @@ TORCH_META_FUNC(hardsigmoid_backward) (const Tensor& grad_output, const Tensor& 
   build_binary_op(maybe_get_output(), grad_output, self);
 }
 
+TORCH_META_FUNC(hardshrink) (const Tensor & self, const Scalar& lambd) {
+  set_output(0, self.sizes(), {}, self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT), {});
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(hardshrink_backward) (
   const Tensor & grad, const Tensor & self, const Scalar& lambd
 ) {
@@ -273,6 +278,12 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out) (
   const Tensor& grad_output, const Tensor& self, const Tensor& grad_input
 ) {
   hardsigmoid_backward_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(hardshrink_out) (
+  const Tensor & self, const Scalar& lambd, const Tensor& result
+) {
+  hardshrink_stub(device_type(), *this, lambd);
 }
 
 TORCH_IMPL_FUNC(hardshrink_backward_out) (
@@ -760,16 +771,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
-}
-
-// -----------------------------------
-// hardshrink
-// -----------------------------------
-Tensor hardshrink(const Tensor & self, const Scalar& lambd) {
-  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto iter = TensorIterator::unary_op(out_tensor, self);
-  hardshrink_stub(iter.device_type(), iter, lambd);
-  return out_tensor;
 }
 
 Tensor gelu_cpu(const Tensor& self) {

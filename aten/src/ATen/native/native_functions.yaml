@@ -3437,11 +3437,17 @@
   device_check: NoCheck
   device_guard: False
 
+- func: hardshrink.out(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: hardshrink_out
+
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  structured_delegate: hardshrink.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: hardshrink
 
 - func: hardshrink_backward.grad_input(Tensor grad_out, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
