@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from pickle import PicklingError
 from typing import (
     Any,
     BinaryIO,
@@ -28,7 +29,7 @@ from torch.utils.hooks import RemovableHandle
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
-from ._package_pickler import create_pickler
+from ._package_pickler import create_pickler, debug_dumps
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
@@ -496,7 +497,10 @@ node [shape=box];
         data_buf = io.BytesIO()
         pickler = create_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
-        pickler.dump(obj)
+        try:
+            pickler.dump(obj)
+        except (TypeError, PicklingError) as e:
+            debug_dumps(self.importer, obj)
         data_value = data_buf.getvalue()
 
         name_in_dependency_graph = f"<{package}.{resource}>"
