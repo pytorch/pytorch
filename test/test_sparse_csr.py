@@ -354,13 +354,13 @@ class TestSparseCSR(TestCase):
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
-    def test_mkl_matvec_warnings(self, device, dtype):
+    def test_mkl_matmul_warnings(self, device, dtype):
         if torch.has_mkl:
             for index_dtype in [torch.int32, torch.int64]:
                 sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
                                              torch.tensor([0, 1, 0, 1]),
                                              torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
-                vec = torch.randn((2, 1), dtype=dtype, device=device)
+                vec = torch.randn((2, 2), dtype=dtype, device=device)
                 with warnings.catch_warnings(record=True) as w:
                     sp.matmul(vec)
                     self.assertEqual(len(w), 2)
@@ -420,7 +420,7 @@ class TestSparseCSR(TestCase):
         for i in range(2, 5):
             for j in range(2, 8):
                 for k in range(2, 8):
-                    test_shape(i, j, k, i*j // 2)
+                    test_shape(i, j, k, i * j // 2)
 
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
