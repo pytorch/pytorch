@@ -50,16 +50,23 @@ else
 fi
 
 add_to_env_file() {
-  local content
-  content=$1
-  # BASH_ENV should be set by CircleCI
-  echo "${content}" >> "${BASH_ENV:-/tmp/env}"
+  local name=$1
+  local value=$2
+  case "$value" in
+    *\ *)
+      # BASH_ENV should be set by CircleCI
+      echo "${name}='${value}'" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+    *)
+      echo "${name}=${value}" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+  esac
 }
 
-add_to_env_file "IN_CI=1"
-add_to_env_file "COMMIT_SOURCE='${CIRCLE_BRANCH:-}'"
-add_to_env_file "BUILD_ENVIRONMENT='${BUILD_ENVIRONMENT}'"
-add_to_env_file "CIRCLE_PULL_REQUEST='${CIRCLE_PULL_REQUEST}'"
+add_to_env_file IN_CI 1
+add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
+add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
+add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"
 
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
