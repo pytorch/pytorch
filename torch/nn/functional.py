@@ -4265,7 +4265,7 @@ Arguments:
     num_classes (int):  Total number of classes. If set to -1, the number
         of classes will be inferred as one greater than the largest class
         value in the input tensor.
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
         Default: ``torch.int64``.
 
 Returns:
