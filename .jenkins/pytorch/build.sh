@@ -359,7 +359,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   mkdir -p "$BENCHMARK_BUILD"
   pushd "$BENCHMARK_BUILD"
-  cmake "../" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  cmake "../" -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS $SITE_PACKAGES/torch/include" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
   make VERBOSE=1
   popd
   assert_git_not_dirty
