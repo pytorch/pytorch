@@ -53,17 +53,17 @@ class Errors(object):
         Test that x and y are nearly equal (equal within self.rtol
         precision), but continue execution even if they are not equal.
 
-        To prevent error cascades, you should remember to call 'failIfErrs'
+        To prevent error cascades, you should remember to call "failIfErrs"
         at some later point in time.
         """
         self.almostEqualAndThen(x, y, msg, self.addErr)
 
     def almostEqualAndThen(self, x, y, msg, k):
         """
-        Helper for implementing 'requireAlmostEqual' and 'checkAlmostEqual'.
-        Upon failure, invokes continuation 'k' with the error message.
+        Helper for implementing "requireAlmostEqual" and "checkAlmostEqual".
+        Upon failure, invokes continuation "k" with the error message.
 
-        At the moment, only tests on 'numpy.ndarray' are supported.
+        At the moment, only tests on "numpy.ndarray" are supported.
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             try:
@@ -85,7 +85,7 @@ class Errors(object):
         """
         Test that x and y are equal, but continue execution even if they are not equal.
 
-        To prevent error cascades, you should remember to call 'failIfErrs'
+        To prevent error cascades, you should remember to call "failIfErrs"
         at some later point in time.
         """
         self.equalAndThen(x, y, msg, self.addErr)
@@ -93,8 +93,8 @@ class Errors(object):
     # Bit-for-bit accuracy test
     def equalAndThen(self, x, y, msg, k):
         """
-        Helper for implementing 'requireEqual' and 'checkEqual'.  Upon failure,
-        invokes continuation 'k' with the error message.
+        Helper for implementing "requireEqual" and "checkEqual".  Upon failure,
+        invokes continuation "k" with the error message.
         """
         if isinstance(x, onnx.TensorProto) and isinstance(y, onnx.TensorProto):
             self.equalAndThen(x.name, y.name, msg, k)
@@ -114,7 +114,7 @@ class Errors(object):
                 # TODO: Better algorithm for lists
                 sx = str(x)
                 sy = str(y)
-                if len(sx) > 40 or len(sy) > 40 or '\n' in sx or '\n' in sy:
+                if len(sx) > 40 or len(sy) > 40 or "\n" in sx or "\n" in sy:
                     # long form
                     l = "=" * 50
                     k("\n{}The value\n{}\n{}\n{}\n\ndoes not equal\n\n{}\n{}\n{}"
@@ -131,8 +131,8 @@ class Errors(object):
 
     def multiLineEqualAndThen(self, x, y, msg, k):
         """
-        Helper for implementing 'requireMultiLineEqual'.  Upon failure,
-        invokes continuation 'k' with the error message.
+        Helper for implementing "requireMultiLineEqual".  Upon failure,
+        invokes continuation "k" with the error message.
         """
         if msg is None:
             msg = "Strings are not equal"
@@ -155,7 +155,7 @@ class Errors(object):
         """
         Immediately fail and short-circuit to the next recovery context.
 
-        NB: It is an error to 'fail' without having added any errors to
+        NB: It is an error to "fail" without having added any errors to
         the error context.
         """
         raise self.exc_class()
@@ -220,7 +220,7 @@ class Errors(object):
     def __exit__(self, exc_type, exc_value, traceback):
         if self.errors:
             errors_msg = "\n\n".join("ERROR: " + x for x in self.errors)
-            final_msg = "{}\n{}\n{}".format(self.msg, '-' * 70, errors_msg)
+            final_msg = "{}\n{}\n{}".format(self.msg, "-" * 70, errors_msg)
             raise AssertionError(final_msg)
         if exc_type == self.exc_class:
             raise RuntimeError("ShortCircuit was raised, but no errors were recorded")
@@ -378,7 +378,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                     msg += "\n(To get more information, run torch.onnx.verify(..., verbose=True))"
                 with Errors(msg, rtol=rtol, atol=atol) as errs:
                     # First, check if we have the same number of parameters, and
-                    # that they're the same order.  If they don't, something has *really* gone wrong.
+                    # that they"re the same order.  If they don"t, something has *really* gone wrong.
                     initializer_order_hint = ("This is really strange! The second time I exported your model,\n"
                                               "it had a different set of parameters.  Are you assigning Parameters\n"
                                               "in the forward() of your model definition?")
