@@ -273,9 +273,6 @@ class TestFuseFx(QuantizationTestCase):
         constructing a fuse_custom_config_dict, an error will be thrown and
         users will be notified of what keys are supported.
         """
-        fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
-                                                "preserved_attributes"}
-
         m = ConvModel().eval()
         from torch.quantization.quantize_fx import fuse_fx
         fuse_custom_config_dict = {"typo": None}
@@ -283,10 +280,8 @@ class TestFuseFx(QuantizationTestCase):
         with self.assertRaises(ValueError) as context:
             m = fuse_fx(m, fuse_custom_config_dict=fuse_custom_config_dict)
         self.assertTrue(
-            str(context.exception) ==
-            'Expected fuse_custom_config_dict to have the ' +
-            'following keys: ' + str(fuse_custom_config_dict_allowed_keys) +
-            '. But found \'typo\' instead.'
+            'Expected fuse_custom_config_dict to have the following keys:'
+            in str(context.exception)
         )
 
 @skipIfNoFBGEMM
@@ -1043,18 +1038,13 @@ class TestQuantizeFx(QuantizationTestCase):
         constructing a qconfig_dict, an error will be thrown and users will be
         notified of what keys are supported.
         """
-        qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
-
         m = ConvModel().eval()
         qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
 
         with self.assertRaises(ValueError) as context:
             m = prepare_fx(m, qconfig_dict)
         self.assertTrue(
-            str(context.exception) ==
-            'Expected qconfig_dict to have the following keys: ' +
-            str(qconfig_dict_allowed_keys) + '. But found ' +
-            '\'object_typo\' instead.'
+            'Expected qconfig_dict to have the following keys:' in str(context.exception)
         )
 
     def test_prepare_custom_config_dict_validity(self):
@@ -1063,19 +1053,6 @@ class TestQuantizeFx(QuantizationTestCase):
         constructing a prepare_custom_config_dict, an error will be thrown and
         users will be notified of what keys are supported.
         """
-        prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
-                                                   "standalone_module_class",
-                                                   "float_to_observed_custom_module_class",
-                                                   "non_traceable_module_name",
-                                                   "non_traceable_module_class",
-                                                   "additional_fuser_method_mapping",
-                                                   "additional_qat__module_mapping",
-                                                   "additional_fusion_pattern",
-                                                   "additional_quant_pattern",
-                                                   "input_quantized_idxs",
-                                                   "output_quantized_idxs",
-                                                   "preserved_attributes"}
-
         m = ConvModel().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         prepare_custom_config_dict = {"typo": None}
@@ -1083,10 +1060,8 @@ class TestQuantizeFx(QuantizationTestCase):
         with self.assertRaises(ValueError) as context:
             m = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
         self.assertTrue(
-            str(context.exception) ==
-            'Expected prepare_custom_config_dict to have the ' +
-            'following keys: ' + str(prepare_custom_config_dict_allowed_keys) +
-            '. But found \'typo\' instead.'
+            'Expected prepare_custom_config_dict to have the following keys:'
+            in str(context.exception)
         )
 
     def test_convert_custom_config_dict_validity(self):
@@ -1095,10 +1070,6 @@ class TestQuantizeFx(QuantizationTestCase):
         constructing a convert_custom_config_dict, an error will be thrown and
         users will be notified of what keys are supported.
         """
-        convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
-                                                   "observed_to_quantized_custom_module_class",
-                                                   "preserved_attributes"}
-
         m = ConvModel().eval()
         qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
@@ -1107,10 +1078,8 @@ class TestQuantizeFx(QuantizationTestCase):
         with self.assertRaises(ValueError) as context:
             m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
         self.assertTrue(
-            str(context.exception) ==
-            'Expected convert_custom_config_dict to have the ' +
-            'following keys: ' + str(convert_custom_config_dict_allowed_keys) +
-            '. But found \'typo\' instead.'
+            'Expected convert_custom_config_dict to have the following keys:'
+            in str(context.exception)
         )
 
     def test_remove_qconfig(self):

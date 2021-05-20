@@ -1,6 +1,6 @@
 import torch
 from collections import OrderedDict
-from typing import Union, Callable, Any, Dict
+from typing import Union, Callable, Any, Dict, Set
 import re
 
 from .utils import _parent_name
@@ -98,6 +98,21 @@ def get_qconfig(qconfig_dict, module_type, module_name, global_qconfig):
         qconfig_dict, module_name, module_name_regex_qconfig)
     return module_name_qconfig
 
+
+def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
+    r""" Checks if the given config_dict has the correct keys
+
+    Args:
+      `config_dict`: dictionary whose keys we want to check
+    """
+
+    for k in config_dict.keys():
+        if k not in allowed_keys:
+            raise ValueError(
+                'Expected ' + dict_name + ' to have the following keys: ' +
+                str(allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
 def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
     r""" Checks if the given qconfig_dict has the correct keys
 
@@ -106,13 +121,7 @@ def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
     """
 
     qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
-
-    for k in qconfig_dict.keys():
-        if k not in qconfig_dict_allowed_keys:
-            raise ValueError(
-                'Expected qconfig_dict to have the following keys: ' +
-                str(qconfig_dict_allowed_keys) + '. But found \'' + k +
-                '\' instead.')
+    check_is_valid_config_dict(qconfig_dict, qconfig_dict_allowed_keys, "qconfig_dict")
 
 def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[str, Any] = None) -> None:
     r""" Checks if the given prepare_custom_config_dict has the correct keys
@@ -136,13 +145,8 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[s
                                                "input_quantized_idxs",
                                                "output_quantized_idxs",
                                                "preserved_attributes"}
-
-    for k in prepare_custom_config_dict.keys():
-        if k not in prepare_custom_config_dict_allowed_keys:
-            raise ValueError(
-                'Expected prepare_custom_config_dict to have the ' +
-                'following keys: ' + str(prepare_custom_config_dict_allowed_keys) +
-                '. But found \'' + k + '\' instead.')
+    check_is_valid_config_dict(prepare_custom_config_dict,
+                               prepare_custom_config_dict_allowed_keys, "prepare_custom_config_dict")
 
 def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[str, Any] = None) -> None:
     r""" Checks if the given convert_custom_config_dict has the correct keys
@@ -157,13 +161,8 @@ def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[s
     convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
                                                "observed_to_quantized_custom_module_class",
                                                "preserved_attributes"}
-
-    for k in convert_custom_config_dict.keys():
-        if k not in convert_custom_config_dict_allowed_keys:
-            raise ValueError(
-                'Expected convert_custom_config_dict to have the following keys: ' +
-                str(convert_custom_config_dict_allowed_keys) + '. But found \'' + k +
-                '\' instead.')
+    check_is_valid_config_dict(convert_custom_config_dict,
+                               convert_custom_config_dict_allowed_keys, "convert_custom_config_dict")
 
 def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Dict[str, Any] = None) -> None:
     r""" Checks if the given fuse_custom_config_dict has the correct keys
@@ -176,10 +175,4 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Dict[str, An
 
     fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
                                             "preserved_attributes"}
-
-    for k in fuse_custom_config_dict.keys():
-        if k not in fuse_custom_config_dict_allowed_keys:
-            raise ValueError(
-                'Expected fuse_custom_config_dict to have the following keys: ' +
-                str(fuse_custom_config_dict_allowed_keys) + '. But found \'' + k +
-                '\' instead.')
+    check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
