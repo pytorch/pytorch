@@ -4760,6 +4760,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, 3, 4)
         self.run_test(model, (x, ))
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_append_nested_mixed_dtype(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    for j in range(x.size(1)):
+                        if i == j:
+                            res.append(x == y)
+                        else:
+                            res.append(x != y)
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        y = torch.randn(3, 4)
+        self.run_test(model, (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_pop(self):
         class ListModel(torch.nn.Module):
