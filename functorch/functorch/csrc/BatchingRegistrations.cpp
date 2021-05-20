@@ -499,7 +499,7 @@ Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes)
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   // Batched Diagonal View
   auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
-  // Append a dimension of size one to the grad output 
+  // Append a dimension of size one to the grad output
   auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
   grad_input_diag.copy_(grad_physical_tensor);
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
@@ -994,19 +994,19 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
 //     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
 //     return at::ones_like(self, memory_format);
 //   }
-// 
+//
 //   TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve
 //       || memory_format == MemoryFormat::Contiguous,
 //       "NYI: Tensor.clone(memory_format) inside vmap is only supported with ",
 //       "memory_format torch.preserve_format or torch.contiguous_format (got ",
 //       *memory_format, ")");
-// 
+//
 //   if (memory_format == MemoryFormat::Contiguous) {
 //     auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
 //     auto output_physical = at::clone(physical_view.tensor(), memory_format);
 //     return physical_view.getPhysicalToLogicalMap().apply(output_physical);
 //   }
-// 
+//
 //   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
 //   auto* self_batched = unsafeGetBatchedImpl(self);
 //   auto output_physical = at::clone(self_batched->value(), memory_format);
@@ -1369,13 +1369,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
   m.impl("mean.dim", mean_int_batching_rule);
-  m.impl("sum.dim_IntList", sum_batching_rule);
+  // m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("log_softmax.int", log_softmax_batching_rule);
   m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
   m.impl("cross_entropy_loss", native::cross_entropy_loss);
-// 
+//
 //   // inplace operations
 //   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
 //   m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
@@ -1420,7 +1420,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   m.impl("addmm", addmm_batching_rule);
   m.impl("matmul", matmul_decomposed);
-// 
+//
   // clamp operations
 //   m.impl("clamp", clamp_batching_rule);
 //   m.impl("clamp_min", clamp_min_batching_rule);
@@ -1448,7 +1448,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 //           TensorTensorScalarType,
 //           at::threshold_backward,
 //           Scalar>);
-// 
+//
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
   // on the logical shape of the tensors.
@@ -1456,11 +1456,11 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, const Scalar&)>(native::result_type));
   m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(const Scalar&, const Tensor&)>(native::result_type));
   m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(const Scalar&, const Scalar&)>(native::result_type));
-// 
+//
 // #undef BINARY_POINTWISE_VA
 // #undef BINARY_POINTWISE
-// 
-// 
+//
+//
 #define TRIVIAL_OP(op) m.impl(#op, \
     unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
   // complex number view operators
@@ -1469,26 +1469,26 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   TRIVIAL_OP(view_as_real);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 // #undef TRIVIAL
-// // 
+// //
 // //   // matmul-like operators
 // //   m.impl("bmm", bmm_batching_rule);
-// // 
+// //
   // cat/stack
   m.impl("cat", cat_batching_rule);
   m.impl("stack", stack_batching_rule);
-// // 
+// //
 // //   // backward operators
 // //   m.impl("select_backward", select_backward_batching_rule);
 // //   m.impl("slice_backward", slice_backward_batching_rule);
 // //   m.impl("trace_backward", trace_backward_batching_rule);
 // //   m.impl("diagonal_backward", diagonal_backward_batching_rule);
-// // 
+// //
 // //   // Tensor.new_* operators
 //   m.impl("ones_like", ones_like_batching_rule);
 // //   m.impl("new_empty", new_empty_batching_rule);
 //   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 // //   m.impl("new_zeros", new_zeros_batching_rule);
-// // 
+// //
 // //   m.impl("contiguous", contiguous_batching_rule);
 }
 
