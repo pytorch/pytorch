@@ -1,4 +1,8 @@
+#include <jit/api/module.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -187,6 +191,117 @@ bool MutationRemover::RemoveListMutation(Block* block) {
   }
 
   return changed;
+}
+
+#define FOR_EACH_VIEW_OP(X)                            \
+  X("view(Tensor self, int[] size) -> Tensor")         \
+  X("view_as(Tensor self, Tensor other) -> Tensor")    \
+  X("reshape(Tensor self, int[] shape) -> Tensor")     \
+  X("reshape(Tensor self, int[] shape) -> Tensor")     \
+  X("reshape_as(Tensor self, Tensor other) -> Tensor") \
+  X("expand(Tensor self, int[] size, bool) -> Tensor") \
+  X("expand_as(Tensor self, Tensor other) -> Tensor")
+
+static bool isViewOp(Node* n) {
+  const static OperatorSet view_set({
+#define X(A) "aten::" A,
+      FOR_EACH_VIEW_OP(X)
+#undef X
+  });
+
+  return n->isMemberOf(view_set);
+}
+
+const RegisterOperators DummyCopyOps({
+#define X(A)                                                                  \
+  torch::jit::Operator(                                                       \
+      "aten::copy_" A,                                                        \
+      [](Stack*) {                                                            \
+        TORCH_CHECK(                                                          \
+            false, "the following operation should've been fused: aten::" A); \
+      },                                                                      \
+      AliasAnalysisKind::FROM_SCHEMA),
+    FOR_EACH_VIEW_OP(X)
+#undef X
+});
+
+void MutationRemover::collectViewOperations(Block* block) {
+  for (auto n : block->nodes()) {
+    copyReplaceable(n);
+    for (auto ib : n->blocks()) {
+      collectViewOperations(ib);
+    }
+  }
+  return;
+}
+
+bool MutationRemover::RemoveViewOperations() {
+  bool changed = false;
+  collectViewOperations(graph_->block());
+  for (auto n : view_ops_) {
+    WithInsertPoint wip{n};
+    auto copy_node = n->replaceWithNewSymbol(
+        Symbol::aten(std::string("copy_") + n->kind().toUnqualString()));
+    GRAPH_DEBUG("Replacing ", getHeader(n), " with ", getHeader(copy_node));
+    n->output()->replaceAllUsesWith(copy_node->output());
+    n->destroy();
+  }
+
+  if (!view_ops_.empty()) {
+    changed = true;
+    // aliasDb is invalid after introducing new ops
+    if (aliasDb_) {
+      aliasDb_.release();
+    }
+    view_ops_.clear();
+  }
+
+  return changed;
+}
+
+bool removeCopyOperations(Block* block) {
+  const static std::string copy_prefix("copy_");
+  bool changed = false;
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    auto* node = *it;
+    it++;
+
+    std::string prefixed_opname(node->kind().toUnqualString());
+    if (prefixed_opname.find(copy_prefix) != std::string::npos) {
+      std::string opname = prefixed_opname.substr(copy_prefix.length());
+      WithInsertPoint wip{node};
+      auto view_node = node->replaceWithNewSymbol(Symbol::aten(opname));
+      GRAPH_DEBUG(
+          "Replacing copy op ",
+          getHeader(node),
+          " with ",
+          getHeader(view_node));
+      node->output()->replaceAllUsesWith(view_node->output());
+      node->destroy();
+      changed = true;
+    } else {
+      for (auto ib : node->blocks()) {
+        changed |= removeCopyOperations(ib);
+      }
+    }
+  }
+
+  return changed;
+}
+
+void MutationRemover::copyReplaceable(Node* n) {
+  if (!isViewOp(n)) {
+    GRAPH_DEBUG("Not a view op: ", getHeader(n));
+    return;
+  }
+
+  if (getOrCreateAliasDb()->safeToChangeAliasingRelationship(
+          n->outputs(), n->input(0)->node()->outputs())) {
+    GRAPH_DEBUG(
+        "Not safe to change the aliasing relationship for ", getHeader(n));
+    return;
+  }
+  view_ops_.push_back(n);
 }
 
 bool MutationRemover::RemoveTensorMutation(Block* block) {

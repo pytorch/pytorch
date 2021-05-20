@@ -55,9 +55,15 @@ struct TORCH_API MutationRemover {
     return aliasDb_.get();
   }
 
+  void copyReplaceable(Node* n);
+
+  void collectViewOperations(Block* b);
+  bool RemoveViewOperations();
+
   c10::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
+  std::vector<Node*> view_ops_;
 };
 
 // Removes list mutation with functional equivalents
