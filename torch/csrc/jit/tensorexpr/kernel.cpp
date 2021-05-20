@@ -2422,7 +2422,8 @@ Tensor* tensorexpr::computeOperandValue(
           "aten_slice",
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
-            int64_t dim = c10::get<int64_t>(inputs[1]);
+            int64_t dim =
+                at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), axes.size());
             ExprHandle start = constant(inputs[2]);
             ExprHandle stride = constant(inputs[4]);
 
@@ -2492,7 +2493,8 @@ Tensor* tensorexpr::computeOperandValue(
             std::vector<VarHandle> new_axes;
             assert(permute_dims.size() == axes.size());
             for (auto i : permute_dims) {
-              new_axes.push_back(axes[i]);
+              auto new_dim = at::maybe_wrap_dim(i, A.ndim());
+              new_axes.push_back(axes[new_dim]);
             }
             return A.load(new_axes);
           });
@@ -3004,6 +3006,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     default: {
+      std::cout << t->repr_str() << std::endl;
       throw unsupported_dtype();
       break;
     }

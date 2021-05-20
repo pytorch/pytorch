@@ -1,6 +1,7 @@
 import operator
 import unittest
 import contextlib
+import math
 import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
@@ -15,7 +16,7 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
@@ -1807,17 +1808,122 @@ class TestTEFuser(JitTestCase):
         z = 2
         script = self.checkScript(eager, (x, y, z))
 
-class TestOpInfo(JitTestCase):
+class TestNNCOpInfo(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_te_compile(self, device, dtype, op):
-        allow_list = []
-        if op.name not in allow_list:
+        work_list = [
+            '__radd__',
+            '__rdiv__',
+            '__rmul__',
+            'abs',
+            'acos',
+            'add',
+            'addcmul',
+            'asin',
+            'atan2',
+            'atan',
+            'ceil',
+            'clamp',
+            'clamp',
+            'cos',
+            'cosh',
+            'div',
+            'div',
+            'eq',
+            'erf',
+            'erfc',
+            'exp',
+            'expand',
+            'expm1',
+            'floor',
+            'ge',
+            'gt',
+            'le',
+            'lerp',
+            'lgamma',
+            'log10',
+            'log1p',
+            'log2',
+            'log',
+            'lt',
+            'masked_fill',
+            'max',
+            'min',
+            'mm',
+            'mul',
+            'ne',
+            'neg',
+            'nn.functional.gelu',
+            'nn.functional.hardshrink',
+            'nn.functional.hardswish',
+            'nn.functional.hardtanh',
+            'pow',
+            'reciprocal',
+            'round',
+            'rsqrt',
+            'sigmoid',
+            'sin',
+            'sinh',
+            'sqrt',
+            'sub',
+            'tan',
+            'tanh',
+            'trunc',
+            'unsqueeze',
+        ]
+        deny_list = ['sum', '__rmatmul__', 'matmul', 'transpose']
+        if op.name in deny_list:
             return
-        print(op.name)
-        5 // 0
+        try:
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            for sample_input in sample_inputs_itr:
+                arg_values = [sample_input.input] + list(sample_input.args)
+                kwarg_values = sample_input.kwargs
+                param_names = []
+                param_values = []
+                fx_args = []
+                for idx, v in enumerate(arg_values):
+                    if isinstance(v, torch.Tensor):
+                        param_names.append(f"arg_{idx}")
+                        param_values.append(v)
+                        fx_args.append(param_names[-1])
+                    else:
+                        fx_args.append(f'{repr(v)}')
 
-instantiate_device_type_tests(TestOpInfo, globals())
+                for k, v in kwarg_values.items():
+                    if isinstance(v, torch.Tensor):
+                        param_names.append(k)
+                        param_values.append(v)
+                        fx_args.append(f'{k} = {k}')
+                    else:
+                        fx_args.append(f'{k} = {repr(v)}')
+
+                code = f"""
+def f({', '.join(param_names)}):
+    return op.op({', '.join(fx_args)})"""
+                g = {'torch': torch, 'inf' : math.inf, 'op': op}
+                exec(code, g)
+                f = g['f']
+                f.__module__ = 'test'
+                ts_g = torch.jit.trace(f, param_values)
+                kernel = torch._C._te.TensorExprKernel(ts_g.graph)
+                self.assertEqual(kernel.run(tuple(param_values)), f(*param_values))
+                self.assertEqual(kernel.fallback(tuple(param_values)), f(*param_values))
+
+            self.assertTrue(op.name in work_list, op.name)
+
+        except Exception as e:
+            self.assertTrue(op.name not in work_list)
+            if "Unhandled node kind" in str(e):
+                print(e)
+                return
+            if isinstance(e, NameError):  # related to passing in input lists of tensors
+                return
+            self.assertTrue(False)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
