@@ -32,6 +32,7 @@ from torch.jit._state import (
     _try_get_jit_cached_overloads,
     _set_jit_function_cache,
     _set_jit_overload_cache,
+    _clear_jit_function_cache,
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
@@ -934,6 +935,32 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
             warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                           "to enable Profile-Directed Typing in TorchScript. Refer to "
                           "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
+        # Free functions can be cached after scripting. If the same
+        # function is scripted twice with different example inputs, then the type annotation
+        # for the second scripted function is lost since the cached scripted function is returned.
+        # Hence, while using profile directed typing to annotate the functions, we invalidate
+        # the cache entry for the function and set the entry of the jit function in the cache to `None`
+        #
+        # Example:
+        #     def fn(x, y):
+        #       return x + y
+        #     s1 = torch.jit._script_pdt(fn, example_inputs=[(1,2), ])
+        #     print(s1(2, 3))
+        #     >> 5
+        #
+        #     s2 = torch.jit._script_pdt(fn, example_inputs=[(1.2, 3.4), ])
+        #     print(s2(4.5, 7.1))
+        #     // If the cache is not invalidated for the scripted function `fn`
+        #     Output:
+        #     >> RuntimeError: fn() Expected a value of type 'int' for argument 'x'
+        #                       but instead found type 'float'.
+        #     // After setting the cache entry for `fn` to `None`
+        #     Output:
+        #     >> 11.6
+        maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
+        if maybe_already_compiled_fn:
+            _clear_jit_function_cache(obj)
+
     return script(obj, optimize, _frames_up, _rcb)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
