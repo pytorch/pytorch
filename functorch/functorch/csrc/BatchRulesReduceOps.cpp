@@ -28,6 +28,47 @@ std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
   return { result, 0 };
 }
 
+bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+  return dim == 0 || dim == -1;
+}
+
+std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
+  if (!self_bdim.has_value()) {
+    return { at::sum(self, dims, keepdim, dtype), nullopt };
+  }
+  auto self_dim = self.dim();
+  if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+    return { self.clone(), 0 };
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  VmapDimVector new_dims;
+  new_dims.reserve(dims.size());
+  for (auto dim: dims) {
+    new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+  }
+  auto result = at::sum(self_, new_dims, keepdim, dtype);
+  return { result, 0 };
+}
+
+std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
+  if (!self_bdim.has_value()) {
+    return { at::argmax(self, dim, keepdim), nullopt };
+  }
+  if (self.dim() == 1 && dim && is_allowed_dim_on_scalar_tensor(*dim)) {
+    return { self.clone(), 0 };
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  if (!dim) {
+    dim = 0;
+    self_ = at::flatten(self, 1);
+  }
+  auto new_dim = getPhysicalDim(self_, self_bdim.has_value(), *dim);
+  auto result = at::argmax(self_, new_dim, keepdim);
+  return {result, 0};
+}
+
 std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
   if (!self_bdim.has_value()) {
@@ -86,6 +127,8 @@ _log_softmax_backward_data(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("sum", sum_batch_rule);
+  VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
+  VMAP_SUPPORT("argmax", argmax_batch_rule);
   VMAP_SUPPORT("mean", mean_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
