@@ -548,4 +548,4 @@ def mem_get_info(device: Union[Device, int] = None) -> int:
     if device is None:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
-    return torch._C._cuda_cudaMemGetInfo(device)
+    return torch.cuda.cudart().cudaMemGetInfo(device)

@@ -430,22 +430,6 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaMemGetInfo(PyObject *_unused, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  PyObject* device_o = nullptr;
-  THPUtils_assert(
-      THPUtils_checkLong(arg), "invalid argument to cuda_mem_get_info");
-  const int device = (int)THPUtils_unpackLong(arg);
-  std::pair<size_t, size_t> cuda_mem_info =
-      c10::cuda::raw_cuda_mem_get_info(device);
-  auto result = PyTuple_New(static_cast<Py_ssize_t>(2));
-  PyTuple_SetItem(result, 0, PyLong_FromSize_t(std::get<0>(cuda_mem_info)));
-  PyTuple_SetItem(result, 1, PyLong_FromSize_t(std::get<1>(cuda_mem_info)));
-  return result;
-  END_HANDLE_TH_ERRORS
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -581,7 +565,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
-  {"_cuda_cudaMemGetInfo", THCPModule_cudaMemGetInfo, METH_O, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
