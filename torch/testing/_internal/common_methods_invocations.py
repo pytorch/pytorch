@@ -3149,11 +3149,17 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
                SampleInput(make_tensor((), device, dtype,
                                        requires_grad=requires_grad)))
 
-    if requires_grad and op_info.op != torch.special.i0e:
+    if requires_grad and op_info.op == torch.special.i0e:
+        # NOTE: `i0e`'s first-order gradient is not continous
+        # at `0`, hence we don't test `i0e` with any input being `0`.
+        # TODO: Remove this when `make_tensor` supports excluding `0`.
+        with torch.no_grad():
+            for sample in samples:
+                t = sample.input
+                t[t == 0] = torch.finfo(dtype).eps
+    elif requires_grad and op_info.op != torch.special.i0e:
         # Special Case for gradient
         # Sample with `0` in the input
-        # NOTE: `i0e`'s first-order gradient is not continous
-        # at `0`, hence we don't test `i0e` for this case.
         t = make_tensor((S,), device, dtype,
                         requires_grad=requires_grad)
 
