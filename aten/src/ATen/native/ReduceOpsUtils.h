@@ -5,6 +5,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -85,10 +86,6 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
     return true;
   }
 
-  if (self.numel() == 0) {
-    AT_ERROR("cannot perform reduction function ", fn_name,
-             " on tensor with no elements because the operation does not have an identity");
-  }
   return false;
 }
 
@@ -182,9 +179,9 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType in_dtype, ScalarType out_dtype)
-{
+    const char* name, Tensor& result, const Tensor& self,
+    c10::optional<IntArrayRef> dim_opt,
+    bool keepdim, ScalarType in_dtype, ScalarType out_dtype) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
       !result.defined() || result.scalar_type() == out_dtype,
@@ -193,6 +190,8 @@ static TensorIterator make_reduction(
       " and ",
       toString(out_dtype),
       ".");
+  // dim={} performs an all-reduce, same as dim=None
+  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result, self, mask, keepdim, out_dtype);
@@ -205,9 +204,8 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType out_dtype)
-{
+    const char* name, Tensor& result, const Tensor& self,
+    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
@@ -219,9 +217,9 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype1, ScalarType dtype2)
-{
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
+    c10::optional<IntArrayRef> dim_opt, bool keepdim, ScalarType dtype1,
+    ScalarType dtype2) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
     (!result1.defined() || result1.scalar_type() == dtype1) && (!result2.defined() || result2.scalar_type() == dtype2),
@@ -231,6 +229,8 @@ static TensorIterator make_reduction(
     toString(dtype1), toString(dtype2),
     ".");
 
+  // dim={} performs an all-reduce, same as dim=None
+  auto dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
   DimMask mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result1, self, mask, keepdim, dtype1);
@@ -254,10 +254,52 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype)
-{
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
+    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
+}
+
+static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const char *fn_name) {
+  if (self.ndimension() == 0) {
+    TORCH_CHECK_INDEX(dim == 0 || dim == -1, fn_name,
+      ": Expected reduction dim -1 or 0 for scalar but got ", dim);
+  }
+  else {
+    TORCH_CHECK_INDEX(self.size(dim) != 0, fn_name,
+      ": Expected reduction dim ", dim, " to have non-zero size.");
+  }
+}
+
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+  for (const int64_t d : dim) {
+    zero_numel_check_dims(self, d, fn_name);
+  }
+}
+
+// Resize the result tensor and indices when result.numel() == 0 depending on values of
+// dim and keepdim for returning tensors containing reduction results.
+// This function should be called when you are reducing a zero-numel tensor and want to
+// resize the output and return it. This function exists for resizing zero-numel
+// tensors when the size of the reduction dimension is non-zero.
+static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
+                                     const Tensor& self, const int64_t dim,
+                                     const bool keepdim, const char *fn_name) {
+  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
+  zero_numel_check_dims(self, dim, fn_name);
+  std::vector<int64_t> sizes;
+  if (keepdim) {
+    sizes = self.sizes().vec();
+    sizes[dim] = 1;
+  }
+  else {
+    for (const auto d : c10::irange(self.dim())) {
+      if (d != dim) {
+        sizes.push_back(self.sizes()[d]);
+      }
+    }
+  }
+  at::native::resize_output(result, sizes);
+  at::native::resize_output(result_indices, sizes);
 }
 
 }}  // at::native

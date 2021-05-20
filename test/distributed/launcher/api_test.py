@@ -29,6 +29,10 @@ from torch.distributed.launcher.api import (
     elastic_launch,
     _get_entrypoint_name,
 )
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+)
 
 
 def path(script):
@@ -122,6 +126,9 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_script_python(self):
         nnodes = 1
         nproc_per_node = 4
@@ -136,6 +143,9 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
@@ -150,6 +160,9 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_script_bash(self):
         nnodes = 1
         nproc_per_node = 4
@@ -162,6 +175,9 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_function(self):
         nnodes = 1
         nproc_per_node = 4
@@ -175,6 +191,9 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
         nproc_per_node = 4
@@ -203,6 +222,9 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
     def test_launch_elastic(self):
         nproc_per_node = 4
 

@@ -13,6 +13,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   if (bit_rate_ == 8 || bit_rate_ == 4) {
     const auto input_rows = packed_weight.size(0);
     const auto input_columns = packed_weight.size(1);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int scale_bias_bytes;
     const auto num_elem_per_byte = 8 / bit_rate_;
     if (bit_rate_ == 8) {
@@ -37,6 +38,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kFloat));
 
     auto output_columns = output_shape[1];
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint8_t* output_data;
 
     // Allocate output weight tensor based on the bit_width
@@ -70,6 +72,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (std::size_t col = 0; col < output_columns / num_elem_per_byte;
              ++col) {
           output_row[col] = input_row[col];

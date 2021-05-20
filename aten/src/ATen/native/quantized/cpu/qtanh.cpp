@@ -14,6 +14,7 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qtanh_stub);
 
 #ifdef USE_PYTORCH_QNNPACK

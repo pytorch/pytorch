@@ -138,6 +138,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -146,6 +147,10 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
+
+class DeviceCheckType(Enum):
+    NoCheck = 0
+    ExactSame = 1
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -174,6 +179,9 @@ class NativeFunction:
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
+
+    # How to emit automatic generation of device check
+    device_check: DeviceCheckType
 
     # What python module to put the function in
     python_module: Optional[str]
@@ -290,6 +298,14 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        device_check_s = e.pop('device_check', None)
+        assert device_check_s is None or isinstance(device_check_s, str), f'not a str: {device_check_s}'
+        device_check: DeviceCheckType
+        if device_check_s is None:
+            device_check = DeviceCheckType.ExactSame
+        else:
+            device_check = DeviceCheckType[device_check_s]
+
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
@@ -358,6 +374,7 @@ class NativeFunction:
             category_override=category_override,
             dispatch=dispatch,
             device_guard=device_guard,
+            device_check=device_check,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
         )
@@ -406,6 +423,10 @@ class NativeFunction:
                 assert k not in self.dispatch, \
                     f"if structured_delegate, then must not have {k} in dispatch dictionary " \
                     "(it is delegated!)"
+        if str(self.func.name).startswith('_foreach'):
+            assert self.device_check == DeviceCheckType.NoCheck, \
+                "foreach kernels fall back to slow path when tensor are on different devices, " \
+                "device_check not allowed to be enabled"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 

@@ -36,31 +36,31 @@
 #define LOCK_UN 0x00000100
 
 int flock_(int fd, int op) {
-    HANDLE hdl = (HANDLE) _get_osfhandle(fd);
-    DWORD low = 1, high = 0;
-    OVERLAPPED offset = {0, 0, 0, 0, NULL};
+  HANDLE hdl = (HANDLE)_get_osfhandle(fd);
+  DWORD low = 1, high = 0;
+  OVERLAPPED offset = {0, 0, 0, 0, NULL};
 
-    if (hdl < 0)
-      return -1;
-
-    switch (op) {
-      case LOCK_EX:
-        if (LockFileEx(hdl, LOCKFILE_EXCLUSIVE_LOCK, 0, low, high, &offset))
-          return 0;
-        break;
-      case LOCK_SH:
-        if (LockFileEx(hdl, 0, 0, low, high, &offset))
-          return 0;
-        break;
-      case LOCK_UN:
-        if(UnlockFileEx(hdl, 0, low, high, &offset) != 0)
-          return 0;
-        break;
-      default:
-        break;
-    }
-    errno = EINVAL;
+  if (hdl < 0)
     return -1;
+
+  switch (op) {
+    case LOCK_EX:
+      if (LockFileEx(hdl, LOCKFILE_EXCLUSIVE_LOCK, 0, low, high, &offset))
+        return 0;
+      break;
+    case LOCK_SH:
+      if (LockFileEx(hdl, 0, 0, low, high, &offset))
+        return 0;
+      break;
+    case LOCK_UN:
+      if (UnlockFileEx(hdl, 0, low, high, &offset) != 0)
+        return 0;
+      break;
+    default:
+      break;
+  }
+  errno = EINVAL;
+  return -1;
 }
 #endif
 
@@ -140,7 +140,8 @@ class File {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
 #ifdef _WIN32
-      fd_ = syscall(std::bind(::open, path.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE));
+      fd_ = syscall(std::bind(
+          ::open, path.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE));
 #else
       fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
 #endif
@@ -300,8 +301,8 @@ void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
 
 std::vector<uint8_t> FileStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
@@ -309,15 +310,19 @@ std::vector<uint8_t> FileStore::compareSet(
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
   pos_ = refresh(file, pos_, cache_);
-  if (cache_.count(regKey) == 0) {
-    return currentValue;
-  }
-  else if (cache_[regKey] == currentValue){
+  if ((cache_.count(regKey) == 0 && expectedValue.empty()) ||
+      (cache_.count(regKey) != 0 && cache_[regKey] == expectedValue)) {
+    // if the key does not exist and currentValue arg is empty or
+    // the key does exist and current value is what is expected, then set it
     file.seek(0, SEEK_END);
     file.write(regKey);
-    file.write(newValue);
-    return newValue;
+    file.write(desiredValue);
+    return desiredValue;
+  } else if (cache_.count(regKey) == 0) {
+    // if the key does not exist
+    return expectedValue;
   }
+  // key exists but current value is not expected
   return cache_[regKey];
 }
 

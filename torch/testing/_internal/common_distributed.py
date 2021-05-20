@@ -99,6 +99,23 @@ def skip_if_lt_x_gpu(x):
     return decorator
 
 
+# This decorator helps avoiding initializing cuda while testing other backends
+def nccl_skip_if_lt_x_gpu(backend, x):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if backend != "nccl":
+                return func(*args, **kwargs)
+            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+                return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(x)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+        return wrapper
+
+    return decorator
+
+
 def with_nccl_blocking_wait(func):
     """
     Convenience decorator to set/unset NCCL_BLOCKING_WAIT flag. Note that use of
@@ -484,8 +501,7 @@ class MultiProcessTestCase(TestCase):
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
-            import caffe2.python._import_c_extension as C
-            C.set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
+            torch._C._set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.

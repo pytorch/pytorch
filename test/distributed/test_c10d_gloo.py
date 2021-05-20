@@ -168,6 +168,7 @@ def simple_multi_input_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
+    @requires_gloo()
     @retry_on_connect_failures
     def test_logging_init(self):
         os.environ["WORLD_SIZE"] = "1"
@@ -235,8 +236,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         xs = [torch.FloatTensor([])]
-        pg.broadcast(xs).wait()
-        self.assertEqual(0, xs[0].numel())
+        w = pg.broadcast(xs)
+        w.wait()
+        output = w.result()
+        self.assertEqual(0, output[0].numel())
+        self.assertEqualIgnoreType(xs[0], output[0])
 
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -298,14 +302,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = rootTensor
             work = pg.broadcast(xs, opts)
             work.wait()
+            return work.result()
 
         # Every rank is root once
         for i in range(self.world_size):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
-            broadcast([x], i, 0)
+            output = broadcast([x], i, 0)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.tensor([i]), x)
+            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
 
             # Run with 2 input tensors
             num = 2
@@ -315,17 +320,18 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     fn(torch.tensor([self.rank * num + 1.0])),
                 ]
 
-                broadcast(xs, i, j)
+                output = broadcast(xs, i, j)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[0])
+                self.assertEqualIgnoreType(torch.tensor([i * num + j]), output[0])
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[1])
+                self.assertEqualIgnoreType(torch.tensor([i * num + j]), output[1])
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
         work = pg.broadcast(x, root=0)
         work.wait()
-        self.assertEqual(torch.tensor([1.0]), x)
+        output = work.result()
+        self.assertEqual(torch.tensor([1.0]), output[0])
 
     def test_broadcast_basics(self):
         self._test_broadcast_basics(lambda t: t.clone())
@@ -388,14 +394,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Single input tests
         tests = simple_reduce_tests(self.rank, self.world_size)
-        for (op, input, output) in tests:
+        for (op, input, expected) in tests:
             opts = c10d.AllreduceOptions()
             opts.reduceOp = op
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
+            output = work.result()
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(output, tensor)
+            self.assertEqualIgnoreType(expected, output[0])
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
@@ -405,7 +412,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             tensors = [fn(input) for input in inputs]
             work = pg.allreduce(tensors, opts)
             work.wait()
-            for tensor in tensors:
+            result = work.result()
+            for tensor in result:
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(output, tensor)
 
@@ -413,8 +421,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         x = fn(torch.tensor([self.rank + 1.0]))
         work = pg.allreduce(x)
         work.wait()
+        result = work.result()
         self.assertEqual(
-            torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]), x
+            torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]), result[0]
         )
 
     def test_allreduce_basics(self):
@@ -678,7 +687,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Wait for work to complete
         for i in range(self.world_size):
             work[i].wait()
-            self.assertEqual(torch.tensor([i]), outputs[i])
+            result = work[i].result()
+            self.assertEqual(torch.tensor([i]), result[0])
 
     def test_scatter_basics(self):
         self._test_scatter_basics(lambda t: t.clone())
@@ -837,8 +847,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         expected = [torch.tensor([rank]) for rank in range(self.world_size)]
         for i in range(self.world_size):
             work[i].wait()
+            result = work[i].result()
             if i == self.rank:
-                self.assertEqual(expected, outputs)
+                self.assertEqual(expected, result)
 
     def test_gather_basics(self):
         self._test_gather_basics(lambda t: t.clone())
@@ -1074,9 +1085,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 tmp = fn(input)
                 work = pg.reduce([tmp], opts)
                 work.wait()
+                result = work.result()
                 if root == self.rank:
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(output, tmp)
+                    self.assertEqualIgnoreType(output, result[0])
 
     def test_reduce_basics(self):
         self._test_reduce_basics(lambda t: t.clone())
@@ -1292,7 +1304,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, None, multi_device=True)
 
-    def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False):
+    def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False, static_graph=False):
         """
         By simulating a multi-task training, this test is to make sure:
         1) DDP does not touch the grad of globally unused parameters.
@@ -1341,6 +1353,8 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
+        if static_graph:
+            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1352,6 +1366,8 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
+        if static_graph:
+            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()
@@ -1363,6 +1379,11 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_grad_is_view(self):
         self._test_global_local_unused_params_grad(gradient_as_bucket_view=True)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_global_local_unused_params_grad_with_static_graph(self):
+        self._test_global_local_unused_params_grad(static_graph=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
@@ -2052,6 +2073,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_gloo_new_group(self):
         self._test_sequence_num_set_new_group(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_default(self):
+        self._test_sequence_num_incremented_default_group("gloo")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_subgroup(self):
+        if self.world_size < 4:
+            return unittest.skip("Test requires world_size of at least 4")
+        self._test_sequence_num_incremented_subgroup("gloo")
 
     @requires_gloo()
     def test_gloo_barrier_device_ids(self):

@@ -1,6 +1,6 @@
 import copy
 import glob
-import imp
+import importlib
 import os
 import re
 import shlex
@@ -1635,13 +1635,12 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from distutils.util import get_platform
-        from distutils._msvccompiler import _get_vc_env
+        from setuptools import distutils
 
-        plat_name = get_platform()
+        plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
 
-        vc_env = _get_vc_env(plat_spec)
+        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
         vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
             uk = k.upper()
@@ -1695,14 +1694,16 @@ def _get_exec_path(module_name, path):
 
 
 def _import_module_from_library(module_name, path, is_python_module):
-    # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
-    file, path, description = imp.find_module(module_name, [path])
-    # Close the .so file after load.
-    with file:
-        if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore[arg-type]
-        else:
-            torch.ops.load_library(path)
+    filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
+    if is_python_module:
+        # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        module = importlib.util.module_from_spec(spec)
+        assert isinstance(spec.loader, importlib.abc.Loader)
+        spec.loader.exec_module(module)
+        return module
+    else:
+        torch.ops.load_library(filepath)
 
 
 def _write_ninja_file_to_build_library(path,

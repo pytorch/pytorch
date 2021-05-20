@@ -65,6 +65,7 @@ void setInputTensorDescriptorTypeAndBuffer(
 template <typename T>
 void adjustQuantizedOffsetImpl(Tensor* t, uint8_t offset) {
   auto* data = t->mutable_data<T>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < t->numel(); ++i) {
     data[i] -= offset;
   }
@@ -131,6 +132,7 @@ void BlobToTensorDescriptor(
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
   const bool is_int8tensor =
       blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_external_tensor;
 #ifndef C10_MOBILE
   auto function_ptr =
@@ -278,6 +280,7 @@ details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
   output_reshape_info.begins.reserve(output_names_.size());
   output_reshape_info.ends.reserve(output_names_.size());
   output_reshape_info.fast_path.reserve(output_names_.size());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < output_names_.size(); ++i) {
     const auto it = output_shape_hints_.find(i);
     CAFFE_ENFORCE(
@@ -316,6 +319,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
   end.Resize(dim_size);
   int32_t* end_ptr = end.template mutable_data<int32_t>();
   int32_t mismatch = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int j = 0; j < dim_size; ++j) {
     CAFFE_ENFORCE_GE(
         max_shape[j],
@@ -330,6 +334,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
         real_shape[j],
         ")");
     begin_ptr[j] = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (max_shape[j] > real_shape[j]) {
       end_ptr[j] = real_shape[j];
       mismatch += j;
@@ -617,19 +622,23 @@ string mapOnnxStatusToString(onnxStatus status) {
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < InputSize(); ++i) {
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     at::IntArrayRef tensor_dims;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
       const auto& input_tensor_int8 =
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           this->template Input<int8::Int8TensorCPU>(i);
       const auto& cpu_tensor = input_tensor_int8.t;
       tensor_dims = cpu_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(
           input_tensor_int8, &tensor_descriptor);
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const auto& input_tensor = Input(i);
       tensor_dims = input_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
@@ -644,7 +653,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   c10::SmallVector<int64_t, 4> tensor_dims_int64;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < OutputSize(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     setOutputShapeAndType(i, tensor_dims_int64);
   }
   bool ext_supported = false;
@@ -691,7 +702,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         mapOnnxStatusToString(status));
 
     current_batch_size = extractOutputBatchSizes();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxEventState eventState;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxStatus eventStatus;
     std::string message;
     size_t messageLength = 512;
@@ -703,6 +716,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             timeout_,
             &eventState,
             &eventStatus,
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<char*>(message.data()),
             &messageLength),
         ONNXIFI_STATUS_SUCCESS);
@@ -760,8 +774,10 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   if (adjust_quantized_offset_) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (unsigned i = 0U; i < OutputSize(); ++i) {
       if (quantized_outputs_[i]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         auto* int8_tensor = this->template Output<int8::Int8TensorCPU>(i);
         int8_tensor->zero_point += adjust_quantized_offset_;
         adjustQuantizedOffset(&int8_tensor->t, adjust_quantized_offset_);
@@ -776,7 +792,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)

@@ -38,7 +38,7 @@ class Stream(torch._C._CudaStreamBase):
         r"""Makes all future work submitted to the stream wait for an event.
 
         Args:
-            event (Event): an event to wait for.
+            event (torch.cuda.Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
            `CUDA Stream documentation`_ for more info.
@@ -69,7 +69,7 @@ class Stream(torch._C._CudaStreamBase):
         r"""Records an event.
 
         Args:
-            event (Event, optional): event to record. If not given, a new one
+            event (torch.cuda.Event, optional): event to record. If not given, a new one
                 will be allocated.
 
         Returns:

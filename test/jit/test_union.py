@@ -151,12 +151,21 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, ())
 
     def test_union_variable_can_be_reassigned(self):
+        @torch.jit.script
+        def aux1(i: int):
+            return int(i ** 2)
+
+        @torch.jit.script
+        def aux2(s: str):
+            return s + s
+
         def fn() -> Union[int, str]:
             x: Union[int, str] = "foo"
             i: int = 1
-            s: str = "bar"
             x = i
-            x = s
+            y: int = aux1(x)
+            z: str = aux2(str(y))
+            x = z
             return x
 
         self.checkScript(fn, ())
@@ -219,6 +228,16 @@ class TestUnion(JitTestCase):
         s = fn.graph
 
         FileCheck().check("x : Union[int, str]")    \
+                   .run(s)
+
+    def test_union_redundant_arguments_are_skipped_subtyping(self):
+        @torch.jit.script
+        def fn(x: Union[str, Tuple[Optional[int], int], Tuple[int, int]]) -> str:
+            return "foo"
+
+        s = fn.graph
+
+        FileCheck().check("x : Union[(int?, int), str]")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_container(self):
@@ -292,19 +311,35 @@ class TestUnion(JitTestCase):
 
         self.assertEqual(fn2(), 10)
 
-    def test_optional_of_union_is_flattened(self):
-        def fn(flag: bool) -> Tuple[Union[str, int, None], Union[str, int, None]]:
+    def test_union_optional_of_union_is_flattened(self):
+        @torch.jit.script
+        def fn(flag: int) -> Union[str, int, None]:
             y: Union[int, str, None] = "foo"
-            if flag:
+            if flag == 0:
                 x: Optional[Union[int, str]] = y
+            elif flag == 1:
+                x: Optional[Union[int, str]] = 1
             else:
-                x: Optional[Union[int, str]] = "bar"
-            return x, y
+                x: Optional[Union[int, str]] = None
+            return x
 
-        self.checkScript(fn, (True,))
-        self.checkScript(fn, (False,))
+        # Can't use `checkScript` because it will flag the fact that
+        # the original code has `Optional[Union[int, str]]` but the
+        # saved/loaded code has `Union[int, NoneType, str]` (even
+        # though this is exactly what we want)
+        self.assertEqual(fn(0), "foo")
+        self.assertEqual(fn(1), 1)
+        self.assertEqual(fn(2), None)
 
-        s = torch.jit.script(fn).graph
+        buffer = io.BytesIO()
+        torch.jit.save(fn, buffer)
+        l = torch.jit.load(buffer)
+
+        s = l.code
+
+        FileCheck().check("Union[int, NoneType, str]")     \
+                   .check("Union[int, NoneType, str]")     \
+                   .run(s)
 
     def test_union_subclasses_larger_union(self):
         def fn() -> Union[int, str, torch.Tensor]:
@@ -313,6 +348,8 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, ())
 
+    # TODO: We would like to eventually support this. The issue is being
+    # tracked at https://github.com/pytorch/pytorch/issues/58167
     def test_union_as_dict_key(self):
         def fn():
             x: Dict[Union[int, str], str] = {}
@@ -375,6 +412,38 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, ("foo",))
         self.checkScript(fn, (1,))
 
+    def test_union_type_refinement_tuple(self):
+        def fn(x: Union[int, float, List[str]]) -> str:
+            if isinstance(x, (int, float)):
+                if isinstance(x, int):
+                    return str(x)
+                else:
+                    return "foo"
+            else:
+                if len(x):
+                    return x[0]
+                else:
+                    return "bar"
+
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, (1.0,))
+        self.checkScript(fn, (["a", "b", "c"],))
+
+    def test_union_type_refinement_internal_declaration(self):
+        def fn(flag: bool) -> str:
+            x: Union[int, str, None] = None
+            if (flag):
+                y = "foo"
+            else:
+                y = 1
+            if isinstance(x, str):
+                return x
+            else:
+                return "bar"
+
+        self.checkScript(fn, (True,))
+        self.checkScript(fn, (False,))
+
     def test_union_branching_with_union_return_and_homogenous_types(self):
         def fn(x: int) -> Union[int, str]:
             if x % 2:
@@ -428,35 +497,15 @@ class TestUnion(JitTestCase):
                                     " value of type int"):
             torch.jit.script(fn)
 
-    def test_union_with_dynamic_type_refinement(self):
-        def fn(x: Union[List[int], int]) -> int:
-            lst = [1, 2, 3]
-            if isinstance(x, int):
-                x = lst
-            return lst[0]
-
-        self.checkScript(fn, (1,))
-        self.checkScript(fn, ([4, 5, 6],))
-
     def test_union_schema_matching_on_internal_type(self):
-        def eager(x: Union[List[int], Dict[str, int]]) -> int:
-            if isinstance(x, list):
+        def fn(x: Union[List[int], Dict[str, int]]) -> int:
+            if torch.jit.isinstance(x, List[int]):
                 return x[0]
-            return list(x.values())[0]
+            else:
+                return list(x.values())[0]
 
-        @torch.jit.script
-        def script(x: Union[List[int], Dict[str, int]]) -> int:
-            if isinstance(x, List[int]):
-                return x[0]
-            return list(x.values())[0]
-
-        list_input_ref = eager([1, 2, 3])
-        list_input_out = script([1, 2, 3])
-        self.assertEqual(list_input_ref, list_input_out)
-
-        dict_input_ref = eager({"foo": 1, "bar": 2, "baz": 3})
-        dict_input_out = script({"foo": 1, "bar": 2, "baz": 3})
-        self.assertEqual(dict_input_ref, dict_input_out)
+        self.checkScript(fn, ([1, 2, 3],))
+        self.checkScript(fn, ({"foo": 1, "bar": 2, "baz": 3},))
 
     def test_union_subtractive_refinement(self):
         def fn(x: Union[List[int], int]) -> int:
@@ -470,20 +519,12 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, ([1, 2, 3],))
 
     def test_union_subtractive_refinement_with_container(self):
-        def eager(x: Union[List[int], int]) -> int:
-            if not isinstance(x, list):
-                return x
-            else:
-                x.append(1)
-                return x[0]
-
-        @torch.jit.script
-        def script(x: Union[List[int], int]) -> int:
+        def fn(x: Union[List[int], int]) -> int:
             if not torch.jit.isinstance(x, List[int]):
                 return x
             else:
                 x.append(1)
                 return x[0]
 
-        self.assertEqual(eager(1), script(1))
-        self.assertEqual(eager([1, 2, 3]), script([1, 2, 3]))
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, ([1, 2, 3],))
