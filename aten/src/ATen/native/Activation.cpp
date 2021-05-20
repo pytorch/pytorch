@@ -334,7 +334,7 @@ Tensor math_mish_backward(
     const Tensor& input) {
   auto input_tanh_softplus = at::tanh(at::softplus(input));
   auto input_sigmoid = at::sigmoid(input);
-  return grad_output * (input_tanh_softplus + (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus));
+  return grad_output * (input_tanh_softplus + (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus)));
 }
 
 template <typename scalar_t>

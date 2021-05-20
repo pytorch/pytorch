@@ -666,7 +666,7 @@ void mish_backward_kernel(TensorIterator& iter) {
                   kOneVec / (kOneVec + x_vec.neg().exp());
               const Vec256<scalar_t> tanh_softplus =
                   x_vec.exp().log1p().tanh();
-              return dy_vec * (tanh_softplus + x_vex * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
+              return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
             });
       });
 }
