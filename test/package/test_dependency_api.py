@@ -6,7 +6,7 @@ from unittest import skipIf
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
     from .common import PackageTestCase
@@ -224,15 +224,27 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        with self.assertRaisesRegex(PackagingError, "did not match against any action"):
+        with self.assertRaises(PackagingError) as e:
             with PackageExporter(buffer, verbose=False) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module did not match against any action pattern. Extern, mock, or intern it.
+                    package_a
+                    package_a.subpackage
+                """
+            ),
+        )
 
         # Interning all dependencies should work
         with PackageExporter(buffer, verbose=False) as he:
             he.intern(["package_a", "package_a.subpackage"])
             he.save_pickle("obj", "obj.pkl", obj2)
 
+    @skipIf(IS_WINDOWS, "extension modules have a different file extension on windows")
     def test_broken_dependency(self):
         """A unpackageable dependency should raise a PackagingError."""
 
@@ -258,20 +270,42 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        with self.assertRaisesRegex(PackagingError, "C extension"):
+        with self.assertRaises(PackagingError) as e:
             with PackageExporter(
                 buffer, verbose=False, importer=BrokenImporter()
             ) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
 
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module is a C extension module. torch.package supports Python modules only.
+                    foo
+                    bar
+                """
+            ),
+        )
+
     def test_invalid_import(self):
         """An incorrectly-formed import should raise a PackagingError."""
         buffer = BytesIO()
-        with self.assertRaisesRegex(PackagingError, "attempted relative import"):
+        with self.assertRaises(PackagingError) as e:
             with PackageExporter(buffer, verbose=False) as exporter:
-                # This import will fail to load
+                # This import will fail to load.
                 exporter.save_source_string("foo", "from ........ import lol")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Dependency resolution failed.
+                    foo
+                      Context: attempted relative import beyond top-level package
+                """
+            ),
+        )
 
 
 if __name__ == "__main__":
