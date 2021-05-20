@@ -71,6 +71,12 @@ TORCH_META_FUNC(silu) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(silu_backward) (
+  const Tensor& grad_output, const Tensor& input
+) {
+  build_binary_op(maybe_get_output(), grad_output, input);
+}
+
 TORCH_META_FUNC(softplus) (
   const Tensor& self, const Scalar& beta, const Scalar& threshold
 ) {
@@ -197,6 +203,12 @@ TORCH_IMPL_FUNC(silu_out) (
   const Tensor& self, const Tensor& result
 ) {
   silu_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(silu_backward_out) (
+  const Tensor& grad_output, const Tensor& input, const Tensor& grad_input
+) {
+  silu_backward_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(softplus_out) (
@@ -354,15 +366,6 @@ Tensor & celu_(Tensor & self, const Scalar& alpha) {
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
-}
-
-Tensor silu_backward(
-    const Tensor& grad_output,
-    const Tensor& input) {
-  Tensor grad_input = at::empty({0}, input.options());
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, input);
-  silu_backward_stub(iter.device_type(), iter);
-  return grad_input;
 }
 
 Tensor math_silu_backward(

@@ -476,7 +476,7 @@ void silu_kernel(TensorIteratorBase& iter) {
       });
 }
 
-void silu_backward_kernel(TensorIterator& iter) {
+void silu_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
