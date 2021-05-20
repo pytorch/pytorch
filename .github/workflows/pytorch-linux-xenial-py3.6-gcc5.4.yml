@@ -150,7 +150,7 @@ jobs:
         name: Store PyTorch Build Artifacts on Github
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 30
+          retention-days: 14
           if-no-files-found: error
           path:
             artifacts.zip
@@ -158,7 +158,7 @@ jobs:
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 30
+          retention-days: 14
           if-no-files-found: error
           path:
             artifacts.zip
@@ -251,7 +251,7 @@ jobs:
         if: always()
         with:
           name: test-reports
-          retention-days: 30
+          retention-days: 14
           if-no-files-found: error
           path:
             test/**/*.xml
