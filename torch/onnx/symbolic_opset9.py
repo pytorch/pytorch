@@ -1756,6 +1756,8 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 
+def as_tensor(g, data, dtype=None, device=None):
+    return tensor(g, data, dtype, device)
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
