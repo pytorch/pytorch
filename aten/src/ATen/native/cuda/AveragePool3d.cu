@@ -343,7 +343,7 @@ void avg_pool3d_out_cuda_template(
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input, "input", 2 };
 
-  checkAllSameGPU("avg_pool3d_out_cuda", {output_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
@@ -472,7 +472,7 @@ void avg_pool3d_backward_out_cuda_template(
   TensorArg gradOutput_arg{ gradOutput, "gradOutput", 2 };
   TensorArg input_arg{ input, "input", 3 };
 
-  checkAllSameGPU("avg_pool3d_backward_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
