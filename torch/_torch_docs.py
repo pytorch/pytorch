@@ -1639,7 +1639,7 @@ Example::
 """)
 
 add_docstr(torch.cov, r"""
-cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
+cov(input, correction=1, fweights=None, aweights=None) -> Tensor
 
 Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
 the variables and columns are the observations.
@@ -1668,8 +1668,6 @@ where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever 
 Args:
     input (Tensor): A 2D matrix containing multiple variables and observations, or a
         Scalar or 1D vector representing a single variable.
-
-Keyword Args:
     correction (int, optional): difference between the sample size and sample degrees of freedom.
         Defaults to Bessel's correction, ``correction = 1`` which returns the unbiased estimate,
         even if both :attr:`fweights` and :attr:`aweights` are specified. ``correction = 0``
