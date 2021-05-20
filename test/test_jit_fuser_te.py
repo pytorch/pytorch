@@ -1267,6 +1267,7 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
             F.hardshrink,
+            F.leaky_relu,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
@@ -1794,6 +1795,14 @@ class TestTEFuser(JitTestCase):
         y = torch.tensor([[[2.0]]], dtype=torch.float32)
         script = self.checkScript(eager, (x, y))
         self.assertAllFused(script.graph_for(x, y))
+
+    def test_unsqueeze_var_dim(self):
+        def eager(x, y, z: int):
+            return x * torch.unsqueeze(y, dim=z)
+        x = torch.rand(4, 4, 64).permute(1, 0, 2)
+        y = torch.rand(4, 4)
+        z = 2
+        script = self.checkScript(eager, (x, y, z))
 
 if __name__ == '__main__':
     run_tests()
