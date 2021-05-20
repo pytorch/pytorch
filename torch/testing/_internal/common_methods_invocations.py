@@ -2916,8 +2916,6 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
 
-    vec_sample = SampleInput(make_tensor((M, )))
-
     # 2D Tensors
     tensors_2d = (
         make_arg((M, M), low=None, high=None),
@@ -2934,9 +2932,8 @@ def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
     args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
 
     tensors = [*product(tensors_2d, args_2d), *product(tensors_3d, args_3d)]
-
     samples = [SampleInput(tensor, args=arg) for tensor, arg in tensors]
-    return samples + [vec_sample]
+    return samples
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -4433,7 +4430,6 @@ op_db: List[OpInfo] = [
     OpInfo('diagonal',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
