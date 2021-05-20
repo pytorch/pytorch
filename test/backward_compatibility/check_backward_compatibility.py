@@ -83,7 +83,7 @@ allow_list = [
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_addmv_impl_", datetime.date(2021, 5, 15)),
-    ("aten::slice", datetime.date(2021, 5, 31)),
+    ("aten::slice", datetime.date(2021, 6, 15)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::_amp_update_scale", datetime.date(2021, 6, 1)),
