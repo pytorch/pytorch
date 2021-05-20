@@ -50,6 +50,7 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\w\build-results
+
   test:
     runs-on: windows.4xlarge
     env:
@@ -97,12 +98,18 @@ jobs:
           if-no-files-found: error
           path:
             test/**/*.xml
-  # TODO: Make this into a composite step
+
+  # this is a separate step from test because the log files from test are too
+  # long: basically, GitHub tries to render all of the log files when you click
+  # through an action causing extreme slowdown on actions that contain too many
+  # logs (like test); we can always move it back to the other one, but it
+  # doesn't create the best experience
   render_test_results:
     if: always()
     needs:
       - test
     runs-on: ubuntu-18.04
+    # TODO: Make this into a composite step
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
