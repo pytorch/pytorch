@@ -486,7 +486,8 @@ void flip_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
                                          iter.dtype(), "flip_cuda",
   [&] {
-    flip_kernel_impl<scalar_t>(iter);
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    flip_kernel_impl<dtype>(iter);
   });
 }
 
