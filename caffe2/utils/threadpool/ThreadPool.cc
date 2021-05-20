@@ -19,7 +19,8 @@ C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
-
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_int(caffe2_threadpool_win_cap, true, "");
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
 
@@ -36,6 +37,8 @@ size_t getDefaultNumThreads() {
   applyCap = FLAGS_caffe2_threadpool_ios_cap;
 #elif defined(TARGET_OS_MAC)
   applyCap = FLAGS_caffe2_threadpool_macos_cap;
+#elif defined(_MSC_VER)
+  applyCap = FLAGS_caffe2_threadpool_win_cap;
 #endif
 
   if (applyCap) {
