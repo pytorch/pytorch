@@ -9,8 +9,8 @@ namespace native {
 namespace {
 
 void quantize_tensor_per_tensor_affine_cuda(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -39,8 +39,8 @@ void quantize_tensor_per_tensor_affine_cuda(
 }
 
 void dequantize_tensor_per_tensor_affine_cuda(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
