@@ -75,6 +75,7 @@ static void reflection_pad1d_out_frame(
   int64_t o_start_x = std::max(int64_t(0), pad_l);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x;
     for (auto k = start; k < end; k++) {
       for (int64_t j = 0; j < output_w; j++) {
@@ -200,6 +201,7 @@ static void reflection_pad1d_backward_out_frame(
   int64_t o_start_x = std::max(int64_t(0), pad_l);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x;
     for (auto k = start; k < end; k++) {
       for (int64_t j = 0; j < output_w; j++) {
@@ -302,6 +304,7 @@ static void reflection_pad2d_out_frame(
   auto o_start_y = std::max(int64_t(0), pad_t);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++) {
       for (int64_t i = 0; i < output_h; i++) {
@@ -457,6 +460,7 @@ static void reflection_pad2d_backward_out_frame(
   auto o_start_y = std::max(int64_t(0), pad_t);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
     for (auto k = start; k < end; k++) {
       for (int64_t i = 0; i < output_h; i++) {

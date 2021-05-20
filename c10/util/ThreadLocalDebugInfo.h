@@ -68,11 +68,9 @@ class C10_API ThreadLocalDebugInfo {
 // Users can access the values through the ThreadLocalDebugInfo::get() call;
 class C10_API DebugInfoGuard {
  public:
-  DebugInfoGuard(
-      DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  DebugInfoGuard(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
 
-  explicit DebugInfoGuard(
-      std::shared_ptr<ThreadLocalDebugInfo> info);
+  explicit DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info);
 
   ~DebugInfoGuard();
 

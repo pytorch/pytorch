@@ -313,10 +313,12 @@ class TestBinaryUfuncs(TestCase):
     def test_div_rounding_nonfinite(self, device, dtype):
 
         # Compare division of special floating point values against NumPy
-        x = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
-                         dtype=dtype)
+        num = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
+                           dtype=dtype)
+        # Divide by zero is tested seperately
+        denom = num[num != 0]
 
-        a, b = x[None, :].clone(), x[:, None].clone()
+        a, b = num[None, :].clone(), denom[:, None].clone()
 
         # Compare bfloat16 against NumPy float
         exact_dtype = dtype != torch.bfloat16
@@ -335,14 +337,37 @@ class TestBinaryUfuncs(TestCase):
                              exact_device=False, exact_dtype=exact_dtype)
 
         # Compare contiguous (likely vectorized) against non-contiguous (not vectorized)
-        storage = torch.empty((20, 20), dtype=dtype, device=device)
-        storage[::2, ::2] = a
-        storage[1::2, 1::2] = b
+        a_noncontig = torch.empty([2 * i for i in a.shape], dtype=dtype, device=device)[::2, ::2]
+        a_noncontig[:] = a
+        b_noncontig = torch.empty([2 * i for i in b.shape], dtype=dtype, device=device)[::2, ::2]
+        b_noncontig[:] = b
 
         for rounding_mode in (None, "trunc", "floor"):
-            expect = torch.divide(storage[::2, ::2], storage[1::2, 1::2], rounding_mode=rounding_mode)
+            expect = torch.divide(a_noncontig, b_noncontig, rounding_mode=rounding_mode)
             actual = torch.divide(a, b, rounding_mode=rounding_mode)
             self.assertEqual(actual, expect)
+
+    @dtypes(torch.bfloat16, torch.half, torch.float32, torch.float64)
+    def test_divide_by_zero_rounding(self, device, dtype):
+        a = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
+                         dtype=dtype)
+        exact_dtype = (dtype != torch.bfloat16)
+        if exact_dtype:
+            an = a.cpu().numpy()
+        else:
+            an = a.float().cpu().numpy()
+
+        zero = torch.zeros_like(a)
+
+        # NOTE: NumPy's floor_divide rounding changed in 1.20.0 to be consistent with divide
+        expect = np.divide(an, 0)
+        for rounding_mode in (None, 'floor'):
+            # CPU scalar
+            actual = torch.divide(a, 0, rounding_mode=rounding_mode)
+            self.assertEqual(actual, expect, exact_dtype=exact_dtype)
+            # Device tensor
+            actual = torch.divide(a, zero, rounding_mode=rounding_mode)
+            self.assertEqual(actual, expect, exact_dtype=exact_dtype)
 
     @dtypes(*torch.testing.get_all_dtypes(
         include_bool=False, include_complex=False, include_bfloat16=False))
@@ -355,9 +380,10 @@ class TestBinaryUfuncs(TestCase):
         a = make_tensor((4096,), device, dtype, low=low, high=high)
         b = make_tensor((4096,), device, dtype, low=low, high=high)
 
-        # Avoid integer division by zero which raises
-        if not dtype.is_floating_point:
-            b[b == 0] = 1
+        # Avoid division by zero which raises for integers and, for floats,
+        # NumPy 1.20 changed floor_divide to follow IEEE rules for inf/nan
+        # after dividing by zero.
+        b[b == 0] = 1
 
         # Compare bfloat16 against NumPy float
         exact_dtype = dtype != torch.bfloat16
@@ -896,11 +922,7 @@ class TestBinaryUfuncs(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                if op in (operator.floordiv, torch.floor_divide):
-                    with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                        do_test(op, a, b)
-                else:
-                    do_test(op, a, b)
+            do_test(op, a, b)
 
     # This test ensures that a scalar Tensor can be safely used
     # in a binary operation in conjunction with a Tensor on all
@@ -2594,14 +2616,16 @@ class TestBinaryUfuncs(TestCase):
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False),
                      torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False)))
-    def test_xlogy(self, device, dtypes):
+    def test_xlogy_xlog1py(self, device, dtypes):
+        x_dtype, y_dtype = dtypes
+
         def out_variant_helper(torch_fn, x, y):
             expected = torch_fn(x, y)
             out = torch.empty_like(expected)
             torch_fn(x, y, out=out)
             self.assertEqual(expected, out)
 
-        def inplace_variant_helper(x, y):
+        def xlogy_inplace_variant_helper(x, y):
             if x.dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
                 with self.assertRaisesRegex(RuntimeError,
                                             "can't be cast to the desired output type"):
@@ -2612,71 +2636,83 @@ class TestBinaryUfuncs(TestCase):
                 inplace_out = x.clone().xlogy_(y)
                 self.assertEqual(expected, inplace_out)
 
-        x_dtype, y_dtype = dtypes
+        def test_helper(torch_fn, reference_fn, inputs, scalar=None):
+            x, y, z = inputs
+            torch_fn_partial = partial(torch_fn, x)
+            reference_fn_partial = partial(reference_fn, x.cpu().numpy())
+            self.compare_with_numpy(torch_fn_partial, reference_fn_partial, x, exact_dtype=False)
+            self.compare_with_numpy(torch_fn_partial, reference_fn_partial, y, exact_dtype=False)
+            self.compare_with_numpy(torch_fn_partial, reference_fn_partial, z, exact_dtype=False)
+
+            val = scalar if scalar is not None else x
+            out_variant_helper(torch_fn, val, x)
+            out_variant_helper(torch_fn, val, y)
+            out_variant_helper(torch_fn, val, z)
 
         # Tensor-Tensor Test (tensor of same and different shape)
         x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
         y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
         z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
 
-        torch_fn = partial(torch.xlogy, x)
-        reference_fn = partial(scipy.special.xlogy, x.cpu().numpy())
+        x_1p = make_tensor((3, 2, 4, 5), device, x_dtype, low=-0.5, high=1000)
+        y_1p = make_tensor((3, 2, 4, 5), device, y_dtype, low=-0.5, high=1000)
+        z_1p = make_tensor((4, 5), device, y_dtype, low=-0.5, high=1000)
 
-        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
-        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
-        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
-        out_variant_helper(torch.xlogy, x, x)
-        out_variant_helper(torch.xlogy, x, y)
-        out_variant_helper(torch.xlogy, x, z)
-        inplace_variant_helper(x, x)
-        inplace_variant_helper(x, y)
-        inplace_variant_helper(x, z)
+        xlogy_fns = torch.xlogy, scipy.special.xlogy
+        xlog1py_fns = torch.special.xlog1py, scipy.special.xlog1py
+
+        test_helper(*xlogy_fns, (x, y, z))
+        xlogy_inplace_variant_helper(x, x)
+        xlogy_inplace_variant_helper(x, y)
+        xlogy_inplace_variant_helper(x, z)
+        test_helper(*xlog1py_fns, (x_1p, y_1p, z_1p))
 
         # Scalar-Tensor Test
-        torch_fn = partial(torch.xlogy, 3.14)
-        reference_fn = partial(scipy.special.xlogy, 3.14)
-
-        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
-        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
-        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
-        out_variant_helper(torch.xlogy, 3.14, x)
-        out_variant_helper(torch.xlogy, 3.14, y)
-        out_variant_helper(torch.xlogy, 3.14, z)
+        test_helper(*xlogy_fns, (x, y, z), 3.14)
+        test_helper(*xlog1py_fns, (x_1p, y_1p, z_1p), 3.14)
 
         # Special Values Tensor-Tensor
-        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
-        zeros = torch.zeros(6, dtype=y_dtype, device=device)
+        t = torch.tensor([-1., 0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.zeros(7, dtype=y_dtype, device=device)
 
-        torch_fn = partial(torch.xlogy, zeros)
-        reference_fn = partial(scipy.special.xlogy, zeros.cpu().numpy())
-        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
-        out_variant_helper(torch.xlogy, zeros, t)
-        inplace_variant_helper(zeros, t)
+        def test_zeros_special_helper(torch_fn, reference_fn, scalar=False):
+            zeros_t = 0 if scalar else zeros
+            zeros_np = 0 if scalar else zeros.cpu().numpy()
+            torch_fn_partial = partial(torch_fn, zeros_t)
+            reference_fn_partial = partial(reference_fn, zeros_np)
+            self.compare_with_numpy(torch_fn_partial, reference_fn_partial, t, exact_dtype=False)
+            out_variant_helper(torch_fn, zeros_t, t)
+
+        test_zeros_special_helper(*xlogy_fns)
+        xlogy_inplace_variant_helper(zeros, t)
+        test_zeros_special_helper(*xlog1py_fns)
 
         # Special Values Scalar-Tensor
-        torch_fn = partial(torch.xlogy, 0)
-        reference_fn = partial(scipy.special.xlogy, 0)
-        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
-        out_variant_helper(torch.xlogy, 0, t)
+        test_zeros_special_helper(*xlogy_fns, scalar=True)
+        test_zeros_special_helper(*xlog1py_fns, scalar=True)
 
-    def test_xlogy_scalar_type_promotion(self, device):
+    def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same
         # priority level as 0-dim tensors
         t = torch.randn((), dtype=torch.float32, device=device)
 
         self.assertEqual(t.dtype, torch.xlogy(t, 5).dtype)
         self.assertEqual(t.dtype, torch.xlogy(t, 5.).dtype)
+        self.assertEqual(t.dtype, torch.special.xlog1py(t, 5).dtype)
+        self.assertEqual(t.dtype, torch.special.xlog1py(t, 5.).dtype)
 
         self.assertEqual(t.dtype, torch.xlogy(5, t).dtype)
         self.assertEqual(t.dtype, torch.xlogy(5., t).dtype)
+        self.assertEqual(t.dtype, torch.special.xlog1py(5, t).dtype)
+        self.assertEqual(t.dtype, torch.special.xlog1py(5., t).dtype)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    def test_xlogy_bfloat16(self, device):
-        def _compare_helper(x, y):
+    def test_xlogy_xlog1py_bfloat16(self, device):
+        def _compare_helper(x, y, torch_fn, reference_fn):
             x_np = x if isinstance(x, float) else x.cpu().to(torch.float).numpy()
             y_np = y if isinstance(y, float) else y.cpu().to(torch.float).numpy()
-            expected = torch.from_numpy(scipy.special.xlogy(x_np, y_np))
-            actual = torch.xlogy(x, y)
+            expected = torch.from_numpy(reference_fn(x_np, y_np))
+            actual = torch_fn(x, y)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         x_dtype, y_dtype = torch.bfloat16, torch.bfloat16
@@ -2686,19 +2722,36 @@ class TestBinaryUfuncs(TestCase):
         y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
         z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
 
-        _compare_helper(x, x)
-        _compare_helper(x, y)
-        _compare_helper(x, z)
+        x_1p = make_tensor((3, 2, 4, 5), device, x_dtype, low=-0.8, high=1000)
+        y_1p = make_tensor((3, 2, 4, 5), device, y_dtype, low=-0.8, high=1000)
+        z_1p = make_tensor((4, 5), device, y_dtype, low=-0.8, high=1000)
 
-        _compare_helper(x, 3.14)
-        _compare_helper(y, 3.14)
-        _compare_helper(z, 3.14)
+        xlogy_fns = torch.xlogy, scipy.special.xlogy
+        xlog1py_fns = torch.special.xlog1py, scipy.special.xlog1py
+
+        _compare_helper(x, x, *xlogy_fns)
+        _compare_helper(x, y, *xlogy_fns)
+        _compare_helper(x, z, *xlogy_fns)
+        _compare_helper(x, 3.14, *xlogy_fns)
+        _compare_helper(y, 3.14, *xlogy_fns)
+        _compare_helper(z, 3.14, *xlogy_fns)
+
+        _compare_helper(x_1p, x_1p, *xlog1py_fns)
+        _compare_helper(x_1p, y_1p, *xlog1py_fns)
+        _compare_helper(x_1p, z_1p, *xlog1py_fns)
+        _compare_helper(x_1p, 3.14, *xlog1py_fns)
+        _compare_helper(y_1p, 3.14, *xlog1py_fns)
+        _compare_helper(z_1p, 3.14, *xlog1py_fns)
 
         # Special Values Tensor-Tensor
-        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
-        zeros = torch.tensor(5, dtype=y_dtype, device=device)
-        _compare_helper(t, zeros)
-        _compare_helper(t, 0.)
+        t = torch.tensor([-1., 0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.tensor(7, dtype=y_dtype, device=device)
+
+        _compare_helper(t, zeros, *xlogy_fns)
+        _compare_helper(t, 0., *xlogy_fns)
+
+        _compare_helper(t, zeros, *xlog1py_fns)
+        _compare_helper(t, 0., *xlog1py_fns)
 
 tensor_binary_ops = [
     '__lt__', '__le__',
@@ -2706,19 +2759,25 @@ tensor_binary_ops = [
     '__eq__', '__ne__',
 
     '__add__', '__radd__', '__iadd__',
-    '__sub__', '__rsub__', '__isub__',
+    '__sub__', '__isub__',
     '__mul__', '__rmul__', '__imul__',
-    '__matmul__', '__rmatmul__', '__imatmul__',
-    '__truediv__', '__rtruediv__', '__itruediv__',
+    '__matmul__',
+    '__truediv__', '__itruediv__',
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__rmod__', '__imod__',
-    '__divmod__', '__rdivmod__', '__idivmod__',
-    '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__rlshift__', '__ilshift__',
-    '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__rand__', '__iand__',
-    '__xor__', '__rxor__', '__ixor__',
-    '__or__', '__ror__', '__ior__',
+    '__mod__', '__imod__',
+    '__rpow__', '__ipow__',
+    '__lshift__', '__ilshift__',
+    '__rshift__', '__irshift__',
+    '__and__', '__iand__',
+    '__xor__', '__ixor__',
+    '__or__', '__ior__',
+
+    # Attribute does not exist
+    # '__rmatmul__', '__rmod__', '__divmod__', '__rdivmod__', '__idivmod__',
+    # '__pow__', '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
+
+    # Attribute exists, but `NotImplemented` is not returned.
+    # '__rsub__', '__imatmul__', '__rtruediv__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
@@ -2742,7 +2801,7 @@ def generate_not_implemented_tests(cls):
             return t.clamp(min=(_number(_div_min, 1, dtype)))
         return t
 
-    for op in tensor_binary_ops:
+    def create_test_func(op):
         @dtypes(*_types)
         def test(self, device, dtype):
             # Generate the inputs
@@ -2751,12 +2810,14 @@ def generate_not_implemented_tests(cls):
             # Runs the tensor op on the device
             result = getattr(tensor, op)(UnknownType())
             self.assertEqual(result, NotImplemented)
+        return test
 
+    for op in tensor_binary_ops:
         test_name = "test_{}_not_implemented".format(op)
         assert not hasattr(cls, test_name), "{0} already in {1}".format(
             test_name, cls.__name__)
 
-        setattr(cls, test_name, test)
+        setattr(cls, test_name, create_test_func(op))
 
 
 generate_not_implemented_tests(TestBinaryUfuncs)

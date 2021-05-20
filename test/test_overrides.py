@@ -787,49 +787,55 @@ class TestGradCheckOverride(TestCase):
     def test_gradcheck(self):
         from torch.testing._internal.common_utils import gradcheck, gradgradcheck
 
-        a = wrap(torch.tensor(5.0, dtype=torch.double))
-        b = wrap(torch.tensor(6.0, dtype=torch.double))
+        def run_test(fast_mode):
+            a = wrap(torch.tensor(5.0, dtype=torch.double))
+            b = wrap(torch.tensor(6.0, dtype=torch.double))
 
-        a.requires_grad = True
-        b.requires_grad = True
+            a.requires_grad = True
+            b.requires_grad = True
 
-        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
-        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
+            gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, fast_mode=fast_mode)
+            gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, fast_mode=fast_mode)
 
-        total_used_attrs = a.used_attrs.union(b.used_attrs)
-        total_used_calls = a.used_calls.union(b.used_calls)
+            total_used_attrs = a.used_attrs.union(b.used_attrs)
+            total_used_calls = a.used_calls.union(b.used_calls)
 
-        # These attributes (and the functions below) may change
-        # if the gradcheck implementation changes. It's best to
-        # aim for attributes that may be commonly present on other
-        # Tensor-likes.
-        self.assertEqual({
-            'data',
-            'device',
-            'dtype',
-            'is_complex',
-            'is_floating_point',
-            'is_sparse',
-            'layout',
-            'new_zeros',
-            'numel',
-            'requires_grad',
-            'retain_grad',
-            'size',
-            'stride',
-        }, total_used_attrs)
+            # These attributes (and the functions below) may change
+            # if the gradcheck implementation changes. It's best to
+            # aim for attributes that may be commonly present on other
+            # Tensor-likes.
+            expected_used_attrs = {
+                'data',
+                'device',
+                'dtype',
+                'is_floating_point',
+                'is_sparse',
+                'layout',
+                'new_zeros',
+                'numel',
+                'requires_grad',
+                'retain_grad',
+                'size',
+                'stride',
+            }
+            if fast_mode:
+                expected_used_attrs.add('is_complex')
+            self.assertEqual(expected_used_attrs, total_used_attrs)
 
-        self.assertEqual({
-            torch.Tensor.new_zeros,
-            torch.Tensor.size,
-            torch.Tensor.is_complex,
-            torch.Tensor.is_floating_point,
-            torch.Tensor.numel,
-            torch.Tensor.retain_grad,
-            torch.Tensor.stride,
-            torch.autograd.grad,
-            torch.add,
-        }, total_used_calls)
+            expected_used_calls = {
+                torch.Tensor.new_zeros,
+                torch.Tensor.size,
+                torch.Tensor.is_floating_point,
+                torch.Tensor.numel,
+                torch.Tensor.retain_grad,
+                torch.Tensor.stride,
+                torch.autograd.grad,
+                torch.add,
+            }
+            if fast_mode:
+                expected_used_attrs.add(torch.Tensor.is_complex)
+            self.assertEqual(expected_used_calls, total_used_calls)
+        run_test(fast_mode=False)
 
 class TestNamedTuple(TestCase):
     """ Regression test for gh-47090 """

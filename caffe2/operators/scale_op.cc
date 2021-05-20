@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Scale, ScaleOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Scale)
     .NumInputs(1)
     .NumOutputs(1)
@@ -22,5 +24,6 @@ class GetScaleGradient : public GradientMakerBase {
         "Scale", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Scale, GetScaleGradient);
 }  // namespace caffe2

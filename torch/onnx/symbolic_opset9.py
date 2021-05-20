@@ -1115,6 +1115,10 @@ def wrap_logical_op_with_negation(func):
     return wrap_with_not
 
 
+def __not_(g, self):
+    return g.op("Not", self)
+
+
 def eq(g, self, other):
     return g.op("Equal", self, other)
 
@@ -1463,10 +1467,21 @@ def index_select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._is_packed_list(indices_list_value):
         indices_list = sym_help._unpack_list(indices_list_value)
+    else:
+        indices_list = [indices_list_value]
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s='index_put')
+
+    accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    if len(indices_list) == 0:
+        if accumulate:
+            return add(g, self, values)
+        else:
+            return values
     else:
         sym_help._onnx_opset_unsupported('index_put', 9, 11)
 
@@ -1551,19 +1566,30 @@ def clamp(g, self, min, max):
     elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
-        min = _parse_arg(min, 'f')
-        max = _parse_arg(max, 'f')
-        return g.op("Clip", self, min_f=min, max_f=max)
+        if sym_help._is_constant(min) and sym_help._is_constant(max):
+            return g.op("Clip", self, min_f=_parse_arg(min, 'f'), max_f=_parse_arg(max, 'f'))
+        else:
+            return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args('v', 'f')
+@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    return g.op("Clip", self, min_f=min)
+    if sym_help._is_constant(min):
+        return g.op("Clip", self, min_f=_parse_arg(min, 'f'))
+    else:
+        dtype = self.type().scalarType()
+        min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+        return g.op("Max", self, min)
 
 
-@parse_args('v', 'f')
+@parse_args('v', 'v')
 def clamp_max(g, self, max):
-    return g.op("Clip", self, max_f=max)
+    if sym_help._is_constant(max):
+        return g.op("Clip", self, max_f=_parse_arg(max, 'f'))
+    else:
+        dtype = self.type().scalarType()
+        max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+        return g.op("Min", self, max)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
@@ -2549,8 +2575,8 @@ def gather(g, self, dim, index, sparse_grad=False):
     return sym_help._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
 
 
-@parse_args('v', 'is', 'b', 'i')
-def _var_mean(g, input, dim, unbiased, keepdim):
+@parse_args('v', 'is', 'i', 'i')
+def _var_mean(g, input, dim, correction, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
         t_mean = mean
@@ -2566,60 +2592,41 @@ def _var_mean(g, input, dim, unbiased, keepdim):
     sqr_sub = g.op("Mul", sub_v, sub_v)
     keepdim_mean = 0 if dim is None else keepdim
     var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
-    # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
-    if unbiased:
+    # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+    if correction is None:
+        correction = 1
+    if correction != 0:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
-        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.float))
+        one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
         mul = g.op("Mul", var, num_elements)
         var = g.op("Div", mul, g.op("Sub", num_elements, one))
     return var, mean
 
 
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::std(input, unbiased)
-# at::std(input, dim, unbiased, keepdim)
 def std(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var_mean(g, input, *args)
-    else:
-        var, _ = _var_mean(g, input, None, args[0], None)
+    var, _ = var_mean(g, input, *args)
     return g.op("Sqrt", var)
 
 
-# Since position of optional arguments can change for var, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::var(input, unbiased)
-# at::var(input, dim, unbiased, keepdim)
 def var(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var_mean(g, input, *args)
-    else:
-        var, _ = _var_mean(g, input, None, args[0], None)
+    var, _ = var_mean(g, input, *args)
     return var
 
 
-# Since position of optional arguments can change for var_mean, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::var_mean(input, unbiased)
-# at::var_mean(input, dim, unbiased, keepdim)
+# var_mean (and all variance-related functions) has multiple signatures, so need to manually figure
+# out the correct arguments:
+# aten::var_mean(Tensor self, bool unbiased)
+# aten::var_mean(Tensor self, int[1] dim, bool unbiased, bool keepdim=False)
+# aten::var_mean(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False)
 def var_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var_mean(g, input, *args)
+    if len(args) == 1:
+        return _var_mean(g, input, None, args[0], None)
     else:
-        var, mean = _var_mean(g, input, None, args[0], None)
-    return var, mean
+        return _var_mean(g, input, *args)
 
 
-# Since position of optional arguments can change for std_mean, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# at::std_mean(input, unbiased)
-# at::std_mean(input, dim, unbiased, keepdim)
 def std_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var_mean(g, input, *args)
-    else:
-        var, mean = _var_mean(g, input, None, args[0], None)
+    var, mean = var_mean(g, input, *args)
     return g.op("Sqrt", var), mean
 
 

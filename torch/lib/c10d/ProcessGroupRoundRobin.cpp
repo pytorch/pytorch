@@ -120,12 +120,12 @@ const c10::intrusive_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
   return processGroup;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
   throw std::runtime_error(
-      "no support for allgather_base in RoundRobin process group");
+      "no support for _allgather_base in RoundRobin process group");
 }
 
 } // namespace c10d

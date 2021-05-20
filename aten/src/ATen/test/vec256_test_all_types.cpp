@@ -91,11 +91,14 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr size_t b_size = vec::size() * sizeof(VT);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN unsigned char ref_storage[128 * b_size];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN unsigned char storage[128 * b_size];
         auto seed = TestSeed();
         ValueGen<unsigned char> generator(seed);
@@ -137,6 +140,7 @@ namespace {
             std::memset(storage, 0, sizeof storage);
         }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SignManipulation, Absolute) {
         using vec = TypeParam;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
@@ -146,6 +150,7 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SignManipulation, Negate) {
         using vec = TypeParam;
         // negate overflows for minimum on int and long
@@ -155,6 +160,7 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -174,6 +180,7 @@ namespace {
             [](vec v) { return v.round(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Ceil) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -182,6 +189,7 @@ namespace {
             [](vec v) { return v.ceil(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Floor) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -190,6 +198,7 @@ namespace {
             [](vec v) { return v.floor(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Rounding, Trunc) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -198,6 +207,7 @@ namespace {
             [](vec v) { return v.trunc(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocal, Sqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -206,6 +216,7 @@ namespace {
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -215,6 +226,7 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(SqrtAndReciprocalReal, Reciprocal) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -224,6 +236,7 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FractionAndRemainderReal, Frac) {
       using vec = TypeParam;
       test_unary<vec>(
@@ -232,6 +245,7 @@ namespace {
           [](vec v) { return v.frac(); },
           createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FractionAndRemainderReal, Fmod) {
       using vec = TypeParam;
       test_binary<vec>(
@@ -241,6 +255,7 @@ namespace {
           createDefaultBinaryTestCase<vec>(TestSeed()),
           RESOLVE_OVERLOAD(filter_fmod));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Sin) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -255,6 +270,7 @@ namespace {
             [](vec v) { return v.sin(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Cos) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -269,6 +285,7 @@ namespace {
             [](vec v) { return v.cos(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Trigonometric, Tan) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -277,6 +294,7 @@ namespace {
             [](vec v) { return v.tan(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -285,6 +303,7 @@ namespace {
             [](vec v) { return v.tanh(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Sinh) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -299,6 +318,7 @@ namespace {
             [](vec v) { return v.sinh(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Hyperbolic, Cosh) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -313,6 +333,7 @@ namespace {
             [](vec v) { return v.cosh(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, Asin) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -328,6 +349,7 @@ namespace {
             [](vec v) { return v.asin(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, ACos) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -343,6 +365,7 @@ namespace {
             [](vec v) { return v.acos(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometric, ATan) {
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         using vec = TypeParam;
@@ -359,6 +382,7 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_zero));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Logarithm, Log) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -367,6 +391,7 @@ namespace {
             [](const vec& v) { return v.log(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LogarithmReals, Log2) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -375,6 +400,7 @@ namespace {
             [](const vec& v) { return v.log2(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Logarithm, Log10) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -383,6 +409,7 @@ namespace {
             [](const vec& v) { return v.log10(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LogarithmReals, Log1p) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
@@ -398,6 +425,7 @@ namespace {
             [](const vec& v) { return v.log1p(); },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Exponents, Exp) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -406,6 +434,7 @@ namespace {
             [](const vec& v) { return v.exp(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Exponents, Expm1) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -414,6 +443,7 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -422,6 +452,7 @@ namespace {
             [](const vec& v) { return v.erf(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erfc) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -430,6 +461,7 @@ namespace {
             [](const vec& v) { return v.erfc(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(ErrorFunctions, Erfinv) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -438,10 +470,13 @@ namespace {
             [](const vec& v) { return v.erfinv(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Nan, IsNan) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_vals[vec::size()];
         auto vals = 1 << (vec::size());
         for (int val = 0; val < vals; ++val) {
@@ -461,6 +496,7 @@ namespace {
           AssertVec256<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
         using UVT = UvalueType<vec>;
@@ -478,6 +514,7 @@ namespace {
             [](vec v) { return v.lgamma(); },
             testCase);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(InverseTrigonometricReal, ATan2) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -488,6 +525,7 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Pow, Pow) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -496,6 +534,7 @@ namespace {
             [](vec v0, vec v1) { return v0.pow(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RealTests, Hypot) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -504,6 +543,7 @@ namespace {
             [](vec v0, vec v1) { return v0.hypot(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RealTests, NextAfter) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -512,11 +552,14 @@ namespace {
             [](vec v0, vec v1) { return v0.nextafter(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Interleave, Interleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr auto N = vec::size() * 2LL;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT vals[N];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT interleaved[N];
         auto seed = TestSeed();
         ValueGen<VT> generator(seed);
@@ -530,11 +573,14 @@ namespace {
         AssertVec256<vec>(NAME_INFO(Interleave FirstHalf), std::get<0>(cc), vec::loadu(interleaved)).check(true);
         AssertVec256<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved + vec::size())).check(true);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Interleave, DeInterleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr auto N = vec::size() * 2LL;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT vals[N];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT interleaved[N];
         auto seed = TestSeed();
         ValueGen<VT> generator(seed);
@@ -549,6 +595,7 @@ namespace {
         AssertVec256<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVec256<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -561,6 +608,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -573,6 +621,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -582,6 +631,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Arithmetics, Division) {
         using vec = TypeParam;
         TestSeed seed;
@@ -592,6 +642,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(seed),
             RESOLVE_OVERLOAD(filter_div_ub));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitAnd) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -600,6 +651,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitOr) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -608,6 +660,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Bitwise, BitXor) {
         using vec = TypeParam;
         test_binary<vec>(
@@ -616,6 +669,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Equal) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -625,6 +679,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 == v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, NotEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -634,6 +689,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 != v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Greater) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -643,6 +699,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 > v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, Less) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -652,6 +709,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 < v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, GreaterEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -661,6 +719,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 >= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Comparison, LessEqual) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -670,6 +729,7 @@ namespace {
             [](const vec& v0, const vec& v1) { return v0 <= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Minimum) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -681,6 +741,7 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Maximum) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -692,6 +753,7 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, ClampMin) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -703,6 +765,7 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, ClampMax) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -714,6 +777,7 @@ namespace {
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(MinMax, Clamp) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -725,9 +789,11 @@ namespace {
             createDefaultTernaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_clamp));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
         //all sets will be within 0  2^(n-1)
         auto power_sets = 1 << (vec::size());
@@ -748,14 +814,18 @@ namespace {
                 << "\nActual:\n#\t" << actual;
         }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Convert) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         using IntVT = at::vec256::int_same_size_t<VT>;
 
         // verify float to int
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT input1[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN IntVT expected_vals1[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN IntVT actual_vals1[vec::size()];
         for (int64_t i = 0; i < vec::size(); i++) {
             input1[i] = (VT)i * (VT)2.1 + (VT)0.5;
@@ -769,8 +839,11 @@ namespace {
         }
 
         // verify int to float
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN IntVT input2[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_vals2[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT actual_vals2[vec::size()];
         for (int64_t i = 0; i < vec::size(); i++) {
             input2[i] = (IntVT)i * (IntVT)2 + (IntVT)1;
@@ -781,6 +854,7 @@ namespace {
         auto actual2 = vec::loadu(actual_vals2);
         AssertVec256<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -801,11 +875,13 @@ namespace {
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
     {
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
         // generate expected_val
         int64_t m = mask;
@@ -824,6 +900,7 @@ namespace {
     }
     template<typename vec, typename VT, int64_t idx, int64_t N>
     std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
@@ -848,6 +925,7 @@ namespace {
     }
     template<typename vec, typename VT, int64_t idx, int64_t N>
     std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
         // shuffle mask and do blendv test
         VT m = mask[idx];
@@ -864,6 +942,7 @@ namespace {
         return true;
     }
     template<typename T, int N>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void blend_init(T(&a)[N], T(&b)[N]) {
         a[0] = (T)1.0;
         b[0] = a[0] + (T)N;
@@ -873,6 +952,7 @@ namespace {
         }
     }
     template<>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void blend_init<Complex<float>, 4>(Complex<float>(&a)[4], Complex<float>(&b)[4]) {
         auto add = Complex<float>(1., 100.);
         a[0] = Complex<float>(1., 100.);
@@ -883,6 +963,7 @@ namespace {
         }
     }
     template<>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void blend_init<Complex<double>, 2>(Complex<double>(&a)[2], Complex<double>(&b)[2]) {
         auto add = Complex<double>(1.0, 100.0);
         a[0] = Complex<double>(1.0, 100.0);
@@ -890,27 +971,37 @@ namespace {
         a[1] = a[0] + add;
         b[1] = b[0] + add;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT a[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT b[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT mask[vec::size()] = {0};
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT a[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT b[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
     template<typename vec, typename VT>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
         if (count < 0) return;
         //generate expected_val
@@ -929,11 +1020,15 @@ namespace {
         }
         test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(BitwiseFloatsAdditional2, Set) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT a[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT b[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
         test_set<vec, VT>(expected_val, a, b, vec::size());
@@ -950,10 +1045,12 @@ namespace {
        base = T(5.0, 5.0);
        step = T(2.0, 3.0);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(RangeFactories, Arange) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         using UVT = UvalueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         VT base, step;
         arange_init(base, step);
@@ -964,10 +1061,15 @@ namespace {
         auto actual = vec::arange(base, step);
         AssertVec256<vec>(NAME_INFO(test_arange), expected, actual).check();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0 };
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0 };
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28 };
         auto a = vcomplex::loadu(aa);
         auto actual1 = a.real();
@@ -980,14 +1082,18 @@ namespace {
         AssertVec256<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVec256<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
         constexpr int trials = 4000;
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         constexpr int min_val = std::numeric_limits<underlying>::min();
         constexpr int max_val = std::numeric_limits<underlying>::max();
         constexpr int el_count = vfloat::size();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN float unit_float_vec[el_count];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying expected_qint_vals[vec::size()];
         typename vec::float_vec_return_type  float_ret;
         auto seed = TestSeed();
@@ -1018,6 +1124,7 @@ namespace {
             if (AssertVec256<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1025,7 +1132,9 @@ namespace {
         constexpr int trials = is_large ? 4000 : std::numeric_limits<underlying>::max() / 2;
         constexpr int min_val = is_large ? -2190 : std::numeric_limits<underlying>::min();
         constexpr int max_val = is_large ? 2199 : std::numeric_limits<underlying>::max();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN float unit_exp_vals[vfloat::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_vals[vec::size()];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
         std::cout << "Dequant will be tested with relative error " << 1.e-3f << std::endl;
@@ -1064,6 +1173,7 @@ namespace {
             }
         } //trials;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, ReQuantizeFromInt) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1071,7 +1181,9 @@ namespace {
         constexpr int min_val = -65535;
         constexpr int max_val = 65535;
         constexpr int el_count = vint::size();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN c10::qint32 unit_int_vec[el_count];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying expected_qint_vals[vec::size()];
         typename vec::int_vec_return_type  int_ret;
         auto seed = TestSeed();
@@ -1099,15 +1211,20 @@ namespace {
             }
         } //trials;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, WideningSubtract) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
         constexpr bool is_large = sizeof(underlying) > 1;
         constexpr int trials = is_large ? 4000 : std::numeric_limits<underlying>::max() / 2;
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         constexpr int min_val = std::numeric_limits<underlying>::min();
         constexpr int max_val = std::numeric_limits<underlying>::max();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN int32_t unit_exp_vals[vfloat::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
@@ -1137,6 +1254,7 @@ namespace {
             }
         } //trials;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Relu) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1154,6 +1272,7 @@ namespace {
             },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(QuantizationTests, Relu6) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;

@@ -10,7 +10,8 @@
 namespace at {
 
 // Thread local state contains values that are preserved across
-// thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
+// thread boundaries (e.g. at::launch/JIT fork, autograd).
+// Note at::parallel_for doesn't preserve TLS across thread boundaries.
 class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
@@ -86,12 +87,12 @@ class TORCH_API ThreadLocalStateGuard {
 };
 
 template <typename T>
-std::function<T(void)> wrapPropagateTLSState(
-    std::function<T(void)> callback) {
-  return [tls_state = ThreadLocalState(), callback = std::move(callback)]() {
+auto wrapPropagateTLSState(T callback) {
+  return [tls_state = ThreadLocalState(),
+          callback = std::move(callback)](auto&&... args) {
     ThreadLocalStateGuard g(tls_state);
     // Propagate value returned by callback().
-    return callback();
+    return callback(std::forward<decltype(args)>(args)...);
   };
 }
 
