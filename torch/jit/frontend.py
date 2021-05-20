@@ -3,8 +3,9 @@ import sys
 import ast
 import inspect
 import string
+from collections import namedtuple
 from textwrap import dedent
-from typing import List
+from typing import List, Tuple  # noqa: F401
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
@@ -17,9 +18,16 @@ from torch._C._jit_tree_views import (
     DictComp,
 )
 from torch._utils_internal import get_source_lines_and_file
-
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
+from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
+
+_IS_ASTUNPARSE_INSTALLED = False
+try:
+    import astunparse  # type: ignore[import]
+    _IS_ASTUNPARSE_INSTALLED = True
+except ImportError:
+    pass
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -289,8 +297,31 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_def.args.args[0].annotation
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
+    # If MonkeyType is installed, get all the consolidated type traces
+    # for the arguments from type_trace_db
+    type_trace_db = torch.jit._script._get_type_trace_db()
+    pdt_arg_types = None
+    if monkeytype_trace:
+        qualname = get_qualified_name(fn)
+        pdt_arg_types = type_trace_db.get_args_types(qualname)
 
+    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
+
+# TODO: more robust handling of recognizing ignore context manager
+def is_torch_jit_ignore_context_manager(stmt):
+    # checks if the statement is torch.jit.ignore context manager
+    if isinstance(stmt.items[0].context_expr, ast.Call):
+        # extract torch part
+        function = stmt.items[0].context_expr.func
+        if isinstance(function, ast.Attribute):
+            attr_name = function.attr
+            attr_value = function.value
+            if attr_name == "_IgnoreContextManager" and isinstance(attr_value, ast.Attribute):
+                # there should be at most two nested attributes (e.g torch.jit._IgnoreContextManager)
+                if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
+                    if attr_value.value.id == "torch":
+                        return True
+    return False
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -306,15 +337,17 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
-def build_def(ctx, py_def, type_line, def_name, self_name=None):
+def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
-    param_list = build_param_list(ctx, py_def.args, self_name)
+
+    param_list = build_param_list(ctx, py_def.args, self_name, pdt_arg_types)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
+
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
@@ -330,7 +363,7 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args, self_name):
+def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -346,23 +379,116 @@ def build_param_list(ctx, py_args, self_name):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+
+    # List of Tuple of args and type as inferred by profile directed typing
+    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
+                     for arg in py_args.args]
+    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+                                else None) for arg in py_args.kwonlyargs]
+
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type) for arg, arg_type in arg_and_types]
+    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
+               for arg, arg_type in arg_and_types_kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only):
+def build_param(ctx, py_arg, self_name, kwarg_only, pdt_arg_type=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
+    elif pdt_arg_type:
+        annotation_expr = Var(Ident(r, pdt_arg_type))
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
         annotation_expr = EmptyTypeAnnotation(r)
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
+def build_ignore_context_manager(ctx, stmt):
+    InputType = namedtuple('InputType', ['name', 'ann'])
+    OutputType = namedtuple('OutputType', ['name', 'ann'])
+
+    def process_ins_outs(args):
+        # parse the context manager to figure out inputs and outputs
+        # with their annotated types
+        # TODO: add input, output validator
+        inputs = []
+        outputs = []
+        for arg in args:
+            var_name = arg.arg
+            if sys.version_info < (3, 8):
+                # Starting python3.8 ast.Str is deprecated
+                var_ann = arg.value.s
+            else:
+                var_ann = arg.value.value
+            var_decl_type, var_ann = var_ann.split(":")
+            if var_decl_type == "inp":
+                inputs.append(InputType(var_name, var_ann))
+            if var_decl_type == "out":
+                outputs.append(OutputType(var_name, var_ann))
+        return inputs, outputs
+
+    def create_unique_name_ext(ctx, stmt):
+        # extension will be based on the full path filename plus
+        # the line number of original context manager
+        return ctx.filename.replace(".", "_").replace("/", "_") + "_" + str(stmt.lineno)
+
+    def build_return_ann_stmt(outputs):
+        return_type_ann = ""
+        return_statement_str = "return "
+        if len(outputs) == 0:
+            return_type_ann += " -> None"
+        if len(outputs) == 1:
+            return_type_ann = " -> " + outputs[0].ann
+            return_statement_str += outputs[0].name
+        if len(outputs) > 1:
+            return_type_ann = " -> Tuple"
+            return_type_ann += "[" + ", ".join([var.ann for var in outputs]) + "]"
+            return_statement_str += ", ".join([var.name for var in outputs])
+        return return_type_ann, return_statement_str
+
+    def build_args(args):
+        return ", ".join([arg.name for arg in args])
+
+    inputs, outputs = process_ins_outs(stmt.items[0].context_expr.keywords)
+
+    # build the replacement function str with given inputs and outputs
+    ignore_function_name = "func_ignore_" + create_unique_name_ext(ctx, stmt)
+    ignore_function_str = "\ndef " + ignore_function_name
+    ignore_function_str += "(" + ", ".join([var.name + " :" + var.ann for var in inputs]) + ")"
+
+    return_ann, return_stmt = build_return_ann_stmt(outputs)
+    ignore_function_str += return_ann + ": pass"
+
+    # first create the functionDef object from just declaration
+    ignore_function = ast.parse(ignore_function_str).body[0]
+
+    # dump the body of context manager to dummy function
+    ignore_function.body = stmt.body  # type: ignore[attr-defined]
+
+    # insert return statement to the function
+    return_stmt = ast.parse(return_stmt).body[0]
+    ignore_function.body.append(return_stmt)  # type: ignore[attr-defined]
+
+    # registers the custom function in the global context
+    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
+    ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
+    exec(ignore_func_str)  # noqa: P204
+
+    # build the statements as:
+    # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
+    assign_str_lhs = build_args(outputs)
+    # this function will be registered in torch.jit.frontend module by default
+    assign_str_rhs = "torch.jit.frontend.{}(".format(ignore_function_name) + build_args(inputs) + ")"
+
+    if len(outputs) > 0:
+        assign_str = assign_str_lhs + " = " + assign_str_rhs
+    else:
+        assign_str = assign_str_rhs
+    assign_ast = ast.parse(assign_str).body[0]
+    return assign_ast
 
 def get_default_args(fn):
     if fn is None:
@@ -544,6 +670,13 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
+        # Handle ignore context manager
+        if is_torch_jit_ignore_context_manager(stmt):
+            if not _IS_ASTUNPARSE_INSTALLED:
+                raise RuntimeError("torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                                   please install it in your Python environment")
+            assign_ast = build_ignore_context_manager(ctx, stmt)
+            return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):

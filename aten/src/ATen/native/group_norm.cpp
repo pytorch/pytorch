@@ -153,7 +153,9 @@ Tensor group_norm(
       at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GroupNormKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
 // Ported from pytorch/xla repo

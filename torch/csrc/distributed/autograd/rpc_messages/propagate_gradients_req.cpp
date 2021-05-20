@@ -18,7 +18,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-Message PropagateGradientsReq::toMessageImpl() && {
+c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -37,7 +37,7 @@ Message PropagateGradientsReq::toMessageImpl() && {
   std::vector<char> payload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
       MessageType::BACKWARD_AUTOGRAD_REQ);
@@ -63,6 +63,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   tupleElements.pop_back();
 
   // Build AutogradMetadata.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t autogradContextId, autogradMessageId;
   autogradMessageId = tupleElements.back().toInt();
   tupleElements.pop_back();
@@ -77,6 +78,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
     grads[i] = tupleElements[i].toTensor();
   }
 
+  // NOLINTNEXTLINE(modernize-make-unique)
   return std::unique_ptr<PropagateGradientsReq>(
       new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
 }

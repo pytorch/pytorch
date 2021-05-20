@@ -25,6 +25,7 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
-          pip install boto3==1.16.34 mypy==0.812
+          pip install boto3==1.16.34
+          make setup_lint
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'

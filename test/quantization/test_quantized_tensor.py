@@ -7,6 +7,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 import torch.testing._internal.hypothesis_utils as hu
 
@@ -137,40 +138,47 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
-    def test_qtensor(self):
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_qtensor_cuda(self):
+        self._test_qtensor(torch.device('cuda'))
+
+    def test_qtensor_cpu(self):
+        self._test_qtensor(torch.device('cpu'))
+
+    def _test_qtensor(self, device):
+        device = str(device)
         num_elements = 10
         scale = 1.0
         zero_point = 2
-        for device in get_supported_device_types():
-            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
-                r = torch.ones(num_elements, dtype=torch.float, device=device)
-                qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
-                self.assertEqual(qr.q_scale(), scale)
-                self.assertEqual(qr.q_zero_point(), zero_point)
-                self.assertTrue(qr.is_quantized)
-                self.assertFalse(r.is_quantized)
-                self.assertEqual(qr.qscheme(), torch.per_tensor_affine)
-                self.assertTrue(isinstance(qr.qscheme(), torch.qscheme))
-                # slicing and int_repr
-                int_repr = qr.int_repr()
-                for num in int_repr:
-                    self.assertEqual(num, 3)
-                for num in qr[2:].int_repr():
-                    self.assertEqual(num, 3)
-                # dequantize
-                rqr = qr.dequantize()
-                for i in range(num_elements):
-                    self.assertEqual(r[i], rqr[i])
-                # we can also print a qtensor
-                empty_r = torch.ones((0, 1), dtype=torch.float, device=device)
-                empty_qr = torch.quantize_per_tensor(empty_r, scale, zero_point, dtype)
+        for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            r = torch.ones(num_elements, dtype=torch.float, device=device)
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            self.assertEqual(qr.q_scale(), scale)
+            self.assertEqual(qr.q_zero_point(), zero_point)
+            self.assertTrue(qr.is_quantized)
+            self.assertFalse(r.is_quantized)
+            self.assertEqual(qr.qscheme(), torch.per_tensor_affine)
+            self.assertTrue(isinstance(qr.qscheme(), torch.qscheme))
+            # slicing and int_repr
+            int_repr = qr.int_repr()
+            for num in int_repr:
+                self.assertEqual(num, 3)
+            for num in qr[2:].int_repr():
+                self.assertEqual(num, 3)
+            # dequantize
+            rqr = qr.dequantize()
+            for i in range(num_elements):
+                self.assertEqual(r[i], rqr[i])
+            # we can also print a qtensor
+            empty_r = torch.ones((0, 1), dtype=torch.float, device=device)
+            empty_qr = torch.quantize_per_tensor(empty_r, scale, zero_point, dtype)
 
-                device_msg = "" if device == 'cpu' else "device='" + device + ":0', "
-                dtype_msg = str(dtype) + ", "
-                self.assertEqual(' '.join(str(empty_qr).split()),
-                                 "tensor([], " + device_msg + "size=(0, 1), dtype=" + dtype_msg +
-                                 "quantization_scheme=torch.per_tensor_affine, " +
-                                 "scale=1.0, zero_point=2)")
+            device_msg = "" if device == 'cpu' else "device='" + device + ":0', "
+            dtype_msg = str(dtype) + ", "
+            self.assertEqual(' '.join(str(empty_qr).split()),
+                             "tensor([], " + device_msg + "size=(0, 1), dtype=" + dtype_msg +
+                             "quantization_scheme=torch.per_tensor_affine, " +
+                             "scale=1.0, zero_point=2)")
 
     def test_qtensor_sub_byte(self):
         num_elements = 10

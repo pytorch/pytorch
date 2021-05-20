@@ -44,7 +44,9 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int32_t qvalue;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
       value,
       static_cast<int32_t>(zero_point),
@@ -70,6 +72,7 @@ void quantize_vec(
 
 template <typename T>
 inline float dequantize_val(double scale, int64_t zero_point, T value) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = static_cast<float>(scale);
   qparams.zero_point = static_cast<int32_t>(zero_point);
@@ -154,9 +157,11 @@ TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
 * to (-Xmin/scale), where Xmin is the min value in input tensor row.
 */
 int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int qvalue;
 
   float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   qvalue = lrintf(value * inv_scale + zero_point);
   qvalue = std::max(qmin, std::min(qvalue, qmax));
   return qvalue;
@@ -177,6 +182,7 @@ template <typename DST_T>
 DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
   int64_t quantize_down =
       zero_point + lrintf(src * static_cast<float>(multiplier));
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
   int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
   return static_cast<DST_T>(

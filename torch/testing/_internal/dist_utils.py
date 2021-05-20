@@ -1,4 +1,3 @@
-
 import re
 import sys
 import time
@@ -24,22 +23,31 @@ def single_threaded_process_group_agent(f):
     Forces ProcessGroupAgent to use only a single thread in the ThreadPool for
     sending and processing requests.
     """
+
     @wraps(f)
     def wrapper(self, *args, **kwargs):
         backend_type = self.rpc_backend
         if backend_type == rpc.backend_registry.BackendType["PROCESS_GROUP"]:
-            self.rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
-                self.rpc_backend,
-                init_method=self.init_method,
-                num_send_recv_threads=1,
+            self.rpc_backend_options = (
+                rpc.backend_registry.construct_rpc_backend_options(
+                    self.rpc_backend,
+                    init_method=self.init_method,
+                    num_send_recv_threads=1,
+                )
             )
         return_value = f(self, *args, **kwargs)
         return return_value
+
     return wrapper
 
 
-def dist_init(old_test_method=None, setup_rpc: bool = True, clean_shutdown: bool = True,
-              faulty_messages=None, messages_to_delay=None):
+def dist_init(
+    old_test_method=None,
+    setup_rpc: bool = True,
+    clean_shutdown: bool = True,
+    faulty_messages=None,
+    messages_to_delay=None,
+):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -73,6 +81,7 @@ def dist_init(old_test_method=None, setup_rpc: bool = True, clean_shutdown: bool
         # Setting _ignore_rref_leak to make sure OwnerRRefs are properly deleted
         # in tests.
         import torch.distributed.rpc.api as api
+
         api._ignore_rref_leak = False
 
         self.worker_id = self.rank
@@ -101,15 +110,16 @@ def dist_init(old_test_method=None, setup_rpc: bool = True, clean_shutdown: bool
 def noop() -> None:
     pass
 
+
 def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
-    '''
+    """
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
     Args:
     rank (int): Rank of the node expected to fail
     expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure
     occurs, not just any.
-    '''
+    """
     while True:
         try:
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
@@ -120,7 +130,7 @@ def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
 
 
 def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
-    '''
+    """
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
     our tests check whether this map is empty, which leads to failures and
@@ -129,7 +139,7 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
     loops until the map is empty, which means the messages have been received
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.
-    '''
+    """
     start = time.time()
     while True:
         debug_info = _rref_context_get_debug_info()
@@ -157,7 +167,9 @@ def get_num_owners_and_forks() -> Tuple[str, str]:
     return num_owners, num_forks
 
 
-def wait_until_owners_and_forks_on_rank(num_owners: int, num_forks: int, rank: int, timeout: int = 20) -> None:
+def wait_until_owners_and_forks_on_rank(
+    num_owners: int, num_forks: int, rank: int, timeout: int = 20
+) -> None:
     """
     Waits until timeout for num_forks and num_owners to exist on the rank. Used
     to ensure proper deletion of RRefs in tests.
@@ -175,7 +187,11 @@ def wait_until_owners_and_forks_on_rank(num_owners: int, num_forks: int, rank: i
         if time.time() - start > timeout:
             raise ValueError(
                 "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    timeout, num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
+                    timeout,
+                    num_owners,
+                    num_forks,
+                    num_owners_on_rank,
+                    num_forks_on_rank,
                 )
             )
 
@@ -192,8 +208,10 @@ def initialize_pg(init_method, rank: int, world_size: int) -> None:
             world_size=world_size,
         )
 
+
 def worker_name(rank: int) -> str:
     return "worker{}".format(rank)
+
 
 def get_function_event(function_events, partial_event_name):
     """
