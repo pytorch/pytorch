@@ -1478,7 +1478,10 @@ def chain_matmul(*matrices, out=None):
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
     .. warning::
-        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
+
+        :func:`torch.chain_matmul` is deprecated and will be removed in a future PyTorch release.
+        Use :func:`torch.linalg.multi_dot` instead, which accepts a list of two or more tensors
+        rather than multiple arguments.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
@@ -1503,7 +1506,11 @@ def chain_matmul(*matrices, out=None):
     """
     if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
-    return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
+
+    if out is None:
+        return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
+    else:
+        return _VF.chain_matmul(matrices, out=out)  # type: ignore[attr-defined]
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):

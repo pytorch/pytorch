@@ -1,10 +1,9 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUFunctions.h>
 #include <benchmark/benchmark.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/torch.h>
 #include "caffe2/operators/tanh_op.h"
 #include "caffe2/operators/logit_op.h"
 
@@ -51,8 +50,8 @@ static void relu_nnc(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::randn({state.range(0)});
-  at::Tensor B_t = at::randn(state.range(0));
+  at::Tensor A_t = torch::randn({state.range(0)});
+  at::Tensor B_t = torch::randn(state.range(0));
   auto B_ref = at::relu(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref));
@@ -81,8 +80,8 @@ static void log_nnc_sleef(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::log(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref));
@@ -111,8 +110,8 @@ static void log_nnc_fast(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::log(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref));
@@ -141,8 +140,8 @@ static void log_nnc_vml(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::log(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref));
@@ -154,10 +153,10 @@ static void log_nnc_vml(benchmark::State& state) {
 }
 
 static void log_aten(benchmark::State& state) {
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-    at::cpu::log_out(B_t, A_t);
+    at::log_out(B_t, A_t);
   }
   state.counters["log/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -188,8 +187,8 @@ static void logit_nnc_sleef(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::logit(A_t, clamp);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(at::nan_to_num(B_t), at::nan_to_num(B_ref)));
@@ -225,8 +224,8 @@ static void logit_nnc_fast(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::logit(A_t, clamp);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(at::nan_to_num(B_t), at::nan_to_num(B_ref)));
@@ -262,8 +261,8 @@ static void logit_nnc_vml(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::logit(A_t, clamp);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(at::nan_to_num(B_t), at::nan_to_num(B_ref)));
@@ -275,11 +274,11 @@ static void logit_nnc_vml(benchmark::State& state) {
 }
 
 static void logit_aten(benchmark::State& state) {
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto clamp = 1e-6f;
   for (auto _ : state) {
-    at::cpu::logit_out(A_t, B_t, clamp);
+    at::native::logit_out(A_t, clamp, B_t);
   }
   state.counters["logit/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -296,14 +295,14 @@ void logit_caffe2_impl(int size, const T* X, T* Y, float eps_ = 1e-6f) {
 }
 
 static void logit_caffe2(benchmark::State& state) {
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
-  at::Tensor B_ref = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
+  at::Tensor B_ref = torch::randn({state.range(0)});
   auto N = state.range(0);
   auto X = A_t.data_ptr<float>();
   auto Y = B_t.data_ptr<float>();
   auto clamp = 1e-6f;
-  at::cpu::logit_out(A_t, B_ref, clamp);
+  at::native::logit_out(A_t, clamp, B_ref);
   logit_caffe2_impl(N, X, Y, clamp);
   TORCH_CHECK(at::allclose(at::nan_to_num(B_t), at::nan_to_num(B_ref)));
 
@@ -333,8 +332,8 @@ static void tanh_nnc_fast(benchmark::State& state) {
   args.emplace_back(A);
   args.emplace_back(N);
   LLVMCodeGen cg(s, args);
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::tanh(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref, 1e-3f, 1e-6f));
@@ -346,19 +345,19 @@ static void tanh_nnc_fast(benchmark::State& state) {
 }
 
 static void tanh_aten(benchmark::State& state) {
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-    at::cpu::tanh_out(A_t, B_t);
+    at::tanh_out(A_t, B_t);
   }
   state.counters["tanh/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 static void tanh_caffe2(benchmark::State& state) {
-  at::Tensor A_t = at::abs(at::randn({state.range(0)}));
-  at::Tensor B_t = at::randn({state.range(0)});
-  at::Tensor B_ref = at::randn({state.range(0)});
+  at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
+  at::Tensor B_t = torch::randn({state.range(0)});
+  at::Tensor B_ref = torch::randn({state.range(0)});
 
   auto N = state.range(0);
   auto X = A_t.data_ptr<float>();
@@ -367,7 +366,7 @@ static void tanh_caffe2(benchmark::State& state) {
   auto tanh = caffe2::TanhFunctor<caffe2::CPUContext>();
   at::tanh_out(A_t, B_ref);
   tanh(N, X, Y, &c);
-  TORCH_CHECK(at::allclose(B_t, B_ref, 1e-3f, 1e-6f));
+  TORCH_CHECK(at::native::allclose(B_t, B_ref, 1e-3f, 1e-6f));
 
   for (auto _ : state) {
     tanh(N, X, Y, &c);

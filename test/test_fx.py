@@ -19,7 +19,9 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
+import torch.utils._pytree as pytree
+import torch.fx._pytree as fx_pytree
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
 import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
@@ -30,7 +32,6 @@ from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
-from fx.quantization import Quantizer
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -42,7 +43,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from fx.named_tup import MyNamedTup
 
 try:
-    from torchvision.models import resnet18
+    from torchvision import models as torchvision_models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -89,6 +90,12 @@ def wrapper_fn(x):
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
+
+# for testing pytrees
+class Foo(object):  # noqa: B209
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
 
 class TestFX(JitTestCase):
     def setUp(self):
@@ -360,37 +367,6 @@ class TestFX(JitTestCase):
         for node in graph2.nodes:
             assert node.name not in seen_names
             seen_names.add(node.name)
-
-    @skipIfNoTorchVision
-    def test_resnet(self):
-        resnet = resnet18()
-        resnet.train()
-
-        res_graph = symbolic_trace(resnet)
-        res_script = torch.jit.script(res_graph)
-
-        ip = torch.rand(1, 3, 224, 224)
-
-        a = resnet(ip)
-        b = res_graph(ip)
-        c = res_script(ip)
-        self.assertEqual(a, b)
-        self.assertEqual(a, c)
-
-        quantizer = Quantizer(res_graph)
-
-        for i in range(10):
-            quantizer.observe((torch.rand(1, 3, 224, 224),))
-
-        qgraph = quantizer.quantize()
-        qgraph.graph.lint()
-        qgraph_script = torch.jit.script(qgraph)
-
-        d = qgraph(ip)
-        e = qgraph_script(ip)
-
-        assert (a - d).abs().max() < 2
-        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
@@ -1250,14 +1226,14 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_interpreter_noop_resnet18(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
 
     @skipIfNoTorchVision
     def test_interpreter_gc_values(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
@@ -1447,7 +1423,7 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
 
         class LowerReluTracer(torch.fx.Tracer):
             def is_leaf_module(self, m : torch.nn.Module, qualname : str):
@@ -1471,6 +1447,22 @@ class TestFX(JitTestCase):
 
         for node in to_erase:
             rn18_traced.graph.erase_node(node)
+
+
+    def test_replace_input(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.replace_input_with(x, y)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input_x = torch.randn(33, 44)
+        input_y = torch.randn(11, 22)
+        self.assertEqual(gm(input_x, input_y), torch.relu(input_y))
 
     def test_insertion_point(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -1919,8 +1911,20 @@ class TestFX(JitTestCase):
         mod = Foo()
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
-        self.assertEqual(mod_true(3), 6)
-        self.assertEqual(mod_false(3), 3)
+        self.assertEqual(mod_true(3, True), 6)
+        print(mod_true.code)
+        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
+        with self.assertRaises(AssertionError):
+            mod_true(3, False)
+        self.assertEqual(mod_false(3, False), 3)
+        with self.assertRaises(AssertionError):
+            mod_false(3, True)
+
+        def f_higher(a, f):
+            return f(a)
+
+        nf = symbolic_trace(f_higher, concrete_args={'f': lambda x: x * 2})
+        self.assertEqual(nf(3, lambda x: x * 2), 6)
 
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
@@ -2283,8 +2287,7 @@ class TestFX(JitTestCase):
 
 
         import torch
-        from torchvision.models.resnet import resnet18
-        rn = resnet18()
+        rn = torchvision_models.resnet18()
 
         try:
             sys.setprofile(trace_func)
@@ -2307,6 +2310,101 @@ class TestFX(JitTestCase):
         fx_f = symbolic_trace(f, enable_cpatching=True)
         assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
 
+
+    def test_pytree(self):
+        def f_sum(x):
+            return sum(x)
+
+        def f_sum_dict(x):
+            out = 0
+            for k, v in x.items():
+                out += v
+            return out
+
+        def f_dict_list_map(x):
+            new_dict = {}
+            for k, v in x.items():
+                new_dict[k] = [i + 1 for i in v]
+            return new_dict
+
+        def f_dict_add(x):
+            return x['a'] + sum(x['z'])
+
+
+        pytree._register_pytree_node(
+            Foo,
+            lambda x: ([x.a, x.b], None),
+            lambda x, _: Foo(x[0], x[1]),
+        )
+        fx_pytree.register_pytree_flatten_spec(Foo, lambda x, _: [x.a, x.b])
+
+        def f_custom(x):
+            return x.a + x.b
+
+        def f_custom_dict(x):
+            return f_sum_dict(x.a) + x.b
+
+        def f_return_custom(x):
+            return Foo(x.b, x.a)
+
+        tests = [
+            (f_sum, [PH, PH, PH]),
+            (f_sum, []),
+            (f_sum_dict, {'a': PH, 'b': PH, 'c': PH}),
+            (f_dict_list_map, {'a': (PH, PH), 'b': [PH], 'c': []}),
+            (f_dict_list_map, {5: (PH, PH, PH)}),
+            (f_dict_add, {'a': PH, 'z': (PH, PH, PH)}),
+            (f_dict_add, {'a': PH, 'z': []}),
+            (f_custom, Foo(PH, PH)),
+            (f_custom, Foo(PH, 3)),
+            (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
+            # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
+        ]
+
+        def verify_pytree(f, inp):
+            val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
+            num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
+            orig_out = f(val)
+            nf = symbolic_trace(f, concrete_args={'x': inp})
+            self.assertEqual(nf(val), orig_out)
+            assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+
+            nf = symbolic_trace(nf)
+            self.assertEqual(nf(val), orig_out)
+            assert "tree_flatten_spec" not in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == 1)
+
+            nf = symbolic_trace(nf, concrete_args={'x': inp})
+            self.assertEqual(nf(val), orig_out)
+            assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+
+            pickled = pickle.dumps(nf)
+            nf = pickle.loads(pickled)
+            self.assertEqual(nf(val), orig_out)
+
+        for f, inp in tests:
+            verify_pytree(f, inp)
+
+    def test_pytree_concrete(self):
+        def f(b, a):
+            if b:
+                return a['a']
+            else:
+                return a['z']
+
+        inp = {'a': {'a': PH, 'z': PH}, 'b': True}
+        nf = symbolic_trace(f, concrete_args=inp)
+        val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
+        self.assertEqual(nf(**val), f(**val))
+
+        nf = symbolic_trace(nf)
+        self.assertEqual(nf(**val), f(**val))
+
+
+
+
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
@@ -2320,8 +2418,26 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
-                           'polygamma'}
+        # Sorted and one entry on each line to minimize merge conflicts.
+        known_no_schema = {'cdist',
+                           'dstack',
+                           'einsum',
+                           'expand',
+                           'expand_as',
+                           'hstack',
+                           'linalg.multi_dot',
+                           'polygamma',
+                           'repeat',
+                           'stack',
+                           'view',
+                           'view_as',
+                           'vstack',
+                           '__getitem__',
+                           '__radd__',
+                           '__rsub__',
+                           '__rmul__',
+                           '__rdiv__',
+                           '__rpow__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2343,7 +2459,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema
+            assert op.name in known_no_schema or "nn.functional" in op.name
 
 
 class TestFunctionalTracing(JitTestCase):
@@ -2396,7 +2512,7 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_avg_pool3d": LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
-        "instance_norm": LEN_ERROR,
+        "instance_norm": CONTROL_FLOW,
         "pad": LEN_ERROR,
 
         "adaptive_max_pool1d": PROXY_ITERABLE,
@@ -2498,7 +2614,7 @@ class TestFunctionalTracing(JitTestCase):
     )
 
     # Inconsistent behavior between Python 3.8 and other Python versions:
-    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Python 3.8+: Re-raise internal exception like `PROXY_ITERATED`
     # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
     #                 internal exception above
     # Use the following map to override the expected exception for Python 3.8
@@ -2551,7 +2667,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
@@ -2590,6 +2706,119 @@ TestFunctionalTracing.generate_tests()
 
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
+
+@skipIfNoTorchVision
+class TestVisionTracing(JitTestCase):
+    PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
+    INCONSISTENT_TYPE = (
+        RuntimeError,
+        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor"
+    )
+
+    UNTRACEABLE_MODELS = {
+        "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_320_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_fpn": PROXY_ITERATED,
+        "maskrcnn_resnet50_fpn": PROXY_ITERATED,
+        "keypointrcnn_resnet50_fpn": PROXY_ITERATED,
+        "retinanet_resnet50_fpn": PROXY_ITERATED,
+    }
+    UNSCRIPTABLE_MODELS = {
+        "googlenet": INCONSISTENT_TYPE,
+        "inception_v3": INCONSISTENT_TYPE,
+    }
+
+    output_transform = {
+        "fcn_resnet50": lambda x: x["out"],
+        "fcn_resnet101": lambda x: x["out"],
+        "deeplabv3_resnet50": lambda x: x["out"],
+        "deeplabv3_resnet101": lambda x: x["out"],
+        "deeplabv3_mobilenet_v3_large": lambda x: x["out"],
+        "lraspp_mobilenet_v3_large": lambda x: x["out"],
+        "fasterrcnn_resnet50_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_320_fpn": lambda x: x[1],
+        "maskrcnn_resnet50_fpn": lambda x: x[1],
+        "keypointrcnn_resnet50_fpn": lambda x: x[1],
+        "retinanet_resnet50_fpn": lambda x: x[1],
+    }
+
+    @classmethod
+    def generate_test_fn(cls, name, model_fn, x, kwargs):
+        def run_test(self):
+            model = model_fn(**kwargs)
+            model = model.eval()
+            if name in self.UNTRACEABLE_MODELS:
+                err, exc = self.UNTRACEABLE_MODELS[name]
+                with self.assertRaisesRegex(err, exc):
+                    graph = symbolic_trace(model)
+            else:
+                out_transform = self.output_transform.get(name, lambda x: x)
+                graph : torch.fx.GraphModule = symbolic_trace(model)
+                a = out_transform(model(x))
+                b = out_transform(graph(x))
+                self.assertEqual(a, b)
+
+                if name in self.UNSCRIPTABLE_MODELS:
+                    err, exc = self.UNSCRIPTABLE_MODELS[name]
+                    with self.assertRaisesRegex(err, exc):
+                        script = torch.jit.script(graph)
+                else:
+                    script = torch.jit.script(graph)
+                    c = out_transform(script(x))
+                    self.assertEqual(a, c)
+
+        return run_test
+
+    @classmethod
+    def generate_classification_tests(cls):
+        for k, v in torchvision_models.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_' + k
+                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_segmentation_tests(cls):
+        for k, v in torchvision_models.segmentation.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_segmentation_' + k
+                x = torch.rand(1, 3, 32, 32)
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_detection_tests(cls):
+        for k, v in torchvision_models.detection.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_detection_' + k
+                x = [torch.rand(3, 300, 300)]
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_video_tests(cls):
+        for k, v in torchvision_models.video.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_video_' + k
+                x = torch.rand(1, 3, 4, 112, 112)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_tests(cls):
+        cls.generate_classification_tests()
+        cls.generate_detection_tests()
+        cls.generate_segmentation_tests()
+        cls.generate_video_tests()
+
+if HAS_TORCHVISION:
+    TestVisionTracing.generate_tests()
 
 if __name__ == '__main__':
     run_tests()

@@ -12,6 +12,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CppPrinter, AllocateOnStackThenFree) {
   KernelScope kernel_scope;
   std::vector<const Expr*> dims = {new IntImm(2), new IntImm(3)};
@@ -31,6 +32,7 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
   torch::jit::testing::FileCheck().run(expected, ss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CppPrinter, AllocateOnHeapThenFree) {
   KernelScope kernel_scope;
   std::vector<const Expr*> dims = {

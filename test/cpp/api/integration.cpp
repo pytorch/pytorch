@@ -53,6 +53,7 @@ class CartPole {
     step_ = 0;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CartPole() {
     reset();
   }
@@ -122,9 +123,11 @@ bool test_mnist(
   model->to(device);
 
   for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
       auto data = batch.data.to(device), targets = batch.target.to(device);
       torch::Tensor prediction = forward_op(std::move(data));
+      // NOLINTNEXTLINE(performance-move-const-arg)
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
       AT_ASSERT(!torch::isnan(loss).any().item<int64_t>());
       optimizer.zero_grad();
@@ -146,6 +149,7 @@ bool test_mnist(
 
 struct IntegrationTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -182,6 +186,7 @@ TEST_F(IntegrationTest, CartPole) {
 
   auto finishEpisode = [&] {
     auto R = 0.;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     for (int i = rewards.size() - 1; i >= 0; i--) {
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
@@ -244,6 +249,7 @@ TEST_F(IntegrationTest, CartPole) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -280,6 +286,7 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
       optimizer));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();

@@ -55,6 +55,7 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
@@ -256,8 +257,10 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py

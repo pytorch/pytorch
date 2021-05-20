@@ -227,7 +227,7 @@ class Vec256<float> {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
 
-  Vec256<float> _isnan() const {
+  Vec256<float> isnan() const {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
@@ -459,8 +459,8 @@ class Vec256<float> {
     // inf and nan checks
 #if 0
                     ret = blendv(ret, v_inf, x >= vf_89);
-                    ret = blendv(ret, v_inf, ret._isnan());
-                    ret = blendv(ret, v_nan, this->_isnan());
+                    ret = blendv(ret, v_inf, ret.isnan());
+                    ret = blendv(ret, v_nan, this->isnan());
 #endif
     return ret;
   }

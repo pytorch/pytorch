@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
@@ -88,11 +89,9 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, unbiased: bool):
-            b = AD_bool_to_int(unbiased)
-
+        def AD_var_backward_0(grad, self, correction: int):
             # FIXME: torchscript: div(float, float)
-            return  grad * (self - self.mean()) * 2.0 / (self.numel() - b)
+            return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
                          dims: List[int]):
@@ -109,23 +108,35 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              unbiased: bool,
+                              correction: int,
                               keepdim: bool):
             if self.dim() == 0:
-                return AD_var_backward_0(grad, self, unbiased)
+                return AD_var_backward_0(grad, self, correction)
             self_size = self.size()
-            b = AD_bool_to_int(unbiased)
             if not keepdim and self.dim() > 1:
                 grad = AD_unsqueeze_multiple(grad, dim, len(self_size))
 
             # FIXME: torchscript: div(float, float)
-            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - b)
+            return grad * (self - self.mean(dim, True)) * 2.0 / (AD_safe_size(self_size, dim) - correction)
+
+        def AD_var_backward_2(grad,
+                              self,
+                              dim: Optional[List[int]],
+                              correction: Optional[int],
+                              keepdim: bool):
+            if correction is None:
+                correction = 1
+            if self.dim() == 0 or dim is None:
+              return AD_var_backward_0(grad, self, correction)
+
+            return AD_var_backward_1(grad, self, dim, correction, keepdim)
 
         def std_0(self,
                   unbiased: bool=True):
             std_out = torch.std(self, unbiased)
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output / (std_out * 2), self, correction)
                 return grad_self, None
 
             return std_out, backward
@@ -136,7 +147,20 @@ const std::vector<std::string> functions = {
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return std_out, backward
+
+        def std_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -144,7 +168,8 @@ const std::vector<std::string> functions = {
         def var_0(self,
                   unbiased: bool=True):
             def backward(grad_output):
-                grad_self = AD_var_backward_0(grad_output, self, unbiased)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_0(grad_output, self, correction)
                 return grad_self, None
 
             return torch.var(self, unbiased), backward
@@ -154,10 +179,22 @@ const std::vector<std::string> functions = {
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
-                grad_self = AD_var_backward_1(grad_output, self, dim, unbiased, keepdim)
+                correction = AD_bool_to_int(unbiased)
+                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
+
+        def var_2(self,
+                  dim: Optional[List[int]],
+                  *,
+                  correction: Optional[int],
+                  keepdim: bool):
+            def backward(grad_output):
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
+                return grad_self, None, None, None
+
+            return torch.var(self, dim, correction=correction, keepdim=keepdim), backward
 
         def tanh(self):
             output = torch.tanh(self)
@@ -342,7 +379,8 @@ const std::vector<std::string> functions = {
                 grad_mat2 = AD_bmm_backward_mat2(grad_output, self)
                 return grad_self, grad_mat2
             return torch.bmm(self, mat2), backward
-
+    )",
+    R"(
         def AD_mat_transpose(mat):
             dim = mat.dim()
             if dim == 1:
@@ -842,6 +880,15 @@ const std::vector<std::string> functions = {
             result = torch.relu(self)
             def backward(grad_output):
                 return grad_output * (result > 0).type_as(result)
+
+            return result, backward
+
+        def hardswish(self):
+            result = torch.hardswish(self)
+            def backward(grad_output):
+                m = (result > 3.).type_as(result)
+                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                return grad_output * m
 
             return result, backward
 
@@ -1393,9 +1440,9 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
-        def clamp(self,
-                  min: Optional[number],
-                  max: Optional[number]):
+        def clamp_1(self,
+                    min: Optional[number],
+                    max: Optional[number]):
           def backward(grad_output):
             if min is not None and max is not None:
                 mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
@@ -1409,16 +1456,36 @@ const std::vector<std::string> functions = {
             else: #min is None and max is None
                 return grad_output, None, None
           return torch.clamp(self, min=min, max=max), backward
+
+        def clamp_2(self,
+                    min: Optional[Tensor],
+                    max: Optional[Tensor]):
+          def backward(grad_output):
+            if min is not None and max is not None:
+                mask = ((self >= min) * (self <= max)).type_as(self)
+                return grad_output * mask, None, None
+            elif min is not None:
+                mask = (self >= min).type_as(self)
+                return grad_output * mask, None, None
+            elif max is not None:
+                mask = (self <= max).type_as(self)
+                return grad_output * mask, None, None
+            else: #min is None and max is None
+                return grad_output, None, None
+          return torch.clamp(self, min=min, max=max), backward
     )"};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
@@ -1485,6 +1552,7 @@ void loadModule(const CompilationUnit& module) {
           << "gradient must return literal a tuple";
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());

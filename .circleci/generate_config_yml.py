@@ -80,6 +80,24 @@ class Header(object):
         for line in filter(None, lines):
             output_filehandle.write(line + "\n")
 
+def filter_master_only_jobs(items):
+    if isinstance(items, list):
+        rc = [filter_master_only_jobs(item) for item in items]
+        return [item for item in rc if len(item if item is not None else []) > 0]
+    assert isinstance(items, dict) and len(items) == 1
+    item_name = next(iter(items.keys()))
+    filters = items[item_name].get('filters', None)
+    if filters is None:
+        return None
+    branches = filters.get('branches', None)
+    branches_only = branches.get('only', None) if branches is not None else None
+    if branches_only is None:
+        return None
+    if 'master' not in branches_only:
+        return None
+    item = items[item_name].copy()
+    item.pop('filters')
+    return {item_name: item}
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
@@ -105,7 +123,8 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
     ]
-
+    build_jobs = [f() for f in build_workflows_functions]
+    master_build_jobs = filter_master_only_jobs(build_jobs)
     return {
         "workflows": {
             "binary_builds": {
@@ -114,7 +133,11 @@ def gen_build_workflows_tree():
             },
             "build": {
                 "when": r"<< pipeline.parameters.run_build >>",
-                "jobs": [f() for f in build_workflows_functions]
+                "jobs": build_jobs,
+            },
+            "master_build": {
+                "when": r"<< pipeline.parameters.run_master_build >>",
+                "jobs": master_build_jobs,
             },
         }
     }

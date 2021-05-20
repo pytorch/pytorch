@@ -24,7 +24,8 @@ void castIndicesToInts(std::vector<const Expr*>& indices) {
   auto index_dtype = ScalarType::Int;
   for (auto& index : indices) {
     const Dtype& dt = index->dtype();
-    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
+    if (c10::isIntegralType(dt.scalar_type(), true) &&
+        dt.scalar_type() != index_dtype) {
       index = new Cast(Dtype(index_dtype, dt.lanes()), index);
     }
   }

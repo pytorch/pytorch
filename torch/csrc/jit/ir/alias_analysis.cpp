@@ -1499,6 +1499,7 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int direction;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;

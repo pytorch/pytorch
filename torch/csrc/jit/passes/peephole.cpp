@@ -22,6 +22,7 @@ static bool mustBeEqual(const c10::optional<T>& a, const c10::optional<T>& b) {
 
 struct PeepholeOptimizeImpl {
   PeepholeOptimizeImpl(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::shared_ptr<Graph>& graph,
       bool disable_shape_peepholes)
       : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {}

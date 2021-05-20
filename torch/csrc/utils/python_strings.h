@@ -76,6 +76,7 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  *
  */
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);

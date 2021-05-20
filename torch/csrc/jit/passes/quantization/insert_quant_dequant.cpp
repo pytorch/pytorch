@@ -327,6 +327,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   std::vector<Use> uses = observer_out->uses();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
@@ -342,6 +343,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   g->insertNode(prepack);
 
   std::vector<Value*> embedding_bag_inputs =
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       embedding_bag_float_op->inputs().vec();
   std::vector<Value*> qembedding_bag_inputs = {prepack->output()};
   const auto inputs_size = embedding_bag_float_op->inputs().size();
@@ -393,6 +395,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < embedding_bag_float_op->outputs().size(); ++i) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
@@ -429,6 +432,7 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *quant, *choose_qparams, *dequant;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
@@ -533,6 +537,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *choose_qparams, *quant, *dequant;
   for (const auto& n : nodes_to_rewrite) {
     std::tie(choose_qparams, quant, dequant) = n;
@@ -1515,6 +1520,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < n->inputs().size(); ++i) {
       n->input(i)->node()->moveBefore(if_node);
     }

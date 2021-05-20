@@ -72,6 +72,7 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->op_type(), kRand);                  \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -86,6 +87,7 @@ TEST(Simplify, ConstantFoldSimple) {
   ASSERT_EQ(eval.value<float>(), 5.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -102,6 +104,7 @@ TEST(Simplify, ConstantFoldTwoLayer) {
   ASSERT_EQ(eval.value<float>(), -4.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldShifts) {
   KernelScope kernel_scope;
   ExprHandle a(7);
@@ -117,6 +120,7 @@ TEST(Simplify, ConstantFoldShifts) {
   ASSERT_EQ(eval.value<int>(), 7 << (4 - 3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldBitwise) {
   KernelScope kernel_scope;
   ExprHandle a(59);
@@ -132,6 +136,7 @@ TEST(Simplify, ConstantFoldBitwise) {
   ASSERT_EQ(eval.value<int>(), (59 ^ 22) & 101);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMultiOp) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -151,6 +156,7 @@ TEST(Simplify, ConstantFoldMultiOp) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMinMax) {
   KernelScope kernel_scope;
   ExprHandle a(12.0f);
@@ -161,6 +167,7 @@ TEST(Simplify, ConstantFoldMinMax) {
   ExprHandle minHandle = Min::make(b, c, true);
   ExprHandle fn = Max::make(a, minHandle, false);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ASSERT_EQ(fn.dtype().scalar_type(), ScalarType::Float);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
@@ -170,6 +177,7 @@ TEST(Simplify, ConstantFoldMinMax) {
   ASSERT_EQ(eval.value<float>(), 15.f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldIntrinsics) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -192,6 +200,7 @@ TEST(Simplify, ConstantFoldIntrinsics) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldCastToBool) {
   KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
@@ -200,6 +209,7 @@ TEST(Simplify, ConstantFoldCastToBool) {
   ASSERT_EQ(eval.value<bool>(), false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldWithVar) {
   KernelScope kernel_scope;
   {
@@ -231,6 +241,7 @@ TEST(Simplify, ConstantFoldWithVar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
@@ -278,6 +289,7 @@ TEST(Simplify, ConditionalSelectFoldSimple) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
@@ -326,6 +338,7 @@ TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldWithVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -347,6 +360,7 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, UnFoldableExpr) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -365,6 +379,7 @@ TEST(Simplify, UnFoldableExpr) {
   ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashSimple) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -386,6 +401,7 @@ TEST(Simplify, HashSimple) {
   ASSERT_NE(hash_a, hash_f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalence) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -423,6 +439,7 @@ TEST(Simplify, HashEquivalence) {
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceRand) {
   KernelScope kernel_scope;
   ExprHandle f =
@@ -443,6 +460,7 @@ TEST(Simplify, HashEquivalenceRand) {
   ASSERT_NE(hash_l, hash_r);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceAfterFolding) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -469,6 +487,7 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
   ASSERT_EQ(hash_l_n, hash_r_n);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
@@ -478,6 +497,7 @@ TEST(Simplify, HashDifferenceTypes) {
   immediates.push_back(new DoubleImm(1));
   immediates.push_back(new FloatImm(1));
   immediates.push_back(new HalfImm(1));
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
   immediates.push_back(new BoolImm(1));
   immediates.push_back(new CharImm(1));
   immediates.push_back(new ByteImm(1));
@@ -502,6 +522,7 @@ TEST(Simplify, HashDifferenceTypes) {
   ASSERT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashLargeExpression) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -546,6 +567,7 @@ TEST(Simplify, HashLargeExpression) {
   ASSERT_NE(hash_t, hash_f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashForLoopOptions) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -588,14 +610,19 @@ TEST(Simplify, HashForLoopOptions) {
 }
 
 /// (2 + x) + 4 => x + 6
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdd) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle m("m", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n("n", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n_1("n_1", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
@@ -610,6 +637,7 @@ TEST(Simplify, SimplifyAdd) {
 }
 
 /// (2 - x) - 4 => -2 - x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySub) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -627,6 +655,7 @@ TEST(Simplify, SimplifySub) {
 }
 
 /// 2 * (1 - x) - 4 => 2 * (-3 - x)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiLayer) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -640,6 +669,7 @@ TEST(Simplify, SimplifyMultiLayer) {
 }
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiTerm) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -658,6 +688,7 @@ TEST(Simplify, SimplifyMultiTerm) {
 }
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyCasts) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -676,6 +707,7 @@ TEST(Simplify, SimplifyCasts) {
 }
 
 /// (x + 0) * 1 => x
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesNoOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -688,6 +720,7 @@ TEST(Simplify, SimplifyEliminatesNoOps) {
 }
 
 /// Cannot simplify this.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -711,6 +744,7 @@ TEST(Simplify, SimplifyMultiVar) {
 }
 
 // x + 2 + y => x + y + 2
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_SimplifyReorderings) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -728,6 +762,7 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
 }
 
 /// y + x * 0 => y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -738,6 +773,7 @@ TEST(Simplify, SimplifyEliminatesVar) {
   IS_VAR_WITH_NAME(simplified.node(), "y");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdds) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -809,6 +845,7 @@ TEST(Simplify, SimplifyAdds) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMuls) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -929,6 +966,7 @@ TEST(Simplify, SimplifyMuls) {
 }
 
 // Sub an expr from itself will result in zero.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySubs) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1095,6 +1133,7 @@ TEST(Simplify, SimplifySubs) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDiv) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1114,6 +1153,7 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMod) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1124,6 +1164,7 @@ TEST(Simplify, SimplifyMod) {
     // Constant folding works.
     ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
 
@@ -1240,6 +1281,7 @@ TEST(Simplify, SimplifyMod) {
 }
 
 // Test that mixing ops together simplifies as expected.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiOp) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1309,6 +1351,7 @@ TEST(Simplify, SimplifyMultiOp) {
 }
 
 // Test that chaining many ops together works as expected.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyManyOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1357,6 +1400,7 @@ TEST(Simplify, SimplifyManyOps) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorization) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1485,6 +1529,7 @@ TEST(Simplify, SimplifyFactorization) {
 }
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorizeUneven) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1512,6 +1557,7 @@ TEST(Simplify, SimplifyFactorizeUneven) {
 
 // (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
 // This is kind of a placeholder test for variable factorization.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1536,6 +1582,7 @@ TEST(Simplify, SimplifyDeeperTerms) {
 
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1550,6 +1597,7 @@ TEST(Simplify, SimplifyDeeperDifference) {
 
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFoldComplexDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1565,6 +1613,7 @@ TEST(Simplify, SimplifyFoldComplexDifference) {
   IS_IMM_WITH_VAL(Int, simplified.node(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyIfComponents) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1587,6 +1636,7 @@ TEST(Simplify, SimplifyIfComponents) {
   IS_VAR_WITH_NAME(ifexpr->false_value(), "y");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOpaqueTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1613,6 +1663,7 @@ TEST(Simplify, SimplifyOpaqueTerms) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicMinMax) {
   KernelScope kernel_scope;
 
@@ -1649,6 +1700,7 @@ TEST(Simplify, SimplifySymbolicMinMax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMax) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1660,6 +1712,7 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle body = Max::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
   }
 
@@ -1952,6 +2005,7 @@ TEST(Simplify, SimplifyNestedMax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMin) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1963,6 +2017,7 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle body = Min::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
   }
 
@@ -2255,6 +2310,7 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyWontReorderFloat) {
   KernelScope kernel_scope;
 
@@ -2367,6 +2423,7 @@ TEST(Simplify, SimplifyWontReorderFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPattern) {
   KernelScope kernel_scope;
 
@@ -2575,6 +2632,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2595,6 +2653,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
     // 32 * (x/8) + 4 * (x % 8) => 4 * x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(32) * (x / 8) + ExprHandle(4) * (x % 8);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2634,6 +2693,7 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
@@ -2691,6 +2751,7 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPattern) {
   KernelScope kernel_scope;
 
@@ -2785,6 +2846,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2854,6 +2916,7 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
@@ -2976,6 +3039,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
   KernelScope kernel_scope;
 
@@ -3048,6 +3112,7 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantBranches) {
   KernelScope kernel_scope;
 
@@ -3106,6 +3171,7 @@ TEST(Simplify, SimplifyConstantBranches) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantCond) {
   KernelScope kernel_scope;
 
@@ -3218,6 +3284,7 @@ TEST(Simplify, SimplifyConstantCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyCond) {
   KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
@@ -3246,6 +3313,7 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantComparisons) {
   KernelScope kernel_scope;
 
@@ -3292,6 +3360,7 @@ TEST(Simplify, SimplifyConstantComparisons) {
   IS_IMM_WITH_VAL(Int, simplified.node(), 42);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicComparisons) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -3314,6 +3383,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 
   // x == x * 2 cannot simplify since we don't know x is nonzero.
   body = CompareSelect::make(x, x * 2, kEQ);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
 
   // x == x * 1 => 1
@@ -3429,6 +3499,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
   TookFalseBranch(IRSimplifier::simplify(body));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   KernelScope kernel_scope;
 
@@ -3489,6 +3560,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOneLoopFor) {
   KernelScope kernel_scope;
 
@@ -3558,6 +3630,7 @@ TEST(Simplify, SimplifyOneLoopFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   KernelScope kernel_scope;
 
@@ -3577,6 +3650,7 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultilevelFor) {
   KernelScope kernel_scope;
 
@@ -3636,6 +3710,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForCleansUp) {
   KernelScope kernel_scope;
 
@@ -3643,6 +3718,7 @@ TEST(Simplify, SimplifyForCleansUp) {
     Placeholder a("a", kFloat, {1, 12, 1});
     VarHandle x("x", kInt);
     Tensor* b = Compute(
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         "x",
         {{1, "i"}, {12, "m"}, {1, "n"}},
         [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
@@ -3665,6 +3741,7 @@ TEST(Simplify, SimplifyForCleansUp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyFor) {
   KernelScope kernel_scope;
 
@@ -3682,6 +3759,7 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFlattenBlock) {
   KernelScope kernel_scope;
 
@@ -3767,6 +3845,7 @@ TEST(Simplify, SimplifyFlattenBlock) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   KernelScope kernel_scope;
 
@@ -3841,6 +3920,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DontSimplifyRand) {
   KernelScope kernel_scope;
 
@@ -3875,6 +3955,7 @@ TEST(Simplify, DontSimplifyRand) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyReorderForCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -4074,6 +4155,7 @@ TEST(Simplify, SimplifyReorderForCond) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFuseConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -4095,6 +4177,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              nullptr)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4493,6 +4576,7 @@ TEST(Simplify, SimplifyFuseConditions) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySyncThreads) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -4501,6 +4585,7 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge two inner SyncThreads.
     auto body = Block::make(
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
@@ -4590,6 +4675,7 @@ TEST(Simplify, SimplifySyncThreads) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRampSubBroadcast) {
   KernelScope kernel_scope;
   int num_lanes = 4;
@@ -4604,6 +4690,7 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
   ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyBroadcastTermExpander) {
   KernelScope kernel_scope;
   int num_lanes = 8;
@@ -4626,6 +4713,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   // Before:
   //   for (int n = 1; n < N; n++) {
@@ -4651,6 +4739,7 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
       oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   // Before:
   //   for (int n = 1; n < N; n++) {
@@ -4676,6 +4765,7 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
       oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   // This test mimics the unpadded region of a conv2d.  We want to remove any
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
@@ -4711,6 +4801,7 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
       oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   // This test mimics the padded region of a conv2d.  We want to adjust the
   // loop bounds such that the condition will be always met.  Note that this

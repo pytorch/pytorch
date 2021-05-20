@@ -54,6 +54,11 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
     set_output(1, {sizeB, sizeD, osizeT, osizeH, osizeW}, input.options().dtype(kLong));
   }
 }
+
+TORCH_META_FUNC(adaptive_max_pool3d_backward)
+(const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
+  set_output(0, input.sizes(), input.options());
+}
 } // namespace meta
 
 namespace native {
@@ -184,113 +189,6 @@ static void adaptive_max_pool3d_out_frame(
   });
 }
 
-void adaptive_max_pool3d_out_cpu_template(
-          Tensor& output,
-          Tensor& indices,
-          const Tensor& input,
-          IntArrayRef output_size)
-{
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
-  int64_t sizeB = 1;
-  int64_t sizeD = 0;
-  int64_t isizeT = 0;
-  int64_t isizeH = 0;
-  int64_t isizeW = 0;
-
-  int64_t istrideB = 0;
-  int64_t istrideD = 0;
-  int64_t istrideT = 0;
-  int64_t istrideH = 0;
-  int64_t istrideW = 0;
-
-  for (int64_t i = 0; i < input.ndimension(); i++) {
-    TORCH_CHECK(input.size(i) > 0,
-      "adaptive_max_pool3d: expected input to have non-empty spatial dimensions, "
-      "but input has sizes ", input.sizes(), " with dimension ", i, " being "
-      "empty");
-  }
-
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(output_size.size() == 3,
-    "adaptive_max_pool3d: internal error: output_size.size() must be 3");
-
-  if (input.ndimension() == 5)
-  {
-    istrideB = input.stride(0);
-    sizeB = input.size(0);
-    dimD++;
-    dimT++;
-    dimH++;
-    dimW++;
-  }
-
-  /* sizes */
-  sizeD  = input.size(dimD);
-  isizeT = input.size(dimT);
-  isizeH = input.size(dimH);
-  isizeW = input.size(dimW);
-  /* strides */
-  istrideD = input.stride(dimD);
-  istrideT = input.stride(dimT);
-  istrideH = input.stride(dimH);
-  istrideW = input.stride(dimW);
-
-  int64_t osizeT = output_size[0];
-  int64_t osizeH = output_size[1];
-  int64_t osizeW = output_size[2];
-
-  /* resize output */
-  if (input.ndimension() == 4)
-  {
-    output.resize_({sizeD, osizeT, osizeH, osizeW});
-    /* indices will contain max input locations for each output point */
-    indices.resize_({sizeD, osizeT, osizeH, osizeW});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool3d_single_out_frame<scalar_t>(input_data, output_data,
-                                                     indices_data,
-                                                     sizeD,
-                                                     isizeT, isizeH, isizeW,
-                                                     osizeT, osizeH, osizeW,
-                                                     istrideD, istrideT,
-                                                     istrideH, istrideW);
-      }
-    );
-  }
-  else
-  {
-    output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
-    /* indices will contain max input locations for each output point */
-    indices.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool3d_out_frame<scalar_t>(input_data, output_data,
-                                              indices_data,
-                                              sizeB,
-                                              sizeD,
-                                              isizeT, isizeH, isizeW,
-                                              osizeT, osizeH, osizeW,
-                                              istrideB,
-                                              istrideD, istrideT,
-                                              istrideH, istrideW);
-      }
-    );
-  }
-}
-
 template <typename scalar_t>
 static void adaptive_max_pool3d_backward_single_out_frame(
           scalar_t *gradInput_p,
@@ -356,92 +254,6 @@ static void adaptive_max_pool3d_backward_out_frame(
     }
   });
 }
-
-Tensor& adaptive_max_pool3d_backward_out_cpu_template(
-          Tensor& gradInput,
-          const Tensor& gradOutput_,
-          const Tensor& input,
-          const Tensor& indices)
-{
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
-  int64_t sizeB = 1;
-  int64_t sizeD;
-  int64_t isizeT;
-  int64_t isizeH;
-  int64_t isizeW;
-  int64_t osizeT;
-  int64_t osizeH;
-  int64_t osizeW;
-
-  /* get contiguous gradOutput */
-  auto gradOutput = gradOutput_.contiguous();
-
-  /* resize */
-  gradInput.resize_as_(input);
-  gradInput.zero_();
-
-  if (input.ndimension() == 5) {
-    sizeB = input.size(0);
-    dimD++;
-    dimT++;
-    dimH++;
-    dimW++;
-  }
-
-  /* sizes */
-  sizeD  = input.size(dimD);
-  isizeT = input.size(dimT);
-  isizeH = input.size(dimH);
-  isizeW = input.size(dimW);
-  osizeT = gradOutput.size(dimT);
-  osizeH = gradOutput.size(dimH);
-  osizeW = gradOutput.size(dimW);
-
-  /* backprop */
-  if (input.ndimension() == 4)
-  {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "adaptive_max_pool3d_backward",
-      [&] {
-        /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        adaptive_max_pool3d_backward_single_out_frame<scalar_t>(gradInput_data, gradOutput_data,
-                                                                indices_data,
-                                                                sizeD,
-                                                                isizeT, isizeH, isizeW,
-                                                                osizeT, osizeH, osizeW);
-      }
-    );
-  }
-  else
-  {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "adaptive_max_pool3d_backward",
-      [&] {
-        /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        adaptive_max_pool3d_backward_out_frame<scalar_t>(gradInput_data, gradOutput_data,
-                                                         indices_data,
-                                                         sizeB,
-                                                         sizeD,
-                                                         isizeT, isizeH, isizeW,
-                                                         osizeT, osizeH, osizeW);
-      }
-    );
-  }
-
-  return gradInput;
-}
-
 } // namespace
 
 TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
@@ -537,32 +349,90 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
   }
 }
 
-Tensor& adaptive_max_pool3d_backward_out_cpu(const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  adaptive_max_pool3d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ const Tensor& indices,
+ const Tensor& gradInput) {
+  int dimD = 0;
+  int dimT = 1;
+  int dimH = 2;
+  int dimW = 3;
+  int64_t sizeB = 1;
+  int64_t sizeD;
+  int64_t isizeT;
+  int64_t isizeH;
+  int64_t isizeW;
+  int64_t osizeT;
+  int64_t osizeH;
+  int64_t osizeW;
 
-Tensor adaptive_max_pool3d_backward_cpu(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  adaptive_max_pool3d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+  /* get contiguous gradOutput */
+  auto gradOutput_ = gradOutput.contiguous();
 
+  /* resize */
+  gradInput.zero_();
+
+  if (input.ndimension() == 5) {
+    sizeB = input.size(0);
+    dimD++;
+    dimT++;
+    dimH++;
+    dimW++;
+  }
+
+  /* sizes */
+  sizeD = input.size(dimD);
+  isizeT = input.size(dimT);
+  isizeH = input.size(dimH);
+  isizeW = input.size(dimW);
+  osizeT = gradOutput_.size(dimT);
+  osizeH = gradOutput_.size(dimH);
+  osizeW = gradOutput_.size(dimW);
+
+  /* backprop */
+  if (input.ndimension() == 4) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool3d_backward", [&] {
+          /* get raw pointers */
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool3d_backward_single_out_frame<scalar_t>(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool3d_backward", [&] {
+          /* get raw pointers */
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool3d_backward_out_frame<scalar_t>(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              sizeB,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW);
+        });
+  }
+}
 } // at::native
 } // at

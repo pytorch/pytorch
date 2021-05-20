@@ -17,8 +17,16 @@ namespace pytorch_jni {
 namespace {
 
 struct LiteJITCallGuard {
-  // Inference only workload.
-  c10::InferenceMode guard;
+  // VariableType dispatch is not included in default mobile build. We need set
+  // this guard globally to avoid dispatch error (only for dynamic dispatch).
+  // Thanks to the unification of Variable class and Tensor class it's no longer
+  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
+  // always set NonVariableTypeMode for inference only use case.
+  // TODO: Ideally AutoNonVariableTypeMode in this file should be changed to InferenceMode
+  // but it's blocked due to typeahead application on Oculus (D27943428). To unblock, we need
+  // to find out which op is making inplace update to an inference tensor outside InferenceMode
+  // and properly guard it.
+  torch::AutoNonVariableTypeMode non_var_guard;
 };
 
 } // namespace

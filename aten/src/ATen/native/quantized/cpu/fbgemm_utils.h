@@ -320,6 +320,7 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
         bit_rate_(bit_rate),
         q_scheme(q_scheme),
         version_(version) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
     if (!packed_w.is_contiguous()) {
       packed_w = packed_w.contiguous();
     }
