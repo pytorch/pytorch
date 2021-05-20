@@ -4414,6 +4414,7 @@ op_db: List[OpInfo] = [
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diag_embed),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
