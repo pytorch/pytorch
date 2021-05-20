@@ -31,6 +31,7 @@ struct CudaIPCGlobalEntities {
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaIPCGlobalEntities() : ref_counters_files_() {}
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
@@ -129,7 +130,9 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CudaIPCSentData::CudaIPCSentData(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     std::string handle,
     int64_t offset,
     int64_t* counter_ptr,

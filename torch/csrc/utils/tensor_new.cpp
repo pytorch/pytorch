@@ -184,6 +184,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
   if (!seq) throw python_error();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
   if (seq_size != n) {
     throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
@@ -256,7 +257,7 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
@@ -605,13 +606,13 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   auto r = parser.parse(args, kwargs, parsed_args);
   THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(CROW_INDICES_ARG), "dtype"));
   THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(COL_INDICES_ARG), "dtype"));
-  at::ScalarType crow_indices_scalar_type = reinterpret_cast<THPDtype*>(
-    crow_indices_dtype_attr.get())->scalar_type;
-  at::ScalarType col_indices_scalar_type = reinterpret_cast<THPDtype*>(
-    col_indices_dtype_attr.get())->scalar_type;
+  at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    crow_indices_dtype_attr.get())->scalar_type : kInt;
+  at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    col_indices_dtype_attr.get())->scalar_type : kInt;
 
   if (r.idx == 0) {
-    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 7, REQ_GRAD_ARG = 8;
+    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
@@ -632,7 +633,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
                                  values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   } else if (r.idx == 1) {
-    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 7;
+    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 5, REQ_GRAD_ARG = 7;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);

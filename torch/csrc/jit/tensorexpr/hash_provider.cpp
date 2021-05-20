@@ -226,6 +226,7 @@ void HashProvider::visit(const Intrinsics* v) {
   // calls to rand are not symbolic and have a different value each time, they
   // should not hash to anything and this is the best we can do.
   if (v->op_type() == kRand) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     putHash(v, (SimplifierHashType)rand());
     return;
   }

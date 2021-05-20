@@ -28,6 +28,7 @@ bool MutationRemover::newMemoryLocation(Value* v) {
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
   WithInsertPoint guard(n);
   auto inputs = n->inputs();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* new_node;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
@@ -216,6 +217,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
       continue;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* new_node;
     if (isSpecialMappedOp(node)) {
       new_node = createSpecialMappedOp(node);
@@ -272,6 +274,47 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
   }
 
   return changed;
+}
+
+bool MutationRemover::inplaceOpVariant(Node* n) {
+  if (!n->kind().is_aten()) {
+    return false;
+  }
+
+  if (isSpecialMappedOp(n)) {
+    return true;
+  }
+
+  auto name = n->schema().name();
+  bool inplace_op = name.at(name.size() - 1) == '_';
+  if (!inplace_op) {
+    return false;
+  }
+
+  // needs to have alias analysis by schema
+  auto op = n->maybeOperator();
+  if (!op) {
+    return false;
+  }
+  if (op->aliasAnalysisKind() != AliasAnalysisKind::FROM_SCHEMA) {
+    return false;
+  }
+
+  // all inplace ops at time of writing have a single input that is mutated
+  // and returned. check that this is true, anything else could have strange
+  // semantics,
+  if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+    return false;
+  }
+  auto inputs = n->inputs();
+  if (!getOrCreateAliasDb()->writesToAlias(n, {inputs.at(0)}) ||
+      getOrCreateAliasDb()->writesToAlias(
+          n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
+    return false;
+  }
+
+  auto new_schema = name.substr(0, name.size() - 1);
+  return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
 }
 
 bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {

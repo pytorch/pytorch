@@ -1127,6 +1127,7 @@ const Expr* combineMinMaxTerms(
       scalar = opterm->scalar();
       variables = opterm->variables();
     }
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (expr->isConstant()) {
       scalar = combine_scalars(scalar, expr);
     } else {

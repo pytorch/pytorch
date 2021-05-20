@@ -55,6 +55,7 @@ class IndexHashOp : public Operator<Context> {
   T hash(T id) {
     int8_t* bytes = (int8_t*)&id;
     T hashed = seed_ * 0xDEADBEEF;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }

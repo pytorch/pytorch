@@ -151,12 +151,21 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, ())
 
     def test_union_variable_can_be_reassigned(self):
+        @torch.jit.script
+        def aux1(i: int):
+            return int(i ** 2)
+
+        @torch.jit.script
+        def aux2(s: str):
+            return s + s
+
         def fn() -> Union[int, str]:
             x: Union[int, str] = "foo"
             i: int = 1
-            s: str = "bar"
             x = i
-            x = s
+            y: int = aux1(x)
+            z: str = aux2(str(y))
+            x = z
             return x
 
         self.checkScript(fn, ())
@@ -219,6 +228,16 @@ class TestUnion(JitTestCase):
         s = fn.graph
 
         FileCheck().check("x : Union[int, str]")    \
+                   .run(s)
+
+    def test_union_redundant_arguments_are_skipped_subtyping(self):
+        @torch.jit.script
+        def fn(x: Union[str, Tuple[Optional[int], int], Tuple[int, int]]) -> str:
+            return "foo"
+
+        s = fn.graph
+
+        FileCheck().check("x : Union[(int?, int), str]")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_container(self):
@@ -292,19 +311,35 @@ class TestUnion(JitTestCase):
 
         self.assertEqual(fn2(), 10)
 
-    def test_optional_of_union_is_flattened(self):
-        def fn(flag: bool) -> Tuple[Union[str, int, None], Union[str, int, None]]:
+    def test_union_optional_of_union_is_flattened(self):
+        @torch.jit.script
+        def fn(flag: int) -> Union[str, int, None]:
             y: Union[int, str, None] = "foo"
-            if flag:
+            if flag == 0:
                 x: Optional[Union[int, str]] = y
+            elif flag == 1:
+                x: Optional[Union[int, str]] = 1
             else:
-                x: Optional[Union[int, str]] = "bar"
-            return x, y
+                x: Optional[Union[int, str]] = None
+            return x
 
-        self.checkScript(fn, (True,))
-        self.checkScript(fn, (False,))
+        # Can't use `checkScript` because it will flag the fact that
+        # the original code has `Optional[Union[int, str]]` but the
+        # saved/loaded code has `Union[int, NoneType, str]` (even
+        # though this is exactly what we want)
+        self.assertEqual(fn(0), "foo")
+        self.assertEqual(fn(1), 1)
+        self.assertEqual(fn(2), None)
 
-        s = torch.jit.script(fn).graph
+        buffer = io.BytesIO()
+        torch.jit.save(fn, buffer)
+        l = torch.jit.load(buffer)
+
+        s = l.code
+
+        FileCheck().check("Union[int, NoneType, str]")     \
+                   .check("Union[int, NoneType, str]")     \
+                   .run(s)
 
     def test_union_subclasses_larger_union(self):
         def fn() -> Union[int, str, torch.Tensor]:
@@ -313,6 +348,8 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, ())
 
+    # TODO: We would like to eventually support this. The issue is being
+    # tracked at https://github.com/pytorch/pytorch/issues/58167
     def test_union_as_dict_key(self):
         def fn():
             x: Dict[Union[int, str], str] = {}

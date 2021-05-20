@@ -22,7 +22,6 @@ def save(name, model, model_jit, eg):
 
 parser = argparse.ArgumentParser(description="Generate Examples")
 parser.add_argument("--install_dir", help="Root directory for all output files")
-parser.add_argument("--fbcode_dir", help="fbcode passes this to all binaries, so we accept it")
 
 
 if __name__ == "__main__":

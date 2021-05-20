@@ -111,6 +111,9 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
+        generator (torch.Generator, optional): If not ``None``, this RNG will be used
+            by RandomSampler to generate random indexes and multiprocessing to generate
+            `base_seed` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
@@ -903,7 +906,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self._dataset_kind, self._dataset, index_queue,
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
-                      self._base_seed + i, self._worker_init_fn, i, self._num_workers,
+                      self._base_seed, self._worker_init_fn, i, self._num_workers,
                       self._persistent_workers))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to

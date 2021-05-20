@@ -347,7 +347,7 @@ namespace {
 constexpr int64_t cufft_max_ndim = 3;
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();

@@ -4,7 +4,8 @@ from .node import Node
 from .symbolic_trace import symbolic_trace
 
 import copy
-from typing import Callable, Dict, List, NamedTuple, Set
+from typing import Callable, Dict, List, NamedTuple, Optional, Set
+import torch
 
 class Match(NamedTuple):
     # Node from which the match was found
@@ -13,7 +14,7 @@ class Match(NamedTuple):
     nodes_map: Dict[Node, Node]
 
 class SubgraphMatcher:
-    def __init__(self, pattern : Graph) -> None:
+    def __init__(self, pattern: Graph) -> None:
         self.pattern = pattern
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an "
@@ -27,7 +28,7 @@ class SubgraphMatcher:
         # Maps nodes in the pattern subgraph to nodes in the larger graph
         self.nodes_map: Dict[Node, Node] = {}
 
-    def matches_subgraph_from_anchor(self, anchor : Node) -> bool:
+    def matches_subgraph_from_anchor(self, anchor: Node) -> bool:
         """
         Checks if the whole pattern can be matched starting from
         ``anchor`` in the larger graph.
@@ -39,14 +40,14 @@ class SubgraphMatcher:
         return self._match_nodes(self.pattern_anchor, anchor)
 
     # Compare the pattern node `pn` against the graph node `gn`
-    def _match_nodes(self, pn : Node, gn : Node) -> bool:
+    def _match_nodes(self, pn: Node, gn: Node) -> bool:
 
         # Check if we've already matched these nodes in the current
         # traversal
         if pn in self.nodes_map:
             return self.nodes_map[pn] == gn
 
-        def attributes_are_equal(pn : Node, gn : Node) -> bool:
+        def attributes_are_equal(pn: Node, gn: Node) -> bool:
             # Use placeholder and output nodes as wildcards. The
             # only exception is that an output node can't match
             # a placeholder
@@ -83,7 +84,52 @@ class SubgraphMatcher:
         return True
 
 
-def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> List[Match]:
+def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
+    gm.delete_all_unused_submodules()
+
+    if isinstance(replacement, GraphModule):
+        replacement.graph.lint()
+
+    def try_get_submodule(mod: torch.nn.Module, target: str) -> Optional[torch.nn.Module]:
+        try:
+            mod_match = mod.get_submodule(target)
+            return mod_match
+        except AttributeError:
+            return None
+
+    for node in gm.graph.nodes:
+        if node.op == "call_module" or node.op == "get_attr":
+
+            gm_submod = try_get_submodule(gm, node.target)
+
+            replacement_submod = try_get_submodule(replacement, node.target)
+
+            # CASE 1: This target already exists as a submodule in our
+            # result GraphModule. Whether or not it exists in
+            # `replacement`, the existing submodule takes precedence.
+            if gm_submod is not None:
+                continue
+
+            # CASE 2: The target exists as a submodule in `replacement`
+            # only, so we need to copy it over.
+            elif replacement_submod is not None:
+                new_submod = copy.deepcopy(getattr(replacement, node.target))
+                gm.add_submodule(node.target, new_submod)
+
+            # CASE 3: The target doesn't exist as a submodule in `gm`
+            # or `replacement`
+            else:
+                raise RuntimeError("Attempted to create a \"", node.op,
+                                   "\" node during subgraph rewriting "
+                                   f"with target {node.target}, but "
+                                   "the referenced submodule does not "
+                                   "exist in either the original "
+                                   "GraphModule `gm` or the replacement"
+                                   " GraphModule `replacement`")
+
+    gm.graph.lint()
+
+def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
@@ -258,7 +304,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
 
     # Return True if one of the nodes in the current match has already
     # been used as part of another match
-    def overlaps_with_prev_match(match : Match) -> bool:
+    def overlaps_with_prev_match(match: Match) -> bool:
         for n in match.nodes_map.values():
             if n in replaced_nodes and n.op != "placeholder":
                 return True
@@ -286,7 +332,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         # in `pattern`
         subgraph_output: Node = match.anchor
 
-        def mark_node_as_replaced(n : Node) -> None:
+        def mark_node_as_replaced(n: Node) -> None:
             if n not in match.nodes_map.values():
                 return
             for n_ in n.all_input_nodes:
@@ -354,5 +400,10 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`
     gm.recompile()
+
+    # If `replacement` was an nn.Module, we'll need to make sure that
+    # all the submodules have been copied over correctly
+    if isinstance(replacement, torch.nn.Module):
+        _replace_submodules(gm, replacement)
 
     return matches

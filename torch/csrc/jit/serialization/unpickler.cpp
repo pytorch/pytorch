@@ -177,6 +177,7 @@ IValue Unpickler::parse_ivalue() {
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double little_endian;
 
   // Pickle floats are big endian, so reverse the bytes

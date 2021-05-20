@@ -1,6 +1,7 @@
 #include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ThreadLocal.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -20,14 +21,27 @@ RecordFunctionHandle next_unique_record_function_handle() {
   return RecordFunctionHandle(unique_rf_id++);
 }
 
-thread_local RecordFunctionTLS rf_tls_;
+RecordFunctionTLS& rf_tls() {
+#if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static c10::ThreadLocal<RecordFunctionTLS> rf_tls_;
+  return rf_tls_.get();
+#else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static thread_local RecordFunctionTLS rf_tls_;
+  return rf_tls_;
+#endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+}
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> defaultNodeId(-1);
 
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint64_t> next_thread_id_ {0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
@@ -43,24 +57,35 @@ struct CoinflipTLS {
 
 CoinflipTLS::CoinflipTLS()
     : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
-thread_local CoinflipTLS coinflip_tls_;
+
+CoinflipTLS& coinflip_tls() {
+#if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static c10::ThreadLocal<CoinflipTLS> coinflip_tls_;
+  return coinflip_tls_.get();
+#else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static thread_local CoinflipTLS coinflip_tls_;
+  return coinflip_tls_;
+#endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+}
 
 int sample_geometric() {
-  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
+  return coinflip_tls().distGeo_(coinflip_tls().genGeo_);
 }
 
 double sample_zero_one() {
-  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
+  return coinflip_tls().distZeroOne_(coinflip_tls().genZeroOne_);
 }
 
 } // namespace
 
 const RecordFunctionTLS& get_record_function_tls_() {
-  return rf_tls_;
+  return rf_tls();
 }
 
 void set_record_function_tls_(const RecordFunctionTLS& tls) {
-  rf_tls_ = tls;
+  rf_tls() = tls;
 }
 
 class CallbackManager {
@@ -73,7 +98,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
-    rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
+    rf_tls().sorted_tls_callbacks_.emplace_back(cb, handle);
     return handle;
   }
 
@@ -83,6 +108,7 @@ class CallbackManager {
       at::bumpRecordAllFunctions();
     }
     auto handle = next_unique_callback_handle();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
@@ -108,7 +134,7 @@ class CallbackManager {
       }
       return false;
     };
-    auto found = find_and_remove(rf_tls_.sorted_tls_callbacks_);
+    auto found = find_and_remove(rf_tls().sorted_tls_callbacks_);
     if (!found) {
       found = find_and_remove(sorted_global_callbacks_);
     }
@@ -122,7 +148,7 @@ class CallbackManager {
   }
 
   void clearThreadLocalCallbacks() {
-    rf_tls_.sorted_tls_callbacks_.clear();
+    rf_tls().sorted_tls_callbacks_.clear();
   }
 
   inline bool hasGlobalCallbacks() const {
@@ -130,7 +156,7 @@ class CallbackManager {
   }
 
   inline bool hasThreadLocalCallbacks() const {
-    return !rf_tls_.sorted_tls_callbacks_.empty();
+    return !rf_tls().sorted_tls_callbacks_.empty();
   }
 
   // We need this function to be inlined: init() is a hot path and
@@ -169,11 +195,11 @@ class CallbackManager {
       // flip for kLowProb with a thread local number of tries tries_left_
       // sampled from the geometric distribution.
       if (sampling_prob < kLowProb) {
-        if (coinflip_tls_.tries_left_ == 0) {
-          coinflip_tls_.tries_left_ = sample_geometric();
+        if (coinflip_tls().tries_left_ == 0) {
+          coinflip_tls().tries_left_ = sample_geometric();
           return (sample_zero_one() < sampling_prob / kLowProb);
         } else {
-          --coinflip_tls_.tries_left_;
+          --coinflip_tls().tries_left_;
           return false;
         }
       } else {
@@ -192,7 +218,7 @@ class CallbackManager {
     bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
-    for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
+    for (const auto& cb: rf_tls().sorted_tls_callbacks_) {
       if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
@@ -251,7 +277,7 @@ class CallbackManager {
         /* is_start */ true,
         rf);
     mergeRunCallbacks(
-        rf_tls_.sorted_tls_callbacks_,
+        rf_tls().sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ true,
@@ -267,7 +293,7 @@ class CallbackManager {
         /* is_start */ false,
         rf);
     mergeRunCallbacks(
-        rf_tls_.sorted_tls_callbacks_,
+        rf_tls().sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ false,
@@ -343,22 +369,6 @@ namespace {
   }
 } // namespace
 
-RecordFunctionCallbacks _getTLSCallbacks() {
-  return rf_tls_.sorted_tls_callbacks_;
-}
-
-void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
-  // keep the original handles
-  rf_tls_.sorted_tls_callbacks_ = callbacks;
-  std::sort(
-      rf_tls_.sorted_tls_callbacks_.begin(),
-      rf_tls_.sorted_tls_callbacks_.end(),
-      [](const std::pair<RecordFunctionCallback, CallbackHandle>& l,
-          const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
-        return l.second < r.second;
-  });
-}
-
 bool hasCallbacks() {
   auto& m = manager();
   return m.hasGlobalCallbacks() || m.hasThreadLocalCallbacks();
@@ -374,11 +384,13 @@ bool hasThreadLocalCallbacks() {
 
 CallbackHandle addThreadLocalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addThreadLocalCallback(std::move(cb));
 }
 
 CallbackHandle addGlobalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addGlobalCallback(std::move(cb));
 }
 
@@ -401,15 +413,15 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return rf_tls_.tls_record_function_enabled_;
+  return rf_tls().tls_record_function_enabled_;
 }
 
 void enableRecordFunction(bool enable) {
-  rf_tls_.tls_record_function_enabled_ = enable;
+  rf_tls().tls_record_function_enabled_ = enable;
 }
 
 RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
-  auto* rf_tls_ptr = &rf_tls_;
+  auto* rf_tls_ptr = &rf_tls();
   if (rf_tls_ptr->tls_record_function_enabled_) {
     auto& m = manager();
     if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
@@ -487,10 +499,24 @@ void RecordFunction::end() {
   }
 }
 
+void RecordFunction::_setAsync() {
+  if (isActive()) {
+    state_->is_async_ = true;
+  }
+}
+
+bool RecordFunction::isAsync() const {
+  if (isActive()) {
+    return state_->is_async_;
+  }
+  return false;
+}
+
 // RecordFunction pre-sampling
 namespace {
 // Whether to try to create RecordFunction on each call (>0) or
 // use pre-sampling (=0)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> global_record_all_functions_ {0};
 }
 
@@ -507,7 +533,7 @@ bool checkRecordAllFunctions() {
 }
 
 bool shouldRunRecordFunction(bool* pre_sampled) {
-  auto* rf_tls_ptr = &rf_tls_;
+  auto* rf_tls_ptr = &rf_tls();
   if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
     *pre_sampled = false;
     return false;
@@ -522,7 +548,7 @@ bool shouldRunRecordFunction(bool* pre_sampled) {
   }
 
   *pre_sampled = true;
-  auto* coinflip_tls_ptr = &coinflip_tls_;
+  auto* coinflip_tls_ptr = &coinflip_tls();
   if (coinflip_tls_ptr->tries_left_ == 0) {
     coinflip_tls_ptr->tries_left_ = sample_geometric();
     return true;

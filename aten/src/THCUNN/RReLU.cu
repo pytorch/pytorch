@@ -103,38 +103,5 @@ struct RReLUUpdateOutputEvalIP_functor
   }
 };
 
-template <typename T>
-struct RReLUupdateGradInputEval_functor
-{
-  const T negSlope_;
-
-  RReLUupdateGradInputEval_functor(T negSlope)
-    : negSlope_(negSlope)
-  {}
-
-  __device__ __forceinline__ void operator()(T *gradIn, T *gradOut, T *in)
-  {
-    *gradIn = (*in) <= 0 ? (*gradOut) * negSlope_ : (*gradOut);
-  }
-};
-
-template <typename T>
-struct RReLUupdateGradInputEvalIP_functor
-{
-  const T negSlope_;
-
-  RReLUupdateGradInputEvalIP_functor(T negSlope)
-    : negSlope_(negSlope)
-  {}
-
-  __device__ __forceinline__ void operator()(T *gradOut, T *in)
-  {
-    if (*in <= 0)
-    {
-      *gradOut = (*gradOut) * negSlope_;
-    }
-  }
-};
-
 #include <THCUNN/generic/RReLU.cu>
 #include <THC/THCGenerateFloatTypes.h>
