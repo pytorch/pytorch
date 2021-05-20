@@ -613,6 +613,23 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   const int NUM_ARGS = 9, CROW_INDICES_ARG = 0, COL_INDICES_ARG = 1, VALUES_ARG = 2;
   ParsedArgs<NUM_ARGS> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
+    // Clear error indicator if attribute does not exists.
+    // Otherwise subsequent Python C API calls might return bogus values.
+    // See https://github.com/pytorch/pytorch/issues/58520 for more details
+    auto rc = PyObject_GetAttrString(o, attr_name);
+    if (!rc) {
+      PyErr_Clear();
+    }
+    return rc;
+  };
+  THPObjectPtr crow_indices_dtype_attr(safe_get_attr_string(r.pyobject(CROW_INDICES_ARG), "dtype"));
+  THPObjectPtr col_indices_dtype_attr(safe_get_attr_string(r.pyobject(COL_INDICES_ARG), "dtype"));
+  at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    crow_indices_dtype_attr.get())->scalar_type : kInt;
+  at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    col_indices_dtype_attr.get())->scalar_type : kInt;
+
   if (r.idx == 0) {
     const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
@@ -624,11 +641,11 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
                                            r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
     Tensor crow_indices =  internal_new_from_data(values.options(),
-      kInt, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
+      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
     Tensor col_indices = internal_new_from_data(values.options(),
-      kInt, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
+      col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
 
@@ -645,10 +662,10 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
                                            r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
     Tensor crow_indices = internal_new_from_data(values.options(),
-      kInt, r.deviceOptional(DEVICE_TYPE_ARG),
+      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
       r.pyobject(CROW_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    Tensor col_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(DEVICE_TYPE_ARG),
+    Tensor col_indices = internal_new_from_data(values.options(), col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
       r.pyobject(COL_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
     return at::sparse_csr_tensor(crow_indices, col_indices, values,
