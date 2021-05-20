@@ -131,6 +131,8 @@ class AliasInfo(object):
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
+_DYNAMIC_DTYPES = _dispatch_dtypes(tuple())
+
 
 # Extension of getattr to support qualified names
 # e.g. _getattr_qual(torch, 'linalg.norm') -> torch.linalg.norm
@@ -4103,6 +4105,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool),
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_atan2,
+           ),
+    OpInfo('atan2',
+           dtypes=_DYNAMIC_DTYPES,
+           variant_test_name='1',
            sample_inputs_func=sample_inputs_atan2,
            ),
     UnaryUfuncInfo('atanh',

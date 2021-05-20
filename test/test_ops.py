@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db, method_tests, _DYNAMIC_DTYPES)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -21,6 +21,14 @@ from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)
 method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
+
+# Assure no operator has `dtypes=_DYNAMIC_DTYPES`
+def is_dynamic_dtype_set(op):
+    dyn_dtype = set(_DYNAMIC_DTYPES)
+    return (op.dtypes == dyn_dtype) or (op.dtypesIfCPU == dyn_dtype) or (op.dtypesIfCUDA == dyn_dtype)
+
+filtered_ops = list(filter(is_dynamic_dtype_set, op_db))
+assert len(filtered_ops) == 0, "One of the operator has dtypes=`DYNAMIC_DTYPES`"
 
 # Tests that apply to all operators
 
