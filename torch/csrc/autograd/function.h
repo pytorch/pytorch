@@ -462,17 +462,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinisim in the engine.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t topological_nr_ = 0;
 
   // Tracks whether this node has been added as the next_edge of another node
   // via set_next_edge(s), which always calls topological_nr() of all its children
   // See NOTE [ Topological Number ] for why we need this.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable bool has_parent_ = false;
 
   // Id of the thread that created the instance
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
@@ -511,13 +515,20 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // not protect the thread safety on Node pre/post C++ hooks (python hooks are
   // automatically thread safe), we rely on the user to write thread safe C++ hooks
   // if they want the hook to be correctly applied in multithreading environment.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex mutex_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   edge_list next_edges_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PyObject* pyobj_ = nullptr; // weak reference
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 

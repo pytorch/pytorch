@@ -40,6 +40,7 @@ PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
 } // namespace
 
 // multiprocessing methods on torch._C
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef methods[] = {
     {
         "_multiprocessing_init",

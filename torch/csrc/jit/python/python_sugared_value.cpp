@@ -954,7 +954,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   // have default values for all its fields
   TORCH_INTERNAL_ASSERT(field_names.size() == field_defaults.size());
 
-  for (auto i = 0; i < field_names.size(); ++i) {
+  for (size_t i = 0; i < field_names.size(); ++i) {
     auto ival = IValue();
     if (!field_defaults[i].is_none()) {
       auto type = tryToInferType(field_defaults[i]);

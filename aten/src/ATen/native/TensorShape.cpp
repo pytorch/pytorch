@@ -29,7 +29,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cat_serial_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -306,6 +308,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
     return false;
   }
   for (const auto i : c10::irange(s1.size())) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -646,6 +649,7 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
@@ -731,7 +735,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
   auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
   auto result = self.as_strided(
-      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
+      expandedSizesAndStrides.sizes, expandedSizesAndStrides.strides);
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
@@ -776,7 +780,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-Tensor &as_strided_(Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
@@ -829,6 +833,7 @@ Tensor& narrow_copy_dense_cpu_out(
   if (dim < 0) {
     dim = at::maybe_wrap_dim(dim, self_sizes.size());
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(dim < self_sizes.size());
   }
 
@@ -853,11 +858,14 @@ Tensor& narrow_copy_dense_cpu_out(
   output_sizes[dim] = length;
   at::native::resize_(output, output_sizes);
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
   const auto itemsize = self_contig->dtype().itemsize();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t src_nbytes = itemsize * self_contig->numel();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];
@@ -1675,7 +1683,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   DimVector strides(self.strides().begin(), self.strides().end());
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  return self.as_strided_(sizes, strides);
+  self.as_strided_(sizes, strides);
+  return self;
 }
 
 Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
@@ -1860,7 +1869,8 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self;
 }
 
 Tensor & squeeze_(Tensor& self, int64_t dim) {
@@ -1868,10 +1878,12 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided_(self.sizes(), self.strides());
+    self.as_strided_(self.sizes(), self.strides());
+    return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self;
 }
 
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
@@ -1947,7 +1959,8 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(g.sizes, g.strides);
+  self.as_strided_(g.sizes, g.strides);
+  return self;
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
@@ -2212,6 +2225,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto self_stride_0 = self.stride(0);
     auto self_stride_1 = self.stride(1);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t sz;
     if (dimension >= 0) {
       sz = std::min(self.size(0), self.size(1) - dimension);
@@ -2376,6 +2390,33 @@ Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
 
 Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
   return self.transpose_(dim0, dim1);
+}
+
+Tensor flatten_dense_tensors(TensorList tensors) {
+  static auto flatten = [](const Tensor &t) { return t.contiguous().view({-1}); };
+  if (tensors.size() == 1)
+    return flatten(tensors[0]);
+  return at::cat(fmap(tensors, flatten));
+}
+
+std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tensors) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(tensors.size());
+  size_t offset = 0;
+  for (const auto & tensor : tensors) {
+    auto numel = tensor.numel();
+    // If unflatten an empty tensor, create a new empty tensor using
+    // flat tensor Options.
+    // This can avoid the unflattened empty tensor to share the same storage
+    // with other unflatten tensors.
+    if (numel == 0) {
+      outputs.push_back(at::empty({0}, flat.options()));
+    } else {
+      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
+      offset += numel;
+    }
+  }
+  return outputs;
 }
 
 }} // at::native

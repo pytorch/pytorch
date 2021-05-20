@@ -69,6 +69,7 @@ struct ConstantTableValue : public SugaredValue {
       Function& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* end;
     int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
@@ -484,13 +485,14 @@ struct SourceImporterImpl : public Resolver,
         } break;
         case TK_DEF: {
           Def def = Def(statement);
-          if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()) {
-            pre_hook_def_map.emplace(def.name().name(), def);
+          auto def_name = def.name().name();
+          if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
+            pre_hook_def_map.emplace(def_name, def);
             pre_hook_resolver_map.emplace(
-                def.name().name(), shared_from_this());
-          } else if (hook_names.find(def.name().name()) != hook_names.end()) {
-            hook_def_map.emplace(def.name().name(), def);
-            hook_resolver_map.emplace(def.name().name(), shared_from_this());
+                def_name, shared_from_this());
+          } else if (hook_names.find(def_name) != hook_names.end()) {
+            hook_def_map.emplace(def_name, def);
+            hook_resolver_map.emplace(def_name, shared_from_this());
           } else {
             methods.emplace_back(def);
             method_resolvers.push_back(shared_from_this());
@@ -649,9 +651,15 @@ struct SourceImporterImpl : public Resolver,
       const auto assign = Assign(statement);
 
       auto name = Var(Assign(statement).lhs()).name().name();
+      auto default_val = IValue();
+      if (assign.rhs().present()) {
+        std::vector<IValue> parsed = type_parser.evaluateDefaults(assign.range(), {assign.rhs().get()}, {assign.type().get()});
+        TORCH_INTERNAL_ASSERT(parsed.size() == 1);
+        default_val = parsed[0];
+      }
 
       fields.emplace_back(
-          std::pair<std::string, IValue>(std::move(name), IValue()));
+          std::pair<std::string, IValue>(std::move(name), std::move(default_val)));
 
       auto type = type_parser.parseTypeFromExpr(assign.type().get());
 

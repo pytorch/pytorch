@@ -540,6 +540,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -961,6 +969,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
 
 def fake_range():
@@ -975,9 +984,9 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    defaults = [obj._field_defaults.get(field) 
-                if hasattr(obj, "_field_defaults") 
-                else None 
+    defaults = [obj._field_defaults.get(field)
+                if hasattr(obj, "_field_defaults")
+                else None
                 for field in obj._fields]
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
@@ -990,11 +999,10 @@ def _get_named_tuple_properties(obj):
     return type(obj).__name__, obj._fields, annotations, defaults
 
 
-def _create_named_tuple(t, unqual_name: str, field_names: Dict[str, Any]):
+def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: List[Any]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
+    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[misc]
     return TupleType(*t)
-
 
 @contextlib.contextmanager
 def _disable_emit_hooks():

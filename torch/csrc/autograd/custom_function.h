@@ -90,11 +90,13 @@ struct TORCH_API Function {
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
 struct TORCH_API AutogradContext {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradContext() : materialize_grads_(true) {}
   AutogradContext(const AutogradContext &other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
   /// Can be used to save non-variable data for `backward`.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
   /// Saves the list of variables for a future call to `backward`. This
@@ -305,6 +307,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
     for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
@@ -316,6 +319,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -326,6 +330,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   variable_list results;
   results.reserve(num_outputs);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < num_outputs; ++i) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {

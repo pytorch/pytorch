@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import copy
@@ -65,6 +65,7 @@ TESTS = [
     'test_linalg',
     'test_logging',
     'test_mkldnn',
+    'test_model_dump',
     'test_module_init',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
@@ -150,6 +151,15 @@ TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    'distributed/elastic/timer/api_test',
+    'distributed/elastic/timer/local_timer_example',
+    'distributed/elastic/timer/local_timer_test',
+    'distributed/elastic/events/lib_test',
+    'distributed/elastic/metrics/api_test',
+    'distributed/elastic/utils/logging_test',
+    'distributed/elastic/utils/util_test',
+    'distributed/elastic/utils/distributed_test',
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 # Tests need to be run with pytest.
@@ -181,6 +191,7 @@ USE_PYTEST_LIST = [
     'distributions/test_utils',
     'test_typing',
     "distributed/elastic/events/lib_test",
+    "distributed/elastic/agent/server/test/api_test",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -214,6 +225,8 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    "distributed/elastic/agent/server/test/api_test",
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 ROCM_BLOCKLIST = [
@@ -604,7 +617,8 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
+    # MPI tests are broken with Python-3.9
+    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0 and sys.version_info < (3, 9)
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')

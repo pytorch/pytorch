@@ -30,7 +30,7 @@ class TORCH_API ScriptTypeParser {
 
   c10::IValue parseClassConstant(const Assign& assign);
 
- private:
+// private:
   c10::TypePtr parseTypeFromExprImpl(const Expr& expr) const;
 
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
@@ -46,6 +46,9 @@ class TORCH_API ScriptTypeParser {
   std::vector<Argument> parseReturnFromDecl(const Decl& decl);
 
   ResolverPtr resolver_ = nullptr;
+
+  // Need to use `evaluateDefaults` in serialization
+  friend class ConstantTableValue;
 };
 } // namespace jit
 } // namespace torch

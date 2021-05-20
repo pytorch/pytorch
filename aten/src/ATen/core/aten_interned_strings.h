@@ -23,7 +23,7 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _amp_foreach_non_finite_check_and_unscale_) \
-_(aten, _amp_update_scale) \
+_(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
@@ -350,6 +350,7 @@ _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
 _(aten, glu_forward) \
+_(aten, gradient) \
 _(aten, grid_sampler) \
 _(aten, grid_sampler_2d) \
 _(aten, grid_sampler_2d_backward) \
@@ -441,6 +442,7 @@ _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
+_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \

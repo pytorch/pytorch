@@ -5,7 +5,6 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
@@ -83,7 +82,7 @@ class NCCLTest : public NCCLTestBase {
   void wait(
       c10::intrusive_ptr<ProcessGroup::Work>& work,
       std::chrono::milliseconds timeout = kNoTimeout) {
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait(timeout);
   }
 
@@ -91,7 +90,7 @@ class NCCLTest : public NCCLTestBase {
     std::vector<at::Tensor> outputs(numDevices_);
 
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
@@ -122,7 +121,7 @@ class NCCLTest : public NCCLTestBase {
     }
 
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; ++i) {
@@ -169,7 +168,7 @@ class AllreduceNCCLTest : public NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
@@ -192,7 +191,7 @@ class BroadcastNCCLTest : public NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
@@ -211,7 +210,7 @@ class ReduceNCCLTest : public NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
@@ -230,7 +229,7 @@ class AllgatherNCCLTest : public NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
@@ -248,7 +247,7 @@ class AllgatherBaseNCCLTest : public NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
@@ -259,12 +258,12 @@ class AllgatherBaseNCCLTest : public NCCLTest {
   }
 
   at::Tensor getOutputTensor() {
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
     return output_tensor_.cpu();
   }
 
   at::Tensor getInputTensor() {
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
     return tensors_[0].cpu();
   }
 
@@ -280,7 +279,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
 
   c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     at::cuda::OptionalCUDAGuard deviceGuard;
     launchDeviceSleep();

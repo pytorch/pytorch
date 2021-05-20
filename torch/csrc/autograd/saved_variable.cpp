@@ -139,6 +139,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time (or directly access saved "
     "variables after they have already been freed). Saved intermediate values "

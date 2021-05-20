@@ -11,28 +11,6 @@
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
-namespace {
-
-template<typename scalar_t>
-__global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64_t *index, const int2 *i_s_ptr, int nsegments, int nsort) {
-  CUDA_KERNEL_LOOP(i, nsegments * nsort) {
-    int segment = i / nsort;
-    int j = i % nsort;
-
-    int offset = segment * nsort;
-    const scalar_t *in_ = in + offset;
-    scalar_t *out_ = out + offset;
-    int64_t *index_ = index + offset;
-    const int2 *i_s_ptr_ = i_s_ptr + offset;
-
-    int idx = i_s_ptr_[j].y;
-    index_[j] = idx;
-    out_[j] = in_[idx];
-  }
-}
-
-}
-
 namespace at { namespace native {
 
 bool should_use_small_sort(const Tensor &self, int64_t dim) {
@@ -62,8 +40,8 @@ void fillSliceWithIndex(Tensor& t,int dim) {
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
-void sortKeyValueInplace(Tensor& key,
-                         Tensor& value,
+void sortKeyValueInplace(const Tensor& key,
+                         const Tensor& value,
                          int dim, bool dir) {
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");
@@ -209,39 +187,26 @@ void sortKeyValueInplace(Tensor& key,
 #undef HANDLE_A_CASE
 }
 
-// We perform a vectorized segmented sort in cub with inputs that have
+namespace {
+
+struct offset_t {
+  int stride;
+  int begin;
+  __device__ int operator[](int i) {
+    return stride * (begin + i);
+  }
+};
+
+}
+
+// We perform a segmented sort in cub with inputs that have
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
-// Large sort algorithm:.
-// Say we are sorting a (2, 3) tensor. We have in flattened form:
-// values       0.4 1.2 5.3 6.2 1.3 2.3
-// indices        0   1   2   0   1   2
-// segment_id     0   0   0   1   1   1
-
-// First we sort by values, globally:
-// values       6.2 5.3 2.3 1.2 1.3 0.4
-// indices        0   2   2   1   1   0
-// segment_id     1   0   1   0   1   0
-
-// Then we stable sort by segment id:
-// values       5.3 1.2 0.4 6.2 2.3 1.3
-// indices        2   1   0   0   2   1
-// segment_id     0   0   0   1   1   1
-
-// This method can only work if the slice we are sorting (`dim`) is
-// innermost, and both values and indices are contiguous. We do this
-// by re-arranging the input into this form as needed, which will
-// unfortunately allocate memory if the request is not in this form.
-// Vectorized sort is slower than iterated sort if the number of
-// slices is small (since we're sorting twice, instead of invoking a
-// smaller sort `numSlices` times), but the cub sort
-// implementation here is a catch-all, so we're not looking for
-// efficiency, but instead correctness.
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
-  checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
+  checkAllSameGPU(__func__, {self_arg, values_arg, indices_arg});
 
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t numel = self.numel();
@@ -365,32 +330,12 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
       int64_t nsegments = n / nsort;
-      int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
-      auto int_options = indices.options().dtype(kInt);
-      auto indices_and_segment = at::empty({nsegments, nsort, 2}, int_options);
-      indices_and_segment.select(-1, 0).copy_(  // segment id
-        at::arange(nsegments, int_options).view({nsegments, 1}).expand({nsegments, nsort}));
-      indices_and_segment.select(-1, 1).copy_(  // reverse indices
-        at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
+      auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
 
-      auto i_s_ptr = reinterpret_cast<int2 *>(indices_and_segment.data_ptr<int>());
-      auto indices_and_segment2 = at::empty_like(indices_and_segment);
-      auto i_s_ptr2 = reinterpret_cast<int2 *>(indices_and_segment2.data_ptr<int>());
-
-      at::cuda::cub::sort_pairs<scalar_t, int2>(
-        self_ptr, nullptr, i_s_ptr, i_s_ptr2,
-        n, descending);
-
-      TORCH_INTERNAL_ASSERT(segment_bits <= 32);
-
-      // sort on lower 32bits, i.e. segment index
-      at::cuda::cub::sort_keys<int64_t>(
-        reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
-        n, false, 0, segment_bits);
-
-      sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-        self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
+      at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
+        reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
+        offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
 
       remaining -= n;
       self_ptr += n;

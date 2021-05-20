@@ -11,6 +11,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+import operator
 from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
@@ -367,6 +368,8 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
+    elif node.op == 'call_function' and node.target is operator.getitem:
+        result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'get_attr':
         result = False
     elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
@@ -385,6 +388,16 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
                             all_node_args_have_no_tensors(list_el, modules, cache)
                         found_one_tensor = found_one_tensor or \
                             (not this_list_el_args_have_no_tensors)
+                        # If found_one_tensor is True, there is no point in
+                        # recursing further as the end result will always
+                        # be True.
+                        # TODO(future PR): remove this entire function  and
+                        # change to dtype inference without recursion.
+                        if found_one_tensor:
+                            result = not found_one_tensor
+                            if cache:
+                                cache[node] = result
+                            return result
             elif isinstance(arg, int):
                 pass
             else:
@@ -392,6 +405,16 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
                     this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
                     found_one_tensor = found_one_tensor or \
                         (not this_arg_args_have_no_tensors)
+                    # If found_one_tensor is True, there is no point in
+                    # recursing further as the end result will always
+                    # be True.
+                    # TODO(future PR): remove this entire function  and
+                    # change to dtype inference without recursion.
+                    if found_one_tensor:
+                        result = not found_one_tensor
+                        if cache:
+                            cache[node] = result
+                        return result
                 else:
                     found_one_tensor = True
             result = not found_one_tensor
@@ -405,6 +428,12 @@ def node_return_type_is_int(node: Node) -> bool:
     Returns true if this node results in an integer, even if some of the args
     are Tensors.
     """
-    if node.op == 'call_method' and node.target == 'size':
-        return True
-    return False
+    return node.op == 'call_method' and node.target == 'size'
+
+def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
+    """
+    Returns indexes of boolean Tensor args
+    """
+    if node.op == "call_method" and node.target == "masked_fill":
+        return [1]
+    return []

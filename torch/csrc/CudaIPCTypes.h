@@ -78,6 +78,7 @@ struct CudaIPCSentDataLimbo final {
 
 struct CudaIPCRefCountersFile final {
   CudaIPCRefCountersFile(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string handle,
       uint64_t size,
       at::DataPtr data_ptr)
@@ -135,6 +136,7 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   ~CudaIPCCollectCallback() {};
   bool Execute() override {
     return torch::CudaIPCCollect();

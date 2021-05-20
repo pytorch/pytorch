@@ -18,6 +18,7 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
+from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -35,6 +36,7 @@ from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_ignorable_args import TestIgnorableArgs  # noqa: F401
 from jit.test_hooks import TestHooks  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
@@ -47,6 +49,9 @@ from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
+from jit.test_pdt import TestPDT  # noqa: F401
+from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
+from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -4179,8 +4184,8 @@ def foo(xyz):
         debug_files = debug_records_from_mod(ft3)
         for debug_file in debug_files:
             for i in range(len(debug_file) - 1):
-                offset, source_range = debug_file[i]
-                offset2, source_range2 = debug_file[i + 1]
+                offset, source_range_tag, source_range = debug_file[i]
+                offset2, source_range_tag2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
 
     def test_circular_dependency(self):
@@ -4619,6 +4624,193 @@ a")
                     test(backward=True)
                     test(backward=True)
                     test(backward=True)
+
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def consec_list(size):
+            return list(range(size))
+
+        def random_string(size):
+            letters = string.ascii_lowercase
+            return "".join(random.choice(letters) for i in range(size))
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
+
+        # Torchscript assumes type Tensor by default, so we need this explicit
+        # declaration.
+        def check_indexing_list_int(indexing, list):
+            template = dedent("""
+            def func(x):
+                # type: (List[int]) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [list])
+
+        def check_indexing_str(indexing, str):
+            template = dedent("""
+            def func(x):
+                # type: (str) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [str])
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # None for new dimensions
+        check_indexing('[None, 0]', consec((3, 3)))
+        check_indexing('[1, None]', consec((3, 3), 10))
+        check_indexing('[None, None, 2]', consec((3, 3), 19))
+        check_indexing('[None, 2, None]', consec((3,)))
+        check_indexing('[0:2, None]', consec((3, 3, 3)))
+        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
+        check_indexing('[None, -3:-1, None]', consec((6, 3)))
+        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+        # positive striding
+        check_indexing_list_int('[0]', consec_list(6))
+        check_indexing_list_int('[1]', consec_list(7))
+        check_indexing_list_int('[2]', consec_list(8))
+        check_indexing_list_int('[2]', consec_list(9))
+        check_indexing_list_int('[-1]', consec_list(10))
+        check_indexing_list_int('[0:2]', consec_list(11))
+        check_indexing_list_int('[1:-1]', consec_list(12))
+        check_indexing_list_int('[-3:-1]', consec_list(13))
+        check_indexing_list_int('[1:]', consec_list(15))
+        check_indexing_list_int('[:1]', consec_list(16))
+        check_indexing_list_int('[:]', consec_list(17))
+        check_indexing_list_int('[::]', consec_list(0))
+        check_indexing_list_int('[1000::]', consec_list(0))
+        check_indexing_list_int('[:1000:]', consec_list(0))
+
+        # negative striding
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[:3:-1]', consec_list(7))
+        check_indexing_list_int('[3::-1]', consec_list(7))
+        check_indexing_list_int('[1000::-1]', consec_list(7))
+        check_indexing_list_int('[3:0:-1]', consec_list(7))
+        check_indexing_list_int('[3:-1000:-1]', consec_list(7))
+        check_indexing_list_int('[0:0:-1]', consec_list(7))
+        check_indexing_list_int('[0:-1000:-1]', consec_list(7))
+
+        # only step is specified
+        check_indexing_list_int('[::-1]', consec_list(0))
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[::-2]', consec_list(7))
+        check_indexing_list_int('[::2]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(7))
+        check_indexing_list_int('[::-42]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(0))
+        check_indexing_list_int('[::-42]', consec_list(0))
+        check_indexing_list_int('[::9223372036854775807]', consec_list(42))
+        check_indexing_list_int('[::-9223372036854775807]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_list_int('[::-9223372036854775808]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_list_int('[::0]', consec_list(42))
+
+        # striding strings
+        check_indexing_str('[0]', random_string(6))
+        check_indexing_str('[1]', random_string(7))
+        check_indexing_str('[2]', random_string(8))
+        check_indexing_str('[2]', random_string(9))
+        check_indexing_str('[-1]', random_string(10))
+        check_indexing_str('[0:2]', random_string(11))
+        check_indexing_str('[1:-1]', random_string(12))
+        check_indexing_str('[-3:-1]', random_string(13))
+        check_indexing_str('[1:]', random_string(15))
+        check_indexing_str('[:1]', random_string(16))
+        check_indexing_str('[:]', random_string(17))
+        check_indexing_str('[::]', random_string(0))
+        check_indexing_str('[1000::]', random_string(0))
+        check_indexing_str('[:1000:]', random_string(0))
+
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[:3:-1]', random_string(7))
+        check_indexing_str('[3::-1]', random_string(7))
+        check_indexing_str('[1000::-1]', random_string(7))
+        check_indexing_str('[3:0:-1]', random_string(7))
+        check_indexing_str('[3:-1000:-1]', random_string(7))
+        check_indexing_str('[0:0:-1]', random_string(7))
+        check_indexing_str('[0:-1000:-1]', random_string(7))
+
+        check_indexing_str('[::-1]', random_string(0))
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[::-2]', random_string(7))
+        check_indexing_str('[::2]', random_string(7))
+        check_indexing_str('[::42]', random_string(7))
+        check_indexing_str('[::-42]', random_string(7))
+        check_indexing_str('[::42]', random_string(0))
+        check_indexing_str('[::-42]', random_string(0))
+        check_indexing_str('[::9223372036854775807]', random_string(42))
+        check_indexing_str('[::-9223372036854775807]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_str('[::-9223372036854775808]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_str('[::0]', random_string(42))
 
     def test_module_copy_with_attributes(self):
         class Vocabulary(torch.jit.ScriptModule):
@@ -7565,7 +7757,7 @@ dedent """
         def fn(x):
             return type(x)
 
-        with self.assertRaisesRegex(RuntimeError, "value of type type"):
+        with self.assertRaisesRegex(RuntimeError, "value of type _TensorMeta"):
             fn(torch.tensor(.5))
 
     def test_python_call_annotation(self):
@@ -13809,6 +14001,11 @@ dedent """
         self.checkModule(M(), (p,))
         self.checkModule(M(), (Point(),))
 
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int? = None, y : int = 2))")   \
+                    .run(m.graph)
+
     def test_namedtuple_default_values_container_type(self):
 
         class Point(NamedTuple):
@@ -13829,6 +14026,14 @@ dedent """
 
         self.checkModule(M(), (p,))
         self.checkModule(M(), (Point(),))
+
+        m = torch.jit.script(M())
+
+        first_line = r"NamedTuple(x : int[]? = None, y : int[]? = "    \
+                     r"[1, 2, 3], z : Dict(str, int)? = {a: 1}))"
+
+        FileCheck().check(first_line)   \
+                   .run(m.graph)
 
     def test_namedtuple_default_values_Tensor_type(self):
 
@@ -13861,7 +14066,6 @@ dedent """
         def fn(x: Pair) -> Pair:
             return x
 
-        print(fn.graph)
         # TODO: We can't use `checkScript` with the NamedTuple factory
         # constructor. Using the factory constructor with TorchScript
         # TorchScript creates an anonymous `NamedTuple` class instead of
@@ -13870,7 +14074,7 @@ dedent """
         #   graph(%x.1 : NamedTuple(x : Tensor, y : Tensor))
         # It looks like similar test cases have had this issue as well
         # (see: `test_namedtuple_python`).
-        FileCheck().check("NamedTuple")   \
+        FileCheck().check(r"NamedTuple(x : Tensor = 1, y : Tensor = 2))")   \
                    .check_next(r"return (%x.1)")    \
                    .run(fn.graph)
 
@@ -15054,57 +15258,6 @@ dedent """
             return val1, val2
 
         self.assertEqual(foo(), torch.jit.script(foo)())
-
-    def test_optional_tuple(self):
-        def fn(x=None):
-            # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
-            if x is None:
-                new_x = (1, 2)
-            else:
-                new_x = x
-            return new_x
-
-        self.checkScript(fn, ((3, 4),))
-        self.checkScript(fn, ())
-
-    def test_namedtuple_redefine(self):
-        global _1, _2
-        _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
-        _2 = namedtuple('GoogLeNetOutputs', ['different'])
-
-        with self.assertRaisesRegex(RuntimeError, r'redefine'):
-            @torch.jit.script
-            def foo(x, y):
-                # type: (_1, _2) -> _1
-                return x
-
-    def test_namedtuple_py2(self):
-        global _GoogLeNetOutputs  # see [local resolution in python]
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
-
-        @torch.jit.script
-        def foo(x):
-            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
-            return x
-
-        vals = torch.rand(3), torch.rand(4), torch.rand(5)
-        out = foo(_GoogLeNetOutputs(logits=vals[0], aux_logits2=vals[1], aux_logits1=vals[2]))
-        self.assertEqual(out.logits, vals[0])
-        self.assertEqual(out.aux_logits2, vals[1])
-        self.assertEqual(out.aux_logits1, vals[2])
-
-    def test_namedtuple_good_error(self):
-        global _GoogLeNetOutputs  # see [local resolution in python]
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
-
-        @torch.jit.script
-        def foo(x):
-            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
-            return x
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
-            out = foo(_GoogLeNetOutputs(logits=3, aux_logits2=4, aux_logits1=5))
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:

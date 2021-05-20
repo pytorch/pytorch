@@ -63,7 +63,7 @@ inline int get_num_bits(uint64_t max_key) {
 template<typename key_t>
 static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
-    int64_t n, bool descending=false, int64_t start_bit=0, int64_t end_bit=sizeof(key_t)*8
+    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
   using key_t_ = typename cuda_type<key_t>::type;
 
@@ -73,11 +73,11 @@ static inline void sort_keys(
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeysDescending,
       keys_in_, keys_out_, n,
-      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeys,
       keys_in_, keys_out_, n,
-      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
 
@@ -85,22 +85,17 @@ template<typename key_t, typename value_t>
 static inline void sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
-    int64_t n, bool descending=false, int64_t start_bit=0, int64_t end_bit=sizeof(key_t)*8
+    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
   using key_t_ = typename cuda_type<key_t>::type;
   using value_t_ = typename cuda_type<value_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  c10::DataPtr values_out_owner;
 
   if (keys_out == nullptr) {
     keys_out_owner = allocator->allocate(n * sizeof(key_t));
     keys_out = reinterpret_cast<key_t *>(keys_out_owner.get());
-  }
-  if (values_out == nullptr) {
-    values_out_owner = allocator->allocate(n * sizeof(value_t));
-    values_out = reinterpret_cast<value_t *>(values_out_owner.get());
   }
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
@@ -111,11 +106,48 @@ static inline void sort_pairs(
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
       keys_in_, keys_out_, values_in_, values_out_, n,
-      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
       keys_in_, keys_out_, values_in_, values_out_, n,
-      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+  }
+}
+
+template<typename key_t, typename value_t, typename OffsetIteratorT>
+static inline void segmented_sort_pairs(
+    const key_t *keys_in, key_t *keys_out,
+    const value_t *values_in, value_t *values_out,
+    int64_t num_elements, int64_t num_segments,
+    OffsetIteratorT begin_offsets, OffsetIteratorT end_offsets,
+    bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
+) {
+  using key_t_ = typename cuda_type<key_t>::type;
+  using value_t_ = typename cuda_type<value_t>::type;
+
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  c10::DataPtr keys_out_owner;
+
+  if (keys_out == nullptr) {
+    keys_out_owner = allocator->allocate(num_elements * sizeof(key_t));
+    keys_out = reinterpret_cast<key_t *>(keys_out_owner.get());
+  }
+
+  const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
+  key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
+  const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
+  value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
+
+  if (descending) {
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
+      keys_in_, keys_out_, values_in_, values_out_,
+      num_elements, num_segments, begin_offsets, end_offsets,
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+  } else {
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairs,
+      keys_in_, keys_out_, values_in_, values_out_,
+      num_elements, num_segments, begin_offsets, end_offsets,
+      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
 
