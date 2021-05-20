@@ -3586,6 +3586,24 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    test_cases = [
+        (_tensor((S, S, S)), (2,)),
+        (_tensor((S, S, S)), (2, 1,)),
+        (_tensor((S, S, S)), (2, -1,)),
+        (_tensor((S, S, S)), (2, 1, True,)),
+        (_tensor((S, S, S)), (2, -1, True,)),
+        (_tensor((S,)), (2, 0,)),
+        (_tensor((S,)), (2, 0, True,)),
+        (_tensor(()), (1,)),
+        (_tensor(()), (1, 0,)),
+        (_tensor(()), (1, 0, True))
+    ]
+
+    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
@@ -4621,6 +4639,10 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('kthvalue',
+           dtypes=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_kthvalue),
     OpInfo('le',
            aliases=('less_equal',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -6441,14 +6463,6 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('kthvalue', (S, S, S), (2,)),
-        ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
-        ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
-        ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
-        ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
-        ('kthvalue', (), (1,), 'scalar', (), ()),
-        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1]),
-        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
