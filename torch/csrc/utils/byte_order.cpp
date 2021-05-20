@@ -11,6 +11,7 @@ namespace {
 
 static inline void swapBytes16(void *ptr)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint16_t output;
   memcpy(&output, ptr, sizeof(uint16_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
@@ -27,6 +28,7 @@ static inline void swapBytes16(void *ptr)
 
 static inline void swapBytes32(void *ptr)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t output;
   memcpy(&output, ptr, sizeof(uint32_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
@@ -45,6 +47,7 @@ static inline void swapBytes32(void *ptr)
 
 static inline void swapBytes64(void *ptr)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t output;
   memcpy(&output, ptr, sizeof(uint64_t));
 #if defined(_MSC_VER)
@@ -67,6 +70,7 @@ static inline void swapBytes64(void *ptr)
 }
 
 static inline uint16_t decodeUInt16LE(const uint8_t *data) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint16_t output;
   memcpy(&output, data, sizeof(uint16_t));
   return output;
@@ -79,6 +83,7 @@ static inline uint16_t decodeUInt16BE(const uint8_t *data) {
 }
 
 static inline uint32_t decodeUInt32LE(const uint8_t *data) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t output;
   memcpy(&output, data, sizeof(uint32_t));
   return output;
@@ -91,6 +96,7 @@ static inline uint32_t decodeUInt32BE(const uint8_t *data) {
 }
 
 static inline uint64_t decodeUInt64LE(const uint8_t *data) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t output;
   memcpy(&output, data, sizeof(uint64_t));
   return output;

@@ -7,12 +7,8 @@
 //
 // The naming convention used here matches the naming convention of torch.cuda
 
-#include <cuda_runtime_api.h>
-
 #include <c10/core/Device.h>
-#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
-#include <c10/macros/Macros.h>
 
 namespace c10 {
 namespace cuda {
@@ -33,6 +29,8 @@ C10_CUDA_API DeviceIndex current_device();
 C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
+
+C10_CUDA_API const char* get_cuda_check_prefix() noexcept;
 
 } // namespace cuda
 } // namespace c10

@@ -14,21 +14,25 @@
 #include "fbgemm/FbgemmConvert.h"
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_tensor_chunk_size,
     1000000,
     "Chunk size to split tensor data into");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_max_tensor_serializer_threads,
     16,
     "Maximal number of threads that can be used for tensor serialization");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_serialize_fp16_as_bytes,
     false,
     "Serialize FLOAT16 tensors using byte_data field");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_serialize_using_bytes_as_holder,
     false,
@@ -83,6 +87,7 @@ Range<T*> GetMutableTensorDataRange(
     size_t start,
     size_t numElements) {
   CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       start + numElements <= tensor.numel(),
       "Requested invalid mutable tensor range [",
       start,
@@ -99,6 +104,7 @@ c10::ArrayRef<T> GetTensorDataRange(
     size_t start,
     size_t numElements) {
   CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       start + numElements <= tensor.numel(),
       "Requested invalid tensor range [",
       start,
@@ -245,6 +251,7 @@ void TensorSerializer::SerializeWithOptions(
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t chunkStart;
     while (chunkQueue.Pop(&chunkStart)) {
       processChunk(chunkStart);
@@ -253,6 +260,7 @@ void TensorSerializer::SerializeWithOptions(
   std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
     futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(FLAGS_caffe2_max_tensor_serializer_threads)) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
@@ -263,6 +271,7 @@ void TensorSerializer::SerializeWithOptions(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
+       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
        chunkBegin < std::max(tensor.numel(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
@@ -317,6 +326,7 @@ void SerializeUsingBytesOrInt32(
   if (enableByteEncoding) {
     const auto bufSize = sizeof(T) * input.size();
     auto* byteData = reinterpret_cast<const uint8_t*>(input.data());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize]);
     context.template CopyToCPU<uint8_t>(bufSize, byteData, buffer.get());
     context.FinishDeviceComputation();
@@ -424,7 +434,9 @@ void SerializeTensorData(const SerializeParams<float>& params) {
 #ifdef USE_FBGEMM
   if (params.options.float_format() ==
       BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<float[]> tmp_buffer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const float* src;
     if (params.context.device() == CPU) {
       src = params.input.data();
@@ -445,6 +457,7 @@ void SerializeTensorData(const SerializeParams<float>& params) {
             &(*params.tensor_proto.mutable_raw_data())[0]),
         params.input.size());
 
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     fbgemm::FloatToBfloat16_simd(src, dest.data(), params.input.size());
 
     // Note: technically a platform can have different integer from floating
@@ -494,11 +507,13 @@ void TensorSerializer::Serialize(
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       chunkBegin <= input.numel(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
       input.numel());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (chunkBegin + chunkSize > input.numel()) {
     chunkSize = input.numel() - chunkBegin;
   }
@@ -585,12 +600,14 @@ void TensorSerializer::StoreDeviceDetail(
   ExtractDeviceOption(proto->mutable_device_detail(), input.GetDevice());
 }
 // The actual serialization registry objects.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
@@ -873,7 +890,9 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
       params.tensor_proto.raw_data().data());
 
   // If we are on a big-endian machine, byte-swap the serialized data.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const fbgemm::bfloat16* src;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<fbgemm::bfloat16[]> bswap_buffer;
   if (kIsLittleEndian) {
     src = raw_src;
@@ -885,7 +904,9 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
 
   // If we are on a non-CPU device, we need an intermediate CPU buffer for the
   // bfloat16 to float conversion.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<float[]> tmp_buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float* dest;
   if (params.context.device() == CPU) {
     dest = params.dest.data();
@@ -1103,10 +1124,14 @@ std::string SerializeAsString_EnforceCheck(
 
 namespace {
 // Serialize Tensor
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<Tensor>()), TensorSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(TensorCPU, TensorDeserializer);
 // Serialize std::string
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<std::string>()), StringSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(std::string, StringDeserializer);
 } // namespace
 } // namespace caffe2

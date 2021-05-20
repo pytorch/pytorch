@@ -16,6 +16,7 @@ namespace caffe2 {
 
 using namespace std;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T, bool ReluFused>
 SumDNNLowPOp<T, ReluFused>::SumDNNLowPOp(
     const OperatorDef& operator_def,
@@ -76,6 +77,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
       // fast path when we have 2 uint8_t inputs with AVX2 / FMA support
       // NOTE: this path does addition in floating point unlike slow path that
       // does everything in fixed-point. So they are numerically different.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       array<const T*, 2> input_data;
       for (int i = 0; i < 2; ++i) {
         input_data[i] = InputTensorCPU_(i).template data<T>();
@@ -86,6 +88,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
       {
         constexpr int VLEN = 8;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num(), VLEN);
@@ -117,6 +120,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #pragma omp parallel
 #endif
       {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
@@ -147,6 +151,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #pragma omp parallel
 #endif
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int j_begin, j_end;
       tie(j_begin, j_end) = Get1DPartition(
           len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
@@ -222,6 +227,7 @@ bool SumDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumRelu)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -231,25 +237,31 @@ OPERATOR_SCHEMA(SumRelu)
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
     .Output(0, "sum", "Output tensor. Same dimension as inputs.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Sum, DNNLOWP, SumDNNLowPOp<uint8_t, false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SumRelu,
     DNNLOWP,
     SumDNNLowPOp<uint8_t, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Sum,
     DNNLOWP,
     SumDNNLowPOp<uint8_t, false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SumRelu,
     DNNLOWP,
     SumDNNLowPOp<uint8_t, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Sum,
     DNNLOWP_16,
     SumDNNLowPOp<uint16_t, false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SumRelu,
     DNNLOWP_16,

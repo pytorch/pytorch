@@ -13,11 +13,10 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAFuture.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
@@ -112,7 +111,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool finishedGPUExecution();
 
     // Get a Future object that will be marked as completed internally.
-    // It actually returns a CUDAFuture object which is a sub class of Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -177,7 +175,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
     // The future returned by getFuture.
-    c10::intrusive_ptr<at::cuda::CUDAFuture> future_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
 
     friend class ProcessGroupNCCL;
   };
@@ -261,7 +259,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -389,7 +387,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
@@ -397,7 +396,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int peer,
       OpType opType,
       PreProcess pre,
-      PostProcess post);
+      PostProcess post,
+      const char* profilingTitle);
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).

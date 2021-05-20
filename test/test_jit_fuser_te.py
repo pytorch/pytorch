@@ -51,6 +51,15 @@ def texpr_reductions_enabled():
     finally:
         torch._C._jit_set_texpr_reductions_enabled(old)
 
+@contextlib.contextmanager
+def inline_fusion_groups():
+    old_inlining = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(True)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old_inlining)
+
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
@@ -120,14 +129,6 @@ class TestTEFuser(JitTestCase):
                 result += self.findFusionGroups(block)
         return result
 
-    def _test_fused_abs(self, device='cpu'):
-        def func(x):
-            return x.abs() * 2
-
-        a = torch.randn(5, device=device)
-        scripted = self.checkScript(func, (a,))
-        self.assertLastGraphAllFused()
-
     def test_typecheck(self):
         a = torch.ones(1)
 
@@ -185,59 +186,53 @@ class TestTEFuser(JitTestCase):
             self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
 
-    def test_abs_cpu(self):
-        self._test_fused_abs()
+    def test_abs(self):
+        for device in self.devices:
+            def func(x):
+                return x.abs() * 2
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    def test_abs_cuda(self):
-        self._test_fused_abs(device="cuda")
+            a = torch.randn(5, device=device)
+            scripted = self.checkScript(func, (a,))
+            self.assertLastGraphAllFused()
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_unsqueeze_size_calculation(self):
+        for device in self.devices:
+            def foo(b, d):
+                x = d.unsqueeze(1)
+                y = x * 42.
+                z = b + y
+                r = z / 42.
+                return r
 
-        def foo(b, d):
-            x = d.unsqueeze(1)
-            y = x * 42.
-            z = b + y
-            r = z / 42.
-            return r
+            inputs = (torch.rand(20, 28, device=device, requires_grad=True), torch.rand(20, device=device))
+            scripted = self.checkScript(foo, inputs)
+            self.assertAllFused(scripted.graph_for(*inputs))
 
-        inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
+    def test_zero_element_tensors(self):
+        for device in self.devices:
+            def decode(sin_t, cos_t):
+                theta = torch.atan2(sin_t.float(), cos_t.float())
+                return theta
 
-        scripted = self.checkScript(foo, inputs)
-        self.assertAllFused(scripted.graph_for(*inputs))
+            sin = torch.zeros(0, device=device)
+            cos = torch.zeros(0, device=device)
+            inputs = [sin, cos]
+            ge = self.checkScript(decode, inputs)
 
-    def _test_zero_element_tensors(self, device="cpu"):
-        def decode(sin_t, cos_t):
-            theta = torch.atan2(sin_t.float(), cos_t.float())
-            return theta
-
-        sin = torch.zeros(0, device=device)
-        cos = torch.zeros(0, device=device)
-        inputs = [sin, cos]
-        ge = self.checkScript(decode, inputs)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    def test_zero_element_tensors_cuda(self):
-        self._test_zero_element_tensors(device="cuda")
-
-    def test_zero_element_tensors_cpu(self):
-        self._test_zero_element_tensors(device="cpu")
-
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_arg_configurations_smoke_cuda(self):
+    def test_arg_configurations_smoke(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
         # TODO: add optionally enabled debug counters to the fuser to verify
         #       that we really can tell the difference between configurations
-        def f(x, y):
-            z1, z2 = (x + y).chunk(2, dim=1)
-            return z1 * z2
+        for device in self.devices:
+            def f(x, y):
+                z1, z2 = (x + y).chunk(2, dim=1)
+                return z1 * z2
 
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        traced_f = torch.jit.trace(f, (x, y,))
-        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
+            traced_f = torch.jit.trace(f, (x, y,))
+            self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
 
     def test_broadcast(self):
         for device in self.devices:
@@ -317,43 +312,36 @@ class TestTEFuser(JitTestCase):
             self.checkScript(fn, inputs)
             self.assertLastGraphAllFused()
 
-    @staticmethod
-    def _test_chunk_correctness(self, device='cpu'):
-        def chunk_4_0(x):
-            x0, x1, x2, x3 = x.chunk(4, 0)
-            return x0 + x1 + x2 + x3
-
-        def chunk_4_1(x):
-            x0, x1, x2, x3 = x.chunk(4, 1)
-            return x0 + x1 + x2 + x3
-
-        def chunk_4_last(x):
-            x0, x1, x2, x3 = x.chunk(4, 2)
-            return x0 + x1 + x2 + x3
-
-        fns = [chunk_4_0, chunk_4_1, chunk_4_last]
-        tensors = [
-            # splitSize = 1
-            torch.randn(4, 4, 4, dtype=torch.float, device=device),
-
-            # contiguous case
-            torch.randn(12, 8, 16, dtype=torch.float, device=device),
-
-            # non-contiguous case
-            torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
-        ]
-
-        for tensor in tensors:
-            for fn in fns:
-                self.checkScript(fn, [tensor])
-                self.assertLastGraphAllFused()
-
     def test_chunk_correctness(self):
-        return self._test_chunk_correctness(self, 'cpu')
+        for device in self.devices:
+            def chunk_4_0(x):
+                x0, x1, x2, x3 = x.chunk(4, 0)
+                return x0 + x1 + x2 + x3
 
-    @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    def test_chunk_correctness_cuda(self):
-        return self._test_chunk_correctness(self, 'cuda')
+            def chunk_4_1(x):
+                x0, x1, x2, x3 = x.chunk(4, 1)
+                return x0 + x1 + x2 + x3
+
+            def chunk_4_last(x):
+                x0, x1, x2, x3 = x.chunk(4, 2)
+                return x0 + x1 + x2 + x3
+
+            fns = [chunk_4_0, chunk_4_1, chunk_4_last]
+            tensors = [
+                # splitSize = 1
+                torch.randn(4, 4, 4, dtype=torch.float, device=device),
+
+                # contiguous case
+                torch.randn(12, 8, 16, dtype=torch.float, device=device),
+
+                # non-contiguous case
+                torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
+            ]
+
+            for tensor in tensors:
+                for fn in fns:
+                    self.checkScript(fn, [tensor])
+                    self.assertLastGraphAllFused()
 
     def test_chunk_distributes(self):
         for device in self.devices:
@@ -487,18 +475,19 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
-        def func(x):
-            x = torch.nn.functional.dropout(x)
-            return torch.nn.functional.relu(x)
+        for device in self.devices:
+            def func(x):
+                x = torch.nn.functional.dropout(x)
+                return torch.nn.functional.relu(x)
 
-        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
-        s = torch.jit.script(func)
-        c = s(a)
-        c = s(a)
-        warmup_backward(c.sum())
-        # skip_check to skip extra bailout nodes in between
-        graph = backward_graph(s, skip_check=True)
-        self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
+            a = torch.randn(4, 4, dtype=torch.float, device=device, requires_grad=True)
+            s = torch.jit.script(func)
+            c = s(a)
+            c = s(a)
+            warmup_backward(c.sum())
+            # skip_check to skip extra bailout nodes in between
+            graph = backward_graph(s, skip_check=True)
+            self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     def test_add_bool(self):
         sizes = [(1,), (2,), (4, 4)]
@@ -709,25 +698,25 @@ class TestTEFuser(JitTestCase):
                 # XXX: TE fuser can handle concats in a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_remove_output_used_only_in_size(self):
-        def test_fuse(a, b):
-            c = a + b
-            d = c + b
-            return d
+        for device in self.devices:
+            def test_fuse(a, b):
+                c = a + b
+                d = c + b
+                return d
 
-        scripted_f = torch.jit.script(test_fuse)
-        x = torch.ones(1, requires_grad=True, device='cuda')
-        y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y, profiling_count=3)
-        g = scripted_f.graph_for(x, y)
-        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
-        self.assertEqual(len(diff_nodes), 1)
-        g = diff_nodes[0].g('Subgraph')
-        if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
-        self.assertEqual(len(if_nodes), 1)
-        # the if node and the fusion group inside it should only have one output
-        self.assertEqual(len(list(if_nodes[0].outputs())), 1)
+            scripted_f = torch.jit.script(test_fuse)
+            x = torch.ones(1, requires_grad=True, device=device)
+            y = torch.ones(1, requires_grad=True, device=device)
+            warmup_forward(scripted_f, x, y, profiling_count=3)
+            g = scripted_f.graph_for(x, y)
+            diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
+            self.assertEqual(len(diff_nodes), 1)
+            g = diff_nodes[0].g('Subgraph')
+            if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
+            self.assertEqual(len(if_nodes), 1)
+            # the if node and the fusion group inside it should only have one output
+            self.assertEqual(len(list(if_nodes[0].outputs())), 1)
 
     def test_concat_invariant(self):
         for device in self.devices:
@@ -1414,7 +1403,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), 'isnan', device])
                 )
 
-    # @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1443,8 +1431,10 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardswish,
             torch.sqrt,
             torch.rsqrt,
+            F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1807,80 +1797,83 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unsupported_dtypes(self):
-        def fn(x):
-            return x * x + x
+        for device in self.devices:
+            def fn(x):
+                return x * x + x
 
-        unsupported_dtypes = [
-            torch.uint8,
-            torch.bfloat16,
-            torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.qint8,
-            torch.quint8,
-            torch.qint32,
-        ]
-        for dtype in unsupported_dtypes:
-            try:
-                x = self.data_for(dtype, "cuda")
-                ref = fn(x)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
-            t = torch.jit.trace(fn, (x,))
-            self.assertEqual(ref, t(x))
-            self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
+            unsupported_dtypes = [
+                torch.uint8,
+                torch.bfloat16,
+                torch.complex32,
+                torch.complex64,
+                torch.complex128,
+                torch.qint8,
+                torch.quint8,
+                torch.qint32,
+            ]
+            for dtype in unsupported_dtypes:
+                try:
+                    x = self.data_for(dtype, device)
+                    ref = fn(x)
+                except Exception:
+                    # If eager mode doesn't support a dtype/op/device combo,
+                    # neither does the fuser.  Catch everything to avoid needing to
+                    # guess what errors might be thrown by eager.
+                    continue
+                t = torch.jit.trace(fn, (x,))
+                self.assertEqual(ref, t(x))
+                self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_superslomo(self):
-        # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
-        # A few interesting things happen here: strided inputs of mixed size,
-        # plus outputs of mixed shapes.  The latter characteristic happened to
-        # expose a memory corruption bug due to not properly guarding the
-        # outputs.
-        def eager(t0, t1, t2, t3, t4):
-            t5 = torch.mul(t0, t4)
-            t6 = torch.mul(t2, t3)
-            t7 = torch.mul(t6, t1)
-            t9 = torch.add(t5, t7)
-            t11 = torch.add(t0, t6)
-            ft_p = torch.div(t9, t11)
-            return (ft_p, t11, t9, t6)
+        devices = self.devices.copy()
+        if not LLVM_ENABLED:
+            devices.remove("cpu")
+        for device in devices:
+            # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
+            # A few interesting things happen here: strided inputs of mixed size,
+            # plus outputs of mixed shapes.  The latter characteristic happened to
+            # expose a memory corruption bug due to not properly guarding the
+            # outputs.
+            def eager(t0, t1, t2, t3, t4):
+                t5 = torch.mul(t0, t4)
+                t6 = torch.mul(t2, t3)
+                t7 = torch.mul(t6, t1)
+                t9 = torch.add(t5, t7)
+                t11 = torch.add(t0, t6)
+                ft_p = torch.div(t9, t11)
+                return (ft_p, t11, t9, t6)
 
-        t0 = torch.rand(1, 6, 352, 352, device="cuda").transpose(0, 1)
-        t1 = torch.rand(6, 3, 352, 352, device="cuda")
-        t2 = torch.rand(6, device="cuda")[None, None, None, :].permute(3, 0, 1, 2)
-        t3 = torch.rand(6, 1, 352, 352, device="cuda")
-        t4 = torch.rand(6, 3, 352, 352, device="cuda")
-        inputs = [t0, t1, t2, t3, t4]
+            t0 = torch.rand(1, 6, 352, 352, device=device).transpose(0, 1)
+            t1 = torch.rand(6, 3, 352, 352, device=device)
+            t2 = torch.rand(6, device=device)[None, None, None, :].permute(3, 0, 1, 2)
+            t3 = torch.rand(6, 1, 352, 352, device=device)
+            t4 = torch.rand(6, 3, 352, 352, device=device)
+            inputs = [t0, t1, t2, t3, t4]
 
-        script = torch.jit.script(eager)
-        for _ in range(4):
-            for pair in zip(script(*inputs), eager(*inputs)):
-                test, ref = pair
-                torch.testing.assert_allclose(test, ref)
-        self.assertAllFused(script.graph_for(*inputs))
+            script = torch.jit.script(eager)
+            for _ in range(4):
+                for pair in zip(script(*inputs), eager(*inputs)):
+                    test, ref = pair
+                    torch.testing.assert_allclose(test, ref)
+                    self.assertAllFused(script.graph_for(*inputs))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_sub_gt_and(self):
-        def eager(t1, t2, t3, t4, t: float):
-            w = t1 - t2
-            h = t3 - t4
-            k = (w > t) & (h > t)
-            assert k.dtype == torch.bool
-            if t > 0.5:
-                # Putting a use of k in a never-executed conditional prevents
-                # profiling its type, which leaves it as "Tensor".  If we
-                # propagate Tensor back to the definition of k, we have to be
-                # careful not to create a fusion group containing it.
-                return k + 1
-            return w
-        t = torch.rand(8, dtype=torch.float, device='cuda')
-        scripted = self.checkScript(eager, (t, t, t, t, 0.1))
+        for device in self.devices:
+            def eager(t1, t2, t3, t4, t: float):
+                w = t1 - t2
+                h = t3 - t4
+                k = (w > t) & (h > t)
+                assert k.dtype == torch.bool
+                if t > 0.5:
+                    # Putting a use of k in a never-executed conditional prevents
+                    # profiling its type, which leaves it as "Tensor".  If we
+                    # propagate Tensor back to the definition of k, we have to be
+                    # careful not to create a fusion group containing it.
+                    return k + 1
+                return w
+            t = torch.rand(8, dtype=torch.float, device=device)
+            scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
     def test_chunk_mul_one(self):
         for device in self.devices:
@@ -1891,16 +1884,16 @@ class TestTEFuser(JitTestCase):
             z, y, w = eager(x)
             script = self.checkScript(eager, (x,))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_eq_unsqueeze_type_as(self):
-        def eager(a, b):
-            mask = b == 1
-            mask = torch.unsqueeze(mask, -1)
-            x = mask.type_as(a)
-            return x, mask
-        a = torch.rand(1, 64, 1024, device='cuda', dtype=torch.float)
-        b = torch.randint(-2, 2, (1, 64), device='cuda', dtype=torch.long)
-        script = self.checkScript(eager, (a, b))
+        for device in self.devices:
+            def eager(a, b):
+                mask = b == 1
+                mask = torch.unsqueeze(mask, -1)
+                x = mask.type_as(a)
+                return x, mask
+            a = torch.rand(1, 64, 1024, device=device, dtype=torch.float)
+            b = torch.randint(-2, 2, (1, 64), device=device, dtype=torch.long)
+            script = self.checkScript(eager, (a, b))
 
     def test_neg_pow(self):
         def eager_tt(a: torch.Tensor, b: torch.Tensor):
@@ -1922,6 +1915,7 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
 
+    @unittest.skipIf(not LLVM_ENABLED, "Too slow to run with the TE interpreter")
     def test_conv2d_depthwise(self):
         def eager(input, weight, bias):
             return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
@@ -1943,6 +1937,24 @@ class TestTEFuser(JitTestCase):
 
         script = self.checkScript(eager, (input, weight, bias))
         FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+    def test_type_as_cat(self):
+        with inline_fusion_groups():
+            def eager(x, y):
+                return torch.cat((x, y.type_as(x)), dim=1)
+            for dtype1, dtype2 in product(self.dtypes, self.dtypes):
+                x = torch.randint(2, (1, 13,)).to(dtype1)
+                zero = torch.tensor([[0]]).to(dtype2)
+                one = torch.tensor([[1]]).to(dtype2)
+                script = torch.jit.trace(eager, (x, zero))
+                for _ in range(3):
+                    torch.testing.assert_allclose(
+                        script(x, zero),
+                        eager(x, zero))
+                    torch.testing.assert_allclose(
+                        script(x, one),
+                        eager(x, one))
+                self.assertAllFused(script.graph_for(x, one))
 
 if __name__ == '__main__':
     run_tests()

@@ -72,21 +72,28 @@ struct FusedKernel {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::string name_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::string code_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<TensorDesc> input_desc_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<TensorDesc> output_desc_;
 
   // same size as input_desc, describes whether an
   // input should be broken into subtensors (chunks)
   // to be consumed by the fusion group
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<PartitionDesc> chunk_desc_;
 
   // same size as output_desc, describes whether
   // an output is actually a concatenation of
   // many subtensors that the fusion group produces
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<PartitionDesc> concat_desc_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool has_random_;
 };
 

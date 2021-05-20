@@ -107,6 +107,9 @@ class MutableTypePtrHelper {
         if (mutable_types.size() == 0) {
           return c10::nullopt;
         }
+        if (mutable_types.size() == 1) {
+          return mutable_types[0];
+        }
         return c10::optional<TypePtr>(UnionType::create(mutable_types));
       }
       case TypeKind::OptionalType: {
@@ -1568,6 +1571,7 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int direction;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;

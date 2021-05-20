@@ -11,6 +11,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+import operator
 from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
@@ -367,6 +368,8 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
+    elif node.op == 'call_function' and node.target is operator.getitem:
+        result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'get_attr':
         result = False
     elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
@@ -405,6 +408,12 @@ def node_return_type_is_int(node: Node) -> bool:
     Returns true if this node results in an integer, even if some of the args
     are Tensors.
     """
-    if node.op == 'call_method' and node.target == 'size':
-        return True
-    return False
+    return node.op == 'call_method' and node.target == 'size'
+
+def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
+    """
+    Returns indexes of boolean Tensor args
+    """
+    if node.op == "call_method" and node.target == "masked_fill":
+        return [1]
+    return []

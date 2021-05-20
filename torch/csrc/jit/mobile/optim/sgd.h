@@ -71,7 +71,9 @@ class TORCH_API SGDParamGroup {
   const std::vector<Tensor>& params() const;
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<Tensor> params_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> options_;
 };
 
@@ -100,6 +102,7 @@ class TORCH_API SGD {
   }
 
   explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
+      // NOLINTNEXTLINE(performance-move-const-arg)
       : SGD({std::move(SGDParamGroup(params))}, defaults) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
@@ -115,10 +118,15 @@ class TORCH_API SGD {
   void zero_grad();
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<SGDParamGroup> param_groups_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, std::unique_ptr<SGDParamState>> state_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> defaults_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<Tensor> params_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> options_;
 };
 } // namespace mobile

@@ -28,3 +28,4 @@ Functions
 .. autofunction:: gammaln
 .. autofunction:: i0e
 .. autofunction:: logit
+.. autofunction:: xlog1py

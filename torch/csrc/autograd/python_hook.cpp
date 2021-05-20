@@ -29,8 +29,11 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
 }
 
 PyFunctionPreHook::~PyFunctionPreHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
@@ -40,6 +43,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
@@ -60,8 +64,11 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
 }
 
 PyFunctionPostHook::~PyFunctionPostHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPostHook::operator()(
@@ -73,6 +80,7 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {

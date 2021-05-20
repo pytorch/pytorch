@@ -283,16 +283,19 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   }
 }
 
-void max_pool2d_with_indices_out_cuda_template(
-           Tensor& output,
-           Tensor& indices,
-           const Tensor& input_,
-           IntArrayRef kernel_size,
-           IntArrayRef stride,
-           IntArrayRef padding,
-           IntArrayRef dilation,
-           bool ceil_mode)
-{
+} // namespace
+
+TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cuda)
+(const Tensor& input_,
+IntArrayRef kernel_size,
+IntArrayRef stride,
+IntArrayRef padding,
+IntArrayRef dilation,
+bool ceil_mode,
+const Tensor& output,
+const Tensor& indices) {
+  NoNamesGuard guard;
+
   TensorArg output_arg{ output, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
@@ -300,27 +303,16 @@ void max_pool2d_with_indices_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {output_arg, indices_arg, input_arg});
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
@@ -338,15 +330,8 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t inputHeight = input_.size(-2);
   const int64_t inputWidth = input_.size(-1);
 
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
-
-  pool2d_shape_check(
-    input_,
-    kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
+  const int64_t outputHeight = output.size(-2);
+  const int64_t outputWidth = output.size(-1);
 
   Tensor input = input_.contiguous(memory_format);
 
@@ -354,12 +339,6 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t in_stride_c = input.stride(-3);
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
-
-  output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-  indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-
-  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-  indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   const int count = safe_downcast<int, int64_t>(output.numel());
 
@@ -432,11 +411,6 @@ void max_pool2d_with_indices_out_cuda_template(
       }
     }
   );
-
-  if(input.ndimension() == 3) {
-    output.resize_({nInputPlane, outputHeight, outputWidth});
-    indices.resize_({nInputPlane, outputHeight, outputWidth});
-  }
 }
 
 void max_pool2d_with_indices_backward_out_cuda_template(
@@ -614,58 +588,6 @@ void max_pool2d_with_indices_backward_out_cuda_template(
       }
     }
   );
-}
-
-} // namespace
-
-std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode,
-  Tensor& output,
-  Tensor& indices)
-{
-  max_pool2d_with_indices_out_cuda_template(
-    output,
-    indices,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode)
-{
-  NoNamesGuard guard;
-
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  max_pool2d_with_indices_out_cuda_template(
-    output,
-    indices,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
-
-  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 Tensor& max_pool2d_with_indices_backward_out_cuda(const Tensor& gradOutput_,

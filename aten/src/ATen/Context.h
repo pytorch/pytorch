@@ -167,6 +167,12 @@ class TORCH_API Context {
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
   //
+  // * Have a test function in `test/test_torch.py` whose name begins with
+  //   `test_nondeterministic_alert_`. Alternatively, if CuBLAS workspace
+  //   configuration is the reason for nondeterminism, the operation should be
+  //   included in the `test_cublas_config_nondeterministic_alert` test. Any new
+  //   tests should ideally follow a pattern similar to the existing ones.
+  //
   // `example_func()` below shows an example of the comments and error-throwing code
   // for a nondeterministic operation:
   //

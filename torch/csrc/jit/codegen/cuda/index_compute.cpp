@@ -303,6 +303,7 @@ void IndexCompute::handle(Merge* merge) {
     }
 
     index_map_[GpuLower::lowerValue(*(input_ids.end() - 1))
+                   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                    ->as<kir::IterDomain>()] = out_ind;
     return;
   }
@@ -858,6 +859,7 @@ std::unordered_map<kir::ForLoop*, Val*> indexMapFromTV(
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
 
   for (auto loop : loops) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
       loop_to_ind_map[loop] = zero;
     } else if (loop->iter_domain()->isBlockDim() && is_shared) {
@@ -872,6 +874,7 @@ std::unordered_map<kir::ForLoop*, Val*> indexMapFromTV(
       within_alloc = true;
     }
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return loop_to_ind_map;
 }
 
@@ -1230,6 +1233,7 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
     }
   }
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   auto index_map = generateIndexAndExtentMap(
                        tv_stack,
                        std::deque<kir::ForLoop*>(loops.begin(), loops.end()),

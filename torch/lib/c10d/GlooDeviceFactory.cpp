@@ -8,6 +8,10 @@
 #include <gloo/transport/tcp/device.h>
 #endif
 
+#if GLOO_HAVE_TRANSPORT_TCP_TLS
+#include <gloo/transport/tcp/tls/device.h>
+#endif
+
 #if GLOO_HAVE_TRANSPORT_UV
 #include <gloo/transport/uv/device.h>
 #endif
@@ -57,6 +61,35 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
 // TCP to `TCP` for env "GLOO_DEVICE_TRANSPORT" override.
 C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
+#endif
+
+#if GLOO_HAVE_TRANSPORT_TCP_TLS
+static std::string cstr_to_std_string(const char* chars) {
+  return std::string (chars != nullptr ? chars : "");
+}
+
+static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
+    const std::string& interface,
+    const std::string& hostname) {
+  TORCH_CHECK(
+      !interface.empty() || !hostname.empty(),
+      "GlooDeviceFactory::makeTCPTLSDevice(): interface or hostname "
+      "can't be empty");
+
+  ::gloo::transport::tcp::attr attr;
+  if (!interface.empty()) {
+    attr.iface = interface;
+  } else {
+    attr.hostname = hostname;
+  }
+  const auto pkey = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
+  const auto cert = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
+  const auto caFile = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
+  const auto caPath = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
+  return ::gloo::transport::tcp::tls::CreateDevice(attr, pkey, cert, caFile, caPath);
+}
+
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice);
 #endif
 
 #if GLOO_HAVE_TRANSPORT_UV

@@ -1080,7 +1080,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(ClampMaxModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_clamp_dyn(self):
         class ClampMaxModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1106,6 +1106,27 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 8).float()
         self.run_test(ClampMinMaxModel(), x)
+
+        class ClampTensorModel(torch.nn.Module):
+            def forward(self, x, min, max):
+                return x.clamp(min, max)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        z = torch.randn(3, 4)
+        self.run_test(ClampTensorModel(), (x, y, z))
+
+        class ClampTensorMinModel(torch.nn.Module):
+            def forward(self, x, min):
+                return x.clamp(min=min)
+
+        self.run_test(ClampTensorMinModel(), (x, y))
+
+        class ClampTensorMaxModel(torch.nn.Module):
+            def forward(self, x, max):
+                return x.clamp(max=max)
+
+        self.run_test(ClampTensorMaxModel(), (x, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
@@ -2714,6 +2735,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    def test_std_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
     def test_var(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -2771,6 +2801,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
         self.run_test(model, x)
 
     def test_var_mean(self):
@@ -2848,6 +2887,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    def test_var_mean_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
     def test_std_mean(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -2896,6 +2944,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
         self.run_test(model, x)
 
     def test_bitshift(self):
@@ -4569,6 +4626,24 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    def test_list_append_nested_2(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x):
+                res = []
+                res_replicate = []
+                for i in range(x.size(0)):
+                    if len(res) > 2:
+                        for j in range(x.size(1)):
+                            res.append(x[i][j])
+                        res_replicate.append(res[-1])
+                        res.append(res_replicate[-1])
+                return res, res_replicate
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        self.run_test(model, (x, ))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_pop(self):
         class ListModel(torch.nn.Module):
@@ -4649,6 +4724,36 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.jit.script(ListModel())
         x = torch.randn(16, 3, 4)
         y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_set(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res.append(x[i])
+                res[y] = x[y]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(12, 4)
+        y = torch.tensor(2, dtype=torch.long)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_idx_sum(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                indices = torch.arange(x.size(0))
+                res = []
+                for i in range(x.size(0)):
+                    res.append(x[i])
+                return res[torch.sum(indices[:y])]
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(12, 4)
+        y = torch.tensor(2, dtype=torch.long)
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -4829,6 +4934,125 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 2, dtype=torch.float)
         self.run_test(InplaceAddModel(), (x, y), rtol=1e-2, atol=1e-2)
         self.run_test(InplaceMulModel(), (x, y), rtol=1e-2, atol=1e-2)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_with_loop(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.ones(12,)
+                for i in range(10):
+                    a.add_(torch.ones(12,))
+                return a + x
+
+        m = M()
+        x = torch.randn(12,)
+        self.run_test(torch.jit.script(M()), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_with_loop_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                _bias = torch.ones(12,)
+                a = torch.ones(12,)  # used in loop, altered.
+                a_ref = a  # not used in loop, should be altered.
+                b = x.clone()  # used in loop, not be altered.
+                b_ref = b  # not used in loop, should not be altered.
+                for i in range(10):
+                    if i == 3:
+                        for j in range(5):
+                            a += _bias
+                            _bias.add_(torch.ones(12,))
+                            b = b + torch.ones(12,)
+
+                    _bias.add_(torch.ones(12,))
+                    a += _bias
+                # TODO: value for a_ref is incorrect.
+                # a_ref += torch.ones(12,)
+                b_ref += torch.ones(12,)
+                return _bias + x, a, b, b_ref
+
+        m = M()
+        x = torch.zeros(12,)
+        self.run_test(torch.jit.script(M()), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_inplace_attr_with_loop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._bias = torch.arange(12,)
+
+            def forward(self, x):
+                self._bias = torch.arange(12,)
+                for i in range(10):
+                    if i == 3:
+                        for j in range(5):
+                            self._bias += torch.arange(12,)
+                return self._bias + x
+
+        m = M()
+        x = torch.zeros(12,)
+        self.run_test(torch.jit.script(M()), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_inplace_attr_copy_with_loop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._bias = torch.arange(12,)
+
+            def forward(self, x):
+                self._bias = torch.arange(12,)
+                for i in range(10):
+                    if i == 3:
+                        for j in range(5):
+                            self._bias.copy_(torch.arange(12,))
+                        self._bias.copy_(self._bias + torch.arange(12,))
+
+                    self._bias.copy_(self._bias + torch.arange(12,))
+                return self._bias + x
+
+        m = M()
+        x = torch.zeros(12,)
+        self.run_test(torch.jit.script(M()), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    def test_inplace_sequence_with_loop(self):
+        class M(torch.nn.Module):
+            def process(self, beam_hyps: List[torch.Tensor], done: torch.Tensor, x):
+                batch_size = x.shape[0]
+                for i in range(batch_size):
+                    if done[i]:
+                        continue
+
+                    beam_idx = 0
+                    for _, token in enumerate(x[i]):
+                        beam_hyps.append(token)
+                        beam_idx += 1
+
+                        if beam_idx == 6:
+                            break
+
+                    done[i] = len(beam_hyps) > 4
+
+                return beam_hyps, done
+
+            def forward(self, x):
+                beam_hyps: List[torch.Tensor] = []
+                batch_size = x.shape[0]
+                cur_len = 0
+                max_len = x.shape[1]
+                done = torch.zeros(batch_size, dtype=torch.bool)
+                while cur_len < max_len:
+                    beam_hyps, done = self.process(beam_hyps, done, x[:, 0, :])
+                    cur_len = cur_len + 1
+
+                return beam_hyps
+
+        m = torch.jit.script(M())
+        x = torch.randn(8, 4, 3)
+        self.run_test(torch.jit.script(M()), (x))
+
 
     @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort(self):
@@ -6908,7 +7132,7 @@ class TestONNXRuntime(unittest.TestCase):
         running_mean = model.bn.running_mean
         running_var = model.bn.running_var
         saved_mean = x.mean((0, 2, 3))
-        saved_var = x.var((0, 2, 3))
+        saved_var = x.var((0, 2, 3), correction=1)
 
         pytorch_out = [out.detach().numpy(),
                        running_mean.cpu().numpy(), running_var.cpu().numpy(),
@@ -7602,6 +7826,37 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, anchors))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_set_attr_5(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
+
+            def set_cell_anchors(self, anchors):
+                self.conv.weight = torch.arange(10)
+                for i in range(10):
+                    if i == 3:
+                        for j in range(10):
+                            w = self.conv.weight
+                            self.conv.weight = torch.arange(10) + w
+
+                    self.conv.weight = self.conv.weight + torch.arange(10)
+                    # NOTE: `is not None` and `assert` is for passing torchscript.
+                    if self.conv.bias is not None:
+                        a = self.conv.bias
+                        assert a is not None
+                        self.conv.bias = anchors + a
+
+            def forward(self, anchors):
+                self.set_cell_anchors(anchors)
+                return self.conv.weight, self.conv.bias
+
+        model = torch.jit.script(MyModule())
+        anchors = torch.ones(3, 10, 3)
+        self.run_test(model, (anchors))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_in_loop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7698,7 +7953,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = Example(10)
         random_data = torch.rand((1, 5, 30, 30))
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
-        self.run_test(model, (random_data, empty_tensor))
+        random_state = torch.rand((1, 1, 10, 30, 30))
+        self.run_test(model, (random_data, empty_tensor),
+                      input_names=['data', 'state'],
+                      dynamic_axes={'state': [0, 1, 2, 3, 4]},
+                      test_with_inputs=[(random_data, random_state)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_3(self):
@@ -7762,6 +8021,41 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input_data, prev_state):
                 prev_state = check_init(input_data, self.hidden_size, prev_state)
                 return prev_state
+
+        model = Example(4)
+        random_data = torch.rand((1, 5, 4, 4))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        self.run_test(model, (random_data, empty_tensor))
+
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_if_5(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size, prev_state):
+            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            state_ref = state
+            if prev_state.size(0) == 0:
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
+                state = state + 3
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
+            else:
+                state = state + 2
+            return state, state_ref
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data, prev_state):
+                prev_state, state_ref = check_init(input_data, self.hidden_size, prev_state)
+                return prev_state, state_ref
 
         model = Example(4)
         random_data = torch.rand((1, 5, 4, 4))

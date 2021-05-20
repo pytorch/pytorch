@@ -55,6 +55,7 @@ class SumReluOp : public SumOp<Context> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumRelu, SumReluOp<CPUContext>);
 
 } // namespace caffe2
