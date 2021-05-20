@@ -1868,8 +1868,11 @@ class TestNNCOpInfo(TestCase):
             'trunc',
             'unsqueeze',
         ]
-        # These are ops that don't work (or are incomplete) and need to be fixed
-        fail_ops = ['matmul', 'permute', 'frac', '__rmatmul__']
+        known_failures = ['matmul', 'permute', 'frac', '__rmatmul__']
+        # If adding new OpInfo tests cause this test to fail, add it into here
+        skip_ops = []
+        if op.name in skip_ops:
+            return
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             for sample_input in sample_inputs_itr:
@@ -1902,6 +1905,7 @@ def f({', '.join(param_names)}):
                 f = g['f']
                 f.__module__ = 'test'
                 out = f(*param_values)
+
                 # NNC currently doesn't support lowering ops with more than one
                 # output
                 if isinstance(out, tuple):
@@ -1923,12 +1927,9 @@ def f({', '.join(param_names)}):
             if "UNSUPPORTED DTYPE" in str(e):
                 print(e)
                 return
-            if "UNSUPPORTED DTYPE" in str(e):
-                print(e)
-                return
             if isinstance(e, NameError):  # related to passing in input lists of tensors
                 return
-            self.assertTrue(op.name in fail_ops)
+            self.assertTrue(op.name in known_failures)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
