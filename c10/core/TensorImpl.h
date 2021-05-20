@@ -1835,6 +1835,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return n;
   }
 
+  /**
+   * Compute the number of elements based on the sizes of a
+   * tensor. Catches integer overflow that may occur when a tensor
+   * using a sparse layout has multiple dimensions with large sizes.
+   */
   int64_t safe_compute_numel() const {
     int64_t n = 1;
     for (auto s : sizes()) {
@@ -1864,12 +1869,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  protected:
   /**
-   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
+   * Recompute the cached numel of a tensor.  Call this if you modify
+   * sizes.
+   *
+   * For tensors with sparse layouts, use safe_refresh_numel() instead
+   * because it will catch integer overflow that may occur for tensors
+   * with sparse layouts and large dimensions.
    */
   void refresh_numel() {
     numel_ = compute_numel();
   }
 
+  /**
+   * Recompute the cached numel of a tensor.  Call this if you modify
+   * sizes. Use only for tensors with sparse layouts because only
+   * sparse tensor are likely to have sizes that may lead to integer
+   * overflow when computing numel.
+   */
   void safe_refresh_numel() {
     numel_ = safe_compute_numel();
   }
