@@ -2914,26 +2914,23 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     return samples + [vec_sample]
 
 def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # 2D Tensors
-    tensors_2d = (
-        make_arg((M, M), low=None, high=None),
-        make_arg((3, 5), low=None, high=None),
-        make_arg((5, 3), low=None, high=None),
-    )
+    # Shapes for 2D Tensors
+    shapes_2d = ((M, M), (3, 5), (5, 3))
 
-    # 3D Tensors
-    tensors_3d = (
-        make_arg((M, M, M), low=None, high=None),
-    )
+    # Shapes for 3D Tensors
+    shapes_3d = ((M, M, M),)
 
-    args_2d = ((), (2,), (-2,), (1,), (2,))
+    args_2d = ((), (2,), (-2,), (1,))
     args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
 
-    tensors = [*product(tensors_2d, args_2d), *product(tensors_3d, args_3d)]
-    samples = [SampleInput(tensor, args=arg) for tensor, arg in tensors]
-    return samples
+    def generator():
+        for shapes, args in zip([shapes_2d, shapes_3d], [args_2d, args_3d]):
+            for shape, arg in product(shapes, args):
+                yield SampleInput(make_arg(shape), args=arg)
+
+    return list(generator())
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
