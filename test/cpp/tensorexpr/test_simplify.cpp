@@ -951,7 +951,7 @@ TEST(Simplify, SimplifyMuls) {
   }
 
   {
-    // (x + y) * (x - y) => (x - y) * (x - y)
+    // (x + y) * (x - y) => (x + y) * (x - y)
     // Don't simplify with different ops on each side.
     ExprHandle body = (x + y) * (x - y);
     ExprHandle simplified = IRSimplifier::simplify(body);
@@ -962,6 +962,88 @@ TEST(Simplify, SimplifyMuls) {
     IS_NODE_WITH_NAME(Sub, mul->rhs(), rhs);
     IS_VAR_WITH_NAME(rhs->lhs(), "x");
     IS_VAR_WITH_NAME(rhs->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with no scalar, poly with non-identity scalar.
+    // x * (y + 1) => x + x * y
+    ExprHandle body = x * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with identity scalar, poly with non-identity scalar.
+    // (x * 1) * (y + 1) => x + x * y
+    ExprHandle body = (x * ExprHandle(1)) * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with non-identity scalar, poly with non-identity scalar.
+    // (x * 2) * (y + 1) => 2 * (x + x * y)
+    ExprHandle body = (x * ExprHandle(2)) * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Add, mul->rhs(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with non-identity scalar, poly with identity scalar.
+    // (x * 2) * (y + 0) => 2 * (x * y)
+    ExprHandle body = (x * ExprHandle(2)) * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mul, mul->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with identity scalar, poly with identity scalar.
+    // (x * 1) * (y + 0) => x * y
+    ExprHandle body = (x * ExprHandle(1)) * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with no scalar, poly with identity scalar.
+    // x * (y + 0) => x * y
+    ExprHandle body = x * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 }
 

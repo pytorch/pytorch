@@ -186,6 +186,10 @@ struct TORCH_API Stride {
         stride_ == b.stride_;
   }
 
+  bool isComplete() const {
+    return stride_index_ && contiguous_ && stride_;
+  }
+
   c10::optional<size_t> stride_index_;
   c10::optional<bool> contiguous_;
   c10::optional<size_t> stride_;
@@ -360,6 +364,17 @@ struct TORCH_API SymbolicShape {
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
 
+namespace detail {
+inline bool isComplete(const Stride& s) {
+  return s.isComplete();
+}
+
+template<typename T>
+inline bool isComplete(const T& t) {
+  return true;
+}
+}
+
 template <typename T>
 struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
@@ -423,7 +438,7 @@ struct VaryingShape {
       return false;
     }
     for (auto d : *dims_) {
-      if(!d) {
+      if (!d || !detail::isComplete(*d)) {
         return false;
       }
     }
