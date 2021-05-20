@@ -3170,7 +3170,7 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         with torch.no_grad():
             for sample in samples:
                 t = sample.input
-                t[t == 0] = torch.finfo(dtype).eps
+                t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
     elif requires_grad and op_info.op != torch.special.i0e:
         # Special Case for gradient
         # Sample with `0` in the input
