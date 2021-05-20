@@ -1173,6 +1173,14 @@ static int THPVariable_subclass_traverse(PyObject* self, visitproc visit, void *
   // to do reachability.  Bypassing traverse during root discovery forces Python
   // to treat self as a root for everything it refers to.  For a full
   // explanation of the algorithm see https://devguide.python.org/garbage_collector/
+  //
+  // NB: if we don't hold an owning reference to the underlying Tensor, it is
+  // possible that the underlying Tensor has already gone dead.  In that case,
+  // it's not safe to access it.  But it's also safe to traverse, because if
+  // the underlying Tensor *is* live, then root discovery will determine that
+  // self is live, and nothing will get GC'ed anyway (resurrection cannot happen
+  // if the C++ objects owns the PyObject)
+  THPVariable* var = reinterpret_cast<THPVariable*>(self);
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(self);
     if (tensor.defined() && tensor.use_count() > 1) return 0;
@@ -1205,7 +1213,6 @@ static int THPVariable_subclass_traverse(PyObject* self, visitproc visit, void *
   Py_VISIT(type);
 
   // Finally traverse THPVariable special stuff
-  THPVariable* var = reinterpret_cast<THPVariable*>(self);
   Py_VISIT(var->backward_hooks);
   // We don't want to traverse the grad_fn, even if the Variable owns it and the
   // shared pointer's use count is 1. This is because we would need to treat
