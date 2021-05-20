@@ -2,15 +2,18 @@
 
 #include <ATen/ATen.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 template <typename index_t, void compute(index_t*, int64_t*, index_t*, int64_t)>
-static inline Tensor repeat_interleave_common(const Tensor &repeats) {
-  TORCH_CHECK(repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
+static inline Tensor repeat_interleave_common(const Tensor& repeats) {
+  TORCH_CHECK(
+      repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   TORCH_CHECK(
       repeats.scalar_type() == at::kLong || repeats.scalar_type() == at::kInt,
       "repeats has to be Long or Int tensor");
-  TORCH_CHECK((repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+  TORCH_CHECK(
+      (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
   if (repeats.size(0) == 0) {
     return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -25,4 +28,5 @@ static inline Tensor repeat_interleave_common(const Tensor &repeats) {
   return result;
 }
 
-}}
+} // namespace native
+} // namespace at
