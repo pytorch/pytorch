@@ -32,13 +32,16 @@ static void avg_pool2d_out_frame(
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t p;
       for(p = 0; p < nbatch; p++)
       {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t xx, yy;
         /* For all output pixels... */
         scalar_t *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
         const scalar_t *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t i;
         for(i = 0; i < outputWidth*outputHeight; i++)
           ptr_output[i] = 0;
@@ -52,6 +55,7 @@ static void avg_pool2d_out_frame(
             int64_t wstart = xx * dW - padW;
             int64_t hend = std::min(hstart + kH, inputHeight + padH);
             int64_t wend = std::min(wstart + kW, inputWidth + padW);
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             int pool_size = (hend - hstart) * (wend - wstart);
             hstart = std::max(hstart, (int64_t) 0);
             wstart = std::max(wstart, (int64_t) 0);
@@ -65,6 +69,7 @@ static void avg_pool2d_out_frame(
 
             scalar_t sum = 0;
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
@@ -72,10 +77,12 @@ static void avg_pool2d_out_frame(
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
                 divide_factor = (hend - hstart) * (wend - wstart);
               }
             }
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t kx, ky;
 
             for(ky = hstart; ky < hend; ky++)
@@ -193,15 +200,18 @@ static void avg_pool2d_backward_out_frame(
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t p;
       for(p = 0; p < nbatch; p++)
       {
         const scalar_t *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t xx, yy;
 
         scalar_t* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
         scalar_t *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
 
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t i;
         for(i=0; i<inputWidth*inputHeight; i++)
           ptr_gi[i] = 0.0;
@@ -214,6 +224,7 @@ static void avg_pool2d_backward_out_frame(
             int64_t wstart = xx * dW - padW;
             int64_t hend = std::min(hstart + kH, inputHeight + padH);
             int64_t wend = std::min(wstart + kW, inputWidth + padW);
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             int pool_size = (hend - hstart) * (wend - wstart);
             hstart = std::max(hstart, (int64_t) 0);
             wstart = std::max(wstart, (int64_t) 0);
@@ -222,6 +233,7 @@ static void avg_pool2d_backward_out_frame(
 
             scalar_t z = *ptr_gradOutput++;
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
@@ -229,10 +241,12 @@ static void avg_pool2d_backward_out_frame(
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
                 divide_factor = (hend - hstart) * (wend - wstart);
               }
             }
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t kx, ky;
             for(ky = hstart ; ky < hend; ky++)
             {
@@ -273,6 +287,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t ndim = input.ndimension();
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");

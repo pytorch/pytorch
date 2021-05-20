@@ -17,7 +17,9 @@ struct TensorArgCodegen {
   };
 
   T* data;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t size[N];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int64_t stride[N];
   constexpr int nDims() {
     return N;
@@ -49,6 +51,7 @@ struct TensorArgCodegen<T, 0> {
 };
 
 struct ArgAbstract {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~ArgAbstract() {}
   virtual void* arg() = 0;
 };
@@ -56,6 +59,7 @@ struct ArgAbstract {
 struct ULongArg : public ArgAbstract {
   uint64_t val_;
   ULongArg(uint64_t _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -64,6 +68,7 @@ struct ULongArg : public ArgAbstract {
 struct LongArg : public ArgAbstract {
   int64_t val_;
   LongArg(int64_t _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -72,6 +77,7 @@ struct LongArg : public ArgAbstract {
 struct IntArg : public ArgAbstract {
   int val_;
   IntArg(int _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
@@ -80,12 +86,14 @@ struct IntArg : public ArgAbstract {
 struct FloatArg : public ArgAbstract {
   float val_;
   FloatArg(float _val) : val_(_val){};
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   void* arg() {
     return &val_;
   }
 };
 
 struct TensorArgAbstract : ArgAbstract {
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~TensorArgAbstract(){};
   virtual void setSize(int i, int64_t size) = 0;
   virtual void setStride(int i, int64_t stride) = 0;

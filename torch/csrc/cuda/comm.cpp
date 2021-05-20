@@ -15,7 +15,6 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
-#include <optional>
 #include <vector>
 
 namespace torch {
@@ -38,7 +37,7 @@ struct unique_type_checker {
     unique = type_id_.value() == type_id;
   }
 
-  optional<size_t> type_id_;
+  c10::optional<size_t> type_id_;
   bool unique = true;
 };
 
@@ -193,6 +192,7 @@ tensor_list2d broadcast_coalesced(
         for (auto& t :
              utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
+          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
           Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
@@ -206,6 +206,7 @@ tensor_list2d broadcast_coalesced(
         for (auto& t :
              utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
+          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
           Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
@@ -248,6 +249,7 @@ std::vector<at::Tensor>& scatter_out(
         out_tensors[i].device(),
         "'");
     auto out_sizes = out_tensors[i].sizes().vec();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     bool same_ndim = out_sizes.size() == tensor.dim();
     if (same_ndim) {
       total_size += out_sizes[dim];

@@ -43,6 +43,7 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
       output->t.ResizeLike(*Fp32Op_()->Get()->Output(0));
       T* out_data = output->t.template mutable_data<T>();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       TensorQuantizationParams out_qparams;
       if (HasStaticQuantization(this)) {
         out_qparams = GetStaticQuantizationParamsOf(this, 0);
@@ -70,7 +71,9 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Gather, DNNLOWP, GatherDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Gather,
     DNNLOWP,

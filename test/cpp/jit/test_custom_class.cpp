@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, TorchbindIValueAPI) {
   script::Module m("m");
 
@@ -52,6 +53,7 @@ class TorchBindTestClass : public torch::jit::CustomClassHolder {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char class_doc_string[] = R"(
   I am docstring for TorchBindTestClass
   Args:
@@ -60,10 +62,12 @@ constexpr char class_doc_string[] = R"(
   Return:
       How would I know? I am just a holder of some meaningless test methods.
   )";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char method_doc_string[] =
     "I am docstring for TorchBindTestClass get_with_docstring method";
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg =
     torch::class_<TorchBindTestClass>(
         "_TorchBindTest",
@@ -75,6 +79,7 @@ static auto reg =
 } // namespace
 
 // Tests DocString is properly propagated when defining CustomClasses.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, TestDocString) {
   auto class_type = getCustomClass(
       "__torch__.torch.classes._TorchBindTest._TorchBindTestClass");
@@ -87,6 +92,7 @@ TEST(CustomClassTest, TestDocString) {
       method_doc_string);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, Serialization) {
   script::Module m("m");
 
@@ -97,6 +103,7 @@ TEST(CustomClassTest, Serialization) {
       "s",
       custom_class_obj.type(),
       custom_class_obj,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*is_parameter=*/false);
   m.define(R"(
     def forward(self):

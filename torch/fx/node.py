@@ -4,12 +4,12 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
-from torch.fx.operator_schemas import normalize_function, normalize_module
+from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 
 if TYPE_CHECKING:
     from .graph import Graph
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
@@ -273,6 +273,34 @@ class Node:
         """
         return list(self._input_nodes.keys())
 
+    def update_arg(self, idx : int, arg : Argument) -> None:
+        """
+        Update an existing positional argument to contain the new value
+        ``arg``. After calling, ``self.args[idx] == arg``.
+
+        Args:
+
+            idx (int): The index into ``self.args`` of the element to update
+            arg (Argument): The new argument value to write into ``args``
+        """
+        args = list(self.args)
+        args[idx] = arg
+        self.args = tuple(args)
+
+    def update_kwarg(self, key : str, arg : Argument) -> None:
+        """
+        Update an existing keyword argument to contain the new value
+        ``arg``. After calling, ``self.kwargs[key] == arg``.
+
+        Args:
+
+            key (str): The key in ``self.kwargs`` of the element to update
+            arg (Argument): The new argument value to write into ``kwargs``
+        """
+        kwargs = dict(self.kwargs)
+        kwargs[key] = arg
+        self.kwargs = kwargs
+
     @property
     def stack_trace(self) -> Optional[str]:
         """
@@ -446,11 +474,13 @@ class Node:
 
     def normalized_arguments(
             self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
-            kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+            kwarg_types : Optional[Dict[str, Any]] = None,
+            normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's
-        signature and return exclusively kwargs in positional order.
+        signature and return exclusively kwargs in positional order
+        if `normalize_to_only_use_kwargs` is true.
         Also populates default values. Does not support positional-only
         parameters or varargs parameters.
 
@@ -462,10 +492,11 @@ class Node:
             root (torch.nn.Module): Module upon which to resolve module targets.
             arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
             kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+            normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
         Returns:
 
-            Returns normalized_kwargs, or `None` if not successful.
+            Returns NamedTuple ArgsKwargsPair, or `None` if not successful.
         """
         if self.op == 'call_function':
             assert callable(self.target)
@@ -479,13 +510,13 @@ class Node:
 
     def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
         """
-        Loop through input nodes of ``self``, and if `old_input` is one
-        of those, replace `old_input` node with new input node `new_input`.
+        Loop through input nodes of ``self``, and replace all instances of
+        ``old_input`` with ``new_input``.
 
         Args:
 
             old_input (Node): The old input node to be replaced.
-            new_input (Node): The new input node to replace `old_input`.
+            new_input (Node): The new input node to replace ``old_input``.
 
         """
         def maybe_replace_node(n : Node) -> Node:

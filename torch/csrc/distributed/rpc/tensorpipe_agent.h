@@ -12,10 +12,6 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAFuture.h>
-#endif
-
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
@@ -40,8 +36,6 @@ class Context;
 namespace channel {
 class Context;
 } // namespace channel
-
-using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
 
 } // namespace tensorpipe
 
@@ -90,8 +84,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       optional<std::vector<std::string>> channels,
       float rpc_timeout,
       std::string init_method,
-      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {},
-      std::vector<c10::DeviceIndex> devices = {})
+      std::unordered_map<std::string, DeviceMap> device_maps = {},
+      std::vector<c10::Device> devices = {})
       : RpcBackendOptions(rpc_timeout, init_method),
         numWorkerThreads(numWorkerThreads),
         transports(std::move(transports)),
@@ -123,15 +117,20 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     }
   }
 
-  void setDeviceMap(
-      const std::string& workerName,
-      const tensorpipe::DeviceMap& deviceMap) {
+  void setDeviceMap(const std::string& workerName, const DeviceMap& deviceMap) {
     auto iter = deviceMaps.find(workerName);
     if (iter == deviceMaps.end()) {
       deviceMaps[workerName] = deviceMap;
     } else {
       for (auto& entry : deviceMap) {
-        iter->second[entry.first] = entry.second;
+        // c10::Device has no default constructor, hence map[device] dosn't work
+        // In C++-17 we can use insert_or_assign.
+        auto entryIter = iter->second.find(entry.first);
+        if (entryIter == iter->second.end()) {
+          iter->second.emplace(entry.first, entry.second);
+        } else {
+          entryIter->second = entry.second;
+        }
       }
     }
   }
@@ -139,8 +138,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   int numWorkerThreads;
   const optional<std::vector<std::string>> transports;
   const optional<std::vector<std::string>> channels;
-  std::unordered_map<std::string, tensorpipe::DeviceMap> deviceMaps;
-  std::vector<c10::DeviceIndex> devices;
+  std::unordered_map<std::string, DeviceMap> deviceMaps;
+  std::vector<c10::Device> devices;
 };
 
 // Struct to track the network source metrics
@@ -175,12 +174,11 @@ class TensorPipeAgent : public RpcAgent {
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
 
-  std::shared_ptr<JitFuture> send(
+  c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) override;
+      const DeviceMap& deviceMap = {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
@@ -195,14 +193,15 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
   void setReverseDeviceMaps(
-      const std::unordered_map<std::string, tensorpipe::DeviceMap>&
-          reverseDeviceMaps);
+      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
-  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+  DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
+
+  const std::vector<c10::Device>& getDevices() const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
@@ -235,18 +234,17 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(
           const tensorpipe::Error&,
-          Message&&,
+          c10::intrusive_ptr<Message>,
           std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      Message&& message,
-      std::vector<c10::DeviceIndex>&& devices,
-      std::shared_ptr<LazyStreamContext> ctx,
-      std::function<void(const tensorpipe::Error&)>,
-      const tensorpipe::DeviceMap& deviceMap = {}) noexcept;
+      c10::intrusive_ptr<Message> message,
+      std::vector<c10::Device>&& devices,
+      std::vector<c10::Stream> streams,
+      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -258,9 +256,9 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<JitFuture>& futureResponseMessage,
+      JitFuture& futureResponseMessage,
       uint64_t messageId,
-      std::shared_ptr<LazyStreamContext> ctx);
+      std::vector<c10::Stream> stream);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -273,7 +271,7 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
-  inline std::vector<c10::DeviceIndex> getDevicesForRemote(
+  inline std::vector<c10::Device> getDevicesForRemote(
       const std::string& remoteName,
       const Message& message) const;
 
@@ -284,24 +282,13 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    explicit AtomicJitFuture(
-        const std::vector<c10::DeviceIndex>& devices,
-        bool noCuda = true) {
-#ifdef USE_CUDA_NOT_ROCM
-      if (!noCuda) {
-        jitFuture = std::make_shared<at::cuda::CUDAFuture>(
-            at::AnyClassType::get(), devices);
-      } else {
-#else
-      {
-#endif
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-      }
+    explicit AtomicJitFuture(const std::vector<c10::Device>& devices) {
+      jitFuture = c10::make_intrusive<at::ivalue::Future>(
+          at::AnyClassType::get(), devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
-    std::shared_ptr<JitFuture> jitFuture;
+    c10::intrusive_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and
@@ -320,11 +307,11 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
-  std::unordered_map<std::string, tensorpipe::DeviceMap> reverseDeviceMaps_;
+  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  std::vector<c10::DeviceIndex> devices_;
+  std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
@@ -449,7 +436,7 @@ class TensorPipeAgent : public RpcAgent {
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
-      Message message,
+      c10::intrusive_ptr<Message> message,
       std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,

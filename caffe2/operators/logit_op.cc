@@ -43,6 +43,7 @@ bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Logit,
     UnaryElementwiseWithArgsOp<
@@ -50,8 +51,10 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         LogitFunctor<CPUContext>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LogitGradient, LogitGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Logit)
     .NumInputs(1)
     .NumOutputs(1)
@@ -65,6 +68,7 @@ input data clampped in (eps, 1-eps).
     .Input(0, "X", "input float tensor")
     .Output(0, "Y", "output float tensor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LogitGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -88,6 +92,7 @@ class GetLogitGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Logit, GetLogitGradient);
 
 } // namespace caffe2

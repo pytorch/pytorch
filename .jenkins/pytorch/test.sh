@@ -7,6 +7,9 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# Get fully qualified path using realpath
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -150,6 +153,11 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_gloo_with_tls() {
+  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
+  assert_git_not_dirty
+}
+
 
 test_aten() {
   # Test ATen
@@ -165,10 +173,10 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
@@ -248,6 +256,11 @@ test_distributed() {
     build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
+    MPIEXEC=$(command -v mpiexec)
+    if [[ -n "$MPIEXEC" ]]; then
+      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
+      eval "$MPICMD"
+    fi
     build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
     build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
@@ -268,7 +281,7 @@ test_rpc() {
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     pushd test/custom_backend
     cp -a "$CUSTOM_BACKEND_BUILD" build
     # Run tests Python-side and export a lowered module.
@@ -285,7 +298,7 @@ test_custom_backend() {
 test_custom_script_ops() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     pushd test/custom_operator
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
@@ -301,7 +314,7 @@ test_custom_script_ops() {
 test_jit_hooks() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing jit hooks in cpp"
-    HOOK_BUILD="$PWD/../jit-hook-build"
+    HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     pushd test/jit_hooks
     cp -a "$HOOK_BUILD" build
     # Run tests Python-side and export the script modules with hooks
@@ -470,6 +483,9 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+    test_python_gloo_with_tls
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
