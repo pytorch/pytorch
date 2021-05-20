@@ -109,6 +109,7 @@ void batch_norm_cpu_inference_contiguous_kernel(Tensor& output, const Tensor& in
 
 }// anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(batch_norm_cpu_inference_contiguous_stub, &batch_norm_cpu_inference_contiguous_kernel);
 
 }} // namespace at::native

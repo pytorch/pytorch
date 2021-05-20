@@ -234,11 +234,16 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Function& method;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -307,6 +312,13 @@ struct Environment {
 
   void setType(const std::string& name, TypePtr type) {
     type_table[name] = std::move(type);
+  }
+
+  c10::optional<TypePtr> getType(const std::string& name) {
+    if (type_table.find(name) != type_table.end() ) {
+      return type_table[name];
+    }
+    return c10::nullopt;
   }
 
   SugaredValuePtr findInAnyFrame(const std::string& name) {
@@ -1176,9 +1188,8 @@ struct to_ir {
       }
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
-      std::vector<TypePtr> present_types =
-          union_type->set_difference_of({NoneType::get()});
-      Refinement present(name, UnionType::create(present_types));
+      UnionTypePtr remaining = union_type->withoutNone();
+      Refinement present(name, remaining);
       if (tok == TK_IS) {
         return RefinementSet({}, {present});
       } else { // TK_ISNOT
@@ -1438,6 +1449,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
     c10::optional<RefinementSet> refinements;
     c10::optional<bool> static_if;
@@ -1503,6 +1515,7 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1624,8 +1637,9 @@ struct to_ir {
     }
 
     // Register outputs in each block
-    for (const auto& x : mutated_variables) {
+    for (const std::string& x : mutated_variables) {
       Value* tv;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
 
       {
@@ -1658,19 +1672,16 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
-      auto unified = unifyTypes(tv->type(), fv->type(), /*default_to_union=*/false);
+      auto unified = unifyTypes(tv->type(), fv->type());
 
       // If the variable we're looking at is known to be Union[T1, T2],
       // then it's okay to have one branch return T1 and the other
-      // return T2. We need to set `unified` to be the annotated Union
-      // type, not just the result of `unifyTypes`; this covers the case
-      // that we have Union[T1, T2, ..., TN]
-      SugaredValuePtr true_val = save_true->findInParentFrame(x);
-      SugaredValuePtr false_val = save_false->findInParentFrame(x);
-      if (true_val && false_val) {
-        if (tv->type() == fv->type() && tv->type()->kind() == UnionType::Kind) {
-          unified = tv->type();
-        }
+      // return T2. (We're not actually going to use `unified` again;
+      // it's acting as a flag)
+      c10::optional<TypePtr> full_true_type = environment_stack->getType(x);
+      c10::optional<TypePtr> full_false_type = environment_stack->getType(x);
+      if (full_true_type && full_false_type && !unified) {
+        unified = unifyTypes(*full_true_type, *full_false_type);
       }
 
       // attempt to unify the types. we allow variables to be set to different
@@ -1776,16 +1787,51 @@ struct to_ir {
     gathered.gather(classinfo);
     Value* val = emitExpr(obj);
     RefinementSet refinement;
-    if (gathered.types.size() == 1 &&
-        gathered.types.at(0)->isSubtypeOf(val->type()) &&
-        obj.kind() == TK_VAR) {
+
+    TORCH_CHECK(!gathered.types.empty(), "`isinstance` must be used with a "
+                "type or a tuple of types");
+
+    bool all_are_subtypes = std::all_of(gathered.types.begin(), gathered.types.end(),
+                                        [&](const TypePtr t) {
+                                          return t->isSubtypeOf(val->type());
+                                        });
+    if (all_are_subtypes && obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
-      Refinement isinstance(ident, gathered.types.at(0));
+
+      // Get the type to compare against. If we have a tuple of types,
+      // turn the tuple into a Union type to prevent unnecessary extra
+      // logic for single vs. multiple comparisons
+      const TypePtr single_comparison = gathered.types.size() == 1 ?
+                                        gathered.types[0] :
+                                        UnionType::create(gathered.types);
+
+      Refinement isinstance(ident, single_comparison);
 
       if (val->type()->kind() == UnionType::Kind) {
-        auto union_type = val->type()->expect<UnionType>();
-        std::vector<TypePtr> not_isinstance_types =
-            union_type->set_difference_of({gathered.types.at(0)});
+        const UnionTypePtr union_type = val->type()->expect<UnionType>();
+
+        std::vector<TypePtr> not_isinstance_types;
+
+        // O(1) lookups of all the types in `gathered.types`
+        std::unordered_set<TypePtr, std::hash<TypePtr>, c10::TypeEqual> dict{
+          gathered.types.begin(), gathered.types.end()};
+
+        for (auto type : union_type->types()) {
+          // Fast path
+          if (!dict.count(type)) {
+            not_isinstance_types.emplace_back(type);
+            break;
+          }
+          // Check all types in `gathered.types` to see if there's a
+          // common supertype
+          for (const TypePtr comparison_type : gathered.types) {
+            c10::optional<TypePtr> unified = unifyTypes(type, comparison_type);
+            if (!unified) {
+              not_isinstance_types.emplace_back(type);
+            }
+          }
+        }
+
         if (not_isinstance_types.size() == 1) {
           Refinement not_isinstance(std::move(ident), not_isinstance_types.at(0));
           refinement = RefinementSet(isinstance, not_isinstance);
@@ -1798,12 +1844,15 @@ struct to_ir {
         refinement = RefinementSet({isinstance}, {});
       }
     }
+
     if (gathered.staticallyTrue(val->type())) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
+
     if (gathered.staticallyFalse(val->type())) {
       return CondValue(*graph, obj.range(), false, std::move(refinement));
     }
+
     // check maybe true/false at runtime, need an actual op
     Value* result =
         graph->insertNode(graph->createIsInstance(val, gathered.types))
@@ -1855,6 +1904,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
@@ -2142,6 +2192,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
@@ -2316,6 +2367,7 @@ struct to_ir {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
@@ -2400,6 +2452,7 @@ struct to_ir {
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
@@ -3342,14 +3395,6 @@ struct to_ir {
       const TypePtr& type_hint = nullptr) {
     switch (tree.kind()) {
       case TK_VAR: {
-        // There are certain cases in which we know a variable is of
-        // type `Union[T1, T2, ..., TN]`, but the type of the variable's
-        // value is still `T1` (one of the types in the Union). This
-        // correctly sets the value's type to match the variable's
-        // Union annotation
-        if (type_hint && type_hint->kind() == UnionType::Kind) {
-          environment_stack->setType(Var(tree).name().name(), type_hint);
-        }
         return environment_stack->getSugaredVar(Var(tree).name());
       }
       case '.': {
@@ -3405,6 +3450,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* fork_node;
     TypePtr out_type;
 

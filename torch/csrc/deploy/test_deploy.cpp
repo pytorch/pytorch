@@ -84,6 +84,19 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   for (size_t i = 0; i < ninterp; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+
+  // test kwargs api with args
+  std::vector<c10::IValue> args;
+  args.emplace_back(input);
+  std::unordered_map<std::string, c10::IValue> kwargs_empty;
+  auto jit_output_args = model.call_kwargs(args, kwargs_empty).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_args));
+
+  // and with kwargs only
+  std::unordered_map<std::string, c10::IValue> kwargs;
+  kwargs["input"] = input;
+  auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {

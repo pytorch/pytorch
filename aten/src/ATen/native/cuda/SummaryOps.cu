@@ -387,7 +387,8 @@ Tensor _bincount_cuda(
     const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  const Tensor& weights = *weights_maybe_owned;
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

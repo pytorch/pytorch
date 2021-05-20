@@ -684,18 +684,21 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       v = F::linear(value, _w, _b);
     }
   } else {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto q_proj_weight_non_opt = q_proj_weight;
     auto sizes = q_proj_weight_non_opt.sizes();
     auto len1 = sizes[0];
     auto len2 = sizes[1];
     TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
 
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto k_proj_weight_non_opt = k_proj_weight;
     sizes = k_proj_weight_non_opt.sizes();
     len1 = sizes[0];
     len2 = sizes[1];
     TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
 
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto v_proj_weight_non_opt = v_proj_weight;
     sizes = v_proj_weight_non_opt.sizes();
     len1 = sizes[0];
@@ -825,6 +828,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     );
     attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
   attn_output_weights = F::dropout(attn_output_weights, F::DropoutFuncOptions().p(dropout_p).training(training));
   auto attn_output = torch::bmm(attn_output_weights, v);

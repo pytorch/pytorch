@@ -869,8 +869,6 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if isinstance(obj, ScriptFunction):
         return obj
 
-    qualified_name = _qualified_name(obj)
-
     # If MonkeyType is installed, enable profile directed type annotation
     # Check if example_inputs are defined and generate call traces
     # for the method by running eager mode version of the method with

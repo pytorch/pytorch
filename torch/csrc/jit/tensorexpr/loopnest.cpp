@@ -1274,7 +1274,8 @@ std::vector<For*> LoopNest::distributeLoop(
   // Extract bodies for all the loops after distribution.
   std::vector<Block*> new_loop_bodies;
   auto new_loop_body = new Block({});
-  while (auto s = loop->body()->front()) {
+  while (!loop->body()->empty()) {
+    auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
     if (pivots.count(s)) {
@@ -1762,6 +1763,12 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
+void LoopNest::unroll(For* f) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Stmt* unrolled;
+  unroll(f, &unrolled);
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
@@ -1821,7 +1828,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   for (size_t i = 0; i < loops.size() - 1; ++i) {
     if ((loops[i]->body()->nstmts() != 1) ||
         (loops[i]->body()->front() != loops[i + 1])) {
-      *flattened = loops[0];
       return false;
     }
   }
@@ -1856,16 +1862,146 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
     stop = new Mul(curr_loop->stop(), stop);
   }
   auto flattened_body =
-      Substitute(Stmt::clone(normalized_loops.back()->body()), var_mapping);
+      Substitute(normalized_loops.back()->removeBody(), var_mapping);
 
-  *flattened = new For(
-      flat_var,
-      new IntImm(0),
-      stop,
-      flattened_body,
-      normalized_loops[0]->loop_options());
-  p->replace_stmt(normalized_loops[0], *flattened);
+  normalized_loops.front()->setVar(flat_var);
+  normalized_loops.front()->setStart(new IntImm(0));
+  normalized_loops.front()->setStop(stop);
+  normalized_loops.front()->setBody(flattened_body);
+  *flattened = normalized_loops.front();
   return true;
+}
+
+bool LoopNest::flatten(const std::vector<For*>& loops) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* flattened;
+  return flatten(loops, &flattened);
+}
+
+void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
+  if (buf->initializer()) {
+    throw malformed_input("Can't compress buffer whose initializer is set");
+  }
+
+  // Loop iterations in NNC IR do not follow sequential semantics by default.
+  // In other words, the iterations of the loops could be executed in any
+  // random order without affecting correctness. This constraint in turn
+  // implies that there can’t be any *inter-iteration* dependences
+  // (or *loop-carried* dependences) in NNC loops. So, any NNC IR with such
+  // dependences is considered invalid.
+  //
+  // Given the constraint above, for any pair of accesses to a buffer (where
+  // at least one of the access is a write), the accesses must be
+  // loop-independent on the innermost loop containing the accesses as well as
+  // all the loops above it. So, any dimension that uses only those loop
+  // variables to access the given buffer could be optimized away.
+  //
+  // Algorithm:
+  //   * Find all the accesses to the given buf. (A)
+  //   * Find the parent common to all accesses in A. (P)
+  //   * Collect all the loops above P. (L)
+  //   * Collect all the loop variables corresponding to L. (LV)
+  //   * For every access a in A:
+  //      * For the index I in every dimension of a:
+  //          * If the variables in I are all in LV, mark this dimension
+  //            for deletion.
+  //   * For every dimension that is marked for deletion in ALL accesses in A:
+  //      * Update the buffer to set the size of that dimension to 1.
+  //      * Update all accesses in A to set the index in that dimension to 0.
+
+  auto writes = WritesToBuf::find(stmt, buf);
+  auto reads = StmtsReadingBuf::find(stmt, buf);
+
+  // All buffers must be read and written at least once.
+  // Is this a valid assumption? TODO
+  TORCH_INTERNAL_ASSERT(!writes.empty());
+  TORCH_INTERNAL_ASSERT(!reads.empty());
+
+  // Find the parent common to all the buffer accesses.
+  const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
+  TORCH_INTERNAL_ASSERT(parent);
+  for (auto w : writes) {
+    parent = Block::getSharedParent(parent, w);
+  }
+  for (auto r : reads) {
+    parent = Block::getSharedParent(parent, r);
+  }
+
+  // Collect all the loops that are above the common parent.
+  auto loops = LoopNest::getEnclosingLoopNest(parent);
+  std::unordered_set<const Var*> loop_vars;
+  for (auto l : loops) {
+    loop_vars.insert(l->var());
+  }
+
+  // TODO: Need to handle other Stmts / Exprs that read / write buffers.
+  auto stores = NodeFinder<Store>::find(stmt);
+  auto loads = NodeFinder<Load>::find(stmt);
+
+  // Vector to indicate which dimensions could be compressed away.
+  std::vector<bool> dims(buf->dims().size(), true);
+  auto check_indices = [&](const std::vector<const Expr*>& indices) {
+    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+      auto index_vars = NodeFinder<Var>::find(indices[i]);
+      for (auto iv : index_vars) {
+        if (loop_vars.count(iv) == 0) {
+          // A variable in this index is not in loop_vars.
+          // This implies that this dimension cannot be optimized away.
+          dims[i] = false;
+          break;
+        }
+      }
+    }
+  };
+  for (auto s : stores) {
+    if (s->buf() == buf) {
+      check_indices(s->indices());
+    }
+  }
+  for (auto l : loads) {
+    if (l->buf() == buf) {
+      check_indices(l->indices());
+    }
+  }
+  bool any_dim_to_compress = false;
+  for (auto d : dims) {
+    any_dim_to_compress |= d;
+  }
+  if (!any_dim_to_compress) {
+    return;
+  }
+
+  // Compress buffer by removing the marked dims.
+  std::vector<const Expr*> new_dims(buf->dims());
+  for (size_t i = 0; i < dims.size(); ++i) {
+    if (dims[i]) {
+      new_dims[i] = new IntImm(1);
+    }
+  }
+  buf->set_dims(new_dims);
+
+  // Modify all access to reflect the removed dims.
+  auto get_new_indices = [&](const std::vector<const Expr*>& indices) {
+    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    std::vector<const Expr*> new_indices(indices);
+    for (size_t i = 0; i < dims.size(); ++i) {
+      if (dims[i]) {
+        new_indices[i] = new IntImm(0);
+      }
+    }
+    return new_indices;
+  };
+  for (auto s : stores) {
+    if (s->buf() == buf) {
+      s->set_indices(get_new_indices(s->indices()));
+    }
+  }
+  for (auto l : loads) {
+    if (l->buf() == buf) {
+      l->set_indices(get_new_indices(l->indices()));
+    }
+  }
 }
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {

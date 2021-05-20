@@ -68,6 +68,7 @@ bool Predictor::operator()(const TensorList& inputs, TensorList* outputs) {
     return false;
   }
   outputs->clear();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
     outputs->emplace_back(
         getTensor(config_.ws.get(), config_.predict_net->external_output(i))
@@ -102,6 +103,7 @@ bool Predictor::operator()(const TensorMap& inputs, TensorList* outputs) {
     return false;
   }
   outputs->clear();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
     outputs->push_back(
         getTensor(config_.ws.get(), config_.predict_net->external_output(i))

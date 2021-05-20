@@ -28,6 +28,7 @@ class TORCH_API Unpickler {
   // to resolve any JIT type. class_resolver and type_resolver are not merged
   // here because some use cases need to get strong class type that
   // type_resolver_ can not return.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -40,6 +41,7 @@ class TORCH_API Unpickler {
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -52,6 +54,7 @@ class TORCH_API Unpickler {
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}

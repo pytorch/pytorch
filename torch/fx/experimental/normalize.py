@@ -3,7 +3,7 @@ import torch.fx
 import torch.fx as fx
 import operator
 from typing import Any, Callable, Dict, Tuple, Optional
-from torch.fx.node import Argument, Target, Node
+from torch.fx.node import Argument, Target, Node, map_aggregate
 from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
 from torch.fx import Transformer, Proxy
@@ -13,9 +13,10 @@ class NormalizeArgs(Transformer):
     """
     Normalize arguments to Python targets. This means that
     `args/kwargs` will be matched up to the module/functional's
-    signature and rewritten to exclusively kwargs in positional order.
-    Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs).
+    signature and rewritten to exclusively kwargs in positional order
+    if `normalize_to_only_use_kwargs` is true. Also populates default
+    values. Does not support positional-only parameters or varargs
+    parameters (*args, **kwargs).
 
     If the nodes have 'type' metadata, it will use it to disambiguate
     overloads. Otherwise, it will throw an error.
@@ -25,20 +26,23 @@ class NormalizeArgs(Transformer):
         traced = torch.fx.symbolic_trace(m)
         traced = NormalizeArgs(traced).transform()
     """
-    def __init__(self, module : torch.nn.Module):
+    def __init__(self, module : torch.nn.Module,
+                 normalize_to_only_use_kwargs : bool = True):
         super().__init__(module)
         self.node_map: Dict[Proxy, Node] = {}
+        self.normalize_to_only_use_kwargs = normalize_to_only_use_kwargs
 
     def run_node(self, n: Node) -> Any:
         args, kwargs = self.fetch_args_kwargs_from_env(n)
 
         def get_type(arg):
-            if isinstance(arg, fx.Proxy):
-                old_meta = self.node_map[arg].meta
-                return old_meta['type'] if 'type' in old_meta else None
-            return create_type_hint(arg)
+            if isinstance(arg, fx.Node):
+                return n.meta['type'] if 'type' in n.meta else None
+            return type(arg)
 
-        arg_types = tuple([get_type(arg) for arg in args])
+        arg_types = map_aggregate(n.args, get_type)
+        assert(isinstance(arg_types, tuple))
+        arg_types = tuple([create_type_hint(i) for i in arg_types])
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == 'call_function':
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
@@ -51,17 +55,21 @@ class NormalizeArgs(Transformer):
             self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any],
             arg_types: Optional[Tuple[Any, ...]] = None, kwarg_types : Optional[Dict[str, Any]] = None):
         assert callable(target)
-        new_kwargs = normalize_function(target, args, kwargs, arg_types, kwarg_types)  # type: ignore
-        if new_kwargs:
-            return self.tracer.create_proxy('call_function', target, (), new_kwargs)
+        new_args_and_kwargs = normalize_function(target, args, kwargs, arg_types, kwarg_types,  # type: ignore[arg-type]
+                                                 self.normalize_to_only_use_kwargs)
+        if new_args_and_kwargs:
+            new_args, new_kwargs = new_args_and_kwargs
+            return self.tracer.create_proxy('call_function', target, new_args, new_kwargs)
         else:
             return super().call_function(target, args, kwargs)
 
     def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         assert isinstance(target, str)
-        new_kwargs = normalize_module(self.module, target, args, kwargs)  # type: ignore
-        if new_kwargs:
-            return super().call_module(target, (), new_kwargs)
+        new_args_and_kwargs = normalize_module(self.module, target, args, kwargs,  # type: ignore[arg-type]
+                                               self.normalize_to_only_use_kwargs)
+        if new_args_and_kwargs:
+            new_args, new_kwargs = new_args_and_kwargs
+            return super().call_module(target, new_args, new_kwargs)
         else:
             return super().call_module(target, args, kwargs)
 

@@ -22,3 +22,6 @@ API Reference
   :members:
 
   .. automethod:: __init__
+
+.. autoclass:: torch.package.Directory
+  :members:

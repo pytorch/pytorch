@@ -1787,6 +1787,39 @@ TEST(LLVM, VectorizedGEMM) {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
+TEST(LLVM, CallRaw) {
+  KernelScope kernel_scope;
+  const int M = 32;
+  VarHandle N("N", kInt);
+  Placeholder a(BufHandle("a", {M, N}, kFloat));
+  Placeholder b(BufHandle("b", {N}, kFloat));
+  Tensor* c = Compute(
+      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return a.load(i, j) + b.load(j);
+      });
+
+  LoopNest l({c});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+
+  LLVMCodeGen cg(s, {a, b, BufHandle(c->buf()), N});
+
+  int32_t N_value = 1024;
+  std::vector<float> av(M * N_value);
+  std::iota(av.begin(), av.end(), 0);
+  std::vector<float> bv(N_value);
+  std::iota(bv.begin(), bv.end(), 0);
+  std::vector<float> cv(M * N_value, 0);
+  std::vector<void*> args({av.data(), bv.data(), cv.data(), &N_value});
+  cg.call_raw(args);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
+      ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
 

@@ -117,12 +117,15 @@ bool IntegralImageGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IntegralImage, IntegralImageOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     IntegralImageGradient,
     IntegralImageGradientOp<float, CPUContext>);
 
 // Input: X; Output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IntegralImage)
     .NumInputs(1)
     .NumOutputs(1)
@@ -135,6 +138,7 @@ with other detection and tracking techniques.
     .Output(0, "Y", "Integrated image of the form (N, C, H+1, W+1)");
 
 // Input: X, dY (aka "gradOutput"); Output: dX (aka "gradInput")
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IntegralImageGradient).NumInputs(2).NumOutputs(1);
 
 class GetIntegralImageGradient : public GradientMakerBase {
@@ -148,6 +152,7 @@ class GetIntegralImageGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(IntegralImage, GetIntegralImageGradient);
 
 } // namespace caffe2

@@ -22,6 +22,7 @@ import os
 import os.path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,24 @@ CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]
 
 # Set from command line arguments in main().
 VERBOSE = False
+
+
+# Functions for correct handling of "ATen/native/cpu" mapping
+# Sources in that folder are not built in place but first copied into build folder with `.[CPUARCH].cpp` suffixes
+def map_filename(build_folder: str, fname: str) -> str:
+    fname = os.path.relpath(fname)
+    native_cpu_prefix = "aten/src/ATen/native/cpu/"
+    build_cpu_prefix = os.path.join(build_folder, native_cpu_prefix, "")
+    default_arch_suffix = ".DEFAULT.cpp"
+    if fname.startswith(native_cpu_prefix) and fname.endswith(".cpp"):
+        return f"{build_cpu_prefix}{fname[len(native_cpu_prefix):]}{default_arch_suffix}"
+    if fname.startswith(build_cpu_prefix) and fname.endswith(default_arch_suffix):
+        return f"{native_cpu_prefix}{fname[len(build_cpu_prefix):-len(default_arch_suffix)]}"
+    return fname
+
+
+def map_filenames(build_folder: str, fnames: Iterable[str]) -> List[str]:
+    return [map_filename(build_folder, fname) for fname in fnames]
 
 
 def run_shell_command(arguments: List[str]) -> str:
@@ -178,10 +197,10 @@ def run_clang_tidy(options: Any, line_filters: Any, files: Iterable[str]) -> str
         command += ["-line-filter", json.dumps(line_filters)]
 
     if options.parallel:
-        commands = [list(command) + [f] for f in files]
+        commands = [list(command) + [map_filename(options.compile_commands_dir, f)] for f in files]
         output = run_shell_commands_in_parallel(commands)
     else:
-        command += files
+        command += map_filenames(options.compile_commands_dir, files)
         if options.dry_run:
             command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
             return " ".join(command)
@@ -334,8 +353,11 @@ def main() -> None:
     if options.suppress_diagnostics:
         warnings = extract_warnings(clang_tidy_output, base_dir=options.compile_commands_dir)
         for fname in warnings.keys():
-            print(f"Applying fixes to {fname}")
+            mapped_fname = map_filename(options.compile_commands_dir, fname)
+            print(f"Applying fixes to {mapped_fname}")
             apply_nolint(fname, warnings[fname])
+            if os.path.relpath(fname) != mapped_fname:
+                shutil.copyfile(fname, mapped_fname)
 
     pwd = os.getcwd() + "/"
     for line in clang_tidy_output.splitlines():
