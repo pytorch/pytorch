@@ -84,7 +84,7 @@ class QuantizeHandler(ABC):
         """
         for maybe_obs_node, _ in self.last_node.users.items():
             if maybe_obs_node.op == 'call_module':
-                maybe_obs = quantizer.modules[maybe_obs_node.name]
+                maybe_obs = quantizer.modules[maybe_obs_node.target]
                 if is_activation_post_process(maybe_obs):
                     return maybe_obs
         return None
