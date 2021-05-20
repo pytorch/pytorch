@@ -47,3 +47,11 @@ jobs:
       _TS_P: $(TS_PAT)
       _TS_SM_P: $(TS_SM_PAT)
     displayName: Run PyTorch Unit Tests
+
+  # Tests results are available outside the docker container since
+  # the current directory is mounted as a volume of the container.
+  - task: PublishTestResults@2
+    condition: always()
+    inputs:
+      testResultsFiles: '**\test-*.xml'
+      testRunTitle: 'Publish test results for Python'
