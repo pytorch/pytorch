@@ -1,12 +1,16 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/TensorTransformations.h> // flip
 
 #include <cmath>
 #include <iostream>
+
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec/vec.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/AtomicAddFloat.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace native {
 namespace {
@@ -535,6 +539,15 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
+void flip_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
+      [&] { cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return a;
+      });
+  });
+}
+
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -557,5 +570,7 @@ REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
 REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 }} // namespace at::native
