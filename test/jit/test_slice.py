@@ -138,42 +138,10 @@ class TestSlice(JitTestCase):
         self.assertTrue('Tuple' not in str(tuple_graph))
 
     def test_module_list_slicing(self):
-        class A(torch.nn.Module):
-            def __init__(self):
+        class Bar(torch.nn.Module):
+            def __init__(self, identifier: str):
                 super().__init__()
-                self.identifier = "model_A"
-
-            def forward(self):
-                return 0
-
-        class B(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.identifier = "model_B"
-
-            def forward(self):
-                return 0
-
-        class C(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.identifier = "model_C"
-
-            def forward(self):
-                return 0
-
-        class D(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.identifier = "model_D"
-
-            def forward(self):
-                return 0
-
-        class E(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.identifier = "model_E"
+                self.identifier = identifier
 
             def forward(self):
                 return 0
@@ -181,7 +149,8 @@ class TestSlice(JitTestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.test = torch.nn.ModuleList([A(), B(), C(), D(), E()])
+                module_list = [Bar("A"), Bar("B"), Bar("C"), Bar("D"), Bar("E")]
+                self.test = torch.nn.ModuleList(module_list)
 
             def forward(self):
                 return self.test[::-2], self.test[1:4:]
@@ -190,11 +159,11 @@ class TestSlice(JitTestCase):
         result1, result2 = scripted_foo()
 
         self.assertEqual(len(result1), 3)
-        self.assertEqual(result1[0].identifier, "model_E")
-        self.assertEqual(result1[1].identifier, "model_C")
-        self.assertEqual(result1[2].identifier, "model_A")
+        self.assertEqual(result1[0].identifier, "E")
+        self.assertEqual(result1[1].identifier, "C")
+        self.assertEqual(result1[2].identifier, "A")
 
         self.assertEqual(len(result2), 3)
-        self.assertEqual(result2[0].identifier, "model_B")
-        self.assertEqual(result2[1].identifier, "model_C")
-        self.assertEqual(result2[2].identifier, "model_D")
+        self.assertEqual(result2[0].identifier, "B")
+        self.assertEqual(result2[1].identifier, "C")
+        self.assertEqual(result2[2].identifier, "D")
