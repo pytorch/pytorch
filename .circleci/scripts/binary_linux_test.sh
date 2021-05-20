@@ -38,6 +38,10 @@ if [[ "$DESIRED_CUDA" == "cu112" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
 
+# Move debug wheels out of the the package dir so they don't get installed
+mkdir -p /tmp/debug_final_pkgs
+mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs
+
 # Install the package
 # These network calls should not have 'retry's because they are installing
 # locally and aren't actually network calls
