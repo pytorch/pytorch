@@ -3,10 +3,8 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
-import pprint
-import textwrap
 import types
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -53,6 +51,27 @@ class _ModuleProviderAction(Enum):
     DENY = 4
 
 
+class PackagingErrorReason(Enum):
+    """Listing of different reasons a dependency may fail to package.
+
+    This enum is used to provide good error messages when
+    :class:`PackagingError` is raised.
+    """
+    def __repr__(self):
+        return '<%s.%s>' % (self.__class__.__name__, self.name)
+
+    IS_EXTENSION_MODULE = "Module is a C extension module. torch.package supports Python modules only."
+    NO_DUNDER_FILE = "Module had no __file__ defined."
+    SOURCE_FILE_NOT_FOUND = (
+        "Module had a __file__, but we could not find it in your filesystem."
+    )
+    DEPENDENCY_RESOLUTION_FAILED = "Dependency resolution failed."
+    NO_ACTION = (
+        "Module did not match against any action pattern. Extern, mock, or intern it."
+    )
+    DENIED = "Module was denied by a pattern."
+
+
 @dataclass
 class _PatternInfo:
     """Holds :class:`PackageExporter`-specific info about how to execute matches against"""
@@ -82,62 +101,34 @@ class PackagingError(Exception):
     """This exception is raised when there is an issue with exporting a package.
     ``PackageExporter`` will attempt to gather up all the errors and present
     them to you at once.
-
-    To make error information more understandable, the exception message will
-    only show modules that you ``intern``'d or direct dependencies of
-    ``intern``'d modules. To see the full list of error modules, consult the
-    attributes on this exception.
-
-    Attributes:
-        denied (Set[str]): modules that have been marked as denied by the exporter.
-        broken (Dict[str, str]): modules for which the exporter could not retrieve source info,
-            along with the reason that retrieving it failed.
-        unhandled (Set[str]): modules for which there is no user-specified action.
     """
 
-    def __init__(
-        self,
-        denied: Set[str],
-        broken: Dict[str, str],
-        unhandled: Set[str],
-        include_filter: Set[str],
-    ):
-        self.denied = denied
-        self.broken = broken
-        self.unhandled = unhandled
+    def __init__(self, dependency_graph: DiGraph):
+        # Group errors by reason.
+        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
+        for module_name, attrs in dependency_graph.nodes.items():
+            error = attrs.get("error")
+            if error is None:
+                continue
+            if error == PackagingErrorReason.NO_ACTION:
+                assert "action" not in attrs
+            broken[error].append(module_name)
 
-        self.filtered_denied = {
-            module for module in self.denied if module in include_filter
-        }
-        self.filtered_broken = {
-            module: reason
-            for module, reason in self.broken.items()
-            if module in include_filter
-        }
-        self.filtered_unhandled = {
-            module for module in self.unhandled if module in include_filter
-        }
+        message = io.StringIO()
+        message.write("\n")
 
-        message = io.StringIO("Errors raised while packaging:")
+        for reason, module_names in broken.items():
+            message.write(f"* {reason.value}\n")
+            for module_name in module_names:
+                message.write(f"    {module_name}\n")
 
-        if self.filtered_denied:
-            message.write(
-                "\n\n* The following modules were detected as dependencies but have been denied:\n"
-                f"{textwrap.indent(pprint.pformat(self.filtered_denied), prefix='  ')}"
-            )
-        if self.filtered_broken:
-            message.write(
-                "\n\n* The following modules did not have source information. "
-                "Extern, mock, or refactor to remove the dependency:\n"
-                f"{textwrap.indent(pprint.pformat(self.filtered_broken), prefix='  ')}"
-            )
-        if self.filtered_unhandled:
-            message.write(
-                "\n\n* The following modules did not match against any patterns. "
-                "Intern, extern, or mock them:\n"
-                f"{textwrap.indent(pprint.pformat(self.filtered_unhandled), prefix='  ')}"
-            )
+                # Print additional context if it's provided.
+                error_context = dependency_graph.nodes[module_name].get("error_context")
+                if error_context is not None:
+                    message.write(f"      Context: {error_context}\n")
 
+        # Save the dependency graph so that tooling can get at it.
+        self.dependency_graph = dependency_graph
         super().__init__(message.getvalue())
 
 
@@ -396,11 +387,22 @@ node [shape=box];
                     module_name, action=pattern_info.action, provided=True
                 )
 
+                if pattern_info.action == _ModuleProviderAction.DENY:
+                    # Requiring a denied module just adds an error to the graph.
+                    self.dependency_graph.add_node(
+                        module_name, error=PackagingErrorReason.DENIED
+                    )
+
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
                 if pattern_info.action == _ModuleProviderAction.INTERN:
                     self._add_module_to_dependency_graph(module_name, dependencies)
                 return
+
+        # No patterns have matched. Explicitly add this as an error.
+        self.dependency_graph.add_node(
+            module_name, error=PackagingErrorReason.NO_ACTION
+        )
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
@@ -434,11 +436,20 @@ node [shape=box];
         if source is None:
             # Couldn't find a source!  Add it to our dependency graph as broken
             # and continue.
+            filename = getattr(module_obj, "__file__", None)
+            error_context = None
+            if filename is None:
+                packaging_error = PackagingErrorReason.NO_DUNDER_FILE
+            elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
+                packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
+            else:
+                packaging_error = PackagingErrorReason.SOURCE_FILE_NOT_FOUND
+                error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
                 is_package=is_package,
-                broken=True,
-                filename=getattr(module_obj, "__file__", None),
+                error=packaging_error,
+                error_context=error_context,
             )
             return
 
@@ -733,47 +744,12 @@ node [shape=box];
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
 
     def _validate_dependency_graph(self):
-        # 1. No modules should be denied.
-        # 2. No broken modules (we should have been able to retrieve source for everything interned).
-        # 3. All modules should have an associated action.
-        # 4. All patterns for which allow_empty=False have been matched at least once.
-        denied = set()
-        broken = {}
-        unhandled = set()
+        # 1. Check the graph for any errors inserted during dependency analysis.
         for module_name, attrs in self.dependency_graph.nodes.items():
-            if attrs.get("action") == _ModuleProviderAction.DENY:
-                denied.add(module_name)
+            if "error" in attrs:
+                raise PackagingError(self.dependency_graph)
 
-            if attrs.get("broken") is True:
-                filename = attrs.get("filename")
-                if filename is None:
-                    broken_reason = "Module does not have a __file__ attribute set."
-                elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
-                    broken_reason = (
-                        "Module is an C extension module, which is not supported in packaging. "
-                        "Extern/mock it, or refactor your code to avoid the dependency."
-                    )
-                else:
-                    broken_reason = f"Source file {filename} not found."
-                broken[module_name] = broken_reason
-
-            if attrs.get("action") is None:
-                unhandled.add(module_name)
-
-        if denied or broken or unhandled:
-            # build up the filter set
-            interns = set()
-            for module_name, attrs in self.dependency_graph.nodes.items():
-                if attrs.get("action") == _ModuleProviderAction.INTERN:
-                    interns.add(module_name)
-
-            include_filter = interns.copy()
-            for intern in interns:
-                for dep in self.dependency_graph.successors(intern):
-                    include_filter.add(dep)
-
-            raise PackagingError(denied, broken, unhandled, include_filter)
-
+        # 2. Check that all patterns for which allow_empty=False have been matched at least once.
         for pattern, pattern_info in self.patterns.items():
             if not pattern_info.allow_empty and not pattern_info.was_matched:
                 raise EmptyMatchError(
