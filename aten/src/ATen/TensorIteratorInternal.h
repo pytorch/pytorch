@@ -25,7 +25,7 @@ inline SmallVector<char*, 4> get_data_ptrs(
   for (int dim = 0; dim < ndim; dim++) {
     int64_t value = counter[dim];
     for (int arg = 0; arg < ntensors; arg++) {
-		ptrs[arg] += value * strides[dim * ntensors + arg];
+      ptrs[arg] += value * strides[dim * ntensors + arg];
     }
   }
   return ptrs;
