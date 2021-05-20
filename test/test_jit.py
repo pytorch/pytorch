@@ -10417,7 +10417,10 @@ dedent """
             def f5(a):
                 torch.cat([3])
 
-        with self.assertRaisesRegex(RuntimeError, r'Expected a value of type \'List\[int\]\' for argument \'size\' but instead found type \'List\[Any\]\''):
+        with self.assertRaisesRegex(RuntimeError, r'Expected a value of'
+                                    ' type \'List\[int\]\' for argument'
+                                    ' \'size\' but instead found type '
+                                    '\'List\[Any\]\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])

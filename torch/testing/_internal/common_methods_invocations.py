@@ -1658,6 +1658,12 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
 
     return inputs
 
+def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
+    N = 10
+    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
+               requires_grad=requires_grad)) for _ in range(1, N)]
+    return tensors
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -3029,7 +3035,12 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_tensor(lhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
         rhs = make_tensor(rhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-        sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+        if op_info.name == 'matmul':
+            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+        elif op_info.name == '__rmatmul__':
+            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
+        else:
+            raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
     return tuple(sample_inputs)
 
 
@@ -5037,6 +5048,17 @@ op_db: List[OpInfo] = [
            supports_gradgrad=False,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
+    OpInfo('nn.functional.leaky_relu',
+           aliases=None,
+           aten_name="leaky_relu",
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_leaky_relu,
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=True,
+           assert_autodiffed=True,
+           supports_gradgrad=True,
+           supports_out=False,
+           autodiff_nonfusible_nodes=["aten::leaky_relu"]),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -5313,6 +5335,23 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::mul'],),
+    OpInfo('__rmatmul__',
+           op=torch.Tensor.__rmatmul__,
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           dtypesIfROCM=floating_types_and(torch.half),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_matmul,
+           supports_out=False,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',),
+               # https://github.com/pytorch/pytorch/issues/55755
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        device_type='cpu', dtypes=(torch.float16,)),
+               # https://github.com/pytorch/pytorch/pull/57934#issuecomment-840091579
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        device_type='cuda', dtypes=(torch.bfloat16,)),)),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),

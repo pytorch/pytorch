@@ -79,7 +79,7 @@ class TestTyping(JitTestCase):
             tup1 = ("foo", torch.tensor(2))
             tup2 = ("bar", {"23": torch.tensor(3)})
             tup3 = ("baz", x)
-            l = list((tup1, tup2))
+            l = list((tup1, tup2))  # noqa: C410
             l.append(tup3)
             tup4 = l[0]
             if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
@@ -92,7 +92,7 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check("Any[]").run(graph)
+        FileCheck().check(r"(str, Any)[]").run(graph)
 
     def test_list_value_type_refinement_defaults_to_Any_list_comprehension(self):
         def fn(x):
@@ -100,7 +100,7 @@ class TestTyping(JitTestCase):
             tup2 = ("bar", {"23": torch.tensor(3)})
             tup3 = ("baz", x)
             l_ = [tup1, tup2]
-            l = [t for t in l_]
+            l = [t for t in l_]    # noqa: C416
             l.append(tup3)
             tup4 = l[0]
             if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
@@ -113,7 +113,9 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check("Any[]").run(graph)
+        print(graph)
+
+        FileCheck().check(r"(str, Any)[]").run(graph)
 
     # TODO: @gmagogsfm: Should we allow this?
     # def test_list_value_type_refinement_defaults_to_Any_list_append(self):
@@ -132,7 +134,7 @@ class TestTyping(JitTestCase):
     def test_dict_value_type_refinement_defaults_to_Any_dict_creation(self):
         def fn(x):
             d = dict(foo=torch.tensor(2),
-                bar={"23": torch.tensor(3)})
+                     bar={"23": torch.tensor(3)})
             d["baz"] = x
             t = d["foo"]
             if isinstance(t, torch.Tensor):

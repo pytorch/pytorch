@@ -1341,7 +1341,7 @@ struct to_ir {
       ListTypePtr lt = list_value->type()->expect<ListType>();
       auto unified = unifyTypes(
           lt->getElementType(), out->type(), /*default_to_any=*/true);
-      list_value->setType(*unified);
+      list_value->setType(ListType::create(*unified));
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
@@ -1404,20 +1404,10 @@ struct to_ir {
 
       DictTypePtr dt = dict_value->type()->expect<DictType>();
 
-      // Is the current value type the same type or a supertype of the
-      // old value type?
-      bool use_new = dt->getValueType()->isSubtypeOf(v->type());
-      // Is the old value type the same type or a supertype of the
-      // current value type?
-      bool use_old = v->type()->isSubtypeOf(dt->getValueType());
-
-      // If we have `use_old && use_new`, we just keep the old value
-      // type. Otherwise...
-      if (!use_old && use_new) {
-        dict_value->setType(DictType::create(k->type(), v->type()));
-      } else if (!use_old && !use_new) {
-        dict_value->setType(DictType::create(k->type(), AnyType::get()));
-      }
+      c10::optional<TypePtr> unified = unifyTypes(dt->getValueType(),
+                                                  v->type(),
+                                                  /*default_to_any=*/true);
+      dict_value->setType(DictType::create(k->type(), *unified));
 
       NamedValue self = NamedValue(loc, "self", dict_value);
       NamedValue input_k = NamedValue(loc, "", k);
@@ -3591,24 +3581,29 @@ struct to_ir {
     // greatest common supertype of all the list elements (defaulting to
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
     TypePtr elem_type = TensorType::get();
+    bool type_set = false;
     if (type_hint) {
       if (type_hint->kind() == TypeKind::ListType) {
         elem_type = type_hint->expectRef<ListType>().getElementType();
+        type_set = true;
       } else {
-        // If the type hint was not a List[T] throw an error
+        // If the type hint was not `List[T]`, throw an error
         throw ErrorReport(ll) << "Expected a List type hint but instead got "
                               << type_hint->repr_str();
       }
-    } else if (!values.empty()) {
+    }
+    if (!values.empty()) {
       std::stringstream ss;
       auto types = fmap(values, [](const Value* v) { return v->type(); });
-      auto maybe_elem_type = unifyTypeList(types, ss, /*default_to_any=*/true);
-      if (!maybe_elem_type) {
-        throw ErrorReport(ll) << ss.str();
-      }
-      // TODO: Can we delay this warning until first use of an
-      // unrefined value?
-      if (maybe_elem_type.value() == AnyType::get()) {
+      c10::optional<TypePtr> rhs_type = unifyTypeList(types, ss, /*default_to_any=*/true);
+
+      TORCH_INTERNAL_ASSERT(!type_set || elem_type != *rhs_type, "List "
+                            "annotation ", type_hint->repr_str(),
+                            " did not match the types of the given "
+                            "list elements (", (*rhs_type)->repr_str(),
+                            ")");
+
+      if (*rhs_type == AnyType::get()) {
         TORCH_WARN(
             "List consists of heterogeneous types, which means",
             " that it has been typed as `List[Any]`. To use "
@@ -3616,7 +3611,7 @@ struct to_ir {
             "necessary to add an `assert isinstance` statement "
             "before first use to trigger type refinement");
       }
-      elem_type = maybe_elem_type.value();
+      elem_type = *rhs_type;
     }
 
     Value* result =
