@@ -2110,6 +2110,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_mean_dim(self):
         self._test_mean_sum_dim(torch.mean)
 
+    def test_argmax_dim(self):
+        def test(f, args):
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}):
+                self.assertEqual(loop_out, batched_out)
+        B0 = 5
+        test(lambda x: torch.argmax(x), [torch.randn(B0)])
+        test(lambda x: torch.argmax(x), [torch.randn(B0, 2, 3)])
+        test(lambda x: torch.argmax(x, 0), [torch.randn(B0, 2, 3)])
+        test(lambda x: torch.argmax(x, -1), [torch.randn(B0, 2, 3)])
+        test(lambda x: torch.argmax(x, 2), [torch.randn(B0, 2, 3)])
+
     def _test_sum_mean(self, op):
         test = self._vmap_test
         B0, B1 = 5, 7

@@ -15,6 +15,7 @@ Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_d
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val);
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim);
+
 void vmapIncompatibleInplaceError(const char* schema_name);
 
 Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank);
