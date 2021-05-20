@@ -79,7 +79,10 @@ static void GenerateSizes2d(benchmark::internal::Benchmark* b) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(quantize_per_channel_2d)->Apply(GenerateSizes2d);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(quantize_per_channel_4d_contiguous)->Apply(GenerateSizes4d);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(quantize_per_channel_4d_channels_last)->Apply(GenerateSizes4d);
 BENCHMARK_MAIN();

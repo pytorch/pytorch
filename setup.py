@@ -21,9 +21,7 @@
 #     default behavior of autogoo and cmake build systems.)
 #
 #   CC
-#     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
-#     compiles, because distutils always uses CC to compile, even for C++
-#     files.
+#     the C/C++ compiler to use
 #
 # Environment variables for feature toggles:
 #
@@ -197,14 +195,10 @@ if sys.version_info < python_min_version:
 
 from setuptools import setup, Extension, find_packages
 from collections import defaultdict
-from distutils import core
-from distutils.core import Distribution
-from distutils.errors import DistutilsArgError
+from setuptools.dist import Distribution
 import setuptools.command.build_ext
 import setuptools.command.install
-import distutils.command.clean
-import distutils.command.sdist
-import distutils.sysconfig
+import setuptools.command.sdist
 import filecmp
 import shutil
 import subprocess
@@ -213,10 +207,11 @@ import json
 import glob
 import importlib
 import time
+import sysconfig
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag, build_type)
+                                     build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.generate_torch_version import get_torch_version
 
@@ -261,31 +256,31 @@ else:
     def report(*args):
         pass
 
+    # Make distutils respect --quiet too
+    setuptools.distutils.log.warn = report
+
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 caffe2_build_dir = os.path.join(cwd, "build")
-# lib/pythonx.x/site-packages
-rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
-# full absolute path to the dir above
-full_site_packages = distutils.sysconfig.get_python_lib()
+
 # CMAKE: full path to python library
 if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
-        distutils.sysconfig.get_config_var("prefix"),
-        distutils.sysconfig.get_config_var("VERSION"))
+        sysconfig.get_config_var("prefix"),
+        sysconfig.get_config_var("VERSION"))
     # Fix virtualenv builds
     # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
             sys.base_prefix,
-            distutils.sysconfig.get_config_var("VERSION"))
+            sysconfig.get_config_var("VERSION"))
 else:
     cmake_python_library = "{}/{}".format(
-        distutils.sysconfig.get_config_var("LIBDIR"),
-        distutils.sysconfig.get_config_var("INSTSONAME"))
-cmake_python_include_dir = distutils.sysconfig.get_python_inc()
+        sysconfig.get_config_var("LIBDIR"),
+        sysconfig.get_config_var("INSTSONAME"))
+cmake_python_include_dir = sysconfig.get_path("include")
 
 
 ################################################################################
@@ -491,9 +486,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
-        system_c_flags = str(distutils.sysconfig.get_config_var('CFLAGS'))
-        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
-            os.environ['CC'] = str(distutils.sysconfig.get_config_var('CC'))
+        c_flags = str(os.getenv('CFLAGS', ''))
+        if IS_LINUX and '-fstack-clash-protection' in c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = str(os.environ['CC'])
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -547,7 +542,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join("torch", rel_site_packages, filename)
+            relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
+            src = os.path.join("torch", relative_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
@@ -559,10 +555,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
                 i += 1
-        distutils.command.build_ext.build_ext.build_extensions(self)
+        setuptools.command.build_ext.build_ext.build_extensions(self)
+
 
     def get_outputs(self):
-        outputs = distutils.command.build_ext.build_ext.get_outputs(self)
+        outputs = setuptools.command.build_ext.build_ext.get_outputs(self)
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
@@ -644,7 +641,15 @@ class install(setuptools.command.install.install):
         super().run()
 
 
-class clean(distutils.command.clean.clean):
+class clean(setuptools.Command):
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
     def run(self):
         import glob
         import re
@@ -665,10 +670,8 @@ class clean(distutils.command.clean.clean):
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
 
-        super().run()
 
-
-class sdist(distutils.command.sdist.sdist):
+class sdist(setuptools.command.sdist.sdist):
     def run(self):
         with concat_license_files():
             super().run()
@@ -728,8 +731,6 @@ def configure_extension_build():
             # https://bugs.llvm.org/show_bug.cgi?id=21629
             '-Wno-missing-braces',
         ]
-        if check_env_flag('WERROR'):
-            extra_compile_args.append('-Werror')
 
     library_dirs.append(lib_path)
 
@@ -863,14 +864,11 @@ if __name__ == '__main__':
     # Parse the command line and check the arguments
     # before we proceed with building deps and setup
     dist = Distribution()
-    dist.script_name = sys.argv[0]
-    dist.script_args = sys.argv[1:]
     try:
-        ok = dist.parse_command_line()
-    except DistutilsArgError as msg:
-        raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
-    if not ok:
-        sys.exit()
+        dist.parse_command_line()
+    except setuptools.distutils.errors.DistutilsArgError as e:
+        print(e)
+        sys.exit(1)
 
     if RUN_BUILD_DEPS:
         build_deps()
@@ -1025,6 +1023,9 @@ if __name__ == '__main__':
                 'utils/benchmark/utils/*.cpp',
                 'utils/benchmark/utils/valgrind_wrapper/*.cpp',
                 'utils/benchmark/utils/valgrind_wrapper/*.h',
+                'utils/model_dump/skeleton.html',
+                'utils/model_dump/code.js',
+                'utils/model_dump/*.mjs',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',

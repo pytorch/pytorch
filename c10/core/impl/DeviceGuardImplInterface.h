@@ -12,6 +12,9 @@
 
 namespace c10 {
 
+// Forward declaration
+class DataPtr;
+
 /**
  * Flags defining the behavior of events.
  *
@@ -27,16 +30,16 @@ namespace c10 {
  * should map one-to-one with actual event flags for those backends.
  */
 enum class EventFlag {
-    PYTORCH_DEFAULT,
-    BACKEND_DEFAULT,
-    // CUDA flags
-    CUDA_EVENT_DEFAULT,
-    CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
-    // HIP flags
-    HIP_EVENT_DEFAULT,
-    HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
-    // FOR TESTING ONLY
-    INVALID
+  PYTORCH_DEFAULT,
+  BACKEND_DEFAULT,
+  // CUDA flags
+  CUDA_EVENT_DEFAULT,
+  CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
+  // HIP flags
+  HIP_EVENT_DEFAULT,
+  HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
+  // FOR TESTING ONLY
+  INVALID
 };
 
 namespace impl {
@@ -110,53 +113,58 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Get a stream from the global pool for a given device.
+   */
+  virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
+      const {
+    TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
-/**
- * Destroys the given event.
- */
-  virtual void destroyEvent (
-    void* event,
-    const DeviceIndex device_index) const noexcept { }
+  /**
+   * Destroys the given event.
+   */
+  virtual void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept {}
 
-/**
- * Increments the event's version and enqueues a job with this version
- * in the stream's work queue. When the stream process that job
- * it notifies all streams waiting on / blocked by that version of the
- * event to continue and marks that version as recorded.
- * */
+  /**
+   * Increments the event's version and enqueues a job with this version
+   * in the stream's work queue. When the stream process that job
+   * it notifies all streams waiting on / blocked by that version of the
+   * event to continue and marks that version as recorded.
+   * */
   virtual void record(
-    void** event,
-    const Stream& stream,
-    const DeviceIndex device_index,
-    const c10::EventFlag flag) const {
+      void** event,
+      const Stream& stream,
+      const DeviceIndex device_index,
+      const c10::EventFlag flag) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
-/**
- * Does nothing if the event has not been scheduled to be recorded.
- * If the event was previously enqueued to be recorded, a command
- * to wait for the version of the event that exists at the time of this call
- * is inserted in the stream's work queue.
- * When the stream reaches this command it will stop processing
- * additional commands until that version of the event is marked as recorded.
- */
-  virtual void block(
-    void* event,
-    const Stream& stream) const {
+  /**
+   * Does nothing if the event has not been scheduled to be recorded.
+   * If the event was previously enqueued to be recorded, a command
+   * to wait for the version of the event that exists at the time of this call
+   * is inserted in the stream's work queue.
+   * When the stream reaches this command it will stop processing
+   * additional commands until that version of the event is marked as recorded.
+   */
+  virtual void block(void* event, const Stream& stream) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
-/**
- * Returns true if (and only if)
- *  (1) the event has never been scheduled to be recorded
- *  (2) the current version is marked as recorded.
- * Returns false otherwise.
- */
+  /**
+   * Returns true if (and only if)
+   *  (1) the event has never been scheduled to be recorded
+   *  (2) the current version is marked as recorded.
+   * Returns false otherwise.
+   */
   virtual bool queryEvent(void* event) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
@@ -167,6 +175,14 @@ struct C10_API DeviceGuardImplInterface {
    * you should report that there are zero available devices.
    */
   virtual DeviceIndex deviceCount() const noexcept = 0;
+
+  /**
+   * Ensure the caching allocator (if any) is aware that the given DataPtr is
+   * being used on the given stream, and that it should thus avoid recycling the
+   * DataPtr until all work on that stream is done.
+   */
+  virtual void recordDataPtrOnStream(const c10::DataPtr&, const Stream&) const {
+  }
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
@@ -210,23 +226,21 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
 
   // Event-related functions
-  void record(void** event,
-    const Stream& stream,
-    const DeviceIndex device_index,
-    const EventFlag flag) const override {
+  void record(
+      void** event,
+      const Stream& stream,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.");
   }
-  void block(
-    void* event,
-    const Stream& stream) const override {
+  void block(void* event, const Stream& stream) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.")
   }
   bool queryEvent(void* event) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.")
   }
-  void destroyEvent(
-    void* event,
-    const DeviceIndex device_index) const noexcept override { }
+  void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept override {}
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so
@@ -244,7 +258,8 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
 // putting them in the registry.  This is done by deleting the destructor
 // on DeviceGuardImplInterface.
 extern C10_API std::atomic<const DeviceGuardImplInterface*>
-device_guard_impl_registry[static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+    device_guard_impl_registry[static_cast<size_t>(
+        DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
 // I can't conveniently use c10/util/Registry.h for the following reason:
 // c10/util/Registry.h gives me a slow way of Create'ing a object of some
@@ -255,12 +270,13 @@ device_guard_impl_registry[static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVI
 // into device_guard_impl_registry.
 
 class C10_API DeviceGuardImplRegistrar {
-public:
+ public:
   DeviceGuardImplRegistrar(DeviceType, const DeviceGuardImplInterface*);
 };
 
-#define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl) \
-  static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE(g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
+#define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl)              \
+  static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE( \
+      g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   // Two adjacent int16_t fields DeviceType and DeviceIndex has field access
@@ -283,4 +299,5 @@ inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
 
-}} // namespace c10::impl
+} // namespace impl
+} // namespace c10

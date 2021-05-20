@@ -4,15 +4,18 @@ set -ex
 
 install_magma() {
     # "install" hipMAGMA into /opt/rocm/magma by copying after build
-    git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
+    git clone https://bitbucket.org/icl/magma.git
     pushd magma
-    cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
+    git checkout 878b1ce02e9cfe4a829be22c8f911e9c0b6bd88f
+    cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
     echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
     echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
     echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908 --gpu-max-threads-per-block=256' >> make.inc
+    # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
+    sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
     export PATH="${PATH}:/opt/rocm/bin"
     make -f make.gen.hipMAGMA -j $(nproc)
-    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
     make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
     popd
     mv magma /opt/rocm

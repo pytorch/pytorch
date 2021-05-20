@@ -32,15 +32,21 @@ namespace autograd {
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
+  bool shared_view_info,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
+      shared_view_info_(shared_view_info),
       creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+  }
+  if (shared_view_info_) {
+    TORCH_INTERNAL_ASSERT(backward_info_.has_value(), "Shared view info require a backward view info.");
+    TORCH_INTERNAL_ASSERT(!forward_info_.has_value(), "Shared view info require forward view info to be empty")
   }
 }
 
@@ -105,6 +111,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
@@ -116,8 +123,10 @@ struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcreteAutogradMetaFactory meta_factory;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
 }
@@ -165,10 +174,12 @@ namespace impl {
 
   void create_cpp_hook(const Variable& self) {
     auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
+    // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
     add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto fn = self.grad_fn();
     if (fn) {
       fn->add_pre_hook(std::move(hook_ptr));
@@ -279,6 +290,7 @@ namespace impl {
   }
 
   namespace {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
   }
 
@@ -304,16 +316,6 @@ namespace impl {
 
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  void set_pyobj(const Variable& self, PyObject* pyobj) {
-    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
-    self.unsafeGetTensorImpl()->set_pyobj(pyobj);
-  }
-
-  PyObject* pyobj(const Variable& self) {
-    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
-    return self.unsafeGetTensorImpl()->pyobj();
-  }
 
   AutogradMeta* get_autograd_meta(const Variable& self) {
     // NB: could return nullptr
@@ -356,7 +358,9 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 VariableHooks variableHooks;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
 Tensor VariableHooks::variable_data(const Tensor& self) const {
@@ -510,6 +514,7 @@ const Tensor& VariableHooks::base(const Tensor& self) const {
 }
 
 namespace {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::string singleton_string;
 }
 
@@ -523,6 +528,7 @@ const std::string& VariableHooks::name(const Tensor& self) const {
 }
 
 namespace {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 
@@ -670,12 +676,7 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 
-      if (creation_meta == CreationMeta::NO_GRAD_MODE) {
-        // TODO: remove this before 1.9 once all code is properly updated
-        TORCH_WARN(msg);
-      } else {
-        TORCH_CHECK(false, msg);
-      }
+      TORCH_CHECK(false, msg);
     }
 
     // We warn only once per view

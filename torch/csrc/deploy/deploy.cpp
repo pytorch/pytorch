@@ -19,7 +19,8 @@ Package InterpreterManager::load_package(const std::string& uri) {
   return Package(uri, this);
 }
 
-Package InterpreterManager::load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+Package InterpreterManager::load_package(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
   return Package(reader, this);
 }
 
@@ -44,6 +45,7 @@ InterpreterSession::~InterpreterSession() {
 
 void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
   if (!on_this_interpreter) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     for (auto& interp : manager_->all_instances()) {
       unload(&interp);
     }
@@ -73,6 +75,7 @@ ReplicatedObj InterpreterSession::create_movable(Obj obj) {
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char library_name[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(library_name);
   TORCH_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
@@ -98,6 +101,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
   assert(new_interpreter_impl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
+      // NOLINTNEXTLINE(modernize-redundant-void-arg)
       ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
 }
 
@@ -114,6 +118,7 @@ int LoadBalancer::acquire() {
   size_t minusers = SIZE_MAX;
   int min_idx = 0;
   for (size_t i = 0; i < n_; ++i, ++last) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (last >= n_) {
       last = 0;
     }

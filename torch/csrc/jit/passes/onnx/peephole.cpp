@@ -667,6 +667,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Node* origLogSoftmaxNode;
 
       // Check for patterns especially in cases with autocasting enabled

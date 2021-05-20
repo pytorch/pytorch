@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -33,7 +34,7 @@ enum class OpType : std::uint8_t {
   ALLREDUCE_COALESCED = 2,
   REDUCE = 3,
   ALLGATHER = 4,
-  ALLGATHER_BASE = 5,
+  _ALLGATHER_BASE = 5,
   ALLGATHER_COALESCED = 6,
   GATHER = 7,
   SCATTER = 8,
@@ -104,6 +105,7 @@ class ProcessGroup : public torch::CustomClassHolder {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
+    // If work is not supposed to have result, we return empty list.
     virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
@@ -227,14 +229,15 @@ class ProcessGroup : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  // Note: this function will be deprecated in near future.
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
   // * do not add dependencies on this function,
-  // * do not implement it in your ProcessGroup, implement allgather_base
+  // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
@@ -328,6 +331,9 @@ class ProcessGroup : public torch::CustomClassHolder {
   const int size_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+  // Debug level setting. It is parsed once when ProcessGroup is constructed and
+  // remains the same across use of this process group.
+  DistributedDebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

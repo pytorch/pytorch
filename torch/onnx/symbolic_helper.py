@@ -108,7 +108,7 @@ def _maybe_get_scalar(value):
 
 
 def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() not in ('onnx::Constant', 'prim::Constant'):
+    if not _is_constant(value):
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
@@ -185,6 +185,9 @@ def _is_none(x):
 
 def _is_value(x):
     return isinstance(x, torch._C.Value)
+
+def _is_constant(value):
+    return not _is_value(value) or value.node().kind() in ('onnx::Constant', 'prim::Constant')
 
 def _is_tensor(x):
     return x.type().isSubtypeOf(torch._C.TensorType.get())

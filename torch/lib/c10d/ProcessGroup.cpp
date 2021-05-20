@@ -17,8 +17,8 @@ std::string opTypeToString(OpType opType) {
       return "REDUCE";
     case OpType::ALLGATHER:
       return "ALLGATHER";
-    case OpType::ALLGATHER_BASE:
-      return "ALLGATHER_BASE";
+    case OpType::_ALLGATHER_BASE:
+      return "_ALLGATHER_BASE";
     case OpType::ALLGATHER_COALESCED:
       return "ALLGATHER_COALESCED";
     case OpType::GATHER:
@@ -62,6 +62,9 @@ ProcessGroup::Work::Work(
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->isActive()) {
+      // Work events follow a future like pattern and can potentially be marked
+      // as complete by different threads, so explicitly set as async event.
+      recordingFunction->_setAsync();
       // Passing input tensor to recordFunction allows for shape information in
       // profiling output.
       std::vector<c10::IValue> inputs;
@@ -168,7 +171,8 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
-ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
+ProcessGroup::ProcessGroup(int rank, int size)
+    : rank_(rank), size_(size), dist_debug_level_(parseDistDebugLevel()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 

@@ -6,7 +6,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
 
 Tensor& glu_out(const Tensor& self, int64_t dim, Tensor &result) {

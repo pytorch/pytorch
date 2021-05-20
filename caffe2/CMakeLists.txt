@@ -421,8 +421,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     )
   endif()
 
@@ -479,7 +479,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/InplaceOrViewType.cpp"
+    "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -516,13 +516,29 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   list(APPEND LIBTORCH_CMAKE_SRCS "")
 
+  list(APPEND LITE_EAGER_SYMOBLICATION_SRCS "")
+  if(USE_SOURCE_DEBUG_ON_MOBILE)
+    append_filelist("libtorch_lite_eager_symbolication" LITE_EAGER_SYMOBLICATION_SRCS)
+    # For source debug on lite interpreter, we have to add dependency on pickling
+    # but references to read/writeArchiveAndTensor is not built for mobile
+    # so this condition specifically says we are building for source debug
+    # on mobile.
+    if(BUILD_LITE_INTERPRETER)
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
+    endif()
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
+      set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+
       # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
       set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
@@ -554,14 +570,18 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
+    list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   endif()
 
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
@@ -580,6 +600,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
@@ -635,6 +657,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   endif()
 
   if(USE_MLCOMPUTE)
@@ -769,6 +792,15 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+
+
+if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
+  # To enable debug fission we need to build libtorch_cpu with debug info on,
+  # but this increases link time and peak memory usage if we use the
+  # REL_WITH_DEB_INFO env var since that enables it for everything, but it's
+  # only really necessary for libtorch_cpu.
+  target_compile_options(torch_cpu PRIVATE "-g")
+endif()
 
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
@@ -925,8 +957,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
     COMMAND
-    "${PYTHON_EXECUTABLE}"
-    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
     --yaml_file_path "${SELECTED_OP_LIST}"
     --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
     WORKING_DIRECTORY "${TORCH_ROOT}")
@@ -1028,6 +1059,10 @@ endif()
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/nnc
+        ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
@@ -1544,6 +1579,10 @@ if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
+if(BUILD_CPP_BENCHMARKS)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp ${PROJECT_BINARY_DIR}/bin)
+endif()
+
 if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
@@ -1693,8 +1732,9 @@ if(BUILD_PYTHON)
   # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
-      from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      import sysconfig
+      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
+      print(relative_site_packages)
   ")
   file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
@@ -1705,9 +1745,21 @@ if(BUILD_PYTHON)
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
   # fallback to ".pyd" if windows and ".so" for all others.
   pycmd(PY_EXT_SUFFIX "
-      from distutils import sysconfig
-      ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
-      print(ext_suffix if ext_suffix else '')
+      def get_ext_suffix():
+          import sys
+          if sys.version_info < (3, 8) and sys.platform == 'win32':
+              # Workaround for https://bugs.python.org/issue39825
+              import _imp
+              return _imp.extension_suffixes()[0]
+          else:
+              import sysconfig
+              return sysconfig.get_config_var('EXT_SUFFIX')
+
+      suffix = get_ext_suffix()
+      if suffix is not None:
+          print(suffix)
+      else:
+          print()
   ")
   if("${PY_EXT_SUFFIX}" STREQUAL "")
     if(MSVC)
@@ -1717,6 +1769,11 @@ if(BUILD_PYTHON)
     endif()
   endif()
 
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+    set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  endif()
   # Allow different install locations for libcaffe2
   # For setuptools installs (that all build Python), install libcaffe2 into
   # site-packages, alongside the torch libraries. The pybind11 library needs

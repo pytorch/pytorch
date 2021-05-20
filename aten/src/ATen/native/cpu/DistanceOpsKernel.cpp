@@ -159,6 +159,7 @@ struct Dist {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
@@ -439,9 +440,13 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
 }}  // namespace at::native

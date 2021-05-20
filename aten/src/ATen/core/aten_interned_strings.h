@@ -23,7 +23,7 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _amp_foreach_non_finite_check_and_unscale_) \
-_(aten, _amp_update_scale) \
+_(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
@@ -297,6 +297,7 @@ _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dsplit) \
 _(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
@@ -370,6 +371,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
@@ -439,6 +441,7 @@ _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
+_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -675,6 +678,7 @@ _(aten, take) \
 _(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
+_(aten, tanh_) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
@@ -747,6 +751,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vsplit) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
