@@ -1658,6 +1658,12 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
 
     return inputs
 
+def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
+    N = 10
+    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
+               requires_grad=requires_grad)) for _ in range(1, N)]
+    return tensors
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -5037,6 +5043,17 @@ op_db: List[OpInfo] = [
            supports_gradgrad=False,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
+    OpInfo('nn.functional.leaky_relu',
+           aliases=None,
+           aten_name="leaky_relu",
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_leaky_relu,
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=True,
+           assert_autodiffed=True,
+           supports_gradgrad=True,
+           supports_out=False,
+           autodiff_nonfusible_nodes=["aten::leaky_relu"]),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
