@@ -177,20 +177,31 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
     def world_size(self) -> int:
         return 2
 
-    def _create_wrapper_pg(self):
+    def _create_wrapper_pg(self, timeout=10.0):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=timeout)
         )
-        _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
         pg = c10d.create_process_group_wrapper(
             _pg,
             "unused",
             store,
             self.rank,
             self.world_size,
+            timeout=timeout,
         )
         return pg
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_hang(self):
+        pg = self._create_wrapper_pg(timeout=2.0)
+        self._test_collective_hang(pg)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
