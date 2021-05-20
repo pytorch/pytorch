@@ -394,6 +394,42 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 10, 50, 100, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-6)
 
+    def test_conv_tbc(self):
+        from torch.nn.modules.utils import _single
+
+        class ConvTBC(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, kernel_size, padding=0):
+                super(ConvTBC, self).__init__()
+                self.in_channels = in_channels
+                self.out_channels = out_channels
+                self.kernel_size = _single(kernel_size)
+                self.padding = _single(padding)
+
+                self.weight = torch.nn.Parameter(
+                    torch.Tensor(self.kernel_size[0], in_channels, out_channels)
+                )
+                self.bias = torch.nn.Parameter(torch.Tensor(out_channels))
+                self.reset_parameters()
+
+            def reset_parameters(self):
+                torch.nn.init.xavier_normal_(self.weight)
+                torch.nn.init.zeros_(self.bias)
+
+            def conv_tbc(self, input):
+                return torch.conv_tbc(
+                    input.contiguous(), self.weight, self.bias, self.padding[0]
+                )
+
+            def forward(self, input):
+                return self.conv_tbc(input)
+
+        in_channels = 3
+        out_channels = 5
+        kernel_size = 5
+        model = ConvTBC(in_channels, out_channels, kernel_size, padding=0)
+        x = torch.randn(10, 7, in_channels, requires_grad=True)
+        self.run_test(model, (x,), atol=1e-5)
+
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
             def __init__(self, ):
