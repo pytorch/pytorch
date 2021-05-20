@@ -214,8 +214,11 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(_aminmax_all_stub, &_aminmax_all_kernel_impl);
 
 }}

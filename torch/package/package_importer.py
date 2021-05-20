@@ -12,7 +12,7 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
+from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from ._importlib import (
     _calc___package__,
@@ -44,7 +44,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
-    modules: Dict[str, Optional[types.ModuleType]]
+    modules: Dict[str, types.ModuleType]
 
     def __init__(
         self,
@@ -225,17 +225,20 @@ class PackageImporter(Importer):
 
     def file_structure(
         self, *, include: "GlobPattern" = "**", exclude: "GlobPattern" = ()
-    ) -> Folder:
+    ) -> Directory:
         """Returns a file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
                 for the names of the files to be inluded in the zipfile representation. This can also be
-                a glob-style pattern, as described in exporter's :meth:`mock`
+                a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+
+        Returns:
+            :class:`Directory`
         """
-        return _create_folder_from_file_list(
+        return _create_directory_from_file_list(
             self.filename, self.zip_reader.get_all_records(), include, exclude
         )
 
@@ -340,7 +343,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore[union-attr]
+                path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None

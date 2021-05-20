@@ -405,6 +405,7 @@ SugaredValuePtr SimpleValue::getitem(
   Graph& g = *m.graph();
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
@@ -532,6 +533,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (SugaredValuePtr sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();

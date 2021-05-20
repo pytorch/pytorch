@@ -42,11 +42,14 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void expm1_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::expm1(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "expm1_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::expm1(a);
+        });
+      });
 }
 
 // We manually overload rsqrt because std::rsqrt does not work with complex types.
@@ -63,12 +66,15 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
 }
 
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-      return rsqrt_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "rsqrt_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
+          return rsqrt_wrapper(a);
+        });
+      });
 }
 
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
@@ -174,9 +180,6 @@ REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 

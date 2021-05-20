@@ -7,6 +7,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMS) {
   Eigen::ArrayXXf input(5, 5);
   input << 10, 10, 50, 60, 0.5, 11, 12, 48, 60, 0.7, 8, 9, 40, 50, 0.6, 100,
@@ -60,6 +61,7 @@ TEST(UtilsNMSTest, TestNMS) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMS1) {
   Eigen::ArrayXXf proposals(53, 4);
   proposals << 350.9821, 161.8200, 369.9685, 205.2372, 250.5236, 154.2844,
@@ -112,6 +114,7 @@ TEST(UtilsNMSTest, TestNMS1) {
   EXPECT_EQ(output_gt, cur_out);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestSoftNMS) {
   Eigen::ArrayXXf input(5, 5);
   input.row(0) << 5.18349426e+02, 1.77783920e+02, 9.06085266e+02,
@@ -234,6 +237,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // Same inputs as TestNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -296,6 +300,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
   // Same inputs as TestSoftNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -427,6 +432,7 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
   {
     // One box is fully within another box, the angle is irrelavant

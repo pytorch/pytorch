@@ -17,6 +17,10 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
+from .graph_module import (
+    FusedGraphModule
+)
+
 from .fusion_patterns import *  # noqa: F401,F403
 
 from .quantization_types import Pattern
@@ -56,7 +60,8 @@ class Fuser:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
-        model = GraphModule(input_root, self.fused_graph)
+        preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
+        model = FusedGraphModule(input_root, self.fused_graph, preserved_attributes)
         return model
 
     def _find_matches(

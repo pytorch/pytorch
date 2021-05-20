@@ -19,6 +19,7 @@ int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
    */
   auto dim = sizes.size();
   int64_t nvalues = 1;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i=sparse_dim; i<dim; i++) {
     nvalues *= sizes[i];
   }
@@ -130,6 +131,7 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
         pool_index += stride * indices_row[i];
       }
     }
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     while (pool_index >= pools.size()) {
       pools.emplace_back();  // create empty pool
     }
@@ -468,6 +470,7 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         /* Compute tmp = - sum_j output_j * grad_j */
         for (int64_t i : pool_indices) {
           auto out_values_row = out_values_accessor[i];
+          // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
           auto values_row = values_accessor[i];
           auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
           auto j = low - grad_offsets.begin();
