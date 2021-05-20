@@ -141,12 +141,35 @@ TEST(RunTimeTest, DelegateException) {
   inputs.emplace_back(torch::rand({2, 4}));
   inputs.emplace_back(torch::rand({13, 9}));
 
-  const std::string error_pattern(
-      ".*(self.A0.forward).*(self.__backend.execute).*(self.AA0.forward).*(return x \\+ y).*");
-  ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
-  ASSERT_THROWS_WITH_MESSAGE(
-      mlm.forward(inputs),
-      "Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)");
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.B0.forward(x)
+             ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in FunctionName_UNKNOWN
+                typed_inputs: List[Any] = [x, y, ]
+                if self.__backend.is_available() :
+                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
+                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+                  assert isinstance(_0, Tensor)
+                  return _0
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.AA0.forward(x, y) + 3
+             ~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
 }
 } // namespace mobile
 } // namespace jit

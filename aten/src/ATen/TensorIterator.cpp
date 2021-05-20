@@ -764,18 +764,28 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   }
 }
 
+#define BINARY_FLOAT_OP_CONFIG()                \
+  TensorIteratorConfig()                        \
+    .set_check_mem_overlap(true)                \
+    .allow_cpu_scalars(true)                    \
+    .promote_inputs_to_common_dtype(true)       \
+    .cast_common_dtype_to_outputs(true)         \
+    .enforce_safe_casting_to_output(true)       \
+    .promote_integer_inputs_to_float(true)
+
 // Helper to construct a binary op that promotes integer inputs to float.
 void TensorIteratorBase::build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
-  build(TensorIteratorConfig()
-     .set_check_mem_overlap(true)
-     .add_output(out)
-     .add_input(a)
-     .add_input(b)
-     .allow_cpu_scalars(true)
-     .promote_inputs_to_common_dtype(true)
-     .cast_common_dtype_to_outputs(true)
-     .enforce_safe_casting_to_output(true)
-     .promote_integer_inputs_to_float(true));
+  build(BINARY_FLOAT_OP_CONFIG()
+        .add_output(out)
+        .add_input(a)
+        .add_input(b));
+}
+
+void TensorIteratorBase::build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
+  build(BINARY_FLOAT_OP_CONFIG()
+        .add_borrowed_output(out)
+        .add_borrowed_input(a)
+        .add_borrowed_input(b));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -826,6 +836,12 @@ void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
+  return iter;
+}
+
+TensorIterator TensorIterator::borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+  TensorIterator iter;
+  iter.build_borrowing_binary_op(out, a, b);
   return iter;
 }
 
