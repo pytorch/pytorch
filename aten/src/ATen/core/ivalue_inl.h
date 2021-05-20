@@ -230,6 +230,7 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
   ConstantString(c10::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
   static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(const char* str_);
 
   const std::string& string() const {
     return str_;

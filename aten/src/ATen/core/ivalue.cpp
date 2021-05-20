@@ -44,6 +44,11 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::string(str_));
 }
 
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    const char* str_) {
+  return c10::make_intrusive<ConstantString>(std::string(str_));
+}
+
 bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
   return lhs.elements_.size() == rhs.elements_.size() &&
       // see [container equality]
