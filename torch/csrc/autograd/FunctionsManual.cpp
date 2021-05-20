@@ -1145,7 +1145,7 @@ Tensor infinitely_differentiable_mish_backward(
     const Tensor& input) {
   const Tensor sigmoid = input.sigmoid();
   const Tensor softplus = input.softplus();
-  const Tensor tanh_softplus = input.tanh(softplus);
+  const Tensor tanh_softplus = softplus.tanh();
   return grad_output * (tanh_softplus + input * sigmoid * (1.0 - tanh_softplus * tanh_softplus));
 }
 
