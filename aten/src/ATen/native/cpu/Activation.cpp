@@ -642,7 +642,7 @@ void mish_kernel(TensorIteratorBase& iter) {
                 return static_cast<scalar_t>(x * std::tanh(std::log1p(std::exp(x))));
             },
             [](Vec256<scalar_t> x_vec) -> Vec {
-              return Vec::blendv(x_vec * x_vec.exp().log1p().tanh());
+              return x_vec * x_vec.exp().log1p().tanh();
             });
       });
 }
@@ -665,7 +665,7 @@ void mish_backward_kernel(TensorIterator& iter) {
                   kOneVec / (kOneVec + x_vec.neg().exp());
               const Vec256<scalar_t> tanh_softplus =
                   x_vec.exp().log1p().tanh();
-              return Vec::blendv(dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus)));
+              return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
             });
       });
 }
