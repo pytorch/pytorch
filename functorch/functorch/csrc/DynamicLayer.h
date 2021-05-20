@@ -31,6 +31,10 @@ TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 
+// NB: Not lock safe, you should only call this from Python where the GIL will
+// prevent race conditions.
+TORCH_API bool areTransformsActive();
+
 // NB: not lock safe. TODO: does it need a lock?
 TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 
