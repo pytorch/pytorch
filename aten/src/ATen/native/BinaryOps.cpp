@@ -105,6 +105,16 @@ TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
+    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    build_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
+    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    build_binary_op(maybe_get_output(), self, other);
+}
+
 } // namespace meta
 
 
@@ -243,6 +253,8 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tens
 
 CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
 CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
@@ -986,23 +998,6 @@ Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
-}
-
-Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
-
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmax_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor fmax(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
-
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmax_stub(iter.device_type(), iter);
-  return iter.output();
 }
 
 // binary min, alias for minimum
