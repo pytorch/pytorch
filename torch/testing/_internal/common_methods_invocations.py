@@ -2913,7 +2913,7 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples + [vec_sample]
 
-def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     # Shapes for 2D Tensors
@@ -2926,9 +2926,8 @@ def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
     args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
 
     def generator():
-        for shapes, args in zip([shapes_2d, shapes_3d], [args_2d, args_3d]):
-            for shape, arg in product(shapes, args):
-                yield SampleInput(make_arg(shape), args=arg)
+        for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
+            yield SampleInput(make_arg(shape), args=arg)
 
     return list(generator())
 
@@ -4423,11 +4422,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_diagonal),
+           sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           sample_inputs_func=sample_inputs_diagonal),
+           sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
