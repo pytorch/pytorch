@@ -1620,7 +1620,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         "all_to_all",             // colName
         inputTensor.numel(),      // inSize
         outputTensor.numel(),     // outSize
-        at::kByte,                // dType
+        inputTensor.scalar_type(),// dType
         std::vector<int64_t>(),   // inSplitSizes
         std::vector<int64_t>());  // outSplitSizes
 
@@ -1647,13 +1647,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<at::Tensor> outputTensors = {outputTensor};
 
     RECORD_PARAM_COMMS(
-        rank_,                 // rank
-        "all_to_allv",         // colName
-        inputTensor.numel(),   // inSize
-        outputTensor.numel(),  // outSize
-        at::kByte,             // dType
-        inputSplitSizes,       // inSplitSizes
-        outputSplitSizes);     // outSplitSizes
+        rank_,                    // rank
+        "all_to_allv",            // colName
+        inputTensor.numel(),      // inSize
+        outputTensor.numel(),     // outSize
+        inputTensor.scalar_type(),// dType
+        inputSplitSizes,          // inSplitSizes
+        outputSplitSizes);        // outSplitSizes
 
     return collective(
         inputTensors,

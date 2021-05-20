@@ -203,27 +203,32 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def setUp(self):
         super(ProcessGroupGlooWrapperTest, self).setUp()
 
-    def opts(self, threads=2):
+    def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
-        opts._timeout = 5.0
+        opts._timeout = timeout
         opts._devices = [create_device(interface=LOOPBACK)]
         opts._threads = threads
         return opts
 
-    def _create_wrapper_pg(self):
+    def _create_wrapper_pg(self, timeout=10.0):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
-        _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(timeout=timeout))
         pg = c10d.create_process_group_wrapper(
             _pg,
             "unused",
             store,
             self.rank,
             self.world_size,
+            timeout=timeout,
         )
         return pg
+
+    def test_collective_hang(self):
+        pg = self._create_wrapper_pg(timeout=2.0)
+        self._test_collective_hang(pg)
 
     def test_collectives_op_mismatch(self):
         pg = self._create_wrapper_pg()

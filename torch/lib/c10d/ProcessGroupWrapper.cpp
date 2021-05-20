@@ -104,13 +104,16 @@ struct CollectiveFingerPrint {
             pg->getRank(),
             " is calling collective: ",
             opTypeToString(op_type_)));
-    if (input_tensors_.size() == 0) {
-      // No shapes to verify.
-      return;
-    }
     // Retrieve input tensor shapes.
     std::vector<at::Tensor> shape_tensors =
         c10d::getTensorShapes(input_tensors_);
+    // If input_tensors_ is empty we would get no shape tensors back, but still
+    // do some sort of shape verification in case input_tensors_.empty() is
+    // inconsistent across ranks. In this case, sub in a single zeros tensor and
+    // ensure all ranks agree.
+    if (shape_tensors.size() == 0) {
+      shape_tensors = {at::zeros(1)};
+    }
     // Verify dimensionality of shapes. This catches errors where tensor shapes
     // have different dimensions such as torch.randn(2, 3) vs torch.randn(2, 3,
     // 4). If we did not do this step and instead proceeded directly with
@@ -123,7 +126,8 @@ struct CollectiveFingerPrint {
         meta_shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
 
     // If all meta shapes are 0 then we can skip the below verification since
-    // it is not possible that there would be a difference.
+    // it is not possible that there would be a difference. This happens only
+    // when the tensor wraps a single scalar.
     bool skip = true;
     for (int i = 0; i < meta_shape_tensors.size(); ++i) {
       auto& t = meta_shape_tensors[i];
@@ -143,10 +147,8 @@ ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<ProcessGroup> pg,
     c10::intrusive_ptr<ProcessGroupGloo> glooPg)
     : ProcessGroup(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
-  if (pg_->getSequenceNumberForGroup() == 0) {
-    // Set the sequence number for the underlying process group.
-    pg_->setSequenceNumberForGroup();
-  }
+  // Set the sequence number for the underlying process group.
+  pg_->setSequenceNumberForGroup();
 }
 
 const std::string ProcessGroupWrapper::getBackendName() const {
@@ -306,6 +308,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
 void ProcessGroupWrapper::runCollectiveChecks(
     OpType op_type,
     const std::vector<at::Tensor>& tensors) const {
+  // first perform a monitored barrier to ensure all ranks can synchronize.
+  c10d::BarrierOptions options;
+  // TODO: we should use wrapped pg_'s timeout here, but C++ ProcessGroup API
+  // does not expose timeout.
+  glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
   auto finger_print = CollectiveFingerPrint(op_type, tensors);
   // Will throw if an ill-formed collective is detected.
   finger_print.verify(glooPg_);
