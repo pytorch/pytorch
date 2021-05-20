@@ -3303,6 +3303,10 @@ class DistributedTest:
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
 
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_ddp_comm_hook_logging(self):
@@ -3410,11 +3414,19 @@ class DistributedTest:
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}"
                 )
 
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_ddp_hook_parity_allreduce(self):
             self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
 
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_ddp_hook_parity_allreduce_process_group(self):
@@ -3424,7 +3436,6 @@ class DistributedTest:
             process_group = torch.distributed.new_group(gpus)
             self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
 
-        # TODO(58467): Remove the following decorator once the test can pass on Gloo/MPI backend.
         @unittest.skipIf(
             BACKEND != "nccl",
             "Only NCCL backend supports DDP communication hook",
