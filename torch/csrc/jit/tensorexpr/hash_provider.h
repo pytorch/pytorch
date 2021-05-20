@@ -151,24 +151,20 @@ class TORCH_API HashProvider : public IRVisitor {
   // Hash funcs for various types, numbers are random.
   template <typename T>
   void _hash_combine(SimplifierHashType& seed, const T& val) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     seed._h ^= te_hash(val) + 0x1f752c19 + (seed._h << 7) + (seed._h >> 4);
   }
 
   void _hash_combine(SimplifierHashType& seed, const char* val) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     seed._h ^= te_hash(val) + 0x1f752c19 + (seed._h << 7) + (seed._h >> 4);
   }
 
   // at:::Half doesn't have a prime_number_hash, so cast to short.
   void _hash_combine(SimplifierHashType& seed, const at::Half& val) {
     seed._h ^=
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         te_hash((uint16_t)val) + 0x1f752c19 + (seed._h << 7) + (seed._h >> 4);
   }
 
   void _hash_combine(SimplifierHashType& seed, const Dtype& val) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     seed._h ^= te_hash(val.ToCppString()) + 0x1f752c19 + (seed._h << 7) +
         (seed._h >> 4);
   }
@@ -203,15 +199,12 @@ class TORCH_API HashProvider : public IRVisitor {
 
   size_t te_hash(int64_t val) {
     // put the thing down.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     size_t h = val ^ 0x647AA4D20C0B;
     // bit flip it.
     size_t h2 = ~h;
     // and reverse byte order.
     size_t h3 = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (unsigned int i = 0; i < 64; i += 8) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       h3 |= ((h2 >> i) & 0xFF) << (64 - i - 8);
     }
     return h3;
@@ -243,13 +236,11 @@ class TORCH_API HashProvider : public IRVisitor {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int s = val.size() - 1;
     while (s >= 0) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (unsigned int i = 0; i < 8; ++i) {
         if (s < 0)
           break;
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         int64_t c = val.data()[s];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         intval |= (c << (i * 8));
 
         s--;

@@ -339,7 +339,6 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
         hex_stream << std::hex << hash;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
         labelMap["fontcolor"] = labelMap["color"];
       }

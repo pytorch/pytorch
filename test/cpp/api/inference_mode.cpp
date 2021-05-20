@@ -455,6 +455,30 @@ TEST(InferenceModeTest, TestCreationMetaPropagation) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InferenceModeTest, TestCreationMetaPropagationInput) {
+  torch::Tensor s = torch::ones({2, 2, 3}).set_requires_grad(true);
+  auto s_view = s.view_as(s);
+  std::vector<at::Tensor> b, c;
+  {
+    InferenceMode guard;
+    b = s_view.split_with_sizes({1, 1});
+
+    s = s.view_as(s);
+    c = s.split_with_sizes({1, 1});
+  }
+  for (auto& b_el: b) {
+    assert_tensor_creation_meta(b_el, CreationMeta::INFERENCE_MODE);
+    ASSERT_THROWS_WITH(b_el.add_(1),
+      "A view was created in inference mode and is being modified inplace");
+  }
+  for (auto& c_el: c) {
+    assert_tensor_creation_meta(c_el, CreationMeta::INFERENCE_MODE);
+    ASSERT_THROWS_WITH(c_el.add_(1),
+      "A view was created in inference mode and is being modified inplace");
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -491,11 +515,11 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
     ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-      "Inference tensor do not track version counter.");
+      "Inference tensors do not track version counter.");
     t.unsafeGetTensorImpl()->bump_version();
   }
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-    "Inference tensor do not track version counter.");
+    "Inference tensors do not track version counter.");
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
     "Inplace update to inference tensor outside InferenceMode is not allowed.");
   // Suggested workaround

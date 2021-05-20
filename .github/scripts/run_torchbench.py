@@ -28,7 +28,7 @@ start: {control}
 end: {treatment}
 threshold: 100
 direction: decrease
-timeout: 60
+timeout: 720
 tests:"""
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]):
@@ -36,6 +36,8 @@ def gen_abtest_config(control: str, treatment: str, models: List[str]):
     d["control"] = control
     d["treatment"] = treatment
     config = ABTEST_CONFIG_TEMPLATE.format(**d)
+    if models == ["ALL"]:
+        return config + "\n"
     for model in models:
         config = f"{config}\n  - {model}"
     config = config + "\n"
@@ -57,8 +59,12 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
         if magic_lines:
             # Only the first magic line will be respected.
             model_list = list(map(lambda x: x.strip(), magic_lines[0][len(MAGIC_PREFIX):].split(",")))
+    # Shortcut: if model_list is ["ALL"], run all the tests
+    if model_list == ["ALL"]:
+        return model_list
     # Sanity check: make sure all the user specified models exist in torchbench repository
-    full_model_list = os.listdir(os.path.join(torchbench_path, "torchbenchmark", "models"))
+    benchmark_path = os.path.join(torchbench_path, "torchbenchmark", "models")
+    full_model_list = [model for model in os.listdir(benchmark_path) if os.path.isdir(os.path.join(benchmark_path, model))]
     for m in model_list:
         if m not in full_model_list:
             print(f"The model {m} you specified does not exist in TorchBench suite. Please double check.")

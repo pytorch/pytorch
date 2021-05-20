@@ -47,6 +47,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"vulkan", DeviceType::Vulkan},
           {"mlc", DeviceType::MLC},
           {"meta", DeviceType::Meta},
+          {"hpu", DeviceType::HPU},
       }};
   auto device = std::find_if(
       types.begin(),
@@ -59,7 +60,7 @@ DeviceType parse_type(const std::string& device_string) {
   }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, mlc, xla, vulkan, meta device type at start of device string: ",
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, mlc, xla, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
 } // namespace

@@ -421,7 +421,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 if len(matching_args) == 1:
                     # We can add undefined grad support if the input variable is a Tensor
                     arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(arg.argument.type) == 'Tensor':
+                    if isinstance(arg.argument, Argument) and str(arg.argument.type) in ('Tensor', 'Tensor?'):
                         formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
                         checks_any_grad_defined = True
             return (checks_any_grad_defined,

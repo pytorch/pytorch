@@ -87,7 +87,6 @@ class LastNWindowCollectorOp : public Operator<Context> {
     // output_num is >= output_batch_size
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (output_num > output_batch_size) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       output->ExtendTo(output_num, 50);
     }
 
@@ -145,7 +144,6 @@ REGISTER_CPU_OPERATOR(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LastNWindowCollector)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs({3, 4, 5})
     .NumOutputs(2, 3)
     .EnforceInplace({{0, 0}, {1, 1}, {4, 2}})

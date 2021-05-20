@@ -218,9 +218,8 @@ void RRefContext::delUser(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      std::weak_ptr<JitFuture> wp = jitFuture;
-      jitFuture->addCallback([this, wp]() {
-        handleException(*wp.lock());
+      jitFuture->addCallback([this](JitFuture& future) {
+        handleException(future);
         --numPendingFutures_;
       });
     }
@@ -349,7 +348,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType
     // information on other workers because it's only information only.
-    if (type == TensorType::get()) {
+    if (type->isSubtypeOf(TensorType::get())) {
       TORCH_INTERNAL_ASSERT(
           ownerRRef->type()->isSubtypeOf(TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
@@ -503,9 +502,8 @@ void RRefContext::notifyOwnerAndParentOfFork(
     ++numPendingFutures_;
     auto jitFuture = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback([this, wp]() {
-      handleException(*wp.lock());
+    jitFuture->addCallback([this](JitFuture& future) {
+      handleException(future);
       --numPendingFutures_;
     });
   } else {
@@ -516,9 +514,8 @@ void RRefContext::notifyOwnerAndParentOfFork(
 
     addPendingUser(forkId, rref);
 
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback([this, forkId, parent, wp]() {
-      handleException(*wp.lock());
+    jitFuture->addCallback([this, forkId, parent](JitFuture& future) {
+      handleException(future);
       this->finishForkRequest(forkId, parent);
       // Decrease after calling finishForkRequest because, as that creates a new
       // future, it might otherwise cause the count to briefly go to zero.
@@ -668,19 +665,24 @@ void RRefContext::recordThreadLocalPendingRRefs() {
 }
 
 c10::intrusive_ptr<JitFuture> RRefContext::waitForThreadLocalPendingRRefs() {
-  auto jitFuturePtr = c10::make_intrusive<JitFuture>(BoolType::get());
+  // We need to set devices here, even if they won't be used by the value (it's
+  // a bool, it doesn't contain tensors!) because we need them to be propagated
+  // to child futures. This is silly and we should find a way to avoid this.
+  auto jitFuturePtr =
+      c10::make_intrusive<JitFuture>(BoolType::get(), agent_->getDevices());
   if (userTable_.empty()) {
     jitFuturePtr->markCompleted(true);
   } else {
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
-      state->confirmationFuture_->addCallback([jitFuturePtr, remainingRRefs]() {
-        auto localCount = remainingRRefs->fetch_sub(1);
-        if (localCount == 1) {
-          jitFuturePtr->markCompleted(true);
-        }
-      });
+      state->confirmationFuture_->addCallback(
+          [jitFuturePtr, remainingRRefs](JitFuture& /* unused */) {
+            auto localCount = remainingRRefs->fetch_sub(1);
+            if (localCount == 1) {
+              jitFuturePtr->markCompleted(true);
+            }
+          });
     }
     userTable_.clear();
   }
@@ -699,9 +701,8 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto jitFuture = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  std::weak_ptr<JitFuture> wp = jitFuture;
-  jitFuture->addCallback([this, wp]() {
-    handleException(*wp.lock());
+  jitFuture->addCallback([this](JitFuture& future) {
+    handleException(future);
     --numPendingFutures_;
   });
 }

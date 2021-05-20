@@ -235,13 +235,11 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (!(flags_ & TH_ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & TH_ALLOCATOR_MAPPED_SHARED) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           AT_ERROR("unable to open file <", filename_, "> in read-write mode");
         }
       } else if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           AT_ERROR("unable to open shared memory object <", filename_, "> in read-write mode");
         }

@@ -141,6 +141,8 @@ Reducer::Reducer(
           gradAccToVariableMap_[grad_accumulator.get()] = index;
         }
 
+        numGradHooksTriggeredMap_[index] = 0;
+
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
         // the raw pointer to be valid.
@@ -170,30 +172,7 @@ Reducer::Reducer(
 
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
-    // Initialize locally used parameter maps
-    {
-      const auto replica_count = replicas_.size();
-      const auto variable_count = replicas_[0].size();
-      local_used_maps_.resize(replica_count);
-      local_used_maps_dev_.resize(replica_count);
-
-      for (size_t i = 0; i < replica_count; i++) {
-        at::TensorOptions options;
-        options = options.dtype(at::kInt);
-
-        // Deliberately don't pin the memory even if local_used_maps_dev_ will
-        // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
-        local_used_maps_[i] =
-            at::zeros({static_cast<long>(variable_count)}, options);
-
-        // This tensor needs to be on the same device as replica because backend
-        // such as NCCL may not support CPU tensors, and hence it might not work
-        // if we always put it on CPU.
-        options = options.device(replicas_[i][0].device());
-        local_used_maps_dev_[i] =
-            at::empty({static_cast<long>(variable_count)}, options);
-      }
-    }
+    initialize_local_used_map();
   }
 }
 
@@ -232,6 +211,42 @@ Reducer::~Reducer() noexcept(false) {
     TORCH_CHECK(
         grad_accumulator->del_post_hook(key),
         "Reducer attempts to delete a non-existing hook.");
+  }
+}
+
+bool Reducer::dynamic_graph_find_unused() {
+  return !static_graph_ && find_unused_parameters_;
+}
+
+bool Reducer::static_graph_first_iteration() {
+  return static_graph_ && num_iterations_ == 1;
+}
+
+bool Reducer::static_graph_after_first_iteration() {
+  return static_graph_ && num_iterations_ > 1;
+}
+
+void Reducer::initialize_local_used_map() {
+  const auto replica_count = replicas_.size();
+  const auto variable_count = replicas_[0].size();
+  local_used_maps_.resize(replica_count);
+  local_used_maps_dev_.resize(replica_count);
+
+  for (size_t i = 0; i < replica_count; i++) {
+    at::TensorOptions options;
+    options = options.dtype(at::kInt);
+
+    // Deliberately don't pin the memory even if local_used_maps_dev_ will
+    // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
+    local_used_maps_[i] =
+        at::zeros({static_cast<long>(variable_count)}, options);
+
+    // This tensor needs to be on the same device as replica because backend
+    // such as NCCL may not support CPU tensors, and hence it might not work
+    // if we always put it on CPU.
+    options = options.device(replicas_[i][0].device());
+    local_used_maps_dev_[i] =
+        at::empty({static_cast<long>(variable_count)}, options);
   }
 }
 
@@ -292,8 +307,6 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
-  const auto offset = replica.offsets[bucket_index.intra_bucket_index];
-  const auto length = replica.lengths[bucket_index.intra_bucket_index];
   auto& bucket_view = replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   // Copy contents of gradient tensor to bucket tensor.
@@ -325,6 +338,15 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
         }
       }
     } else {
+      // Gradient is undefined. When find_unused_parameters=True, ensure it is
+      // not marked as locally used, otherwise we will be allreducing zero's
+      // instead of not touching .grad field of parameter.
+      if (this->dynamic_graph_find_unused() || this->static_graph_first_iteration()) {
+        TORCH_CHECK(
+            local_used_maps_[index.replica_index][index.variable_index]
+                    .item<int>() == 0,
+            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+      }
       bucket_view.zero_();
     }
     // The grad is not modified and doesn't need to be written back.
@@ -407,11 +429,9 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 }
 
 void Reducer::push_rebuilt_params(const VariableIndex& index) {
-  if (should_rebuild_buckets() && index.replica_index == 0) {
-    rebuilt_params_.push_back(
-        replicas_[index.replica_index][index.variable_index]);
-    rebuilt_param_indices_.push_back(index.variable_index);
-  }
+  rebuilt_params_.push_back(
+      replicas_[index.replica_index][index.variable_index]);
+  rebuilt_param_indices_.push_back(index.variable_index);
 }
 
 void Reducer::set_divide_factor() {
@@ -429,6 +449,65 @@ void Reducer::set_divide_factor() {
       divFactor_ = res.item().to<int>();
     }
   }
+}
+
+const c10::Stream Reducer::get_current_stream() {
+  const auto& device = replicas_[0][0].device();
+  c10::DeviceType deviceType = device.type();
+  const c10::impl::VirtualGuardImpl guard =
+        c10::impl::VirtualGuardImpl{deviceType};
+  return guard.getStream(device);
+}
+
+// Right now delay_all_reduce is only called when static_graph_=true and
+// num_iterations_==1.
+void Reducer::delay_all_reduce() {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+
+  // The autograd engine uses the default stream when running callbacks, so we
+  // pass in the current CUDA stream in case it is not the default.
+  const c10::Stream currentStream = get_current_stream();
+  // Run callback with the current stream
+  c10::OptionalStreamGuard currentStreamGuard{currentStream};
+
+  if (should_collect_runtime_stats()) {
+    record_backward_compute_end_time();
+    record_backward_comm_start_time();
+  }
+
+  // launch all reduce local used map
+  all_reduce_local_used_map();
+
+  // prepare to set unused_parameters_, if it is static graph,
+  // unused_parameters_ will not change after 1st iteration.
+  unused_parameters_.clear();
+
+  // copy all gradients to buckets
+  for (size_t replica_index = 0; replica_index < replicas_.size();
+       replica_index++) {
+    for (size_t variable_index = 0; variable_index < replicas_[replica_index].size();
+         variable_index++) {
+      const auto index = VariableIndex(replica_index, variable_index);
+      // set unused_parameters_
+      if (numGradHooksTriggeredMap_[index] == 0) {
+        unused_parameters_.push_back(index);
+      }
+      require_finalize_ = true;
+      set_divide_factor();
+      if (expect_sparse_gradients_[replica_index][variable_index]) {
+        mark_variable_ready_sparse(index);
+      } else {
+        mark_variable_ready_dense(index);
+      }
+    }
+  }
+
+  // launch all reduces for all buckets
+  for (auto & bucket : buckets_) {
+    all_reduce_bucket(bucket);
+  }
+
+  finalize_backward();
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -449,44 +528,69 @@ void Reducer::autograd_hook(VariableIndex index) {
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
-  if (find_unused_parameters_) {
+  if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
     // to mark it in local_used_maps_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
-    local_used_maps_[index.replica_index][index.variable_index] = 1;
+    // Only set it as locally used if the grad is defined. Otherwise, hooks
+    // could sometimes be triggered with undefined grads, and if this happens
+    // globally, we don't want to touch the .grad field of the param.
+
+    auto& variable = get_param_from_index(index);
+    runGradCallbackForVariable(variable, [&](auto& grad) {
+      if (grad.defined()) {
+        local_used_maps_[index.replica_index][index.variable_index] = 1;
+      }
+      // The gradient is never modified.
+      return false;
+    });
   }
 
-  // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
-  // find_unused_parameters_ is false, currently it does not support when there
-  // are unused parameters 3) this backward pass needs to run allreduce. Here,
-  // we just dump tensors and their parameter indices into rebuilt_params_ and
-  // rebuilt_param_indices_ based on gradient arriving order, and then at the
-  // end of finalize_backward(), buckets will be rebuilt based on
-  // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
-  // and initialized. Also we only need to dump tensors and parameter indices of
-  // one replica.
-  push_rebuilt_params(index);
+  if (static_graph_first_iteration()) {
+    numGradHooksTriggeredMap_[index] += 1;
+    return;
+  }
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the
   // autograd graph, and won't receive gradients. These parameters are
   // discovered in the `prepare_for_backward` function and their indexes stored
   // in the `unused_parameters_` vector.
-  if (!has_marked_unused_parameters_ && find_unused_parameters_) {
+  if (!has_marked_unused_parameters_) {
     has_marked_unused_parameters_ = true;
     for (const auto& unused_index : unused_parameters_) {
       mark_variable_ready(unused_index);
     }
   }
 
-  // Finally mark variable for which this function was originally called.
-  mark_variable_ready(index);
+  // If it is static graph, after 1st iteration, check a avariable
+  // is ready for communication based on numGradHooksTriggeredMap_.
+  if (static_graph_after_first_iteration()) {
+    TORCH_CHECK(
+        numGradHooksTriggeredMapPerIteration_[index] > 0,
+        "Your training graph has changed in this iteration, ",
+        "e.g., one parameter is unused in first iteration, but ",
+        "then got used in the second iteration. this is not ",
+        "compatible with static_graph set to True.");
+    if (--numGradHooksTriggeredMapPerIteration_[index] == 0) {
+      if (should_rebuild_buckets()) {
+        push_rebuilt_params(index);
+      }
+      // Finally mark variable for which this function was originally called.
+      mark_variable_ready(index);
+    }
+  } else {
+    if (should_rebuild_buckets()) {
+      push_rebuilt_params(index);
+    }
+    // Finally mark variable for which this function was originally called.
+    mark_variable_ready(index);
+  }
 }
 
 void Reducer::all_reduce_local_used_map() {
   // See Note [Skip allreducing local_used_maps_dev]
-  if (find_unused_parameters_) {
     // H2D from local_used_maps_ to local_used_maps_dev_
     for (size_t i = 0; i < local_used_maps_.size(); i++) {
       if (local_used_maps_dev_[i].is_cuda()) {
@@ -533,8 +637,20 @@ void Reducer::all_reduce_local_used_map() {
       }
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
-  }
 }
+
+at::Tensor& Reducer::get_param_from_index(VariableIndex index) {
+  const auto replica_index = index.replica_index;
+  const auto variable_index = index.variable_index;
+  const auto& bucket_index = variable_locators_[variable_index];
+  auto& bucket = buckets_[bucket_index.bucket_index];
+  auto& replica = bucket.replicas[replica_index];
+  // Cannot simply access variable via replicas_[replica_index][variable_index]
+  // as the callback does not accept const tensors.
+  auto& variable = replica.variables[bucket_index.intra_bucket_index];
+  return variable;
+}
+
 void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
@@ -571,13 +687,17 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
         "This error is caused by one of the following reasons: ",
         "1) Use of a module parameter outside the `forward` function. ",
         "Please make sure model parameters are not shared across multiple ",
-        "concurrent forward-backward passes",
+        "concurrent forward-backward passes. or try to use _set_static_graph() ",
+        "as a workaround if this module graph does not change ",
+        "during training loop.",
         "2) Reused parameters in multiple reentrant backward passes. For ",
         "example, if you use multiple `checkpoint` functions to wrap the ",
         "same part of your model, it would result in the same set of ",
         "parameters been used by different reentrant backward passes ",
         "multiple times, and hence marking a variable ready multiple times. ",
-        "DDP does not support such use cases yet.");
+        "DDP does not support such use cases in default. You can try to ",
+        "use _set_static_graph() as a workaround if your module graph ",
+        "does not change over iterations.");
 
     common_error += c10::str("\n", paramInfo);
 
@@ -594,12 +714,24 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
         "parameters in the model participate in the backward pass, you can ",
         "disable unused parameter detection by passing the keyword argument ",
         "`find_unused_parameters=False` to ",
-        "`torch.nn.parallel.DistributedDataParallel`.");
+        "`torch.nn.parallel.DistributedDataParallel`. If unused parameters ",
+        "in the model do not change over iterations, You can try to use ",
+        "_set_static_graph() as a workaround if this module graph does not ",
+        "change during training loop.");
     TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
 }
 
 void Reducer::mark_variable_ready(VariableIndex index) {
+  // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
+  // static_graph_ is true or find_unused_parameters_ is false,
+  // 3) this backward pass needs to run allreduce.
+  // Here, we just dump tensors and their parameter indices into
+  // rebuilt_params_ and rebuilt_param_indices_ based on gradient arriving
+  // order, and then at the end of finalize_backward(), buckets will be
+  // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
+  // will be broadcasted and initialized. Also we only need to dump tensors
+  // and parameter indices of one replica.
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
   TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
@@ -650,15 +782,14 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Run finalizer function and kick off reduction for local_used_maps once the
   // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
-    all_reduce_local_used_map();
+
+    if (dynamic_graph_find_unused()) {
+      all_reduce_local_used_map();
+    }
 
     // The autograd engine uses the default stream when running callbacks, so we
     // pass in the current CUDA stream in case it is not the default.
-    c10::DeviceType deviceType = replica.contents.device().type();
-    const c10::impl::VirtualGuardImpl guard =
-        c10::impl::VirtualGuardImpl{deviceType};
-    const c10::Stream currentStream =
-        guard.getStream(replica.contents.device());
+    const c10::Stream currentStream = get_current_stream();
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       // Run callback with the current stream
@@ -668,6 +799,11 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
+      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+        for (const auto& unused_index : unused_parameters_) {
+          push_rebuilt_params(unused_index);
+        }
+      }
       this->finalize_backward();
     });
   }
@@ -994,6 +1130,10 @@ void Reducer::reset_bucket_counting() {
     }
     bucket.pending = bucket.replicas.size();
   }
+
+  if (static_graph_) {
+    numGradHooksTriggeredMapPerIteration_ = numGradHooksTriggeredMap_;
+  }
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1006,12 +1146,10 @@ void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
-  // If find_unused_parameters_ is false, we assume that autograd hooks for ALL
-  // variables will be called, and we don't have to search the autograd graph
-  // for presence of these hooks.
-  if (!find_unused_parameters_) {
-    return;
-  }
+
+  RECORD_FUNCTION(
+      "torch.distributed.ddp.reducer::search_unused_parameters",
+      std::vector<c10::IValue>());
 
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {
@@ -1074,11 +1212,19 @@ void Reducer::prepare_for_backward(
 
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
-  unused_parameters_.clear();
   // Reset per iteration marked ready parameters.
   perIterationReadyParams_.clear();
 
-  search_unused_parameters(outputs);
+  // If static graph is not set, search graph to detect unused parameters.
+  // When static graph is set, unused_parameters_ will be detected and will
+  // not change after 1st iteration.
+  // If static_graph_ = false and find_unused_parameters_ is false,
+  // we assume that autograd hooks for ALL variables will be called,
+  // and we don't have to search the autograd graph for presence of these hooks.
+  if (dynamic_graph_find_unused()) {
+    unused_parameters_.clear();
+    search_unused_parameters(outputs);
+  }
 }
 
 void Reducer::copy_bucket_to_grad(
@@ -1142,7 +1288,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       bool global_unused = false;
       // See Note [Skip allreducing local_used_maps_dev]
-      if (find_unused_parameters_) {
+      if (static_graph_ || find_unused_parameters_) {
         // Determine if this param has been used globally or not.
         //
         // If the variable was used locally, it is also used globally and then
@@ -1282,12 +1428,7 @@ void Reducer::finalize_backward() {
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
-  if (find_unused_parameters_) {
-    // Reset unused parameter accounting.
-    // See Note [local_used_maps_ -> local_used_maps_dev copying]
-    for (auto& local_used : local_used_maps_) {
-      local_used.fill_(0);
-    }
+  if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Due to the lazy wait, it is possible that reduction of the current
     // iteration is still going when the one for next iteration gets kicked off.
     // For such case, we want to wait explicitly to make sure the reduction does
@@ -1296,6 +1437,14 @@ void Reducer::finalize_backward() {
     // local_unused_maps_dev_.
     if (!local_used_maps_reduced_) {
       local_used_work_->wait();
+    }
+  }
+
+  if (dynamic_graph_find_unused()) {
+    // Reset unused parameter accounting.
+    // See Note [local_used_maps_ -> local_used_maps_dev copying]
+    for (auto& local_used : local_used_maps_) {
+      local_used.fill_(0);
     }
     local_used_maps_reduced_ = false;
   }
@@ -1468,11 +1617,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  // TODO: Support GLOO and MPI backends for DDP communication hook.
-  TORCH_CHECK(
-      process_group_->getBackendName() == "nccl",
-      "register_builtin_comm_hook currently can only support NCCL backend, but the current backend is %s.",
-      process_group_->getBackendName());
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
@@ -1496,6 +1640,15 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
+    TORCH_CHECK(
+      !static_graph_,
+       "Expected to have finished reduction in the prior iteration before "
+       "starting a new one. "
+       "This error indicates that your training graph has changed ",
+       "in this iteration, e.g., one parameter is used in first ",
+       "iteration, but then got unused in the second iteration. ",
+       "this is not compatible with static_graph set to True."
+    );
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
@@ -1682,6 +1835,9 @@ void Reducer::set_static_graph() {
       "set_static_graph() should be called before training loop starts "
       "and after DistributedDataParallel is constructed.");
   static_graph_ = true;
+  // when static_graph_ is set as true, always initialize_local_used_map
+  // and detect the global unused parameters in the first iteration.
+  initialize_local_used_map();
 }
 
 namespace {

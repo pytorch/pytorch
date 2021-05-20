@@ -158,49 +158,41 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, AtTensorCtorScalar) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_EQ(tensor[0].item<int32_t>(), 123);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(123.456f);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456f));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(123.456);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(123, at::dtype(at::kFloat)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.5));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(c10::complex<float>(1.0, 2.0)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
   ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexFloat)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
   ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(c10::complex<double>(1.0, 2.0)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
   ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 2.0)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexDouble)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -223,7 +215,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor({1.5, 2.25, 3.125});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -231,7 +222,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor({c10::complex<float>(1.5, 0.15), c10::complex<float>(1.5, 0.15), c10::complex<float>(3.125, 0.3125)});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
@@ -239,7 +229,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<float>(1.5, 0.15)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<float>(3.125, 0.3125)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor({c10::complex<double>(1.5, 0.15), c10::complex<double>(1.5, 0.15), c10::complex<double>(3.125, 0.3125)});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -247,7 +236,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(1.5, 0.15)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.125, 0.3125)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor({1.1, 2.2, 3.3}, at::dtype(at::kInt));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -256,7 +244,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -264,7 +251,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(std::vector<c10::complex<float>>({c10::complex<float>(1.5, 0.15), c10::complex<float>(1.5, 0.15), c10::complex<float>(3.125, 0.3125)}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
@@ -272,7 +258,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<float>(1.5, 0.15)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<float>(3.125, 0.3125)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(std::vector<c10::complex<double>>({c10::complex<double>(1.5, 0.15), c10::complex<double>(1.5, 0.15), c10::complex<double>(3.125, 0.3125)}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -280,7 +265,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(1.5, 0.15)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.125, 0.3125)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   tensor = at::tensor(v);
   ASSERT_EQ(tensor.numel(), v.size());
@@ -289,7 +273,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
     ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<double> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
   tensor = at::tensor(w);
   ASSERT_EQ(tensor.numel(), w.size());
@@ -299,9 +282,7 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   }
 
   std::vector<c10::complex<double>> x = {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {1.1, -1.1}, {2.2, -2.2}, {3.3, -3.3}, {4.4, -4.4}, {5.5, -5.5},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {6.6, -6.6}, {7.7, -7.7}, {8.8, -8.8}, {9.9, -9.9}, {10.0, -10.0}
   };
   tensor = at::tensor(x);
@@ -314,7 +295,6 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, AtTensorCastRealToComplex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::tensor(std::vector<double>({1.5, 2.5, 3.5}), at::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -322,7 +302,6 @@ TEST(TensorTest, AtTensorCastRealToComplex) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor({1.5, 2.5, 3.5}, at::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -330,7 +309,6 @@ TEST(TensorTest, AtTensorCastRealToComplex) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::tensor(1.5, at::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
@@ -340,17 +318,14 @@ TEST(TensorTest, AtTensorCastRealToComplex) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, AtTensorCastComplexToRealErrorChecks) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(at::tensor(c10::complex<float>(0.1, 0.2), at::kFloat),
       "\"tensor_cpu\" not implemented for 'Float'");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(at::tensor({c10::complex<float>(0.1, 0.2)}, at::kFloat),
       "\"tensor_cpu\" not implemented for 'Float'");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(at::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2)}, at::kFloat),
       "\"tensor_cpu\" not implemented for 'Float'");
   }
@@ -358,7 +333,6 @@ TEST(TensorTest, AtTensorCastComplexToRealErrorChecks) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, TorchTensorCtorScalarIntegralType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = torch::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
@@ -369,21 +343,18 @@ TEST(TensorTest, TorchTensorCtorScalarIntegralType) {
 void test_TorchTensorCtorScalarFloatingType_expected_dtype(c10::ScalarType default_dtype) {
   AutoDefaultDtypeMode dtype_mode(default_dtype);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = torch::tensor(123.456f);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor, 123.456f));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(123.456);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor, 123.456));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor({123.456});
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1}));
@@ -458,7 +429,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
 void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType default_dtype) {
   AutoDefaultDtypeMode dtype_mode(default_dtype);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = torch::tensor({1.5, 2.25, 3.125});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -467,7 +437,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor({1.5f, 2.25f, 3.125f});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -476,7 +445,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25f));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125f));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(at::ArrayRef<float>({1.5f, 2.25f, 3.125f}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), default_dtype);
@@ -484,7 +452,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(std::vector<float>({1.5f, 2.25f, 3.125f}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -493,7 +460,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), default_dtype);
@@ -501,7 +467,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -592,7 +557,6 @@ TEST(TensorTest, TorchTensorCtorMultiDimIntegralType) {
 void test_TorchTensorCtorMultiDimFloatingType_expected_dtype(c10::ScalarType default_dtype) {
   AutoDefaultDtypeMode dtype_mode(default_dtype);
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto tensor = torch::tensor({{1.0, 2.0}});
     ASSERT_EQ(tensor.dtype(), default_dtype);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
@@ -600,7 +564,6 @@ void test_TorchTensorCtorMultiDimFloatingType_expected_dtype(c10::ScalarType def
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto tensor = torch::tensor({{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}});
     ASSERT_EQ(tensor.dtype(), default_dtype);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 3, 1, 1, 1, 1, 3}));
@@ -664,12 +627,10 @@ TEST(TensorTest, TorchTensorCtorMultiDimErrorChecks) {
       "Expected all sub-lists to have sizes: 2 (e.g. {5, 6}), but got sub-list {7} with sizes: 1");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(torch::tensor({{{1, 2.0}, {1, 2.0}}}),
       "Expected all elements of the tensor to have the same scalar type: Int, but got element of scalar type: Double");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(torch::tensor({{{true, 2.0, 3}, {true, 2.0, 3}}}),
       "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Double");
   }
@@ -685,7 +646,6 @@ TEST(TensorTest, TorchTensorCtorMultiDimErrorChecks) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, TorchTensorCastRealToComplex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = torch::tensor(std::vector<double>({1.5, 2.5, 3.5}), torch::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
@@ -693,7 +653,6 @@ TEST(TensorTest, TorchTensorCastRealToComplex) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor({1.5, 2.5, 3.5}, torch::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
@@ -701,7 +660,6 @@ TEST(TensorTest, TorchTensorCastRealToComplex) {
   ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
   ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = torch::tensor(1.5, torch::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
@@ -711,17 +669,14 @@ TEST(TensorTest, TorchTensorCastRealToComplex) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, TorchTensorCastComplexToRealErrorChecks) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(torch::tensor(c10::complex<float>(0.1, 0.2), torch::kFloat),
       "value cannot be converted to type float without overflow");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(torch::tensor({c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
       "value cannot be converted to type float without overflow");
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ASSERT_THROWS_WITH(torch::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
       "can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
   }
@@ -731,7 +686,6 @@ void test_TorchTensorCtorMultiDim_CUDA_expected_dtype(c10::ScalarType default_dt
   AutoDefaultDtypeMode dtype_mode(default_dtype);
 
   auto tensor = torch::tensor(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}},
     torch::dtype(default_dtype).device(torch::kCUDA));
   ASSERT_TRUE(tensor.device().is_cuda());
@@ -859,7 +813,6 @@ void test_Arange_expected_dtype(c10::ScalarType default_dtype) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, Arange) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::arange(0, 5);
     ASSERT_EQ(x.dtype(), torch::kLong);
   }
@@ -920,31 +873,25 @@ TEST(TensorTest, PrettyPrintTensorDataContainer) {
 TEST(TensorTest, TensorDataContainerCallingAccessorOfWrongType) {
   {
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer(1.1).init_list(),
       "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer(1.1).tensor(),
       "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
   }
   {
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer({1.1, 2.2}).scalar(),
       "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer({1.1, 2.2}).tensor(),
       "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
   }
   {
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).scalar(),
       "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
     ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).init_list(),
       "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
   }
@@ -952,7 +899,6 @@ TEST(TensorTest, TensorDataContainerCallingAccessorOfWrongType) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, FromBlob) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<double> v = {1.0, 2.0, 3.0};
   auto tensor = torch::from_blob(
       v.data(), v.size(), torch::dtype(torch::kFloat64).requires_grad(true));
@@ -985,9 +931,7 @@ TEST(TensorTest, FromBlobWithStrides) {
   // clang-format off
   std::vector<int32_t> v = {
     1, 2, 3,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     4, 5, 6,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     7, 8, 9
   };
   // clang-format on
@@ -1011,13 +955,11 @@ TEST(TensorTest, FromBlobWithStrides) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, Item) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::tensor(3.14);
     torch::Scalar scalar = tensor.item();
     ASSERT_NEAR(scalar.to<float>(), 3.14, 1e-5);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::tensor(123);
     torch::Scalar scalar = tensor.item();
     ASSERT_EQ(scalar.to<int>(), 123);
@@ -1027,13 +969,11 @@ TEST(TensorTest, Item) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, Item_CUDA) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::tensor(3.14, torch::kCUDA);
     torch::Scalar scalar = tensor.item();
     ASSERT_NEAR(scalar.to<float>(), 3.14, 1e-5);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor tensor = torch::tensor(123, torch::kCUDA);
     torch::Scalar scalar = tensor.item();
     ASSERT_EQ(scalar.to<int>(), 123);
@@ -1056,7 +996,6 @@ TEST(TensorTest, Data) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, BackwardAndGrad) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   y.backward();
@@ -1073,7 +1012,6 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, BackwardNonScalarOutputs) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5, 5}, torch::requires_grad());
   auto y = x * x;
   ASSERT_THROWS_WITH(y.backward(),
@@ -1082,7 +1020,6 @@ TEST(TensorTest, BackwardNonScalarOutputs) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, IsLeaf) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   ASSERT_TRUE(x.is_leaf());
@@ -1091,7 +1028,6 @@ TEST(TensorTest, IsLeaf) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, OutputNr) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   ASSERT_EQ(x.output_nr(), 0);
@@ -1110,7 +1046,6 @@ TEST(TensorTest, Version) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, Detach) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   const auto y_detached = y.detach();
@@ -1121,7 +1056,6 @@ TEST(TensorTest, Detach) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, DetachInplace) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   auto y_detached = y.detach_();
@@ -1133,9 +1067,7 @@ TEST(TensorTest, DetachInplace) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, SetData) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = torch::randn({5});
   ASSERT_FALSE(torch::equal(x, y));
   ASSERT_NE(x.data_ptr<float>(), y.data_ptr<float>());
@@ -1147,7 +1079,6 @@ TEST(TensorTest, SetData) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, RequiresGradInplace) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({5.0});
   x.requires_grad_(true);
   ASSERT_TRUE(x.requires_grad());

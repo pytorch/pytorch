@@ -271,7 +271,6 @@ if(USE_DISTRIBUTED)
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
     endif()

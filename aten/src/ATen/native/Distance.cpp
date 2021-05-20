@@ -68,7 +68,6 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
 
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
     TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
     TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
@@ -102,7 +101,6 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
     // See Note [cdist relies on cdist_impl redispatching]
     // Keep the condition above in sync with the condition at the Note
@@ -134,7 +132,6 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // This is for pytorch to figure the backward pass itself
     // when p=2.  Keep this condition in sync with the See Note reference
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
         return cdist_impl(x1, x2, p, compute_mode);
     } else {

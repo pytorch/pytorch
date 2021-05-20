@@ -25,12 +25,6 @@ def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.devic
     for k in device_map:
         v = device_map[k]
         k, v = torch.device(k), torch.device(v)
-        if k.type != 'cuda' or v.type != 'cuda':
-            raise ValueError(
-                "`set_device_map` only supports CUDA devices, "
-                f"but got device pair {k}: {v}"
-
-            )
         if v in reverse_map:
             raise ValueError(
                 "`device_map` only supports 1-to-1 mapping, "
