@@ -132,7 +132,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
@@ -267,7 +267,7 @@ Tensor sparse_mask_helper_cuda(
     auto t_indices_pos_ti =
         getTensorInfo<int64_t, int64_t>(t_indices_pos);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
         r_values.scalar_type(), "sparse_mask_helper_cuda", [&] {
           auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
           auto r_values_ti =

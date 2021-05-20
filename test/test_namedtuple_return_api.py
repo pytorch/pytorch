@@ -15,7 +15,7 @@ all_operators_with_namedtuple_return = {
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
-    'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig',
+    'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
     'frexp'
 }
 
@@ -62,7 +62,8 @@ class TestNamedTupleAPI(TestCase):
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
-            op(operators=['svd', '_svd_helper', 'linalg_svd'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['svd', '_svd_helper'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
             op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['solve'], input=(a,), names=('solution', 'LU'), hasout=True),
@@ -73,6 +74,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
+            op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['fake_quantize_per_tensor_affine_cachemask'],
                input=(0.1, 0, 0, 255), names=('output', 'mask',), hasout=False),
             op(operators=['fake_quantize_per_channel_affine_cachemask'],

@@ -32,6 +32,9 @@ NSSubgraph = NamedTuple(
 #   # index of this node within the arg of the input/output node
 #   # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
 #   'index_within_arg': 0,
+#   # index of this node within the args of the input/output node
+#   # for example, in add(x1, x2), x2 would have index_of_arg == 1
+#   'index_of_arg': 0,
 # }
 NSSingleResultType = Dict[str, Any]
 

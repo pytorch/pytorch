@@ -77,7 +77,9 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
 }} // namespace at::native

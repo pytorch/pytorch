@@ -41,6 +41,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
     .add_input(self)
@@ -74,6 +75,7 @@ static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
         for (int64_t i = 0; i < self_dim_size; ++i) {
           cum_number += self_data[i * self_dim_stride];
@@ -92,6 +94,7 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
         for (int64_t i = 0; i < self_dim_size; ++i) {
           cum_number *= self_data[i * self_dim_stride];
@@ -157,13 +160,17 @@ static void mean_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_sqrt) {
+static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
-      iter,
-      WelfordOps<scalar_t, double, int64_t, double, std::tuple<scalar_t, scalar_t>> { unbiased, take_sqrt },
-      WelfordData<double, int64_t, double>()
-    );
+        iter,
+        WelfordOps<
+            scalar_t,
+            double,
+            int64_t,
+            double,
+            std::tuple<scalar_t, scalar_t>>{correction, take_sqrt},
+        WelfordData<double, int64_t, double>());
   });
 }
 
@@ -175,6 +182,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a && b; },
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*identity=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
@@ -182,6 +190,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
         [=](Vec256 <scalar_t> a, Vec256 <scalar_t> b) { return a * b; },
+        // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
       });
   }
@@ -190,10 +199,12 @@ static void prod_kernel_impl(TensorIterator& iter) {
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     val = p.to<double>();
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
@@ -396,19 +407,33 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native

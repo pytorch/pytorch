@@ -20,6 +20,7 @@ using namespace at::sparse;
       https://doi.org/10.1007/BF02070824
 */
 namespace {
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   /*
     Expands a compressed row pointer into a row indices array
@@ -40,9 +41,13 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
 int64_t _csr_matmult_maxnnz(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[]) {
   /*
     Compute needed buffer size for matrix `C` in `C = A@B` operation.
@@ -75,14 +80,23 @@ template<class scalar_t>
 void _csr_matmult(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Ax[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Bx[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t Cx[]) {
   /*
     Compute CSR entries for matrix C = A@B.

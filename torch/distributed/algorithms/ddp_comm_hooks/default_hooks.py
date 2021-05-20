@@ -52,7 +52,7 @@ def fp16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    compressed_tensor = bucket.get_tensor().to(torch.float16)
+    compressed_tensor = bucket.get_tensor().to(torch.float16).div_(world_size)
 
     fut = dist.all_reduce(
         compressed_tensor, group=group_to_use, async_op=True
@@ -62,7 +62,7 @@ def fp16_compress_hook(
         decompressed_tensor = bucket.get_tensor()
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
-        decompressed_tensor.copy_(fut.value()[0].div_(world_size))
+        decompressed_tensor.copy_(fut.value()[0])
         return [decompressed_tensor]
 
     return fut.then(decompress)

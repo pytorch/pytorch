@@ -53,7 +53,7 @@ ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   auto autogradContext =
@@ -93,6 +93,7 @@ Message getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
@@ -104,7 +105,7 @@ Message getMessageWithAutograd(
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
@@ -141,7 +142,7 @@ Message getMessageWithAutograd(
   return std::move(*rpcWithAutograd).toMessage();
 }
 
-std::shared_ptr<JitFuture> sendMessageWithAutograd(
+c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
@@ -155,7 +156,7 @@ std::shared_ptr<JitFuture> sendMessageWithAutograd(
       forceGradRecording,
       agent.getDeviceMap(dst));
 
-  std::shared_ptr<JitFuture> fut;
+  c10::intrusive_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
   if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
@@ -163,6 +164,7 @@ std::shared_ptr<JitFuture> sendMessageWithAutograd(
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
     fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
   } else {

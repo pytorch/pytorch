@@ -21,13 +21,13 @@ from urllib.parse import quote
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
-from .glob_group import GlobPattern, GlobGroup
+from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
+from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
 
@@ -104,7 +104,10 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_storages: Dict[str, Any] = {}
-        self.extern_modules: List[str] = []
+        # Only a dict for uniquing and deterministic ordering, the value is meaningless
+        self.extern_modules: Dict[str, bool] = {}
+
+        self.dependency_graph = DiGraph()
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
 
@@ -122,87 +125,7 @@ class PackageExporter:
             Tuple[Any, Callable[[str], None], bool]
         ] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.matched_patterns: Set[int] = set()
-        self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
-
-    def save_source_file(
-        self, module_name: str, file_or_directory: str, dependencies=True
-    ):
-        """Adds the local file system `file_or_directory` to the source package to provide the code
-        for `module_name`.
-
-        Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
-            file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
-                are recursively copied using :meth:`save_source_file`. If a file is named "/__init__.py" the code is treated
-                as a package.
-            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
-        """
-        path = Path(file_or_directory)
-        if path.is_dir():
-            to_save = []  # list of tuples with arguments to save_source_string
-            module_path = module_name.replace(".", "/")
-            for filename in path.glob("**/*.py"):
-                relative_path = filename.relative_to(path).as_posix()
-                archivename = module_path + "/" + relative_path
-                if filename.is_dir():
-                    self.provided[archivename] = True
-                else:
-                    submodule_name = None
-                    if filename.name == "__init__.py":
-                        submodule_name = archivename[: -len("/__init__.py")].replace(
-                            "/", "."
-                        )
-                        is_package = True
-                    else:
-                        submodule_name = archivename[: -len(".py")].replace("/", ".")
-                        is_package = False
-
-                    self.provided[submodule_name] = True
-                    # we delay the call to save_source_string so that we record all the source files
-                    # being provided by this directory structure _before_ attempting to resolve the dependencies
-                    # on the source. This makes sure we don't try to copy over modules that will just get
-                    # overwritten by this directory blob
-                    to_save.append(
-                        (
-                            submodule_name,
-                            _read_file(str(filename)),
-                            is_package,
-                            dependencies,
-                            str(filename),
-                        )
-                    )
-
-            for item in to_save:
-                self.save_source_string(*item)
-        else:
-            is_package = path.name == "__init__.py"
-            self.save_source_string(
-                module_name,
-                _read_file(file_or_directory),
-                is_package,
-                dependencies,
-                file_or_directory,
-            )
-
-    def file_structure(
-        self, *, include: "GlobPattern" = "**", exclude: "GlobPattern" = ()
-    ) -> Folder:
-        """Returns a file structure representation of package's zipfile.
-
-        Args:
-            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
-                a glob-style pattern, as described in :meth:`mock`
-
-            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
-        """
-        return _create_folder_from_file_list(
-            self.zip_file.archive_name(),
-            self.zip_file.get_all_written_records(),
-            include,
-            exclude,
-        )
 
     def get_unique_id(self) -> str:
         """Get an id. This id is guaranteed to only be handed out once for this package."""
@@ -210,13 +133,56 @@ class PackageExporter:
         self._unique_id += 1
         return ret
 
+    def _get_dependencies(
+        self, src: str, module_name: str, is_package: bool
+    ) -> List[str]:
+        """Return all modules that this source code depends on.
+
+        Dependencies are found by scanning the source code for import-like statements.
+
+        Arguments:
+            src: The Python source code to analyze for dependencies.
+            module_name: The name of the module that ``src`` corresponds to.
+            is_package: Whether this module should be treated as a package.
+                See :py:meth:`save_source_string` for more info.
+
+        Returns:
+            A list containing modules detected as direct dependencies in
+            ``src``.  The items in the list are guaranteed to be unique.
+        """
+        package_name = (
+            module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
+        )
+        dep_pairs = find_files_source_depends_on(src, package_name)
+        # Use a dict to get uniquing but also deterministic order
+        dependencies = {}
+        for dep_module_name, dep_module_obj in dep_pairs:
+            # handle the case where someone did something like `from pack import sub`
+            # where `sub` is a submodule. In this case we don't have to save pack, just sub.
+            # this ensures we don't pick up additional dependencies on pack.
+            # However, in the case where `sub` is not a submodule but an object, then we do have
+            # to save pack.
+            if dep_module_obj is not None:
+                possible_submodule = f"{dep_module_name}.{dep_module_obj}"
+                if self._module_exists(possible_submodule):
+                    dependencies[possible_submodule] = True
+                    # we don't need to save `pack`
+                    continue
+            if self._module_exists(dep_module_name):
+                dependencies[dep_module_name] = True
+
+        if self.verbose:
+            dep_str = "".join(f"  {dep}\n" for dep in dependencies)
+            print(f"{module_name} depends on:\n{dep_str}\n")
+
+        return list(dependencies.keys())
+
     def save_source_string(
         self,
         module_name: str,
         src: str,
         is_package: bool = False,
         dependencies: bool = True,
-        orig_file_name: str = None,
     ):
         """Adds `src` as the source code for `module_name` in the exported package.
 
@@ -226,47 +192,17 @@ class PackageExporter:
             is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
                 (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
             dependencies (bool, optional): If True, we scan the source for dependencies.
-            orig_file_name (str, optional): If present, used in logging to identifying where the source came from.
-                Defaults to ``None``.
         """
         self.provided[module_name] = True
         extension = "/__init__.py" if is_package else ".py"
         filename = module_name.replace(".", "/") + extension
         self._write(filename, src)
         if dependencies:
-            package = (
-                module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
-            )
-            dep_pairs = find_files_source_depends_on(src, package)
-            dep_list = {}
-            for dep_module_name, dep_module_obj in dep_pairs:
-                # handle the case where someone did something like `from pack import sub`
-                # where `sub` is a submodule. In this case we don't have to save pack, just sub.
-                # this ensures we don't pick up additional dependencies on pack.
-                # However, in the case where `sub` is not a submodule but an object, then we do have
-                # to save pack.
-                if dep_module_obj is not None:
-                    possible_submodule = f"{dep_module_name}.{dep_module_obj}"
-                    if self._module_exists(possible_submodule):
-                        dep_list[possible_submodule] = True
-                        # we don't need to save `pack`
-                        continue
-                if self._module_exists(dep_module_name):
-                    dep_list[dep_module_name] = True
+            deps = self._get_dependencies(src, module_name, is_package)
+            for dep in deps:
+                self.dependency_graph.add_edge(module_name, dep)
 
-            for dep in dep_list.keys():
-                self.debug_deps.append((module_name, dep))
-
-            if self.verbose:
-                dep_str = "".join(f"  {dep}\n" for dep in dep_list.keys())
-                file_info = (
-                    f"(from file {orig_file_name}) "
-                    if orig_file_name is not None
-                    else ""
-                )
-                print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
-
-            for dep in dep_list.keys():
+            for dep in deps:
                 self.require_module_if_not_provided(dep)
 
     def _import_module(self, module_name: str):
@@ -289,7 +225,7 @@ class PackageExporter:
             return False
 
     def _write_dep_graph(self, failing_module=None):
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
         failing = "" if failing_module is None else f'"{failing_module}" [color=red];'
         template = f"""\
 digraph G {{
@@ -372,7 +308,6 @@ node [shape=box];
             source,
             hasattr(module_obj, "__path__"),
             dependencies,
-            module_obj.__file__,
         )
 
     def save_pickle(
@@ -412,7 +347,7 @@ node [shape=box];
                         all_dependencies.append(module)
 
             for dep in all_dependencies:
-                self.debug_deps.append((package + "." + resource, dep))
+                self.dependency_graph.add_edge(f"<{package}.{resource}>", dep)
 
             if self.verbose:
                 dep_string = "".join(f"  {dep}\n" for dep in all_dependencies)
@@ -528,8 +463,7 @@ node [shape=box];
 
         Prefer using :meth:`extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        if module_name not in self.extern_modules:
-            self.extern_modules.append(module_name)
+        self.extern_modules[module_name] = True
 
     def save_mock_module(self, module_name: str):
         """Add `module_name` to the package, implemented it with a mocked out version that
@@ -538,8 +472,11 @@ node [shape=box];
         Prefer using `mock` to only include this module if it is required by other modules.
         """
         if "_mock" not in self.provided:
-            self.save_source_file(
-                "_mock", str(Path(__file__).parent / "_mock.py"), dependencies=False
+            self.save_source_string(
+                "_mock",
+                _read_file(str(Path(__file__).parent / "_mock.py")),
+                is_package=False,
+                dependencies=False,
             )
         is_package = hasattr(self._import_module(module_name), "__path__")
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)

@@ -290,90 +290,6 @@ void atomicadaptivemaxgradinput_loop(
     offsetZ += 65535;
   }
 }
-
-void adaptive_max_pool3d_backward_out_cuda_template(
-           Tensor& gradInput,
-           const Tensor& gradOutput_,
-           const Tensor& input,
-           const Tensor& indices)
-{
-  TensorArg grad_input_arg{ gradInput, "gradInput", 1 };
-  TensorArg grad_output_arg{ gradOutput_, "gradOutput_", 2 };
-  TensorArg input_arg{ input, "input", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
-
-  checkAllSameGPU("adaptive_max_pool3d_out_cuda",
-                 {grad_input_arg, grad_output_arg, input_arg, indices_arg});
-
-  const Tensor gradOutput = gradOutput_.contiguous();
-
-  gradInput.resize_as_(input);
-  gradInput.zero_();
-
-  int64_t sizeD, isizeT, isizeH, isizeW;
-  int64_t osizeT, osizeH, osizeW;
-  int64_t totalZ;
-
-  if (input.ndimension() == 4) {
-    sizeD = input.size(0);
-    isizeT = input.size(1);
-    isizeH = input.size(2);
-    isizeW = input.size(3);
-
-    osizeT = gradOutput.size(1);
-    osizeH = gradOutput.size(2);
-    osizeW = gradOutput.size(3);
-  } else {
-    sizeD = input.size(1);
-    isizeT = input.size(2);
-    isizeH = input.size(3);
-    isizeW = input.size(4);
-
-    osizeT = gradOutput.size(2);
-    osizeH = gradOutput.size(3);
-    osizeW = gradOutput.size(4);
-  }
-
-  bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0) || (isizeT%osizeT != 0);
-
-  if (input.ndimension() == 4) {
-    totalZ = sizeD * osizeT;
-  } else {
-    int sizeB = input.size(0);
-    totalZ = sizeB * sizeD * osizeT;
-  }
-
-  if (atomic) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-      "adaptive_max_pool3d_backward_cuda",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        atomicadaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
-      }
-    );
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-      "adaptive_max_pool3d_backward_cuda",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        adaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
-      }
-    );
-  }
-}
-
 } // namespace
 
 // 5d tensor B x D x T x H x W
@@ -451,32 +367,105 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
       });
 }
 
-Tensor& adaptive_max_pool3d_backward_out_cuda(const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  adaptive_max_pool3d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ const Tensor& indices,
+ const Tensor& gradInput) {
+  TensorArg grad_input_arg{gradInput, "gradInput", 1};
+  TensorArg grad_output_arg{gradOutput, "gradOutput", 2};
+  TensorArg input_arg{input, "input", 3};
+  TensorArg indices_arg{indices, "indices", 4};
 
-Tensor adaptive_max_pool3d_backward_cuda(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  adaptive_max_pool3d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+  checkAllSameGPU(
+      "adaptive_max_pool3d_backward_cuda",
+      {grad_input_arg, grad_output_arg, input_arg, indices_arg});
 
+  const Tensor gradOutput_ = gradOutput.contiguous();
+
+  gradInput.zero_();
+
+  int64_t sizeD, isizeT, isizeH, isizeW;
+  int64_t osizeT, osizeH, osizeW;
+  int64_t totalZ;
+
+  if (input.ndimension() == 4) {
+    sizeD = input.size(0);
+    isizeT = input.size(1);
+    isizeH = input.size(2);
+    isizeW = input.size(3);
+
+    osizeT = gradOutput_.size(1);
+    osizeH = gradOutput_.size(2);
+    osizeW = gradOutput_.size(3);
+  } else {
+    sizeD = input.size(1);
+    isizeT = input.size(2);
+    isizeH = input.size(3);
+    isizeW = input.size(4);
+
+    osizeT = gradOutput_.size(2);
+    osizeH = gradOutput_.size(3);
+    osizeW = gradOutput_.size(4);
+  }
+
+  bool atomic = (isizeW % osizeW != 0) || (isizeH % osizeH != 0) ||
+      (isizeT % osizeT != 0);
+
+  if (input.ndimension() == 4) {
+    totalZ = sizeD * osizeT;
+  } else {
+    int sizeB = input.size(0);
+    totalZ = sizeB * sizeD * osizeT;
+  }
+
+  if (atomic) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
+        input.scalar_type(),
+        "adaptive_max_pool3d_backward_cuda",
+        [&] {
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          atomicadaptivemaxgradinput_loop(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              totalZ,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
+        input.scalar_type(),
+        "adaptive_max_pool3d_backward_cuda",
+        [&] {
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          adaptivemaxgradinput_loop(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              totalZ,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW);
+        });
+  }
+ }
 } // at::native
 } // at

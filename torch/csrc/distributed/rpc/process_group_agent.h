@@ -90,12 +90,12 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<JitFuture> send(
+  c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) override;
+      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
+      override;
 
   // put SendWork into a queue and notify the worker thread
   virtual void enqueueSend(SendWork work);
@@ -134,12 +134,12 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
-    std::shared_ptr<JitFuture> future_;
+    c10::intrusive_ptr<JitFuture> future_;
     steady_clock_time_point endTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        std::shared_ptr<JitFuture> future,
+        c10::intrusive_ptr<JitFuture> future,
         const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)

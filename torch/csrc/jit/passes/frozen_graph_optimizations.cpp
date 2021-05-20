@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -21,6 +22,7 @@ void OptimizeFrozenGraph(
       FoldFrozenConvMulOrDiv(graph);
     }
   }
+  FuseFrozenConvAddRelu(graph);
 }
 
 } // namespace jit

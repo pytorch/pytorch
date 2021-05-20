@@ -39,6 +39,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
       "The dimension of input tensor should be larger than or equal to 2");
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
 
   auto packB = w.get();
@@ -51,6 +52,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
           std::to_string(K));
 
   // Calculate statistics for quantization of the input Tensor
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float x_min, x_max;
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
@@ -129,6 +131,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
         /*smat=*/input_ptr,
         /*ld=*/K,
         /*pmat=*/nullptr, // Currently, packA manages ownership of `pmat`.
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         /*scale=*/q_params.scale,
         /*zero_pt=*/q_params.zero_point);
     // TODO: Consider a way to pre-allocate and reuse
@@ -243,7 +246,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float x_min;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float x_max;
   if (input.numel() > 0) {
     x_min = input_contig.min().item<float>();
@@ -263,6 +268,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   float* weight_scales_data = w_scales.data_ptr<float>();
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, q_params.scale, 1.f, requantization_scales);
   }
 
@@ -321,6 +327,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
     rows_input *= input_contig.size(i);
   }
@@ -368,6 +375,7 @@ at::Tensor PackedLinearWeightFp16::apply_dynamic_impl(at::Tensor input) {
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
   std::vector<int64_t> output_size = input.sizes().vec();
@@ -417,6 +425,7 @@ class QLinearDynamicInt8 final {
       at::Tensor input,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       bool reduce_range) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     auto& ctx = at::globalContext();
 
     if (ReluFused) {

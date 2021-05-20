@@ -112,6 +112,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
       continue;
     }
     auto inp_tv = inp->as<TensorView>();
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (inp_tv->domain()->hasRFactor()) {
       continue;
     } else if (
@@ -205,6 +206,7 @@ kir::Bool* UnrollPredicate::get(
     }
   }
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       unroll_pred->getValType().value() == ValType::KirScalar &&
       unroll_pred->getDataType().value() == DataType::Bool);
   return unroll_pred->as<kir::Bool>();
@@ -226,6 +228,7 @@ void UnrollPredicate::predicateOn(Expr* tv_expr) {
       continue;
     }
     auto inp_tv = inp->as<TensorView>();
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (inp_tv->domain()->hasRFactor()) {
       continue;
     } else if (

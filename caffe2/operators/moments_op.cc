@@ -15,8 +15,10 @@ bool MomentsGradientOp<T, Context>::Compute(
     const T* mean_data,
     T* dX_data) {
   const int dY_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   const int dX_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
@@ -34,9 +36,12 @@ bool MomentsGradientOp<T, Context>::Compute(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Moments, MomentsOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MomentsGradient, MomentsGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Moments)
     .NumInputs(1)
     .NumOutputs(2)
@@ -59,6 +64,7 @@ OPERATOR_SCHEMA(Moments)
     .Output(0, "mean", "Reduced mean tensor.")
     .Output(1, "variance", "Reduced variance tensor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MomentsGradient).NumInputs(4).NumOutputs(1);
 
 namespace {
@@ -77,6 +83,7 @@ class GetMomentsGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Moments, GetMomentsGradient);
 
 } // namespace caffe2
