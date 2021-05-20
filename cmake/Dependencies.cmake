@@ -1325,9 +1325,9 @@ if(USE_GLOO)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
     set(__BUILD_TEST ${BUILD_TEST})
-    set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
+    set(__GLOO_BUILD_BENCHMARK ${GLOO_BUILD_BENCHMARK})
     set(BUILD_TEST OFF)
-    set(BUILD_BENCHMARK OFF)
+    set(GLOO_BUILD_BENCHMARK OFF)
     if(USE_ROCM)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
@@ -1348,7 +1348,7 @@ if(USE_GLOO)
     include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     set(BUILD_TEST ${__BUILD_TEST})
-    set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
+    set(GLOO_BUILD_BENCHMARK ${__GLOO_BUILD_BENCHMARK})
 
     # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build

@@ -349,3 +349,18 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+  BENCHMARK_BUILD_DIR=${BENCHMARK_BUILD_DIR:-${PWD}/benchmarks/cpp}
+  mkdir -pv "${BENCHMARK_BUILD_DIR}"
+  # Build benchmark
+  BENCHMARK_BUILD="${BENCHMARK_BUILD_DIR}/build"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir -p "$BENCHMARK_BUILD"
+  pushd "$BENCHMARK_BUILD"
+  cmake "../" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+fi
