@@ -291,8 +291,8 @@ def einsum(*args):
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
                          'or at least one operand and its subscripts list')
 
-    equation: str = None
-    operands: List[torch.Tensor] = None
+    equation = None
+    operands = None
 
     if isinstance(args[0], torch.Tensor):
         # Convert the subscript list format which is an interleaving of operand and its subscripts
