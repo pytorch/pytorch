@@ -23,7 +23,7 @@ namespace c10 {
 
 namespace impl {
 
-std::string noop_name_fn(const PyInterpreter*) {
+static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
 
