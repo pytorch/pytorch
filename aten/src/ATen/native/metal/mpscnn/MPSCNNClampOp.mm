@@ -30,7 +30,7 @@
   id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       pipelineState:at::native::metal::mpscnn::kernelFor(
-                        _X, @"clamp_half4", @"clamp_half4_nonarray")];
+                        _X, "clamp_half4", "clamp_half4_nonarray")];
 
   [encoder setComputePipelineState:state];
   [encoder setTexture:[_X texture] atIndex:0];

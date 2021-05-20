@@ -305,27 +305,6 @@ LLVMCodeGen::LLVMCodeGen(
     : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
-}
-
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
   USE_TRIGGER(llvm_codegen_executed);
@@ -395,8 +374,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
 
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
@@ -948,9 +928,9 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
             toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
-        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNE, value_, zero);
         value_ = irb_.CreateICmpEQ(
-            value_, llvm::ConstantInt::get(value_->getType(), 0));
+            value_, llvm::ConstantInt::get(value_->getType(), 1));
         value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
         return;
       }

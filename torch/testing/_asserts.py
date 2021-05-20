@@ -2,7 +2,7 @@ import collections.abc
 import functools
 import numbers
 import sys
-from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union, cast
 from types import SimpleNamespace
 
 import torch
@@ -222,11 +222,16 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
     dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
     a_flat = actual.flatten().to(dtype)
     b_flat = expected.flatten().to(dtype)
+    matches_flat = ~mismatches.flatten()
 
     abs_diff = torch.abs(a_flat - b_flat)
+    # Ensure that only mismatches are used for the max_abs_diff computation
+    abs_diff[matches_flat] = 0
     max_abs_diff, max_abs_diff_flat_idx = torch.max(abs_diff, 0)
 
     rel_diff = abs_diff / torch.abs(b_flat)
+    # Ensure that only mismatches are used for the max_rel_diff computation
+    rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
     return SimpleNamespace(
@@ -425,88 +430,89 @@ def _amend_error_message(exc: E, msg_fmtstr: str) -> E:
     return type(exc)(msg_fmtstr.format(str(exc)))
 
 
+class _TensorPair(NamedTuple):
+    actual: Tensor
+    expected: Tensor
+
+
 _SEQUENCE_MSG_FMTSTR = "The failure occurred at index {} of the sequences."
 _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 
-def _check_inputs(
-    actual: Union[Tensor, List[Tensor], Dict[Any, Tensor]],
-    expected: Union[Tensor, List[Tensor], Dict[Any, Tensor]],
-    check_tensors: Callable[[Tensor, Tensor], Optional[Exception]],
+def _check_pair(
+    pair: Union[_TensorPair, List, Dict],
+    check_tensors: Callable[[Any, Any], Optional[Exception]],
 ) -> Optional[Exception]:
-    """Checks inputs.
+    """Checks input pairs.
 
-    :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s are checked elementwise.
+    :class:`list`'s or :class:`dict`'s are checked elementwise. Checking is performed recursively and thus nested
+    containers are supported.
 
     Args:
-        actual (Union[Tensor, List[Tensor], Dict[Any, Tensor]]): Actual input.
-        expected (Union[Tensor, List[Tensor], Dict[Any, Tensor]]): Expected input.
+        pair (Union[_TensorPair, List, Dict]): Input pair.
         check_tensors (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a tensor pair matches.
             In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
         (Optional[Exception]): Return value of :attr:`check_tensors`.
     """
-    if isinstance(actual, collections.abc.Sequence) and isinstance(expected, collections.abc.Sequence):
-        for idx, (actual_t, expected_t) in enumerate(zip(actual, expected)):
-            exc = check_tensors(actual_t, expected_t)
+    if isinstance(pair, list):
+        for idx, pair_item in enumerate(pair):
+            exc = _check_pair(pair_item, check_tensors)
             if exc:
                 return _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
         else:
             return None
-    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
-        for key in sorted(actual.keys()):
-            exc = check_tensors(actual[key], expected[key])
+    elif isinstance(pair, dict):
+        for key, pair_item in pair.items():
+            exc = _check_pair(pair_item, check_tensors)
             if exc:
                 return _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
         else:
             return None
-    else:
-        return check_tensors(cast(Tensor, actual), cast(Tensor, expected))
+    else:  # isinstance(pair, TensorPair)
+        return check_tensors(pair.actual, pair.expected)
 
 
-class _ParsedInputs(NamedTuple):
-    actual: Union[Tensor, List[Tensor], Dict[Any, Tensor]]
-    expected: Union[Tensor, List[Tensor], Dict[Any, Tensor]]
-
-
-def _parse_inputs(
-    actual: Any,
-    expected: Any,
-) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
-    """Parses inputs by constructing tensors from array-or-scalar-likes.
-
-    :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise.
-
+def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[Exception], Optional[Tensor]]:
+    """Converts a scalar-or-array-like to a :class:`~torch.Tensor`.
     Args:
-        actual (Any): Actual input.
-        expected (Any): Expected input.
-
+        array_or_scalar_like (Any): Scalar-or-array-like.
     Returns:
-        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will not and vice versa. Check :func:`_parse_array_or_scalar_like_pair`,
-            :func:`_parse_sequences`, and :func:`_parse_mappings` for possible exceptions.
+        (Tuple[Optional[Exception], Optional[Tensor]]): The two elements are orthogonal, i.e. if the first ``is None``
+            the second will be valid and vice versa. Returns a :class:`UsageError` if no tensor can be constructed from
+            :attr:`actual` or :attr:`expected`. Additionally, returns any exception from
+            :func:`_check_supported_tensor`.
     """
-    if isinstance(actual, collections.abc.Sequence) and isinstance(expected, collections.abc.Sequence):
-        return _parse_sequences(actual, expected)
-    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
-        return _parse_mappings(actual, expected)
+    exc: Optional[Exception]
+
+    if isinstance(array_or_scalar_like, Tensor):
+        tensor = array_or_scalar_like
     else:
-        return _parse_array_or_scalar_like_pair(actual, expected)
+        try:
+            tensor = torch.as_tensor(array_or_scalar_like)
+        except Exception:
+            exc = UsageError(f"No tensor can be constructed from type {type(array_or_scalar_like)}.")
+            return exc, None
+
+    exc = _check_supported_tensor(tensor)
+    if exc:
+        return exc, None
+
+    return None, tensor
 
 
-def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
-    """Parses an scalar-or-array-like pair.
+def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[_TensorPair]]:
+    """Converts a scalar-or-array-like pair to a :class:`_TensorPair`.
 
     Args:
-        actual: Actual array-or-scalar-like.
-        expected: Expected array-or-scalar-like.
+        actual (Any): Actual array-or-scalar-like.
+        expected (Any): Expected array-or-scalar-like.
 
-    Returns:
-        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
+    (Optional[Exception], Optional[_TensorPair]): The two elements are orthogonal, i.e. if the first ``is None``
             the second will not and vice versa. Returns a :class:`AssertionError` if :attr:`actual` and
-            :attr:`expected` do not have the same type and a :class:`UsageError` if no :class:`~torch.Tensor` can be
-            constructed from them.
+            :attr:`expected` are not scalars and do not have the same type. Additionally, returns any exception from
+            :func:`_to_tensor`.
     """
     exc: Optional[Exception]
 
@@ -521,104 +527,87 @@ def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Option
         )
         return exc, None
 
-    tensors = []
-    for array_or_scalar_like in (actual, expected):
-        try:
-            tensor = torch.as_tensor(array_or_scalar_like)
-        except Exception:
-            exc = UsageError(f"No tensor can be constructed from type {type(array_or_scalar_like)}.")
-            return exc, None
+    exc, actual = _to_tensor(actual)
+    if exc:
+        return exc, None
 
-        exc = _check_supported_tensor(tensor)
-        if exc:
-            return exc, None
+    exc, expected = _to_tensor(expected)
+    if exc:
+        return exc, None
 
-        tensors.append(tensor)
-
-    actual_tensor, expected_tensor = tensors
-    return None, _ParsedInputs(actual_tensor, expected_tensor)
+    return None, _TensorPair(actual, expected)
 
 
-def _parse_sequences(actual: Sequence, expected: Sequence) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
-    """Parses sequences of scalar-or-array-like pairs.
+def _parse_inputs(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[Union[_TensorPair, List, Dict]]]:
+    """Parses the positional inputs by constructing :class:`_TensorPairs` from corresponding array-or-scalar-likes.
 
-    Regardless of the input types, the sequences are returned as :class:`list`.
+    :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise. Parsing is
+    performed recursively and thus nested containers are supported. The hierarchy of the containers is preserved, but
+    sequences are returned as :class:`list` and mappings as :class:`dict`.
 
     Args:
-        actual: Actual sequence array-or-scalar-likes.
-        expected: Expected sequence array-or-scalar-likes.
+        actual (Any): Actual input.
+        expected (Any): Expected input.
 
     Returns:
-        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will not and vice versa. Returns a :class:`AssertionError` if the length of :attr:`actual` and
-            :attr:`expected` does not match. Additionally, returns any exception from
-            :func:`_parse_array_or_scalar_like_pair`.
+        (Tuple[Optional[Exception], Optional[Union[_TensorPair, List, Dict]]]): The two elements are orthogonal, i.e.
+            if the first ``is None`` the second will be valid and vice versa. Returns an :class:`AssertionError` if the
+            length of two sequences or the keys of two mappings do not match. Additionally, returns any exception from
+            :func:`_to_tensor_pair`.
     """
     exc: Optional[Exception]
 
-    actual_len = len(actual)
-    expected_len = len(expected)
-    if actual_len != expected_len:
-        exc = AssertionError(f"The length of the sequences mismatch: {actual_len} != {expected_len}")
-        return exc, None
-
-    actual_lst = []
-    expected_lst = []
-    for idx in range(actual_len):
-        exc, result = _parse_array_or_scalar_like_pair(actual[idx], expected[idx])
-        if exc:
-            exc = _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+    # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
+    # "a" == "a"[0][0]...
+    if (
+        isinstance(actual, collections.abc.Sequence)
+        and not isinstance(actual, str)
+        and isinstance(expected, collections.abc.Sequence)
+        and not isinstance(expected, str)
+    ):
+        actual_len = len(actual)
+        expected_len = len(expected)
+        if actual_len != expected_len:
+            exc = AssertionError(f"The length of the sequences mismatch: {actual_len} != {expected_len}")
             return exc, None
 
-        result = cast(_ParsedInputs, result)
-        actual_lst.append(cast(Tensor, result.actual))
-        expected_lst.append(cast(Tensor, result.expected))
+        pair_list = []
+        for idx in range(actual_len):
+            exc, pair = _parse_inputs(actual[idx], expected[idx])
+            if exc:
+                exc = _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+                return exc, None
 
-    return None, _ParsedInputs(actual_lst, expected_lst)
+            pair_list.append(pair)
+        else:
+            return None, pair_list
 
-
-def _parse_mappings(actual: Mapping, expected: Mapping) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
-    """Parses sequences of scalar-or-array-like pairs.
-
-    Regardless of the input types, the sequences are returned as :class:`dict`.
-
-    Args:
-        actual: Actual mapping array-or-scalar-likes.
-        expected: Expected mapping array-or-scalar-likes.
-
-    Returns:
-        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will not and vice versa. Returns a :class:`AssertionError` if the keys of :attr:`actual` and
-            :attr:`expected` do not match. Additionally, returns any exception from
-            :func:`_parse_array_or_scalar_like_pair`.
-    """
-    exc: Optional[Exception]
-
-    actual_keys = set(actual.keys())
-    expected_keys = set(expected.keys())
-    if actual_keys != expected_keys:
-        missing_keys = expected_keys - actual_keys
-        additional_keys = actual_keys - expected_keys
-        exc = AssertionError(
-            f"The keys of the mappings do not match:\n\n"
-            f"Missing keys in the actual mapping: {sorted(missing_keys)}\n"
-            f"Additional keys in the actual mapping: {sorted(additional_keys)}\n"
-        )
-        return exc, None
-
-    actual_dct = {}
-    expected_dct = {}
-    for key in sorted(actual_keys):
-        exc, result = _parse_array_or_scalar_like_pair(actual[key], expected[key])
-        if exc:
-            exc = _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
+        actual_keys = set(actual.keys())
+        expected_keys = set(expected.keys())
+        if actual_keys != expected_keys:
+            missing_keys = expected_keys - actual_keys
+            additional_keys = actual_keys - expected_keys
+            exc = AssertionError(
+                f"The keys of the mappings do not match:\n"
+                f"Missing keys in the actual mapping: {sorted(missing_keys)}\n"
+                f"Additional keys in the actual mapping: {sorted(additional_keys)}"
+            )
             return exc, None
 
-        result = cast(_ParsedInputs, result)
-        actual_dct[key] = cast(Tensor, result.actual)
-        expected_dct[key] = cast(Tensor, result.expected)
+        pair_dict = {}
+        for key in sorted(actual_keys):
+            exc, pair = _parse_inputs(actual[key], expected[key])
+            if exc:
+                exc = _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+                return exc, None
 
-    return None, _ParsedInputs(actual_dct, expected_dct)
+            pair_dict[key] = pair
+        else:
+            return None, pair_dict
+
+    else:
+        return _to_tensor_pair(actual, expected)
 
 
 def assert_equal(
@@ -688,10 +677,11 @@ def assert_equal(
         To assert that the values of a tensor pair are close but are not required to be bitwise equal, use
         :func:`assert_close` instead.
     """
-    exc, parse_result = _parse_inputs(actual, expected)
+    exc, pair = _parse_inputs(actual, expected)
     if exc:
         raise exc
-    actual, expected = cast(_ParsedInputs, parse_result)
+    else:
+        pair = cast(Union[_TensorPair, List, Dict], pair)
 
     check_tensors = functools.partial(
         _check_tensors_equal,
@@ -700,7 +690,7 @@ def assert_equal(
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_inputs(actual, expected, check_tensors)
+    exc = _check_pair(pair, check_tensors)
     if exc:
         raise exc
 
@@ -888,10 +878,11 @@ def assert_close(
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
-    exc, parse_result = _parse_inputs(actual, expected)
+    exc, pair = _parse_inputs(actual, expected)
     if exc:
         raise exc
-    actual, expected = cast(_ParsedInputs, parse_result)
+    else:
+        pair = cast(Union[_TensorPair, List, Dict], pair)
 
     check_tensors = functools.partial(
         _check_tensors_close,
@@ -903,6 +894,6 @@ def assert_close(
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_inputs(actual, expected, check_tensors)
+    exc = _check_pair(pair, check_tensors)
     if exc:
         raise exc

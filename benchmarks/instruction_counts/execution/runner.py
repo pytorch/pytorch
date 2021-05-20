@@ -43,6 +43,7 @@ class CorePool:
         self._min_core_id: int = min_core_id
         self._max_core_id: int = max_core_id
         self._num_cores = max_core_id - min_core_id + 1
+        print(f"Core pool created: cores {self._min_core_id}-{self._max_core_id}")
 
         self._available: List[bool] = [
             True for _ in range(min_core_id, min_core_id + self._num_cores)]
@@ -81,9 +82,11 @@ class Runner:
         self,
         work_items: Tuple[WorkOrder, ...],
         core_pool: Optional[CorePool] = None,
+        cadence: float = 1.0,
     ) -> None:
         self._work_items: Tuple[WorkOrder, ...] = work_items
         self._core_pool: CorePool = core_pool or CorePool(0, CPU_COUNT - 4)
+        self._cadence: float = cadence
 
         # Working state.
         self._work_queue: List[WorkOrder] = list(work_items)
@@ -135,7 +138,7 @@ class Runner:
             self._update_active_jobs()
             self._enqueue_new_jobs()
             self._print_progress()
-            time.sleep(max(1.0 - (time.time() - t0), 0.0))
+            time.sleep(max(self._cadence - (time.time() - t0), 0.0))
         print(f"\nTotal time: {time.time() - self._start_time:.0f} seconds")
         return self._results.copy()
 

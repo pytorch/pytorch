@@ -72,7 +72,7 @@ class TensorRTMinimizer(net_min_base._MinimizerBase):
         self,
         module: torch.fx.GraphModule,
         sample_input: Tuple[torch.Tensor],
-        compare_fn: Callable[[Any, Any], Tuple[float, bool]],
+        compare_fn: Callable[[Any, Any, Any], Tuple[float, bool]],
         settings: net_min_base._MinimizerSettingBase = None,
     ):
         if settings is None:
@@ -142,7 +142,7 @@ class TensorRTSplitter(splitter_base._SplitterBase):
         that is responsible for the error.
         """
         # Since we don't care about accuracy here, we pass in a dummy compare function.
-        minimizer = TensorRTMinimizer(mod, inputs, lambda a, b: (1, True))
+        minimizer = TensorRTMinimizer(mod, inputs, lambda a, b, c: (1, True))
         minimizer.settings.traverse_method = "sequential"
         minimizer.settings.find_all = True
         culprits = minimizer.minimize()
