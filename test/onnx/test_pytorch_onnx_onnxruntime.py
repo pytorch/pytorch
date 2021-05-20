@@ -21,6 +21,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
+from torch import Tensor
 import model_defs.word_language_model as word_language_model
 
 import onnx
@@ -6714,6 +6715,70 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.randn(2, 5, 7, dtype=torch.float64)
         self.run_test(Celu(), (input,))
+
+    def test_lower_tuple(self):
+        class TupleModule(torch.nn.Module):
+            def forward(self, input1, input2, input3):
+                # type: (Tensor, Tensor, Tensor) -> Tensor
+                a = (input1, input2)
+                b = a
+                c = (input1, input2, input3)
+                for i in range(5):
+                    d = a[0]
+                    for j in range(2):
+                        e, f = a
+                        a = (d, f)
+                        f = c[2]
+                        if f.size(0) != input1.size(-1):
+                            g = b[1]
+                            b = (g, f)
+                        else:
+                            k = c[1:]
+                            b = (f, k[0])
+                    m, n = b
+                    c = (input1, n, m)
+                p, q, r = c
+                return p + q + r
+
+        input1 = torch.randn(2)
+        input2 = torch.randn(2)
+        input3 = torch.randn(2)
+        self.run_test(TupleModule(), (input1, input2, input3))
+
+    def test_lower_tuple_2(self):
+        class TupleModule(torch.nn.Module):
+            def forward(self, input1, input2):
+                # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                a = (input1, input2)
+                for x in range(5):
+                    c, d = a
+                    a = (c, d)
+                return a
+
+        input1 = torch.randn(2)
+        input2 = torch.randn(2)
+        self.run_test(TupleModule(), (input1, input2))
+
+    def test_lower_tuple_3(self):
+        class TupleModule(torch.nn.Module):
+            def forward(self, input1, input2):
+                # type: (Tuple[Tensor, Tensor], Tuple[Tensor, Tensor])
+                a = input1
+                b = input2
+                for x in range(5):
+                    c, d = a
+                    e, f = b
+                    if c.shape[0] == e.shape[0]:
+                        e = e + c
+                    else:
+                        f = f + d
+                    a = (e, f)
+                    b = (c, d)
+                return a , b
+
+        input1 = (torch.randn(2), torch.randn(2))
+        input2 = (torch.randn(2), torch.randn(2))
+        self.run_test(TupleModule(), (input1, input2))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where(self):
