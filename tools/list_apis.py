@@ -25,6 +25,7 @@ def should_skip(obj: Any) -> bool:
         "numpy",
         "pickle",
         "json",
+        "astunparse",
     ]
     for name in system_modules:
         if obj == importlib.import_module(name):
@@ -93,6 +94,14 @@ def crawl_helper(
             try:
                 next_obj = getattr(obj, attr)
                 crawl_helper(next_obj, attr, path + [name], seen_modules, out)
+            except ModuleNotFoundError as e:
+                err_print(e)
+                err_print(f"ERROR: whacky module {get_name(path, name)}")
+                out.errors.append(
+                    CrawlError(
+                        reason="whacky module", path=get_name(path, name)
+                    )
+                )
             except AttributeError as e:
                 err_print(e)
                 err_print(f"ERROR: unaccessible attribute {get_name(path, name)}")
